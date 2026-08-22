@@ -103,6 +103,19 @@ ao__<conversation-uuid>__worker__<provider>__<slug>
 The server polls tmux, accepts only names matching that contract, and exposes them as tabs. It does
 not need provider APIs or duplicated session state.
 
+## Worker lifecycle
+
+Workers are temporary leases owned by their conversation's captain. Only the captain has enough
+context to distinguish a completed interactive agent from one that is quiet, blocked, or waiting for
+a follow-up, so the server does not use idle timeouts or process activity as a completion signal.
+
+After the captain captures and incorporates a terminal outcome or blocker, it removes a worker that
+has no immediate next action. Cancellation and supersession also make a worker eligible, even if its
+process has not finished; relevant running work is never interrupted. Cleanup uses a literal, exact
+worker name under the conversation-specific prefix and a tmux-side attachment check. User-attached
+workers are deferred, missing sessions count as already cleaned, and the captain is never eligible
+for cleanup.
+
 ## Trust boundaries
 
 - The server binds to `127.0.0.1` and rejects non-loopback Host and Origin headers.

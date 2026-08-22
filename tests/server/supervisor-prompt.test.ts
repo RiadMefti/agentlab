@@ -24,4 +24,34 @@ describe("supervisor instructions", () => {
     expect(instructions).toContain(`ao__${TEST_CONVERSATION_ID}__worker__<provider>__<slug>`);
     expect(instructions).toContain("/opt/claude");
   });
+
+  it("gives the captain a safe, conversation-scoped worker cleanup contract", () => {
+    const instructions = buildSupervisorInstructions(context);
+    const workerPrefix = `ao__${TEST_CONVERSATION_ID}__worker__`;
+
+    expect(instructions).toContain("A worker session is a temporary lease for one assignment");
+    expect(instructions).toContain(
+      "Never infer completion from silence, elapsed time, or low activity"
+    );
+    expect(instructions).toContain(
+      "Never interrupt an assignment that is still relevant and running"
+    );
+    expect(instructions).toContain(
+      "A stopped or failed worker and a worker blocked on user or external input"
+    );
+    expect(instructions).toContain(
+      "Cancellation, supersession, or abandonment also makes a worker eligible"
+    );
+    expect(instructions).toContain("capture a terminal outcome");
+    expect(instructions).toContain(`exact worker names that you launched under ${workerPrefix}`);
+    expect(instructions).toContain(
+      "tmux if-shell -F -t =<name>: '#{==:#{session_attached},0}' 'kill-session -t =<name>' ''"
+    );
+    expect(instructions).toContain("Never target the captain, another conversation");
+    expect(instructions).toContain("Never use kill-server or kill-session -a");
+    expect(instructions).toContain("Never remove a worker while a user is attached");
+    expect(instructions).toContain("leave it pending and retry on the next orchestration turn");
+    expect(instructions).toContain("cleanup retries are idempotent");
+    expect(instructions).toContain("The captain session must remain alive after cleanup");
+  });
 });
