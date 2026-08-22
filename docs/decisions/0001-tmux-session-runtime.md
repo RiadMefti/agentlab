@@ -23,4 +23,4 @@ to the captain and never mediate captain-worker communication.
 - Sessions survive browser and server restarts while tmux remains alive.
 - The UI can replay retained terminal output and then attach live.
 - tmux is a required local dependency.
-- Machine-reboot restoration requires provider-specific resume support and is outside the MVP.
+- Machine-reboot restoration is a separate provider-resume concern and is not part of this decision.

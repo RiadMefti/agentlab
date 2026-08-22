@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A lean local desktop interface for supervising real coding-agent terminals.",
+  "description": "One captain for all your coding agents. Direct the work, follow every session, and jump in at any time.",
   "author": "Riad Mefti",
   "repository": {
     "type": "git",

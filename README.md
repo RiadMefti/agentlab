@@ -1,25 +1,24 @@
 # Agent Orchestrator
 
-A lean, local interface for one captain and the real coding-agent sessions it supervises.
+[![CI](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml)
 
-The MVP does six things:
+**One captain for all your coding agents.**
 
-- saves conversations;
-- starts one Codex, Claude Code, or OpenCode captain per conversation;
-- lets you choose the captain's model and thinking level;
-- tells the captain to orchestrate instead of implement;
-- discovers every worker the captain creates as an agent tab;
-- attaches you directly to the captain or worker's exact terminal session.
+Direct the work from one conversation. Follow every agent the captain creates. Jump into any live
+session whenever you want.
 
-## No captain control layer
+Agent Orchestrator runs each agent as its real CLI, with its existing authentication, configuration,
+tools, and context. The captain coordinates the work while every worker remains directly accessible
+from the same workspace.
 
-The app does not provide a command API, wrapper CLI, MCP server, or provider protocol to the
-captain. The captain runs raw `tmux`, `codex`, `claude`, and `opencode` commands itself. The
-server's provider-specific launch definitions are used once: to start the captain with the chosen
-model, thinking level, and orchestration instructions.
+## Workflow
 
-The server talks to tmux only for the user interface: it lists tagged sessions, replays retained
-output, and attaches the browser to the selected session through a PTY.
+1. Start a conversation and choose Codex, Claude Code, or OpenCode as the captain.
+2. Select the model and thinking level, then give the captain an objective.
+3. The captain delegates work by creating real agent sessions.
+4. Each agent appears automatically as a tab beside the captain.
+5. Switch tabs to read a session or speak directly to that agent.
+6. Return to any saved conversation and continue where the team left off.
 
 ## Requirements
 
@@ -28,34 +27,32 @@ output, and attaches the browser to the selected session through a PTY.
 - tmux
 - at least one installed and authenticated CLI: `codex`, `claude`, or `opencode`
 
-## Run as a desktop app
+## Run the desktop app
 
 ```bash
-npm install
+npm ci
 AO_WORKSPACE=/absolute/path/to/your/project npm run desktop
 ```
 
-Electron starts the loopback server on an ephemeral port and opens the existing interface in a
-sandboxed native window. During local development it reuses `apps/server/.data/orchestrator.sqlite`.
-Packaged builds keep the database in Electron's per-user application-data directory and ask for the
-agent workspace when `AO_WORKSPACE` is not set.
+Packaged builds open a native workspace picker when `AO_WORKSPACE` is not set.
 
-Build a portable Linux AppImage with:
+Build a portable Linux AppImage:
 
 ```bash
 npm run desktop:package
+./release/Orchestrator-0.1.0.AppImage
 ```
 
 ## Run in a browser
 
 ```bash
-npm install
+npm ci
 AO_WORKSPACE=/absolute/path/to/your/project npm run dev
 ```
 
-Open `http://127.0.0.1:5173` during development.
+Open `http://127.0.0.1:5173`.
 
-For the production build:
+Run the production server build:
 
 ```bash
 npm run build
@@ -69,32 +66,41 @@ Open `http://127.0.0.1:4321`.
 | Variable           | Default                     | Purpose                                            |
 | ------------------ | --------------------------- | -------------------------------------------------- |
 | `AO_WORKSPACE`     | current directory           | Workspace inherited by captain and worker sessions |
-| `AO_PORT`          | `4321`                      | Loopback HTTP/WebSocket port                       |
+| `AO_PORT`          | `4321`                      | Loopback HTTP and WebSocket port                   |
 | `AO_DATABASE_PATH` | `.data/orchestrator.sqlite` | Local conversation metadata database               |
 | `AO_CODEX_BIN`     | discovered                  | Absolute Codex executable override                 |
 | `AO_CLAUDE_BIN`    | discovered                  | Absolute Claude Code executable override           |
 | `AO_OPENCODE_BIN`  | discovered                  | Absolute OpenCode executable override              |
 
-Electron defaults `AO_PORT` to an available ephemeral port while still honoring an explicit value.
+The desktop app selects an available loopback port automatically. Provider credentials remain in
+each CLI's local authentication store.
 
-Provider credentials stay in each CLI's existing local authentication store. The app never reads or
-copies them.
+## Architecture
 
-## Session lifecycle
+- Electron hosts the desktop window and the local application runtime.
+- React and xterm.js provide the conversation and terminal workspace.
+- Fastify serves the local HTTP and WebSocket boundaries on `127.0.0.1`.
+- tmux owns live captain and worker sessions so they survive UI restarts.
+- SQLite stores conversation metadata locally.
+- Provider launch definitions start the selected captain with its model, thinking level, and
+  orchestration instructions.
 
-Tmux owns live terminal state. Sessions survive browser and server restarts while the tmux server is
-alive. A machine reboot ends those tmux sessions; provider-specific resume automation is outside
-this MVP.
+See [Architecture](docs/architecture.md) and the [decision records](docs/decisions) for the system
+boundaries and design rationale.
 
-## Quality checks
+## Development
 
 ```bash
 npm run verify
 npm audit
 ```
 
-`verify` runs formatting, strict type checking, linting, all unit/component tests, real tmux
-integration tests, and the production build.
+`verify` checks formatting, strict TypeScript, linting, unit and component tests, real tmux and PTY
+integration, and the production build. See [Contributing](CONTRIBUTING.md) for the engineering
+contract and local setup.
 
-See [the architecture](docs/architecture.md), [decision records](docs/decisions), and
-[contribution guide](CONTRIBUTING.md).
+## Security
+
+The application binds to loopback, validates HTTP and WebSocket boundaries, and passes process
+arguments through a tested quoting boundary. Provider credentials are managed by their respective
+CLIs. See [Security](SECURITY.md) for reporting guidance.

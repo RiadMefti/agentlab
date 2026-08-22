@@ -2,7 +2,7 @@
 
 - Keep the product local-first and provider-neutral.
 - Preserve the hierarchy: conversation → one captain → zero or more workers.
-- Do not add product features outside the lean MVP without an explicit request.
+- Do not add product features outside the defined scope without an explicit request.
 - Keep domain logic independent from Fastify, React, tmux, and individual providers.
 - Validate all external input at process and HTTP boundaries.
 - Never construct shell commands from unescaped user input.
