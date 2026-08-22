@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "description": "A lean local desktop interface for supervising real coding-agent terminals.",
+  "author": "Riad Mefti",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RiadMefti/agent-orchestrator.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RiadMefti/agent-orchestrator/issues"
+  },
+  "homepage": "https://github.com/RiadMefti/agent-orchestrator#readme",
   "desktopName": "dev.agentorchestrator.desktop",
   "main": "apps/desktop/dist/main.js",
   "workspaces": [
