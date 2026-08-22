@@ -18,10 +18,7 @@ describe("desktop server environment", () => {
 
   it("keeps explicit server configuration", () => {
     expect(
-      withDesktopDefaults(
-        { AO_PORT: "5432", AO_DATABASE_PATH: "/tmp/custom.sqlite" },
-        paths
-      )
+      withDesktopDefaults({ AO_PORT: "5432", AO_DATABASE_PATH: "/tmp/custom.sqlite" }, paths)
     ).toMatchObject({
       AO_PORT: "5432",
       AO_DATABASE_PATH: "/tmp/custom.sqlite"

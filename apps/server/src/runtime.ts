@@ -27,11 +27,7 @@ export async function createOrchestratorServer(
 
   try {
     const sessions = new TmuxSessionRuntime(runner);
-    const providers = new LocalProviderCatalog(
-      captainLaunchers,
-      new BinaryLocator(runner),
-      runner
-    );
+    const providers = new LocalProviderCatalog(captainLaunchers, new BinaryLocator(runner), runner);
     const conversations = new ConversationService({
       repository,
       providers,
@@ -42,8 +38,8 @@ export async function createOrchestratorServer(
       conversations,
       terminal: new TerminalGateway(),
       workspace: options.workspace,
-      logger: options.logger,
-      webRoot: options.webRoot
+      ...(options.logger === undefined ? {} : { logger: options.logger }),
+      ...(options.webRoot === undefined ? {} : { webRoot: options.webRoot })
     });
 
     app.addHook("onClose", () => {

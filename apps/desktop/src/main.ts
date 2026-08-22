@@ -5,17 +5,19 @@ import {
   loadConfig,
   type OrchestratorServerOptions
 } from "@orchestrator/server/runtime";
-import { app, BrowserWindow, Menu } from "electron";
+import { app, BrowserWindow, dialog, Menu } from "electron";
 
 import { withDesktopDefaults } from "./desktop-environment.js";
 import { isTrustedAppUrl } from "./navigation.js";
+import { ShutdownGate } from "./shutdown-gate.js";
+import { ensureDesktopWorkspace } from "./workspace-selection.js";
 
 type OrchestratorServer = Awaited<ReturnType<typeof createOrchestratorServer>>;
 
 let mainWindow: BrowserWindow | null = null;
 let server: OrchestratorServer | null = null;
 let serverUrl: string | null = null;
-let shutdownStarted = false;
+const shutdown = new ShutdownGate();
 
 app.enableSandbox();
 
@@ -36,11 +38,16 @@ async function startDesktop(): Promise<void> {
   await app.whenReady();
   Menu.setApplicationMenu(null);
 
-  const environment = withDesktopDefaults(process.env, {
+  const defaults = withDesktopDefaults(process.env, {
     appPath: app.getAppPath(),
     isPackaged: app.isPackaged,
     userDataPath: app.getPath("userData")
   });
+  const environment = await ensureDesktopWorkspace(defaults, app.isPackaged, selectWorkspace);
+  if (environment === null) {
+    app.quit();
+    return;
+  }
   const config = loadConfig(environment, process.cwd());
   const serverOptions: OrchestratorServerOptions = {
     databasePath: config.databasePath,
@@ -54,6 +61,14 @@ async function startDesktop(): Promise<void> {
   mainWindow = createWindow(serverUrl);
   await mainWindow.loadURL(serverUrl);
   console.info(`Orchestrator desktop ready at ${serverUrl}`);
+}
+
+async function selectWorkspace(): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    title: "Choose the agent workspace",
+    properties: ["openDirectory"]
+  });
+  return result.canceled ? null : (result.filePaths[0] ?? null);
 }
 
 function createWindow(url: string): BrowserWindow {
@@ -113,23 +128,23 @@ function registerLifecycleHandlers(): void {
   });
 
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
+    if (shutdown.shouldQuitAfterWindowsClose(process.platform)) app.quit();
   });
 
   app.on("before-quit", (event) => {
-    if (server === null || shutdownStarted) return;
+    if (server === null) return;
     event.preventDefault();
-    shutdownStarted = true;
+    if (!shutdown.begin()) return;
     for (const window of BrowserWindow.getAllWindows()) window.destroy();
 
     const activeServer = server;
-    server = null;
     void activeServer
       .close()
       .catch((error: unknown) => {
         console.error("Failed to stop the local server cleanly.", error);
       })
       .finally(() => {
+        server = null;
         app.quit();
       });
   });
