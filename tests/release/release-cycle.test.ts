@@ -253,3 +253,19 @@ describe("release asset validation", () => {
     expect(malformed.stderr).toContain("valid type-2 AppImage header");
   });
 });
+
+describe("dependency update policy", () => {
+  it("automates compatible npm upgrades without batching breaking changes", async () => {
+    const configuration = await readFile(join(projectRoot, ".github", "dependabot.yml"), "utf8");
+
+    expect(configuration).toMatch(
+      /npm-development:[\s\S]*?applies-to: version-updates[\s\S]*?dependency-type: development[\s\S]*?- minor[\s\S]*?- patch/
+    );
+    expect(configuration).toMatch(
+      /npm-production:[\s\S]*?applies-to: version-updates[\s\S]*?dependency-type: production[\s\S]*?- minor[\s\S]*?- patch/
+    );
+    expect(configuration).toMatch(
+      /ignore:[\s\S]*?dependency-name: "\*"[\s\S]*?- version-update:semver-major/
+    );
+  });
+});
