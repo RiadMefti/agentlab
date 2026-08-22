@@ -250,12 +250,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          existing_json="$RUNNER_TEMP/existing-release.json"
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$existing_json" 2>/dev/null; then
-            if [[ "$(jq -r '.draft' "$existing_json")" == "true" ]]; then
+          if existing_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [[ "$existing_is_draft" == "true" ]]; then
               echo "state=draft" >> "$GITHUB_OUTPUT"
-            else
+            elif [[ "$existing_is_draft" == "false" ]]; then
               echo "state=published" >> "$GITHUB_OUTPUT"
+            else
+              echo "GitHub returned an invalid release state." >&2
+              exit 1
             fi
           else
             echo "state=missing" >> "$GITHUB_OUTPUT"
@@ -302,8 +304,8 @@ jobs:
         run: |
           set -euo pipefail
           release_json="$RUNNER_TEMP/draft-release.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$release_json"
-          jq -e '.draft == true' "$release_json" >/dev/null
+          gh release view "$GITHUB_REF_NAME" --json isDraft,assets > "$release_json"
+          jq -e '.isDraft == true' "$release_json" >/dev/null
 
           local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
           remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"

@@ -377,6 +377,12 @@ describe("release workflow trust boundaries", () => {
     expect(inspectIndex).toBeGreaterThan(0);
     expect(inspectIndex).toBeLessThan(attestIndex);
     expect(workflow).toContain("if: steps.existing.outputs.state != 'published'");
+    expect(workflow).toContain(
+      "gh release view \"$GITHUB_REF_NAME\" --json isDraft --jq '.isDraft'"
+    );
+    expect(workflow).toContain(
+      'gh release view "$GITHUB_REF_NAME" --json isDraft,assets > "$release_json"'
+    );
     expect(workflow).toContain('gh release download "$GITHUB_REF_NAME"');
     expect(workflow).toContain('gh attestation verify "$asset"');
   });
