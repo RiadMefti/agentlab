@@ -2,10 +2,15 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
+import type {
+  AgentSession,
+  Conversation,
+  DesktopUpdateApi,
+  ProviderCapability
+} from "@orchestrator/contracts";
 
 import { AgentTabs } from "../../apps/web/src/components/AgentTabs.js";
 import { AppearancePicker } from "../../apps/web/src/components/AppearancePicker.js";
@@ -13,6 +18,7 @@ import { ConversationReel } from "../../apps/web/src/components/ConversationReel
 import { DeleteWorkerDialog } from "../../apps/web/src/components/DeleteWorkerDialog.js";
 import { NewConversationDialog } from "../../apps/web/src/components/NewConversationDialog.js";
 import { NewWorkerDialog } from "../../apps/web/src/components/NewWorkerDialog.js";
+import { UpdateButton } from "../../apps/web/src/components/UpdateButton.js";
 import { ThemeProvider } from "../../apps/web/src/theme/react-theme.js";
 import { ThemeStore } from "../../apps/web/src/theme/theme-store.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
@@ -108,6 +114,38 @@ describe("lean interface components", () => {
       />
     );
     expect(tabs.queryByRole("button", { name: /Delete/u })).not.toBeInTheDocument();
+  });
+
+  it("shows the GitHub update action only when a newer release exists", async () => {
+    const openLatestRelease = vi.fn(() => Promise.resolve());
+    const updates: DesktopUpdateApi = {
+      checkForUpdate: vi.fn(() => Promise.resolve({ version: "0.2.0" })),
+      openLatestRelease
+    };
+    render(<UpdateButton updates={updates} />);
+
+    const button = await screen.findByRole("button", {
+      name: "Download Orchestrator v0.2.0 from GitHub"
+    });
+    expect(button).toHaveTextContent("update v0.2.0");
+    fireEvent.click(button);
+    expect(openLatestRelease).toHaveBeenCalledOnce();
+  });
+
+  it("renders no update affordance when the installed release is current", async () => {
+    const checkForUpdate = vi.fn(() => Promise.resolve(null));
+    const updates: DesktopUpdateApi = {
+      checkForUpdate,
+      openLatestRelease: vi.fn(() => Promise.resolve())
+    };
+    const view = render(<UpdateButton updates={updates} />);
+
+    await waitFor(() => {
+      expect(checkForUpdate).toHaveBeenCalledOnce();
+    });
+    expect(
+      within(view.container).queryByRole("button", { name: /Download Orchestrator/u })
+    ).not.toBeInTheDocument();
   });
 
   it("selects a saved conversation from the Reel", () => {

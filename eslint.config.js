@@ -24,7 +24,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["scripts/*.mjs"],
+          allowDefaultProject: ["apps/desktop/src/*.cjs", "scripts/*.mjs"],
           defaultProject: "tsconfig.base.json"
         },
         tsconfigRootDir: import.meta.dirname
@@ -45,13 +45,19 @@ export default tseslint.config(
   },
   {
     files: [
-      "apps/desktop/**/*.ts",
+      "apps/desktop/**/*.{cjs,ts}",
       "apps/server/**/*.ts",
       "packages/**/*.ts",
       "scripts/*.mjs",
       "*.config.{js,ts}"
     ],
     languageOptions: { globals: globals.node }
+  },
+  {
+    files: ["apps/desktop/src/preload.cjs"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off"
+    }
   },
   {
     files: ["apps/server/src/domain/**/*.ts"],

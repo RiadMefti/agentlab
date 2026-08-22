@@ -19,6 +19,7 @@ import { DeleteWorkerDialog } from "./components/DeleteWorkerDialog.js";
 import { EmptyState } from "./components/EmptyState.js";
 import { NewConversationDialog } from "./components/NewConversationDialog.js";
 import { NewWorkerDialog } from "./components/NewWorkerDialog.js";
+import { UpdateButton } from "./components/UpdateButton.js";
 
 const TerminalPane = lazy(() => import("./components/TerminalPane.js"));
 
@@ -70,6 +71,7 @@ export function App() {
             setWorkerToDelete(worker);
           }}
         />
+        <UpdateButton />
         <AppearancePicker />
         <button
           className="new"

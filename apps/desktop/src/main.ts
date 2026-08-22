@@ -5,12 +5,27 @@ import {
   loadConfig,
   type OrchestratorServerOptions
 } from "@orchestrator/server/runtime";
-import { app, BrowserWindow, dialog, Menu, nativeTheme, session } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeTheme,
+  net,
+  session,
+  shell
+} from "electron";
 
 import { withDesktopDefaults } from "./desktop-environment.js";
 import { synchronizeNativeWindowTheme } from "./initial-window-theme.js";
 import { registerNativeThemeSynchronization } from "./native-theme-synchronizer.js";
 import { isTrustedAppUrl } from "./navigation.js";
+import {
+  CHECK_FOR_UPDATE_CHANNEL,
+  createDesktopUpdateApi,
+  OPEN_LATEST_RELEASE_CHANNEL
+} from "./release-update.js";
 import { ShutdownGate } from "./shutdown-gate.js";
 import { ensureDesktopWorkspace } from "./workspace-selection.js";
 
@@ -54,6 +69,7 @@ async function startDesktop(): Promise<void> {
     }
   );
   Menu.setApplicationMenu(null);
+  registerUpdateHandlers();
 
   const defaults = withDesktopDefaults(process.env, {
     appPath: app.getAppPath(),
@@ -108,6 +124,7 @@ function createWindow(url: string, backgroundColor: string): BrowserWindow {
       contextIsolation: true,
       navigateOnDragDrop: false,
       nodeIntegration: false,
+      preload: resolve(app.getAppPath(), "apps/desktop/src/preload.cjs"),
       sandbox: true,
       spellcheck: false,
       webviewTag: false
@@ -132,6 +149,24 @@ function createWindow(url: string, backgroundColor: string): BrowserWindow {
     if (mainWindow === window) mainWindow = null;
   });
   return window;
+}
+
+function registerUpdateHandlers(): void {
+  const updates = createDesktopUpdateApi({
+    currentVersion: app.getVersion(),
+    isPackaged: app.isPackaged,
+    onCheckError: (error) => {
+      console.warn(
+        "Could not check for a newer Orchestrator release.",
+        error instanceof Error ? error.message : error
+      );
+    },
+    openExternal: (url) => shell.openExternal(url),
+    request: (url, options) => net.fetch(url, options)
+  });
+
+  ipcMain.handle(CHECK_FOR_UPDATE_CHANNEL, () => updates.checkForUpdate());
+  ipcMain.handle(OPEN_LATEST_RELEASE_CHANNEL, () => updates.openLatestRelease());
 }
 
 function registerLifecycleHandlers(): void {

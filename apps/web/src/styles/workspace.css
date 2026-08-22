@@ -102,6 +102,22 @@
   flex: 0 0 auto;
 }
 
+.update-action {
+  flex: 0 0 auto;
+  padding: 3px 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-control);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.update-action:hover {
+  border-bottom-color: var(--color-border-control-hover);
+  color: var(--color-text);
+}
+
 .appearance-picker select {
   height: 30px;
   padding: 0 24px 0 9px;

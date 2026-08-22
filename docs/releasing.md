@@ -11,6 +11,10 @@ workflow publishes these fixed assets:
 The filenames stay stable so the README's `/releases/latest/download/…` links always resolve to the
 newest release.
 
+Packaged apps validate GitHub's latest stable release metadata at launch and once daily. A newer
+version reveals a button that opens this repository's fixed `/releases/latest` page; no binary is
+downloaded or installed by the app.
+
 ## One-time GitHub setup
 
 Create a GitHub environment named `release` and restrict deployment branches and tags to `v*`. The

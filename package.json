@@ -81,6 +81,7 @@
     },
     "files": [
       "apps/desktop/dist/**/*.js",
+      "apps/desktop/src/preload.cjs",
       "apps/desktop/package.json",
       "apps/server/dist/**/*.js",
       "apps/server/package.json",
