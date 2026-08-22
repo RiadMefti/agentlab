@@ -24,6 +24,7 @@ describe("desktop GitHub release updates", () => {
     const request: ReleaseRequest = vi.fn(() => Promise.resolve(releaseResponse("v0.2.0")));
 
     await expect(checkLatestRelease({ currentVersion: "0.1.0", request })).resolves.toEqual({
+      installation: "manual",
       version: "0.2.0"
     });
     expect(request).toHaveBeenCalledWith(
@@ -123,5 +124,17 @@ describe("desktop GitHub release updates", () => {
     await api.openLatestRelease();
 
     expect(openExternal).toHaveBeenCalledWith(LATEST_RELEASE_PAGE_URL);
+  });
+
+  it("rejects in-app installation on a manual-update platform", async () => {
+    const api = createDesktopUpdateApi({
+      currentVersion: "0.1.0",
+      isPackaged: true,
+      openExternal: vi.fn(() => Promise.resolve()),
+      request: vi.fn(() => Promise.resolve(releaseResponse("v0.2.0")))
+    });
+
+    await expect(api.downloadUpdate()).rejects.toThrow("not available on this platform");
+    await expect(api.restartToUpdate()).rejects.toThrow("not available on this platform");
   });
 });

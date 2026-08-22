@@ -1,7 +1,9 @@
 import type { AvailableUpdate, DesktopUpdateApi } from "@orchestrator/contracts";
 
 export const CHECK_FOR_UPDATE_CHANNEL = "orchestrator:updates:check";
+export const DOWNLOAD_UPDATE_CHANNEL = "orchestrator:updates:download";
 export const OPEN_LATEST_RELEASE_CHANNEL = "orchestrator:updates:open-latest";
+export const RESTART_TO_UPDATE_CHANNEL = "orchestrator:updates:restart";
 export const LATEST_RELEASE_API_URL =
   "https://api.github.com/repos/RiadMefti/agent-orchestrator/releases/latest";
 export const LATEST_RELEASE_PAGE_URL =
@@ -69,7 +71,7 @@ export async function checkLatestRelease({
 
     const latestVersion = readStableReleaseVersion(await response.json());
     return compareStableVersions(latestVersion, currentVersion) > 0
-      ? { version: latestVersion }
+      ? { installation: "manual", version: latestVersion }
       : null;
   } finally {
     clearTimeout(timeout);
@@ -88,8 +90,14 @@ export function createDesktopUpdateApi(options: DesktopUpdateOptions): DesktopUp
         return null;
       }
     },
+    downloadUpdate() {
+      return Promise.reject(new Error("In-app updates are not available on this platform."));
+    },
     async openLatestRelease() {
       await options.openExternal(LATEST_RELEASE_PAGE_URL);
+    },
+    restartToUpdate() {
+      return Promise.reject(new Error("In-app updates are not available on this platform."));
     }
   };
 }

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { open, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -147,6 +147,15 @@ async function sha256(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+async function sha512(path: string): Promise<string> {
+  const hash = createHash("sha512");
+  for await (const chunk of createReadStream(path)) {
+    if (!Buffer.isBuffer(chunk)) throw new Error(`Could not hash binary file ${path}.`);
+    hash.update(chunk);
+  }
+  return hash.digest("base64");
+}
+
 async function createAssetFixture(version = "0.1.0", includeChecksums = false): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "orchestrator-release-assets-"));
   temporaryDirectories.push(root);
@@ -167,11 +176,32 @@ async function createAssetFixture(version = "0.1.0", includeChecksums = false): 
     })
   ]);
 
+  const appImagePath = join(root, "Orchestrator-linux-x64.AppImage");
+  const appImage = await stat(appImagePath);
+  const appImageSha512 = await sha512(appImagePath);
+  await writeFile(
+    join(root, "latest-linux.yml"),
+    [
+      `version: ${version}`,
+      "files:",
+      "  - url: Orchestrator-linux-x64.AppImage",
+      `    sha512: ${appImageSha512}`,
+      `    size: ${String(appImage.size)}`,
+      "    blockMapSize: 1024",
+      "path: Orchestrator-linux-x64.AppImage",
+      `sha512: ${appImageSha512}`,
+      "releaseDate: '2026-08-22T12:00:00.000Z'",
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+
   if (includeChecksums) {
     const assetNames = [
       `Orchestrator-${version}.cdx.json`,
       "Orchestrator-linux-x64.AppImage",
-      "Orchestrator-mac-arm64.dmg"
+      "Orchestrator-mac-arm64.dmg",
+      "latest-linux.yml"
     ].sort();
     const checksums = await Promise.all(
       assetNames.map(async (name) => `${await sha256(join(root, name))}  ${name}`)
@@ -260,7 +290,19 @@ describe("release asset validation", () => {
     const result = runScript("check-release-assets.mjs", "v0.1.0", root);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Validated 3 release assets for v0.1.0.");
+    expect(result.stdout).toContain("Validated 4 release assets for v0.1.0.");
+  });
+
+  it("rejects updater metadata that does not match the AppImage", async () => {
+    const root = await createAssetFixture();
+    const metadataPath = join(root, "latest-linux.yml");
+    const metadata = await readFile(metadataPath, "utf8");
+    await writeFile(metadataPath, metadata.replace("version: 0.1.0", "version: 0.2.0"), "utf8");
+
+    const result = runScript("check-release-assets.mjs", "v0.1.0", root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("does not match the packaged AppImage");
   });
 
   it("rejects extra files and malformed binary containers", async () => {
@@ -298,7 +340,7 @@ describe("release asset validation", () => {
     const invalid = runScript("check-release-assets.mjs", "v0.1.0", root, "--published");
 
     expect(valid.status).toBe(0);
-    expect(valid.stdout).toContain("Validated 4 release assets for v0.1.0.");
+    expect(valid.stdout).toContain("Validated 5 release assets for v0.1.0.");
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("wrong digest");
   });

@@ -23,8 +23,9 @@ from the same workspace.
 GitHub build provenance attestations are attached to every release.
 
 Packaged builds check GitHub at launch and once daily. A quiet update button appears only when a
-newer stable release exists; clicking it opens that release. The app never downloads updates in the
-background.
+newer stable release exists. On Linux, clicking it downloads the verified AppImage without leaving
+the app; a second click restarts into the update. The unsigned macOS build opens the GitHub release
+for a manual replacement.
 
 > **macOS:** The DMG has no valid Apple Developer signature or notarization. After the first blocked
 > launch, open **System Settings → Privacy & Security** and choose **Open Anyway**. Do not disable

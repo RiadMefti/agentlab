@@ -5,6 +5,7 @@ import {
   loadConfig,
   type OrchestratorServerOptions
 } from "@orchestrator/server/runtime";
+import electronUpdater from "electron-updater";
 import {
   app,
   BrowserWindow,
@@ -17,6 +18,7 @@ import {
   shell
 } from "electron";
 
+import { createAppImageUpdateApi } from "./app-image-update.js";
 import { withDesktopDefaults } from "./desktop-environment.js";
 import { synchronizeNativeWindowTheme } from "./initial-window-theme.js";
 import { registerNativeThemeSynchronization } from "./native-theme-synchronizer.js";
@@ -24,7 +26,9 @@ import { isTrustedAppUrl } from "./navigation.js";
 import {
   CHECK_FOR_UPDATE_CHANNEL,
   createDesktopUpdateApi,
-  OPEN_LATEST_RELEASE_CHANNEL
+  DOWNLOAD_UPDATE_CHANNEL,
+  OPEN_LATEST_RELEASE_CHANNEL,
+  RESTART_TO_UPDATE_CHANNEL
 } from "./release-update.js";
 import { ShutdownGate } from "./shutdown-gate.js";
 import { ensureDesktopWorkspace } from "./workspace-selection.js";
@@ -36,6 +40,7 @@ let server: OrchestratorServer | null = null;
 let serverUrl: string | null = null;
 const shutdown = new ShutdownGate();
 const appearanceCookieUrl = "http://127.0.0.1/";
+const { autoUpdater } = electronUpdater;
 
 app.enableSandbox();
 
@@ -152,7 +157,7 @@ function createWindow(url: string, backgroundColor: string): BrowserWindow {
 }
 
 function registerUpdateHandlers(): void {
-  const updates = createDesktopUpdateApi({
+  const manualUpdates = createDesktopUpdateApi({
     currentVersion: app.getVersion(),
     isPackaged: app.isPackaged,
     onCheckError: (error) => {
@@ -164,9 +169,28 @@ function registerUpdateHandlers(): void {
     openExternal: (url) => shell.openExternal(url),
     request: (url, options) => net.fetch(url, options)
   });
+  const updates =
+    app.isPackaged && process.platform === "linux"
+      ? createAppImageUpdateApi({
+          beforeRestart: () => {
+            app.releaseSingleInstanceLock();
+          },
+          currentVersion: app.getVersion(),
+          onCheckError: (error) => {
+            console.warn(
+              "Could not check for a newer Orchestrator AppImage.",
+              error instanceof Error ? error.message : error
+            );
+          },
+          openLatestRelease: () => manualUpdates.openLatestRelease(),
+          updater: autoUpdater
+        })
+      : manualUpdates;
 
   ipcMain.handle(CHECK_FOR_UPDATE_CHANNEL, () => updates.checkForUpdate());
+  ipcMain.handle(DOWNLOAD_UPDATE_CHANNEL, () => updates.downloadUpdate());
   ipcMain.handle(OPEN_LATEST_RELEASE_CHANNEL, () => updates.openLatestRelease());
+  ipcMain.handle(RESTART_TO_UPDATE_CHANNEL, () => updates.restartToUpdate());
 }
 
 function registerLifecycleHandlers(): void {

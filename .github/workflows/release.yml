@@ -127,7 +127,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-linux-x64
-          path: release/Orchestrator-linux-x64.AppImage
+          path: |
+            release/Orchestrator-linux-x64.AppImage
+            release/latest-linux.yml
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -239,7 +241,7 @@ jobs:
         run: |
           set -euo pipefail
           cd release-assets
-          sha256sum Orchestrator-* > SHA256SUMS
+          sha256sum Orchestrator-* latest-linux.yml > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ..
           node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets --published
@@ -266,7 +268,9 @@ jobs:
         if: steps.existing.outputs.state != 'published'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: release-assets/Orchestrator-*
+          subject-path: |
+            release-assets/Orchestrator-*
+            release-assets/latest-linux.yml
       - name: Attest the production SBOM
         if: steps.existing.outputs.state != 'published'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -367,7 +371,7 @@ jobs:
               fi
             done < <(cd "$download_directory" && sha256sum *)
 
-            for asset in "$download_directory"/Orchestrator-*; do
+            for asset in "$download_directory"/Orchestrator-* "$download_directory"/latest-linux.yml; do
               gh attestation verify "$asset" \
                 --repo "$GITHUB_REPOSITORY" \
                 --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \

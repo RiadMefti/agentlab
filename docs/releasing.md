@@ -4,6 +4,7 @@ Stable releases are built from annotated `vMAJOR.MINOR.PATCH` tags already prese
 workflow publishes these fixed assets:
 
 - `Orchestrator-linux-x64.AppImage`
+- `latest-linux.yml`
 - `Orchestrator-mac-arm64.dmg`
 - `Orchestrator-MAJOR.MINOR.PATCH.cdx.json`
 - `SHA256SUMS`
@@ -11,9 +12,11 @@ workflow publishes these fixed assets:
 The filenames stay stable so the README's `/releases/latest/download/…` links always resolve to the
 newest release.
 
-Packaged apps validate GitHub's latest stable release metadata at launch and once daily. A newer
-version reveals a button that opens this repository's fixed `/releases/latest` page; no binary is
-downloaded or installed by the app.
+Packaged apps check GitHub for the latest stable release at launch and once daily. On Linux, a newer
+version reveals a button that downloads the AppImage in the app, validates it against the SHA-512
+digest in `latest-linux.yml`, and then offers to restart into it. Downloads begin only after the
+user clicks. The unsigned macOS build opens the fixed `/releases/latest` page for manual
+replacement.
 
 ## One-time GitHub setup
 
@@ -68,8 +71,8 @@ The tag starts `.github/workflows/release.yml`. It performs the following gates 
 4. Build a native Apple-silicon DMG on an arm64 macOS runner without release credentials.
 5. Verify each app has no valid code signature, has the expected native architecture, and survives
    DMG integrity and read-only mount checks.
-6. Validate the exact artifact set and container formats, then generate checksums, a CycloneDX SBOM,
-   SLSA provenance, and an SBOM attestation.
+6. Validate the exact artifact set, container formats, and AppImage update metadata, then generate
+   checksums, a CycloneDX SBOM, SLSA provenance, and an SBOM attestation.
 7. Upload everything to a draft, compare GitHub's asset digests with the local files, and only then
    publish it as the latest release.
 

@@ -116,11 +116,15 @@ describe("lean interface components", () => {
     expect(tabs.queryByRole("button", { name: /Delete/u })).not.toBeInTheDocument();
   });
 
-  it("shows the GitHub update action only when a newer release exists", async () => {
+  it("keeps manual updates on the fixed GitHub release page", async () => {
     const openLatestRelease = vi.fn(() => Promise.resolve());
     const updates: DesktopUpdateApi = {
-      checkForUpdate: vi.fn(() => Promise.resolve({ version: "0.2.0" })),
-      openLatestRelease
+      checkForUpdate: vi.fn(() =>
+        Promise.resolve({ installation: "manual" as const, version: "0.2.0" })
+      ),
+      downloadUpdate: vi.fn(() => Promise.resolve()),
+      openLatestRelease,
+      restartToUpdate: vi.fn(() => Promise.resolve())
     };
     render(<UpdateButton updates={updates} />);
 
@@ -132,11 +136,39 @@ describe("lean interface components", () => {
     expect(openLatestRelease).toHaveBeenCalledOnce();
   });
 
+  it("downloads an AppImage in the app before offering a restart", async () => {
+    const downloadUpdate = vi.fn(() => Promise.resolve());
+    const restartToUpdate = vi.fn(() => Promise.resolve());
+    const updates: DesktopUpdateApi = {
+      checkForUpdate: vi.fn(() =>
+        Promise.resolve({ installation: "in-app" as const, version: "0.2.0" })
+      ),
+      downloadUpdate,
+      openLatestRelease: vi.fn(() => Promise.resolve()),
+      restartToUpdate
+    };
+    render(<UpdateButton updates={updates} />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Download Orchestrator v0.2.0 in the app" })
+    );
+    const restart = await screen.findByRole("button", {
+      name: "Restart to install Orchestrator v0.2.0"
+    });
+    expect(downloadUpdate).toHaveBeenCalledOnce();
+    expect(restart).toHaveTextContent("restart to update");
+
+    fireEvent.click(restart);
+    expect(restartToUpdate).toHaveBeenCalledOnce();
+  });
+
   it("renders no update affordance when the installed release is current", async () => {
     const checkForUpdate = vi.fn(() => Promise.resolve(null));
     const updates: DesktopUpdateApi = {
       checkForUpdate,
-      openLatestRelease: vi.fn(() => Promise.resolve())
+      downloadUpdate: vi.fn(() => Promise.resolve()),
+      openLatestRelease: vi.fn(() => Promise.resolve()),
+      restartToUpdate: vi.fn(() => Promise.resolve())
     };
     const view = render(<UpdateButton updates={updates} />);
 

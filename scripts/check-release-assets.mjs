@@ -2,14 +2,18 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, readFile, readdir } from "node:fs/promises";
+import { open, readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { load } from "js-yaml";
 
 import { stableVersionFromTag } from "./release-versions.mjs";
 
 const MINIMUM_BINARY_SIZE = 50 * 1024 * 1024;
 const CHECKSUM_FILE = "SHA256SUMS";
+const LINUX_APP_IMAGE = "Orchestrator-linux-x64.AppImage";
+const LINUX_UPDATE_METADATA = "latest-linux.yml";
 
 /** @typedef {Record<string, unknown>} JsonObject */
 
@@ -106,6 +110,46 @@ async function verifySbom(path, version) {
 
 /**
  * @param {string} path
+ * @param {string} appImagePath
+ * @param {string} version
+ */
+async function verifyLinuxUpdateMetadata(path, appImagePath, version) {
+  /** @type {unknown} */
+  let value;
+  try {
+    value = /** @type {unknown} */ (load(await readFile(path, "utf8")));
+  } catch (error) {
+    throw new Error(`${path} is not valid updater YAML.`, { cause: error });
+  }
+
+  if (!isJsonObject(value) || !Array.isArray(value.files) || value.files.length !== 1) {
+    throw new Error(`${path} must describe exactly one AppImage update.`);
+  }
+  const file = /** @type {unknown} */ (value.files[0]);
+  if (!isJsonObject(file)) {
+    throw new Error(`${path} contains invalid AppImage file metadata.`);
+  }
+
+  const appImage = await stat(appImagePath);
+  const digest = await sha512(appImagePath);
+  if (
+    value.version !== version ||
+    value.path !== LINUX_APP_IMAGE ||
+    value.sha512 !== digest ||
+    file.url !== LINUX_APP_IMAGE ||
+    file.sha512 !== digest ||
+    file.size !== appImage.size ||
+    !Number.isSafeInteger(file.blockMapSize) ||
+    file.blockMapSize <= 0 ||
+    typeof value.releaseDate !== "string" ||
+    !Number.isFinite(Date.parse(value.releaseDate))
+  ) {
+    throw new Error(`${path} does not match the packaged AppImage for version ${version}.`);
+  }
+}
+
+/**
+ * @param {string} path
  */
 async function sha256(path) {
   const hash = createHash("sha256");
@@ -114,6 +158,18 @@ async function sha256(path) {
     hash.update(chunk);
   }
   return hash.digest("hex");
+}
+
+/**
+ * @param {string} path
+ */
+async function sha512(path) {
+  const hash = createHash("sha512");
+  for await (const chunk of createReadStream(path)) {
+    if (!Buffer.isBuffer(chunk)) throw new Error(`Could not hash binary file ${path}.`);
+    hash.update(chunk);
+  }
+  return hash.digest("base64");
 }
 
 /**
@@ -165,8 +221,9 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
   const directory = resolve(directoryPath);
   const assetNames = [
     `Orchestrator-${version}.cdx.json`,
-    "Orchestrator-linux-x64.AppImage",
-    "Orchestrator-mac-arm64.dmg"
+    LINUX_APP_IMAGE,
+    "Orchestrator-mac-arm64.dmg",
+    LINUX_UPDATE_METADATA
   ].sort();
   const expectedNames = includeChecksums ? [...assetNames, CHECKSUM_FILE].sort() : assetNames;
   const entries = await readdir(directory, { withFileTypes: true });
@@ -183,9 +240,14 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
   }
 
   await Promise.all([
-    verifyAppImage(join(directory, "Orchestrator-linux-x64.AppImage")),
+    verifyAppImage(join(directory, LINUX_APP_IMAGE)),
     verifyDmg(join(directory, "Orchestrator-mac-arm64.dmg")),
-    verifySbom(join(directory, `Orchestrator-${version}.cdx.json`), version)
+    verifySbom(join(directory, `Orchestrator-${version}.cdx.json`), version),
+    verifyLinuxUpdateMetadata(
+      join(directory, LINUX_UPDATE_METADATA),
+      join(directory, LINUX_APP_IMAGE),
+      version
+    )
   ]);
   if (includeChecksums) {
     await verifyChecksums(join(directory, CHECKSUM_FILE), directory, assetNames);

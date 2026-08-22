@@ -8,8 +8,11 @@ interface UpdateButtonProps {
   readonly updates?: DesktopUpdateApi;
 }
 
+type UpdatePhase = "available" | "downloading" | "failed" | "ready" | "restarting";
+
 export function UpdateButton({ updates = window.orchestratorUpdates }: UpdateButtonProps = {}) {
   const [available, setAvailable] = useState<AvailableUpdate | null>(null);
+  const [phase, setPhase] = useState<UpdatePhase>("available");
 
   useEffect(() => {
     if (updates === undefined) return;
@@ -18,7 +21,10 @@ export function UpdateButton({ updates = window.orchestratorUpdates }: UpdateBut
     const check = async () => {
       try {
         const result = await updates.checkForUpdate();
-        if (active) setAvailable(result);
+        if (active) {
+          setAvailable(result);
+          setPhase("available");
+        }
       } catch {
         if (active) setAvailable(null);
       }
@@ -37,18 +43,64 @@ export function UpdateButton({ updates = window.orchestratorUpdates }: UpdateBut
 
   if (available === null || updates === undefined) return null;
 
-  const label = `Download Orchestrator v${available.version} from GitHub`;
+  const manual = available.installation === "manual";
+  const label = updateLabel(available.version, manual, phase);
+  const text = updateText(available.version, phase);
+
+  const runUpdate = async () => {
+    if (manual) {
+      await updates.openLatestRelease();
+      return;
+    }
+    if (phase === "ready") {
+      setPhase("restarting");
+      try {
+        await updates.restartToUpdate();
+      } catch {
+        setPhase("ready");
+      }
+      return;
+    }
+    if (phase === "downloading" || phase === "restarting") return;
+
+    setPhase("downloading");
+    try {
+      await updates.downloadUpdate();
+      setPhase("ready");
+    } catch {
+      setPhase("failed");
+    }
+  };
+
   return (
     <button
       className="update-action"
       type="button"
       aria-label={label}
+      disabled={phase === "downloading" || phase === "restarting"}
       title={label}
       onClick={() => {
-        void updates.openLatestRelease().catch(() => undefined);
+        void runUpdate().catch(() => undefined);
       }}
     >
-      update v{available.version}
+      {text}
     </button>
   );
+}
+
+function updateLabel(version: string, manual: boolean, phase: UpdatePhase): string {
+  if (manual) return `Download Orchestrator v${version} from GitHub`;
+  if (phase === "downloading") return `Downloading Orchestrator v${version}`;
+  if (phase === "ready") return `Restart to install Orchestrator v${version}`;
+  if (phase === "restarting") return `Restarting into Orchestrator v${version}`;
+  if (phase === "failed") return `Retry downloading Orchestrator v${version}`;
+  return `Download Orchestrator v${version} in the app`;
+}
+
+function updateText(version: string, phase: UpdatePhase): string {
+  if (phase === "downloading") return `downloading v${version}…`;
+  if (phase === "ready") return "restart to update";
+  if (phase === "restarting") return "restarting…";
+  if (phase === "failed") return "retry update";
+  return `update v${version}`;
 }
