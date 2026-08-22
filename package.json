@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "A lean local desktop interface for supervising real coding-agent terminals.",
+  "desktopName": "dev.agentorchestrator.desktop",
   "main": "apps/desktop/dist/main.js",
   "workspaces": [
     "apps/*",
@@ -74,6 +75,7 @@
     "linux": {
       "category": "Development",
       "executableName": "agent-orchestrator",
+      "syncDesktopName": true,
       "target": [
         "AppImage"
       ]
