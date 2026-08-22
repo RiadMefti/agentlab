@@ -6,7 +6,9 @@ import type { CreateCaptainSessionInput, SessionRuntime } from "../../domain/ses
 import { type CommandRunner, errorOutput } from "../process/command-runner.js";
 import { renderShellCommand } from "./shell-command.js";
 
-const FIELD_SEPARATOR = "\u001f";
+// tmux 3.4 escapes control characters in format output, so keep this printable.
+// Managed session names and the remaining numeric fields cannot contain a pipe.
+const FIELD_SEPARATOR = "|";
 const SESSION_FORMAT = [
   "#{session_name}",
   "#{session_created}",

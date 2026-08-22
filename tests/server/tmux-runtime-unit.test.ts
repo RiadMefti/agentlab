@@ -31,7 +31,7 @@ class RecordingRunner implements CommandRunner {
     if (subcommand === "list-sessions") {
       const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
       return Promise.resolve({
-        stdout: `${name}\u001f1787313600\u001f1\u001f0\nignored-session\u001f0\u001f0\u001f0\n`,
+        stdout: `${name}|1787313600|1|0\nignored-session|0|0|0\n`,
         stderr: ""
       });
     }
