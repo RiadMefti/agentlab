@@ -6,8 +6,6 @@ import { open, readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { load } from "js-yaml";
-
 import { stableVersionFromTag } from "./release-versions.mjs";
 
 const MINIMUM_BINARY_SIZE = 50 * 1024 * 1024;
@@ -114,35 +112,30 @@ async function verifySbom(path, version) {
  * @param {string} version
  */
 async function verifyLinuxUpdateMetadata(path, appImagePath, version) {
-  /** @type {unknown} */
-  let value;
-  try {
-    value = /** @type {unknown} */ (load(await readFile(path, "utf8")));
-  } catch (error) {
-    throw new Error(`${path} is not valid updater YAML.`, { cause: error });
-  }
+  const source = await readFile(path, "utf8");
+  const match =
+    /^version: ([0-9]+\.[0-9]+\.[0-9]+)\nfiles:\n {2}- url: Orchestrator-linux-x64\.AppImage\n {4}sha512: ([A-Za-z0-9+/]{86}==)\n {4}size: ([0-9]+)\n {4}blockMapSize: ([0-9]+)\npath: Orchestrator-linux-x64\.AppImage\nsha512: ([A-Za-z0-9+/]{86}==)\nreleaseDate: '([^'\n]+)'\n$/u.exec(
+      source
+    );
+  if (!match) throw new Error(`${path} is not canonical AppImage updater metadata.`);
 
-  if (!isJsonObject(value) || !Array.isArray(value.files) || value.files.length !== 1) {
-    throw new Error(`${path} must describe exactly one AppImage update.`);
-  }
-  const file = /** @type {unknown} */ (value.files[0]);
-  if (!isJsonObject(file)) {
-    throw new Error(`${path} contains invalid AppImage file metadata.`);
-  }
+  const [, metadataVersion, fileDigest, sizeSource, blockMapSizeSource, rootDigest, releaseDate] =
+    match;
+  const size = Number(sizeSource);
+  const blockMapSize = Number(blockMapSizeSource);
 
   const appImage = await stat(appImagePath);
   const digest = await sha512(appImagePath);
   if (
-    value.version !== version ||
-    value.path !== LINUX_APP_IMAGE ||
-    value.sha512 !== digest ||
-    file.url !== LINUX_APP_IMAGE ||
-    file.sha512 !== digest ||
-    file.size !== appImage.size ||
-    !Number.isSafeInteger(file.blockMapSize) ||
-    file.blockMapSize <= 0 ||
-    typeof value.releaseDate !== "string" ||
-    !Number.isFinite(Date.parse(value.releaseDate))
+    metadataVersion !== version ||
+    fileDigest !== digest ||
+    rootDigest !== digest ||
+    size !== appImage.size ||
+    !Number.isSafeInteger(size) ||
+    !Number.isSafeInteger(blockMapSize) ||
+    blockMapSize <= 0 ||
+    releaseDate === undefined ||
+    !Number.isFinite(Date.parse(releaseDate))
   ) {
     throw new Error(`${path} does not match the packaged AppImage for version ${version}.`);
   }
