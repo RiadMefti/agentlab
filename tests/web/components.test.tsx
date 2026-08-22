@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
@@ -37,10 +37,20 @@ const provider: ProviderCapability = {
   available: true,
   version: "test",
   reason: null,
-  defaultReasoning: "high",
-  reasoningLevels: ["low", "high", "xhigh"],
-  modelSuggestions: ["gpt-test"],
-  acceptsCustomModel: true
+  source: "live",
+  discoveredAt: "2026-08-21T12:00:00.000Z",
+  defaultModel: "default-model",
+  models: ["default-model", "gpt-test"].map((id) => ({
+    id,
+    label: id === "gpt-test" ? "GPT Test" : "Default Model",
+    description: null,
+    defaultReasoning: "high",
+    reasoningOptions: ["low", "high", "xhigh"].map((level) => ({
+      id: level,
+      label: level
+    }))
+  })),
+  customModelPolicy: "allowed"
 };
 
 describe("lean interface components", () => {
@@ -104,5 +114,214 @@ describe("lean interface components", () => {
       model: "gpt-test",
       reasoning: "xhigh"
     });
+  });
+
+  it("submits provider defaults as nullable selections", () => {
+    const onCreate = vi.fn();
+    const view = render(
+      <NewConversationDialog
+        providers={[provider]}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+
+    fireEvent.change(dialog.getByLabelText("Task"), { target: { value: "Use defaults" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Start" }));
+
+    expect(onCreate).toHaveBeenCalledWith({
+      prompt: "Use defaults",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+  });
+
+  it("explains fallback discovery and gates custom model entry behind policy", () => {
+    const onCreate = vi.fn();
+    const view = render(
+      <NewConversationDialog
+        providers={[
+          {
+            ...provider,
+            source: "fallback",
+            reason: "Model discovery failed: timed out",
+            discoveredAt: null,
+            defaultModel: null,
+            models: []
+          }
+        ]}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+
+    expect(dialog.getByText(/provider default remains available/u)).toBeInTheDocument();
+    expect(dialog.queryByLabelText("Custom model ID")).not.toBeInTheDocument();
+    fireEvent.change(dialog.getByLabelText("Model"), { target: { value: "--custom--" } });
+    fireEvent.change(dialog.getByLabelText("Custom model ID"), {
+      target: { value: "custom-safe-model" }
+    });
+    fireEvent.change(dialog.getByLabelText("Task"), { target: { value: "Use custom" } });
+    fireEvent.click(dialog.getByRole("button", { name: "Start" }));
+
+    expect(onCreate).toHaveBeenCalledWith({
+      prompt: "Use custom",
+      provider: "codex",
+      model: "custom-safe-model",
+      reasoning: null
+    });
+  });
+
+  it("preserves valid selections across a refetch and clears removed model state", () => {
+    const onCreate = vi.fn();
+    const onCancel = vi.fn();
+    const view = render(
+      <NewConversationDialog
+        providers={[provider]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+    fireEvent.change(dialog.getByLabelText("Task"), { target: { value: "Use refreshed data" } });
+    fireEvent.change(dialog.getByLabelText("Model"), { target: { value: "gpt-test" } });
+    fireEvent.change(dialog.getByLabelText("Thinking"), { target: { value: "xhigh" } });
+
+    view.rerender(
+      <NewConversationDialog
+        providers={[
+          {
+            ...provider,
+            source: "cache",
+            models: provider.models.map((model) => ({ ...model }))
+          }
+        ]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+    expect(dialog.getByLabelText("Model")).toHaveValue("gpt-test");
+    expect(dialog.getByLabelText("Thinking")).toHaveValue("xhigh");
+
+    view.rerender(
+      <NewConversationDialog
+        providers={[
+          {
+            ...provider,
+            models: provider.models.filter(({ id }) => id === provider.defaultModel)
+          }
+        ]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+    expect(dialog.getByLabelText("Model")).toHaveValue("");
+    expect(dialog.getByLabelText("Thinking")).toHaveValue("");
+    fireEvent.click(dialog.getByRole("button", { name: "Start" }));
+    expect(onCreate).toHaveBeenCalledWith({
+      prompt: "Use refreshed data",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+  });
+
+  it("clears selections when an implicit provider disappears during refetch", () => {
+    const onCreate = vi.fn();
+    const onCancel = vi.fn();
+    const view = render(
+      <NewConversationDialog
+        providers={[provider]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+    fireEvent.change(dialog.getByLabelText("Task"), { target: { value: "Use new provider" } });
+    fireEvent.change(dialog.getByLabelText("Model"), { target: { value: "gpt-test" } });
+    fireEvent.change(dialog.getByLabelText("Thinking"), { target: { value: "xhigh" } });
+
+    const claudeProvider: ProviderCapability = {
+      ...provider,
+      id: "claude",
+      label: "Claude",
+      defaultModel: "claude-default",
+      models: [
+        {
+          id: "claude-default",
+          label: "Claude Default",
+          description: null,
+          defaultReasoning: null,
+          reasoningOptions: [{ id: "high", label: "High" }]
+        }
+      ]
+    };
+    view.rerender(
+      <NewConversationDialog
+        providers={[claudeProvider]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+
+    expect(dialog.getByLabelText("Captain")).toHaveValue("claude");
+    expect(dialog.getByLabelText("Model")).toHaveValue("");
+    expect(dialog.getByLabelText("Thinking")).toHaveValue("");
+    fireEvent.click(dialog.getByRole("button", { name: "Start" }));
+    expect(onCreate).toHaveBeenCalledWith({
+      prompt: "Use new provider",
+      provider: "claude",
+      model: null,
+      reasoning: null
+    });
+  });
+
+  it("clears a custom model when refetched policy becomes catalog-only", () => {
+    const onCreate = vi.fn();
+    const onCancel = vi.fn();
+    const view = render(
+      <NewConversationDialog
+        providers={[provider]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+    fireEvent.change(dialog.getByLabelText("Model"), { target: { value: "--custom--" } });
+    fireEvent.change(dialog.getByLabelText("Custom model ID"), {
+      target: { value: "custom-safe-model" }
+    });
+
+    view.rerender(
+      <NewConversationDialog
+        providers={[{ ...provider, customModelPolicy: "catalog-only" }]}
+        pending={false}
+        error={null}
+        onCancel={onCancel}
+        onCreate={onCreate}
+      />
+    );
+
+    expect(dialog.getByLabelText("Model")).toHaveValue("");
+    expect(dialog.queryByLabelText("Custom model ID")).not.toBeInTheDocument();
   });
 });

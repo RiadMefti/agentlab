@@ -58,11 +58,7 @@ export class ConversationService {
       );
     }
 
-    if (!resolved.launcher.capability.reasoningLevels.includes(input.reasoning)) {
-      throw new ConflictError(
-        `${input.reasoning} reasoning is not supported by ${resolved.launcher.capability.label}.`
-      );
-    }
+    validateSelection(resolved.capability, input.model, input.reasoning);
 
     const id = this.#createId();
     const timestamp = this.#now().toISOString();
@@ -71,7 +67,7 @@ export class ConversationService {
       id,
       title: input.title ?? deriveTitle(input.prompt),
       provider: input.provider,
-      model: input.model ?? null,
+      model: input.model,
       reasoning: input.reasoning,
       captainSessionName,
       createdAt: timestamp,
@@ -158,6 +154,33 @@ export class ConversationService {
       throw new NotFoundError("Conversation not found.");
     }
     return conversation;
+  }
+}
+
+function validateSelection(
+  capability: ProviderCapability,
+  selectedModel: string | null,
+  selectedReasoning: string | null
+): void {
+  const effectiveModel = selectedModel ?? capability.defaultModel;
+  const model =
+    effectiveModel === null
+      ? null
+      : (capability.models.find(({ id }) => id === effectiveModel) ?? null);
+
+  if (selectedModel !== null && model === null && capability.customModelPolicy === "catalog-only") {
+    throw new ConflictError(
+      `${selectedModel} is not in the discovered ${capability.label} model catalog.`
+    );
+  }
+  if (selectedReasoning === null) return;
+  if (model === null) {
+    throw new ConflictError(
+      `Choose a discovered ${capability.label} model before overriding its reasoning.`
+    );
+  }
+  if (!model.reasoningOptions.some(({ id }) => id === selectedReasoning)) {
+    throw new ConflictError(`${selectedReasoning} reasoning is not supported by ${model.label}.`);
   }
 }
 

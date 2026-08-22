@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 
 import { ConversationService } from "../../apps/server/src/application/conversation-service.js";
+import type { ProviderCapabilityDiscovery } from "../../apps/server/src/domain/provider-capability-discovery.js";
 import { buildApp } from "../../apps/server/src/app.js";
 import { SqliteConversationRepository } from "../../apps/server/src/infrastructure/persistence/sqlite-conversation-repository.js";
 import { NodeCommandRunner } from "../../apps/server/src/infrastructure/process/command-runner.js";
@@ -55,8 +56,27 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
       repository = new SqliteConversationRepository(join(root, "conversations.sqlite"));
       const providers = new LocalProviderCatalog(
         [codexCaptainLauncher],
+        [
+          {
+            id: "codex",
+            discover: () =>
+              Promise.resolve({
+                defaultModel: "gpt-test",
+                models: [
+                  {
+                    id: "gpt-test",
+                    label: "GPT Test",
+                    description: null,
+                    defaultReasoning: "high",
+                    reasoningOptions: [{ id: "high", label: "High" }]
+                  }
+                ]
+              })
+          } satisfies ProviderCapabilityDiscovery
+        ],
         new BinaryLocator(runner, { AO_CODEX_BIN: fakeCodex }, root),
-        runner
+        runner,
+        { workspace: root }
       );
       const conversations = new ConversationService({
         repository,

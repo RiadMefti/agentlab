@@ -1,15 +1,6 @@
 import { z } from "zod";
 
-import { providerIdSchema, reasoningLevelSchema } from "./provider.js";
-
-const modelSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(120)
-  .refine((model) => !model.startsWith("-") && !model.includes("\0"), {
-    message: "Model must be an identifier, not a command option."
-  });
+import { modelIdSchema, providerIdSchema, reasoningIdSchema } from "./provider.js";
 
 const promptSchema = z
   .string()
@@ -18,16 +9,18 @@ const promptSchema = z
   .max(20_000)
   .refine((prompt) => !prompt.includes("\0"), { message: "Prompt cannot contain null bytes." });
 
-export const conversationSchema = z.object({
-  id: z.uuid(),
-  title: z.string().min(1).max(80),
-  provider: providerIdSchema,
-  model: z.string().min(1).max(120).nullable(),
-  reasoning: reasoningLevelSchema,
-  captainSessionName: z.string().min(1),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime()
-});
+export const conversationSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string().min(1).max(80),
+    provider: providerIdSchema,
+    model: modelIdSchema.nullable(),
+    reasoning: reasoningIdSchema.nullable(),
+    captainSessionName: z.string().min(1),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime()
+  })
+  .strict();
 
 export type Conversation = z.infer<typeof conversationSchema>;
 
@@ -36,15 +29,22 @@ export const createConversationInputSchema = z
     prompt: promptSchema,
     title: z.string().trim().min(1).max(80).optional(),
     provider: providerIdSchema,
-    model: modelSchema.optional(),
-    reasoning: reasoningLevelSchema
+    model: modelIdSchema.nullable().optional(),
+    reasoning: reasoningIdSchema.nullable().optional()
   })
-  .strict();
+  .strict()
+  .transform((input) => ({
+    ...input,
+    model: input.model ?? null,
+    reasoning: input.reasoning ?? null
+  }));
 
 export type CreateConversationInput = z.infer<typeof createConversationInputSchema>;
 
-export const conversationsResponseSchema = z.object({
-  conversations: z.array(conversationSchema)
-});
+export const conversationsResponseSchema = z
+  .object({
+    conversations: z.array(conversationSchema)
+  })
+  .strict();
 
 export type ConversationsResponse = z.infer<typeof conversationsResponseSchema>;

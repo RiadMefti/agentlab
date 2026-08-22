@@ -60,6 +60,38 @@ describe("ConversationService", () => {
     expect(sessions.created[0]?.command.args.at(-1)).toBe("Investigate the refresh race");
   });
 
+  it("preserves provider-default model and reasoning as null through launch", async () => {
+    const { sessions, service } = createFixture();
+
+    const conversation = await service.createConversation({
+      prompt: "Use provider defaults",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    expect(conversation).toMatchObject({ model: null, reasoning: null });
+    expect(sessions.created[0]?.command.args).not.toContain("-m");
+    expect(
+      sessions.created[0]?.command.args.some((argument) =>
+        argument.startsWith("model_reasoning_effort=")
+      )
+    ).toBe(false);
+  });
+
+  it("allows a custom model only with provider-default reasoning", async () => {
+    const { service } = createFixture();
+
+    await expect(
+      service.createConversation({
+        prompt: "Use a custom model",
+        provider: "codex",
+        model: "custom-model",
+        reasoning: null
+      })
+    ).resolves.toMatchObject({ model: "custom-model", reasoning: null });
+  });
+
   it("compensates the tmux session when persistence fails", async () => {
     const { repository, sessions, service } = createFixture();
     repository.createError = new Error("disk full");
@@ -68,6 +100,7 @@ describe("ConversationService", () => {
       service.createConversation({
         prompt: "Task",
         provider: "codex",
+        model: null,
         reasoning: "high"
       })
     ).rejects.toThrow("disk full");
@@ -89,6 +122,7 @@ describe("ConversationService", () => {
       service.createConversation({
         prompt: "Task",
         provider: "claude",
+        model: null,
         reasoning: "high"
       })
     ).rejects.toBeInstanceOf(ProviderUnavailableError);
@@ -100,7 +134,12 @@ describe("ConversationService", () => {
     const { repository, sessions, service } = createFixture();
 
     await expect(
-      service.createConversation({ prompt: "Task", provider: "codex", reasoning: "max" })
+      service.createConversation({
+        prompt: "Task",
+        provider: "codex",
+        model: null,
+        reasoning: "max"
+      })
     ).rejects.toBeInstanceOf(ConflictError);
     expect(repository.conversations).toHaveLength(0);
     expect(sessions.created).toHaveLength(0);
@@ -111,6 +150,7 @@ describe("ConversationService", () => {
     const conversation = await service.createConversation({
       prompt: "Task",
       provider: "codex",
+      model: null,
       reasoning: "high"
     });
     const worker: AgentSession = {

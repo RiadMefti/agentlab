@@ -1,20 +1,13 @@
 import type { CaptainCommandInput, CaptainLauncher } from "../../domain/captain-launcher.js";
 
-const MODEL_SUGGESTIONS: readonly string[] = [];
-
 function promptFrom(input: CaptainCommandInput): string {
   return `<captain_instructions>\n${input.supervisorInstructions}\n</captain_instructions>\n\n<user_request>\n${input.userPrompt}\n</user_request>`;
 }
 
 export const codexCaptainLauncher: CaptainLauncher = {
-  capability: {
-    id: "codex",
-    label: "Codex",
-    defaultReasoning: "high",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh"],
-    modelSuggestions: [...MODEL_SUGGESTIONS],
-    acceptsCustomModel: true
-  },
+  id: "codex",
+  label: "Codex",
+  customModelPolicy: "allowed",
   buildCaptainCommand(input) {
     const args = [
       "--no-alt-screen",
@@ -25,12 +18,13 @@ export const codexCaptainLauncher: CaptainLauncher = {
       "-C",
       input.workspace,
       "-c",
-      `model_reasoning_effort=${JSON.stringify(input.reasoning)}`,
-      "-c",
       `developer_instructions=${JSON.stringify(input.supervisorInstructions)}`,
       "-c",
-      "agents.enabled=false"
+      "features.multi_agent=false"
     ];
+    if (input.reasoning !== null) {
+      args.push("-c", `model_reasoning_effort=${JSON.stringify(input.reasoning)}`);
+    }
     if (input.model !== null) args.push("-m", input.model);
     args.push("--", input.userPrompt);
     return { executable: input.executable, args };
@@ -38,22 +32,13 @@ export const codexCaptainLauncher: CaptainLauncher = {
 };
 
 export const claudeCaptainLauncher: CaptainLauncher = {
-  capability: {
-    id: "claude",
-    label: "Claude",
-    defaultReasoning: "high",
-    reasoningLevels: ["low", "medium", "high", "xhigh", "max"],
-    modelSuggestions: [...MODEL_SUGGESTIONS],
-    acceptsCustomModel: true
-  },
+  id: "claude",
+  label: "Claude",
+  customModelPolicy: "allowed",
   buildCaptainCommand(input) {
-    const args = [
-      "--ax-screen-reader",
-      "--effort",
-      input.reasoning,
-      "--name",
-      `captain-${input.conversationId.slice(0, 8)}`
-    ];
+    const args = ["--ax-screen-reader"];
+    if (input.reasoning !== null) args.push("--effort", input.reasoning);
+    args.push("--name", `captain-${input.conversationId.slice(0, 8)}`);
     if (input.model !== null) args.push("--model", input.model);
     args.push("--append-system-prompt", input.supervisorInstructions, "--", input.userPrompt);
     return { executable: input.executable, args };
@@ -61,18 +46,21 @@ export const claudeCaptainLauncher: CaptainLauncher = {
 };
 
 export const opencodeCaptainLauncher: CaptainLauncher = {
-  capability: {
-    id: "opencode",
-    label: "OpenCode",
-    defaultReasoning: "high",
-    reasoningLevels: ["minimal", "low", "medium", "high", "xhigh", "max"],
-    modelSuggestions: [...MODEL_SUGGESTIONS],
-    acceptsCustomModel: true
-  },
+  id: "opencode",
+  label: "OpenCode",
+  customModelPolicy: "catalog-only",
   buildCaptainCommand(input) {
-    const args = ["run", "--interactive", "--dir", input.workspace, "--variant", input.reasoning];
+    // OpenCode 1.18.21 parses `run --interactive` but does not use it; `run` still exits when
+    // the first response becomes idle. The supported root command is the persistent TUI.
+    // It has no startup variant option, so fail closed if validation is ever bypassed.
+    if (input.reasoning !== null) {
+      throw new Error(
+        "OpenCode does not support selecting a variant when starting its persistent TUI."
+      );
+    }
+    const args = [input.workspace];
     if (input.model !== null) args.push("--model", input.model);
-    args.push("--", promptFrom(input));
+    args.push("--prompt", promptFrom(input));
     return { executable: input.executable, args };
   }
 };

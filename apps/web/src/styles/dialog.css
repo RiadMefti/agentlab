@@ -97,6 +97,11 @@
   gap: 22px;
 }
 
+.custom-model-field {
+  width: calc((100% - 44px) / 3);
+  margin-top: 18px;
+}
+
 .form-error,
 .form-note {
   margin: 18px 0 0;

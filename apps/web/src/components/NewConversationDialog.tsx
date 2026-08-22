@@ -3,9 +3,10 @@ import { useEffect, useState, type SyntheticEvent } from "react";
 import type {
   CreateConversationInput,
   ProviderCapability,
-  ProviderId,
-  ReasoningLevel
+  ProviderId
 } from "@orchestrator/contracts";
+
+const CUSTOM_MODEL_CHOICE = "--custom--";
 
 interface NewConversationDialogProps {
   readonly providers: readonly ProviderCapability[];
@@ -15,6 +16,15 @@ interface NewConversationDialogProps {
   readonly onCreate: (input: CreateConversationInput) => void;
 }
 
+interface DialogSelection {
+  readonly providers: readonly ProviderCapability[];
+  readonly providerId: ProviderId | null;
+  readonly activeProviderId: ProviderId | null;
+  readonly modelChoice: string;
+  readonly customModel: string;
+  readonly reasoning: string;
+}
+
 export function NewConversationDialog({
   providers,
   pending,
@@ -22,17 +32,33 @@ export function NewConversationDialog({
   onCancel,
   onCreate
 }: NewConversationDialogProps) {
-  const firstAvailable = providers.find(({ available }) => available) ?? providers[0] ?? null;
-  const [providerId, setProviderId] = useState<ProviderId | null>(null);
-  const provider = providers.find(({ id }) => id === providerId) ?? firstAvailable;
-  const [selectedReasoning, setSelectedReasoning] = useState<ReasoningLevel | null>(null);
-  const reasoning =
-    provider !== null &&
-    selectedReasoning !== null &&
-    provider.reasoningLevels.includes(selectedReasoning)
-      ? selectedReasoning
-      : (provider?.defaultReasoning ?? "high");
-  const [model, setModel] = useState("");
+  const initialProvider = resolveProvider(providers, null);
+  const [storedSelection, setStoredSelection] = useState<DialogSelection>(() => ({
+    providers,
+    providerId: null,
+    activeProviderId: initialProvider?.id ?? null,
+    modelChoice: "",
+    customModel: "",
+    reasoning: ""
+  }));
+  let selection = storedSelection;
+  if (selection.providers !== providers) {
+    selection = reconcileSelection(selection, providers);
+    setStoredSelection(selection);
+  }
+  const provider = resolveProvider(providers, selection.providerId);
+  const effectiveModelChoice = selection.modelChoice;
+  const selectedModel =
+    effectiveModelChoice === ""
+      ? null
+      : effectiveModelChoice === CUSTOM_MODEL_CHOICE
+        ? selection.customModel.trim() || null
+        : effectiveModelChoice;
+  const effectiveModelId = selectedModel ?? provider?.defaultModel ?? null;
+  const modelCapability = provider?.models.find(({ id }) => id === effectiveModelId) ?? null;
+  const reasoning = modelCapability?.reasoningOptions.some(({ id }) => id === selection.reasoning)
+    ? selection.reasoning
+    : null;
   const [prompt, setPrompt] = useState("");
 
   useEffect(() => {
@@ -47,14 +73,23 @@ export function NewConversationDialog({
 
   function submit(event: SyntheticEvent<HTMLFormElement>): void {
     event.preventDefault();
-    if (provider === null || !provider.available || prompt.trim() === "") return;
+    if (
+      provider === null ||
+      !provider.available ||
+      prompt.trim() === "" ||
+      (effectiveModelChoice === CUSTOM_MODEL_CHOICE && selectedModel === null)
+    ) {
+      return;
+    }
     onCreate({
       provider: provider.id,
+      model: selectedModel,
       reasoning,
-      prompt: prompt.trim(),
-      ...(model.trim() === "" ? {} : { model: model.trim() })
+      prompt: prompt.trim()
     });
   }
+
+  const selectableModels = provider?.models.filter(({ id }) => id !== provider.defaultModel) ?? [];
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -95,9 +130,15 @@ export function NewConversationDialog({
                 onChange={(event) => {
                   const selected = providers.find(({ id }) => id === event.target.value);
                   if (selected !== undefined) {
-                    setProviderId(selected.id);
-                    setSelectedReasoning(selected.defaultReasoning);
-                    setModel("");
+                    setStoredSelection((current) => ({
+                      ...current,
+                      providers,
+                      providerId: selected.id,
+                      activeProviderId: selected.id,
+                      modelChoice: "",
+                      customModel: "",
+                      reasoning: ""
+                    }));
                   }
                 }}
               >
@@ -112,41 +153,70 @@ export function NewConversationDialog({
 
             <label className="field">
               <span>Model</span>
-              <input
-                value={model}
-                placeholder="Provider default"
-                list="model-suggestions"
+              <select
+                value={effectiveModelChoice}
                 onChange={(event) => {
-                  setModel(event.target.value);
+                  setStoredSelection((current) => ({
+                    ...current,
+                    providers,
+                    modelChoice: event.target.value,
+                    reasoning: ""
+                  }));
                 }}
-              />
-              <datalist id="model-suggestions">
-                {(provider?.modelSuggestions ?? []).map((suggestion) => (
-                  <option value={suggestion} key={suggestion} />
+              >
+                <option value="">Provider default</option>
+                {selectableModels.map((model) => (
+                  <option value={model.id} key={model.id}>
+                    {model.label}
+                  </option>
                 ))}
-              </datalist>
+                {provider?.customModelPolicy === "allowed" ? (
+                  <option value={CUSTOM_MODEL_CHOICE}>Custom model…</option>
+                ) : null}
+              </select>
             </label>
 
             <label className="field">
               <span>Thinking</span>
               <select
-                value={reasoning}
+                value={reasoning ?? ""}
                 onChange={(event) => {
-                  setSelectedReasoning(event.target.value as ReasoningLevel);
+                  setStoredSelection((current) => ({
+                    ...current,
+                    providers,
+                    reasoning: event.target.value
+                  }));
                 }}
               >
-                {(provider?.reasoningLevels ?? []).map((level) => (
-                  <option value={level} key={level}>
-                    {level}
+                <option value="">Provider default</option>
+                {(modelCapability?.reasoningOptions ?? []).map((option) => (
+                  <option value={option.id} key={option.id}>
+                    {option.label}
                   </option>
                 ))}
               </select>
             </label>
           </div>
 
-          {provider !== null && !provider.available ? (
-            <p className="form-error">{provider.reason}</p>
+          {effectiveModelChoice === CUSTOM_MODEL_CHOICE ? (
+            <label className="field custom-model-field">
+              <span>Custom model ID</span>
+              <input
+                required
+                value={selection.customModel}
+                placeholder="Provider model identifier"
+                onChange={(event) => {
+                  setStoredSelection((current) => ({
+                    ...current,
+                    providers,
+                    customModel: event.target.value
+                  }));
+                }}
+              />
+            </label>
           ) : null}
+
+          <ProviderNotice provider={provider} />
           {providers.length === 0 && error === null ? (
             <p className="form-note">Looking for installed agents…</p>
           ) : null}
@@ -156,7 +226,13 @@ export function NewConversationDialog({
             <button
               type="submit"
               className="primary-action"
-              disabled={pending || provider === null || !provider.available || prompt.trim() === ""}
+              disabled={
+                pending ||
+                provider === null ||
+                !provider.available ||
+                prompt.trim() === "" ||
+                (effectiveModelChoice === CUSTOM_MODEL_CHOICE && selectedModel === null)
+              }
             >
               {pending ? "Starting…" : "Start"}
             </button>
@@ -165,4 +241,80 @@ export function NewConversationDialog({
       </section>
     </div>
   );
+}
+
+function resolveProvider(
+  providers: readonly ProviderCapability[],
+  providerId: ProviderId | null
+): ProviderCapability | null {
+  return (
+    providers.find(({ id }) => id === providerId) ??
+    providers.find(({ available }) => available) ??
+    providers[0] ??
+    null
+  );
+}
+
+function reconcileSelection(
+  selection: DialogSelection,
+  providers: readonly ProviderCapability[]
+): DialogSelection {
+  const requestedProviderExists =
+    selection.providerId === null || providers.some(({ id }) => id === selection.providerId);
+  const provider = resolveProvider(providers, selection.providerId);
+  const providerId = requestedProviderExists ? selection.providerId : (provider?.id ?? null);
+  const providerChanged = selection.activeProviderId !== (provider?.id ?? null);
+  if (providerChanged || !isModelChoiceValid(provider, selection.modelChoice)) {
+    return {
+      providers,
+      providerId,
+      activeProviderId: provider?.id ?? null,
+      modelChoice: "",
+      customModel: "",
+      reasoning: ""
+    };
+  }
+
+  const selectedModel =
+    selection.modelChoice === ""
+      ? provider?.defaultModel
+      : selection.modelChoice === CUSTOM_MODEL_CHOICE
+        ? selection.customModel.trim() || null
+        : selection.modelChoice;
+  const model = provider?.models.find(({ id }) => id === selectedModel) ?? null;
+  return {
+    ...selection,
+    providers,
+    providerId,
+    activeProviderId: provider?.id ?? null,
+    reasoning: model?.reasoningOptions.some(({ id }) => id === selection.reasoning)
+      ? selection.reasoning
+      : ""
+  };
+}
+
+function isModelChoiceValid(provider: ProviderCapability | null, modelChoice: string): boolean {
+  if (modelChoice === "") return true;
+  if (provider === null) return false;
+  if (modelChoice === CUSTOM_MODEL_CHOICE) return provider.customModelPolicy === "allowed";
+  return provider.models.some(({ id }) => id === modelChoice);
+}
+
+function ProviderNotice({ provider }: { readonly provider: ProviderCapability | null }) {
+  if (provider === null) return null;
+  if (!provider.available) return <p className="form-error">{provider.reason}</p>;
+  if (provider.source === "stale") {
+    return <p className="form-note">Showing the last known model catalog. {provider.reason}</p>;
+  }
+  if (provider.source === "fallback") {
+    return (
+      <p className="form-note">
+        Model discovery is unavailable; provider default remains available. {provider.reason}
+      </p>
+    );
+  }
+  if (provider.models.length === 0) {
+    return <p className="form-note">This provider currently exposes only its default model.</p>;
+  }
+  return null;
 }

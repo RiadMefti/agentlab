@@ -43,14 +43,37 @@ points only own their respective process lifecycles.
 
 ## Create flow
 
-1. HTTP validates provider, model, thinking level, and task.
-2. The application resolves an installed provider CLI.
-3. A captain launcher builds that provider's initial argument vector.
-4. The tmux implementation creates and configures one retained session, then starts the captain.
-5. SQLite stores the conversation only after its captain session starts.
+1. HTTP validates provider, nullable model/thinking selections, and task.
+2. The application resolves an installed provider CLI and its cached model capabilities.
+3. Explicit selections are validated against the selected model; null keeps the provider default.
+4. A captain launcher builds that provider's initial argument vector.
+5. The tmux implementation creates and configures one retained session, then starts the captain.
+6. SQLite stores the conversation only after its captain session starts.
 
 Captain launchers are not used again. Worker creation and captain-worker communication happen
 directly inside the captain through native commands.
+
+## Provider capability discovery
+
+Model metadata is obtained from each installed CLI without starting an agent turn:
+
+- Codex uses app-server's machine-readable `model/list` protocol.
+- Claude uses the official Agent SDK control channel's `supportedModels()` metadata with an empty
+  streaming input.
+- OpenCode uses bounded parsing of `models --verbose`. Version 1.18.21 reports model variants, but
+  its persistent root TUI cannot select one at startup, so those variants are deliberately not
+  exposed as selectable capabilities.
+
+Discovery runs in the selected workspace and all process output, JSON depth, record counts, and
+timeouts are bounded. Cache entries are isolated by provider, workspace, executable, and CLI
+version. Concurrent requests share a single probe. A failed refresh uses last-known-good metadata
+only for that exact key; without a prior catalog, the installed provider remains available in a
+clearly marked provider-default-only fallback state.
+
+The launchers receive only validated argument values. Provider-default model and reasoning are
+represented by null and therefore omit the corresponding CLI flags. OpenCode uses its persistent
+root TUI with `--prompt` inside tmux. In 1.18.21, `run --interactive` is parsed but ignored and the
+`run` process remains one-shot, so it is never used as a persistent launch path.
 
 ## Discovery flow
 

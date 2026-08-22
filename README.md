@@ -82,8 +82,10 @@ each CLI's local authentication store.
 - Fastify serves the local HTTP and WebSocket boundaries on `127.0.0.1`.
 - tmux owns live captain and worker sessions so they survive UI restarts.
 - SQLite stores conversation metadata locally.
-- Provider launch definitions start the selected captain with its model, thinking level, and
-  orchestration instructions.
+- Provider capability adapters discover selectable models and model-specific thinking levels from
+  the installed CLIs, with local caching and stale fallback.
+- Provider launch definitions start the selected captain with nullable provider defaults or its
+  validated model and thinking selection, plus orchestration instructions.
 
 See [Architecture](docs/architecture.md) and the [decision records](docs/decisions) for the system
 boundaries and design rationale.

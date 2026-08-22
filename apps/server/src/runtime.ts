@@ -7,6 +7,7 @@ import { SqliteConversationRepository } from "./infrastructure/persistence/sqlit
 import { BinaryLocator } from "./infrastructure/providers/binary-locator.js";
 import { captainLaunchers } from "./infrastructure/providers/captain-launchers.js";
 import { LocalProviderCatalog } from "./infrastructure/providers/local-provider-catalog.js";
+import { createProviderDiscoveries } from "./infrastructure/providers/provider-discoveries.js";
 import { TerminalGateway } from "./infrastructure/terminal/terminal-gateway.js";
 import { TmuxSessionRuntime } from "./infrastructure/tmux/tmux-session-runtime.js";
 
@@ -27,7 +28,13 @@ export async function createOrchestratorServer(
 
   try {
     const sessions = new TmuxSessionRuntime(runner);
-    const providers = new LocalProviderCatalog(captainLaunchers, new BinaryLocator(runner), runner);
+    const providers = new LocalProviderCatalog(
+      captainLaunchers,
+      createProviderDiscoveries(runner),
+      new BinaryLocator(runner),
+      runner,
+      { workspace: options.workspace }
+    );
     const conversations = new ConversationService({
       repository,
       providers,

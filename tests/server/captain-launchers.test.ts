@@ -7,6 +7,7 @@ import {
   opencodeCaptainLauncher
 } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
+import { LONG_BEDROCK_MODEL_ID } from "../helpers/model-ids.js";
 
 const input: CaptainCommandInput = {
   executable: "/opt/provider",
@@ -31,16 +32,28 @@ describe("captain launchers", () => {
       "-C",
       "/work/project",
       "-c",
-      'model_reasoning_effort="high"',
-      "-c",
       'developer_instructions="Only orchestrate"',
       "-c",
-      "agents.enabled=false",
+      "features.multi_agent=false",
+      "-c",
+      'model_reasoning_effort="high"',
       "-m",
       "custom/model",
       "--",
       "Implement the task"
     ]);
+  });
+
+  it("passes a long Bedrock deployment identifier as one literal launcher argument", () => {
+    const command = codexCaptainLauncher.buildCaptainCommand({
+      ...input,
+      model: LONG_BEDROCK_MODEL_ID,
+      reasoning: null
+    });
+    const modelFlag = command.args.indexOf("-m");
+
+    expect(modelFlag).toBeGreaterThanOrEqual(0);
+    expect(command.args[modelFlag + 1]).toBe(LONG_BEDROCK_MODEL_ID);
   });
 
   it("builds Claude arguments with effort and a named session", () => {
@@ -54,25 +67,41 @@ describe("captain launchers", () => {
     expect(command.args.slice(-2)).toEqual(["--", "Implement the task"]);
   });
 
-  it("builds OpenCode arguments with model and thinking variant", () => {
-    const command = opencodeCaptainLauncher.buildCaptainCommand(input);
+  it("starts OpenCode's persistent root TUI with a model and prompt", () => {
+    const command = opencodeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
     expect(command.args).toEqual([
-      "run",
-      "--interactive",
-      "--dir",
       "/work/project",
-      "--variant",
-      "high",
       "--model",
       "custom/model",
-      "--",
+      "--prompt",
       "<captain_instructions>\nOnly orchestrate\n</captain_instructions>\n\n<user_request>\nImplement the task\n</user_request>"
     ]);
+    expect(command.args).not.toContain("run");
+    expect(command.args).not.toContain("--interactive");
   });
 
-  it("lets the provider choose its default model", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand({ ...input, model: null });
+  it("fails closed for unsupported OpenCode startup variants", () => {
+    expect(() => opencodeCaptainLauncher.buildCaptainCommand(input)).toThrow(
+      "OpenCode does not support selecting a variant"
+    );
+  });
+
+  it("lets the provider choose its default model and reasoning", () => {
+    const command = codexCaptainLauncher.buildCaptainCommand({
+      ...input,
+      model: null,
+      reasoning: null
+    });
     expect(command.args).not.toContain("-m");
+    expect(command.args.some((argument) => argument.startsWith("model_reasoning_effort="))).toBe(
+      false
+    );
+
+    const claude = claudeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
+    expect(claude.args).not.toContain("--effort");
+
+    const opencode = opencodeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
+    expect(opencode.args).not.toContain("--variant");
   });
 
   it("terminates options before a dash-prefixed task", () => {
@@ -91,6 +120,6 @@ describe("captain launchers", () => {
     expect(command.args).toContain(
       'developer_instructions="Orchestrate \\"only\\"\\nand never implement."'
     );
-    expect(command.args).toContain("agents.enabled=false");
+    expect(command.args).toContain("features.multi_agent=false");
   });
 });

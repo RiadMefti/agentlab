@@ -78,26 +78,49 @@ export class StaticProviderCatalog implements ProviderCatalog {
     private readonly launchers: ReadonlyMap<ProviderId, CaptainLauncher> = new Map([
       ["codex", codexCaptainLauncher]
     ]),
-    private readonly executable = "/opt/bin/codex"
+    private readonly executable = "/opt/bin/codex",
+    private readonly capabilities: Partial<Record<ProviderId, ProviderCapability>> = {}
   ) {}
 
   public list(): Promise<readonly ProviderCapability[]> {
     return Promise.resolve(
-      [...this.launchers.values()].map((launcher) => ({
-        ...launcher.capability,
-        available: true,
-        version: "test 1.0.0",
-        reason: null
-      }))
+      [...this.launchers.values()].map(
+        (launcher) => this.capabilities[launcher.id] ?? testProviderCapability(launcher)
+      )
     );
   }
 
   public resolveCaptain(id: ProviderId): Promise<ResolvedCaptainProvider | null> {
     const launcher = this.launchers.get(id);
+    const capability =
+      launcher === undefined ? null : (this.capabilities[id] ?? testProviderCapability(launcher));
     return Promise.resolve(
-      launcher === undefined
+      launcher === undefined || capability === null
         ? null
-        : { launcher, executable: this.executable, version: "test 1.0.0" }
+        : { launcher, capability, executable: this.executable, version: "test 1.0.0" }
     );
   }
+}
+
+export function testProviderCapability(launcher: CaptainLauncher): ProviderCapability {
+  return {
+    id: launcher.id,
+    label: launcher.label,
+    available: true,
+    version: "test 1.0.0",
+    reason: null,
+    source: "live",
+    discoveredAt: "2026-08-21T12:00:00.000Z",
+    defaultModel: "gpt-test",
+    models: [
+      {
+        id: "gpt-test",
+        label: "GPT Test",
+        description: "Test model",
+        defaultReasoning: "high",
+        reasoningOptions: ["low", "high", "xhigh"].map((id) => ({ id, label: id }))
+      }
+    ],
+    customModelPolicy: launcher.customModelPolicy
+  };
 }

@@ -1,32 +1,76 @@
-import { describe, expect, it, vi } from "vitest";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  ProviderCapabilityDiscovery,
+  ProviderDiscoveryContext
+} from "../../apps/server/src/domain/provider-capability-discovery.js";
 import type {
   CommandRunner,
   RunResult
 } from "../../apps/server/src/infrastructure/process/command-runner.js";
+import { NodeCommandRunner } from "../../apps/server/src/infrastructure/process/command-runner.js";
 import { codexCaptainLauncher } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
+import { parseCodexModels } from "../../apps/server/src/infrastructure/providers/codex-capability-discovery.js";
 import {
   LocalProviderCatalog,
+  ProviderCapabilityCache,
   type ProviderBinaryLocator
 } from "../../apps/server/src/infrastructure/providers/local-provider-catalog.js";
 
+const temporaryRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
+});
+
+function discoveredModels() {
+  return {
+    defaultModel: "gpt-test",
+    models: [
+      {
+        id: "gpt-test",
+        label: "GPT Test",
+        description: null,
+        defaultReasoning: "high",
+        reasoningOptions: [{ id: "high", label: "High" }]
+      }
+    ]
+  };
+}
+
+function discovery(
+  discover: ProviderCapabilityDiscovery["discover"] = vi.fn(() =>
+    Promise.resolve(discoveredModels())
+  )
+): ProviderCapabilityDiscovery {
+  return { id: "codex", discover };
+}
+
+function locator(candidates: readonly string[] = ["/opt/codex"]): ProviderBinaryLocator {
+  return { candidates: vi.fn(() => Promise.resolve(candidates)) };
+}
+
+function versionRunner(version = "codex-cli 1.2.3") {
+  return {
+    run: vi.fn(() => Promise.resolve({ stdout: `${version}\n`, stderr: "" }))
+  };
+}
+
 describe("LocalProviderCatalog", () => {
-  it("reports and resolves an installed CLI while caching its version probe", async () => {
-    const locator: ProviderBinaryLocator = {
-      candidates: vi.fn(() => Promise.resolve(["/opt/codex"]))
-    };
-    const run = vi.fn<CommandRunner["run"]>(() =>
-      Promise.resolve({
-        stdout: "mise ~/.config/mise/config.toml tools: codex@1.2.3\ncodex-cli 1.2.3\n",
-        stderr: ""
-      })
-    );
+  it("reports and resolves an installed CLI while caching its exact capabilities", async () => {
+    const runner = versionRunner();
+    const discoverModels = vi.fn(() => Promise.resolve(discoveredModels()));
+    const modelDiscovery = discovery(discoverModels);
     const catalog = new LocalProviderCatalog(
       [codexCaptainLauncher],
-      locator,
-      { run },
-      5_000,
-      () => 100
+      [modelDiscovery],
+      locator(),
+      runner,
+      { workspace: "/work/project", cacheDurationMs: 5_000, now: () => 100 }
     );
 
     await expect(catalog.list()).resolves.toEqual([
@@ -34,36 +78,353 @@ describe("LocalProviderCatalog", () => {
         id: "codex",
         available: true,
         version: "codex-cli 1.2.3",
-        reason: null
+        source: "live",
+        defaultModel: "gpt-test"
       })
     ]);
     await expect(catalog.resolveCaptain("codex")).resolves.toMatchObject({
       executable: "/opt/codex",
       version: "codex-cli 1.2.3",
-      launcher: codexCaptainLauncher
+      launcher: codexCaptainLauncher,
+      capability: { source: "cache" }
     });
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(runner.run).toHaveBeenCalledTimes(1);
+    expect(runner.run).toHaveBeenCalledWith(
+      "/opt/codex",
+      ["--version"],
+      expect.objectContaining({ cleanupProcessTree: true })
+    );
+    expect(discoverModels).toHaveBeenCalledTimes(1);
   });
 
   it("reports a missing CLI without failing the provider list", async () => {
-    const locator: ProviderBinaryLocator = {
-      candidates: () => Promise.resolve([])
-    };
     const runner: CommandRunner = {
       run(): Promise<RunResult> {
         throw new Error("Version probing should not run without a candidate.");
       }
     };
-    const catalog = new LocalProviderCatalog([codexCaptainLauncher], locator, runner);
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery()],
+      locator([]),
+      runner,
+      { workspace: "/work/project" }
+    );
 
     await expect(catalog.list()).resolves.toEqual([
       expect.objectContaining({
         id: "codex",
         available: false,
         version: null,
+        source: "unavailable",
         reason: "Executable not found."
       })
     ]);
     await expect(catalog.resolveCaptain("codex")).resolves.toBeNull();
   });
+
+  it("does not create a version-ambiguous cache entry", async () => {
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery()],
+      locator(),
+      versionRunner(""),
+      { workspace: "/work/project" }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Version probe returned no version."
+      })
+    ]);
+  });
+
+  it("cleans an ignored-TERM version process tree after a timeout", async () => {
+    const fixture = createIgnoredTermVersionFixture("version-timeout-", 'wait "$child_pid"');
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery()],
+      locator([fixture.executable]),
+      new NodeCommandRunner({ gracefulShutdownMs: 25, forcedShutdownMs: 1_000 }),
+      { workspace: fixture.root, versionTimeoutMs: 250 }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: expect.stringContaining("timed out after 250 milliseconds")
+      })
+    ]);
+    expectProcessGone(readPid(fixture.leaderPidPath));
+    expectProcessGone(readPid(fixture.childPidPath));
+  });
+
+  it("cleans lingering version-probe descendants before rejecting malformed output", async () => {
+    const fixture = createIgnoredTermVersionFixture("version-malformed-", "printf '%s\\n' '   '");
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery()],
+      locator([fixture.executable]),
+      new NodeCommandRunner({ gracefulShutdownMs: 25, forcedShutdownMs: 1_000 }),
+      { workspace: fixture.root, versionTimeoutMs: 1_000 }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Version probe returned no version."
+      })
+    ]);
+    expectProcessGone(readPid(fixture.leaderPidPath));
+    expectProcessGone(readPid(fixture.childPidPath));
+  });
+
+  it("deduplicates concurrent probes", async () => {
+    let release!: (value: ReturnType<typeof discoveredModels>) => void;
+    const discover = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof discoveredModels>>((resolve) => {
+          release = resolve;
+        })
+    );
+    const runner = versionRunner();
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      runner,
+      { workspace: "/work/project" }
+    );
+
+    const listed = catalog.list();
+    const resolved = catalog.resolveCaptain("codex");
+    await vi.waitFor(() => {
+      expect(discover).toHaveBeenCalledTimes(1);
+    });
+    release(discoveredModels());
+    await Promise.all([listed, resolved]);
+    expect(runner.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses an exact-version last-known-good catalog after a failed refresh", async () => {
+    let now = 0;
+    const discover = vi
+      .fn<ProviderCapabilityDiscovery["discover"]>()
+      .mockResolvedValueOnce(discoveredModels())
+      .mockRejectedValueOnce(new Error("catalog timeout"));
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      versionRunner(),
+      { workspace: "/work/project", cacheDurationMs: 5, now: () => now }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        source: "live",
+        models: [expect.objectContaining({ id: "gpt-test" })]
+      })
+    ]);
+    now = 10;
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        source: "stale",
+        reason: "Using last known models: catalog timeout",
+        models: [expect.objectContaining({ id: "gpt-test" })]
+      })
+    ]);
+  });
+
+  it("fails closed instead of reusing stale capabilities for a spaced ultra default", async () => {
+    let now = 0;
+    const discover = vi
+      .fn<ProviderCapabilityDiscovery["discover"]>()
+      .mockResolvedValueOnce(discoveredModels())
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          parseCodexModels([
+            {
+              model: "gpt-spaced-ultra",
+              displayName: "GPT Spaced Ultra",
+              description: "Unsafe implicit default",
+              hidden: false,
+              supportedReasoningEfforts: [
+                { reasoningEffort: " high ", description: "High" },
+                { reasoningEffort: " ultra ", description: "Automatic delegation" }
+              ],
+              defaultReasoningEffort: " ultra ",
+              isDefault: true
+            }
+          ])
+        )
+      );
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      versionRunner(),
+      { workspace: "/work/project", cacheDurationMs: 5, now: () => now }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({ source: "live", available: true })
+    ]);
+    now = 10;
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        source: "unavailable",
+        available: false,
+        reason: expect.stringContaining("defaults to ultra")
+      })
+    ]);
+    await expect(catalog.resolveCaptain("codex")).resolves.toBeNull();
+  });
+
+  it("does not reuse stale capabilities across CLI versions", async () => {
+    let now = 0;
+    let version = "codex-cli 1";
+    const runner: CommandRunner = {
+      run: vi.fn(() => Promise.resolve({ stdout: version, stderr: "" }))
+    };
+    const discover = vi
+      .fn<ProviderCapabilityDiscovery["discover"]>()
+      .mockResolvedValueOnce(discoveredModels())
+      .mockRejectedValueOnce(new Error("new catalog unavailable"));
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      runner,
+      { workspace: "/work/project", cacheDurationMs: 5, now: () => now }
+    );
+
+    await catalog.list();
+    now = 10;
+    version = "codex-cli 2";
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({ source: "fallback", version: "codex-cli 2", models: [] })
+    ]);
+  });
+
+  it("does not collide long version identities that share a truncated display prefix", async () => {
+    let now = 0;
+    const sharedPrefix = `codex-cli ${"v".repeat(220)}`;
+    let version = `${sharedPrefix}-one`;
+    const runner: CommandRunner = {
+      run: vi.fn(() => Promise.resolve({ stdout: version, stderr: "" }))
+    };
+    const discover = vi
+      .fn<ProviderCapabilityDiscovery["discover"]>()
+      .mockResolvedValueOnce(discoveredModels())
+      .mockRejectedValueOnce(new Error("second version unavailable"));
+    const catalog = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      runner,
+      { workspace: "/work/project", cacheDurationMs: 5, now: () => now }
+    );
+
+    const first = await catalog.list();
+    expect(first[0]).toMatchObject({ source: "live" });
+    const displayedVersion = first[0]?.version;
+    now = 10;
+    version = `${sharedPrefix}-two`;
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        source: "fallback",
+        version: displayedVersion,
+        models: []
+      })
+    ]);
+    expect(discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("keys a shared cache by workspace", async () => {
+    const cache = new ProviderCapabilityCache();
+    const discover = vi.fn((context: ProviderDiscoveryContext) => {
+      const models = discoveredModels();
+      const model = models.models[0];
+      if (model === undefined) throw new Error("Test model fixture is empty.");
+      return Promise.resolve({
+        ...models,
+        models: [{ ...model, description: context.workspace }]
+      });
+    });
+    const shared = {
+      cache,
+      cacheDurationMs: 5_000,
+      now: () => 100
+    };
+    const first = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      versionRunner(),
+      { ...shared, workspace: "/work/one" }
+    );
+    const second = new LocalProviderCatalog(
+      [codexCaptainLauncher],
+      [discovery(discover)],
+      locator(),
+      versionRunner(),
+      { ...shared, workspace: "/work/two" }
+    );
+
+    await Promise.all([first.list(), second.list()]);
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(discover.mock.calls.map(([context]) => context.workspace).sort()).toEqual([
+      "/work/one",
+      "/work/two"
+    ]);
+  });
 });
+
+interface IgnoredTermVersionFixture {
+  readonly root: string;
+  readonly executable: string;
+  readonly leaderPidPath: string;
+  readonly childPidPath: string;
+}
+
+function createIgnoredTermVersionFixture(prefix: string, body: string): IgnoredTermVersionFixture {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  temporaryRoots.push(root);
+  const executable = join(root, "provider");
+  const leaderPidPath = join(root, "leader-pid");
+  const childPidPath = join(root, "child-pid");
+  writeFileSync(
+    executable,
+    `#!/bin/sh
+printf '%s' "$$" > '${leaderPidPath}'
+trap '' TERM
+sleep 1000 >/dev/null 2>&1 &
+child_pid=$!
+printf '%s' "$child_pid" > '${childPidPath}'
+${body}
+`
+  );
+  chmodSync(executable, 0o755);
+  return { root, executable, leaderPidPath, childPidPath };
+}
+
+function readPid(path: string): number {
+  const pid = Number(readFileSync(path, "utf8"));
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Invalid fixture process ID.");
+  return pid;
+}
+
+function expectProcessGone(pid: number): void {
+  try {
+    process.kill(pid, 0);
+  } catch (error: unknown) {
+    expect(error).toMatchObject({ code: "ESRCH" });
+    return;
+  }
+  throw new Error(`Fixture process ${String(pid)} is still running.`);
+}
