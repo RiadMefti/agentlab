@@ -20,7 +20,7 @@ Orchestration
 captain ── raw tmux/provider CLI commands ──▶ workers
 
 Observation and direct interaction
-browser ◀── WebSocket ── PTY ──▶ exact tmux session
+Electron renderer or browser ◀── WebSocket ── PTY ──▶ exact tmux session
 ```
 
 The second path never carries captain-to-worker instructions. There is no app command language,
@@ -35,9 +35,11 @@ captain API, wrapper CLI, MCP bridge, or provider-session translation layer.
   tmux, and PTY implementations.
 - `apps/server/src/http`: loopback-only HTTP/WebSocket transport and boundary validation.
 - `apps/web`: the conversation reel, agent tabs, creation dialog, and terminal view.
+- `apps/desktop`: a thin Electron lifecycle shell that embeds the same server and web build.
 
 Domain code imports neither framework code nor concrete infrastructure. ESLint rules enforce that
-boundary. Composition happens only in `apps/server/src/main.ts`.
+boundary. Server composition lives in `apps/server/src/runtime.ts`; the CLI and Electron entry
+points only own their respective process lifecycles.
 
 ## Create flow
 

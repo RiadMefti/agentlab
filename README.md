@@ -28,7 +28,25 @@ output, and attaches the browser to the selected session through a PTY.
 - tmux
 - at least one installed and authenticated CLI: `codex`, `claude`, or `opencode`
 
-## Run locally
+## Run as a desktop app
+
+```bash
+npm install
+AO_WORKSPACE=/absolute/path/to/your/project npm run desktop
+```
+
+Electron starts the loopback server on an ephemeral port and opens the existing interface in a
+sandboxed native window. During local development it reuses `apps/server/.data/orchestrator.sqlite`.
+Packaged builds keep the database in Electron's per-user application-data directory and ask for the
+agent workspace when `AO_WORKSPACE` is not set.
+
+Build a portable Linux AppImage with:
+
+```bash
+npm run desktop:package
+```
+
+## Run in a browser
 
 ```bash
 npm install
@@ -56,6 +74,8 @@ Open `http://127.0.0.1:4321`.
 | `AO_CODEX_BIN`     | discovered                  | Absolute Codex executable override                 |
 | `AO_CLAUDE_BIN`    | discovered                  | Absolute Claude Code executable override           |
 | `AO_OPENCODE_BIN`  | discovered                  | Absolute OpenCode executable override              |
+
+Electron defaults `AO_PORT` to an available ephemeral port while still honoring an explicit value.
 
 Provider credentials stay in each CLI's existing local authentication store. The app never reads or
 copies them.
