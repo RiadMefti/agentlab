@@ -1,6 +1,7 @@
 # Agent Orchestrator
 
 [![CI](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml)
+[![Release](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml)
 
 **One captain for all your coding agents.**
 
@@ -10,6 +11,17 @@ session whenever you want.
 Agent Orchestrator runs each agent as its real CLI, with its existing authentication, configuration,
 tools, and context. The captain coordinates the work while every worker remains directly accessible
 from the same workspace.
+
+## Download
+
+| Platform              | Build                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Linux x64             | [AppImage](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-linux-x64.AppImage) |
+| macOS — Apple silicon | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-arm64.dmg)           |
+| macOS — Intel         | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-x64.dmg)             |
+
+[Checksums](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/SHA256SUMS) and
+signed build provenance are attached to every release.
 
 ## Workflow
 
@@ -22,12 +34,14 @@ from the same workspace.
 
 ## Requirements
 
-- Linux or macOS
-- Node.js 24 or newer
-- tmux
+- Linux x64, or macOS 12 or newer
+- `tmux`
 - at least one installed and authenticated CLI: `codex`, `claude`, or `opencode`
 
-## Run the desktop app
+On macOS, install tmux with `brew install tmux`. Use your distribution's package manager on Linux.
+Node.js is only required when running or building from source.
+
+## Run from source
 
 ```bash
 npm ci
@@ -36,12 +50,16 @@ AO_WORKSPACE=/absolute/path/to/your/project npm run desktop
 
 Packaged builds open a native workspace picker when `AO_WORKSPACE` is not set.
 
-Build a portable Linux AppImage:
+Build a portable Linux AppImage locally:
 
 ```bash
-npm run desktop:package
-./release/Orchestrator-0.1.0.AppImage
+npm run desktop:package:linux
+chmod +x ./release/Orchestrator-linux-x64.AppImage
+./release/Orchestrator-linux-x64.AppImage
 ```
+
+Production macOS builds require Apple signing and notarization credentials. See
+[Releasing](docs/releasing.md).
 
 ## Run in a browser
 
@@ -99,10 +117,11 @@ npm audit
 
 `verify` checks formatting, strict TypeScript, linting, unit and component tests, real tmux and PTY
 integration, and the production build. See [Contributing](CONTRIBUTING.md) for the engineering
-contract and local setup.
+contract and local setup, and [Releasing](docs/releasing.md) for the versioned release cycle.
 
 ## Security
 
 The application binds to loopback, validates HTTP and WebSocket boundaries, and passes process
 arguments through a tested quoting boundary. Provider credentials are managed by their respective
-CLIs. See [Security](SECURITY.md) for reporting guidance.
+CLIs. Published binaries are checksummed, attested, and immutable. See [Security](SECURITY.md) for
+reporting guidance.

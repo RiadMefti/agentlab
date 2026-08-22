@@ -7,4 +7,8 @@ reverse proxy, or public tunnel.
 Provider credentials remain owned by their installed CLIs. The application does not read, copy, or
 store them.
 
+Install desktop binaries only from this repository's GitHub Releases. Each published release is
+immutable and includes SHA-256 checksums plus GitHub build and SBOM attestations; verification
+commands are documented in [Releasing](docs/releasing.md#verify-a-download).
+
 Please report security issues privately to the repository owner rather than opening a public issue.

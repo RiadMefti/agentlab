@@ -3,7 +3,7 @@ dist/
 dist-types/
 .test-types/
 coverage/
-release/
+/release/
 .data/
 .env
 *.log

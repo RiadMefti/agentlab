@@ -17,3 +17,6 @@ Keep changes inside the lean scope in the README and preserve these constraints:
 - every behavior change includes focused tests.
 
 Prefer small cohesive modules. Update an ADR when a change alters a durable architectural decision.
+
+Use the version and tag process in [Releasing](docs/releasing.md) for production artifacts. Do not
+publish binaries manually or bypass signing, notarization, checksum, and provenance gates.

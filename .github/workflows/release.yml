@@ -1,0 +1,410 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y tmux
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate tag and release metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run release:check -- "$GITHUB_REF_NAME"
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "Release tags must be annotated." >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-list -n 1 "refs/tags/$GITHUB_REF_NAME")"
+          if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "The checked-out commit does not match the release tag." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "Release tags must point to a commit already present on origin/main." >&2
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Run the full verification suite
+        run: npm run verify
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Generate the production SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm sbom \
+            --package-lock-only \
+            --omit=dev \
+            --sbom-format=cyclonedx \
+            --sbom-type=application \
+            > "Orchestrator-${{ steps.metadata.outputs.version }}.cdx.json"
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sbom
+          path: Orchestrator-${{ steps.metadata.outputs.version }}.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux x64
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install packaging and smoke-test dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y tmux xvfb
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build the AppImage
+        run: npm run desktop:package:linux
+      - name: Verify and smoke-test the AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="release/Orchestrator-linux-x64.AppImage"
+          test -s "$asset"
+          file "$asset" | grep -F "x86-64"
+          smoke_workspace="$(mktemp -d)"
+          smoke_log="$RUNNER_TEMP/orchestrator-linux-smoke.log"
+          set +e
+          AO_WORKSPACE="$smoke_workspace" \
+            APPIMAGE_EXTRACT_AND_RUN=1 \
+            timeout --signal=TERM --kill-after=5s 20s \
+            xvfb-run -a "$asset" --disable-gpu > "$smoke_log" 2>&1
+          smoke_status=$?
+          set -e
+          cat "$smoke_log"
+          if [[ "$smoke_status" -ne 124 ]]; then
+            echo "The packaged app exited unexpectedly with status $smoke_status." >&2
+            exit 1
+          fi
+          grep -F "Orchestrator desktop ready" "$smoke_log"
+      - name: Upload the Linux artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-x64
+          path: release/Orchestrator-linux-x64.AppImage
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            machine_arch: arm64
+            runner: macos-15
+          - arch: x64
+            machine_arch: x86_64
+            runner: macos-15-intel
+    env:
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Verify the native runner architecture
+        shell: bash
+        run: test "$(uname -m)" = "${{ matrix.machine_arch }}"
+      - name: Prepare signing and notarization credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            APPLE_API_ISSUER \
+            APPLE_API_KEY_BASE64 \
+            APPLE_API_KEY_ID \
+            APPLE_TEAM_ID \
+            CSC_KEY_PASSWORD \
+            MACOS_CERTIFICATE_BASE64
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Required release secret $name is not configured." >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then exit 1; fi
+
+          certificate_path="$RUNNER_TEMP/orchestrator-developer-id.p12"
+          api_key_path="$RUNNER_TEMP/orchestrator-notary-key.p8"
+          CERTIFICATE_PATH="$certificate_path" API_KEY_PATH="$api_key_path" node --input-type=module <<'NODE'
+          import { writeFileSync } from "node:fs";
+
+          function decodeBase64(value, label) {
+            const compact = value.replace(/\s/g, "");
+            if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+              throw new Error(`${label} is not valid base64.`);
+            }
+            const decoded = Buffer.from(compact, "base64");
+            if (decoded.length === 0) throw new Error(`${label} decoded to an empty file.`);
+            return decoded;
+          }
+
+          writeFileSync(
+            process.env.CERTIFICATE_PATH,
+            decodeBase64(process.env.MACOS_CERTIFICATE_BASE64, "MACOS_CERTIFICATE_BASE64"),
+            { mode: 0o600 }
+          );
+          writeFileSync(
+            process.env.API_KEY_PATH,
+            decodeBase64(process.env.APPLE_API_KEY_BASE64, "APPLE_API_KEY_BASE64"),
+            { mode: 0o600 }
+          );
+          NODE
+          openssl pkcs12 -in "$certificate_path" -passin env:CSC_KEY_PASSWORD -noout
+          grep -q '^-----BEGIN PRIVATE KEY-----$' "$api_key_path"
+          grep -q '^-----END PRIVATE KEY-----$' "$api_key_path"
+          echo "CSC_LINK=$certificate_path" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY=$api_key_path" >> "$GITHUB_ENV"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build, sign, and notarize the DMG
+        run: npm run desktop:package:mac -- --${{ matrix.arch }}
+      - name: Verify the signed and notarized app
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg_path="release/Orchestrator-mac-${{ matrix.arch }}.dmg"
+          app_count="$(find release -type d -name 'Orchestrator.app' | wc -l | tr -d ' ')"
+          app_path="$(find release -type d -name 'Orchestrator.app' -print -quit)"
+          if [[ "$app_count" != "1" || -z "$app_path" || ! -s "$dmg_path" ]]; then
+            echo "Expected exactly one app bundle and one non-empty DMG." >&2
+            exit 1
+          fi
+
+          executable="$app_path/Contents/MacOS/Orchestrator"
+          test "$(lipo -archs "$executable")" = "${{ matrix.machine_arch }}"
+          codesign --verify --deep --strict --verbose=4 "$app_path"
+          signature_details="$(codesign --display --verbose=4 "$app_path" 2>&1)"
+          printf '%s\n' "$signature_details"
+          grep -F "Authority=Developer ID Application:" <<< "$signature_details"
+          grep -E 'flags=.*\(runtime\)' <<< "$signature_details"
+          signed_team="$(sed -n 's/^TeamIdentifier=//p' <<< "$signature_details" | head -n 1)"
+          if [[ "$signed_team" != "$APPLE_TEAM_ID" ]]; then
+            echo "The app was signed by unexpected team $signed_team." >&2
+            exit 1
+          fi
+          gatekeeper_result="$(spctl --assess --type execute --verbose=4 "$app_path" 2>&1)"
+          printf '%s\n' "$gatekeeper_result"
+          grep -F "source=Notarized Developer ID" <<< "$gatekeeper_result"
+          xcrun stapler validate "$app_path"
+          hdiutil verify "$dmg_path"
+
+          mount_directory="$(mktemp -d)"
+          cleanup_mount() {
+            hdiutil detach "$mount_directory" -quiet >/dev/null 2>&1 || true
+            rmdir "$mount_directory" >/dev/null 2>&1 || true
+          }
+          trap cleanup_mount EXIT
+          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_directory"
+          mounted_app="$mount_directory/Orchestrator.app"
+          codesign --verify --deep --strict --verbose=4 "$mounted_app"
+          test "$(lipo -archs "$mounted_app/Contents/MacOS/Orchestrator")" = "${{ matrix.machine_arch }}"
+          xcrun stapler validate "$mounted_app"
+          cleanup_mount
+          trap - EXIT
+      - name: Upload the macOS artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: release/Orchestrator-mac-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/orchestrator-developer-id.p12" \
+            "$RUNNER_TEMP/orchestrator-notary-key.p8"
+
+  publish:
+    name: Publish immutable GitHub Release
+    needs: [validate, linux, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download all release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Validate the complete asset set
+        run: node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum Orchestrator-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/Orchestrator-*
+      - name: Attest the production SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/Orchestrator-linux-x64.AppImage
+            release-assets/Orchestrator-mac-arm64.dmg
+            release-assets/Orchestrator-mac-x64.dmg
+          sbom-path: release-assets/Orchestrator-${{ needs.validate.outputs.version }}.cdx.json
+      - name: Inspect any existing release
+        id: existing
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing_json="$RUNNER_TEMP/existing-release.json"
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$existing_json" 2>/dev/null; then
+            if [[ "$(jq -r '.draft' "$existing_json")" == "true" ]]; then
+              echo "state=draft" >> "$GITHUB_OUTPUT"
+            else
+              echo "state=published" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Replace an incomplete draft
+        if: steps.existing.outputs.state == 'draft'
+        run: gh release delete "$GITHUB_REF_NAME" --yes
+      - name: Create the complete draft release
+        if: steps.existing.outputs.state != 'published'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --draft \
+            --fail-on-no-commits \
+            --generate-notes \
+            --title "Orchestrator ${{ needs.validate.outputs.version }}" \
+            --verify-tag
+      - name: Verify draft assets against local digests
+        if: steps.existing.outputs.state != 'published'
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/draft-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$release_json"
+          jq -e '.draft == true' "$release_json" >/dev/null
+
+          local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+          remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
+          if [[ "$local_names" != "$remote_names" ]]; then
+            echo "GitHub draft assets do not match the validated local set." >&2
+            diff <(printf '%s\n' "$local_names") <(printf '%s\n' "$remote_names") || true
+            exit 1
+          fi
+
+          while read -r digest filename; do
+            remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+            if [[ "$remote_digest" != "sha256:$digest" ]]; then
+              echo "Digest mismatch for $filename." >&2
+              exit 1
+            fi
+          done < <(cd release-assets && sha256sum *)
+      - name: Publish the release
+        if: steps.existing.outputs.state != 'published'
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+      - name: Verify the published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/published-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$release_json"
+          jq -e '.draft == false and .prerelease == false' "$release_json" >/dev/null
+
+          local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+          remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
+          if [[ "$local_names" != "$remote_names" ]]; then
+            echo "Published GitHub assets do not match the validated local set." >&2
+            exit 1
+          fi
+
+          while read -r digest filename; do
+            remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+            if [[ "$remote_digest" != "sha256:$digest" ]]; then
+              echo "Published digest mismatch for $filename." >&2
+              exit 1
+            fi
+          done < <(cd release-assets && sha256sum *)

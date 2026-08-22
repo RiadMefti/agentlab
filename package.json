@@ -5,6 +5,7 @@
   "type": "module",
   "description": "One captain for all your coding agents. Direct the work, follow every session, and jump in at any time.",
   "author": "Riad Mefti",
+  "copyright": "Copyright © 2026 Riad Mefti",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/RiadMefti/agent-orchestrator.git"
@@ -28,11 +29,16 @@
     "dev": "npm run build --workspace @orchestrator/contracts && concurrently --kill-others-on-fail --names server,web \"npm run dev --workspace @orchestrator/server\" \"npm run dev --workspace @orchestrator/web\"",
     "desktop": "npm run build && electron .",
     "desktop:open": "electron .",
-    "desktop:package": "npm run build && electron-builder --linux AppImage",
+    "desktop:package": "npm run desktop:package:linux",
     "desktop:package:dir": "npm run build && electron-builder --linux dir",
+    "desktop:package:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
+    "desktop:package:mac": "npm run build && electron-builder --mac dmg --publish never",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
+    "release:assets:check": "node scripts/check-release-assets.mjs",
+    "release:check": "node scripts/check-release.mjs",
+    "release:prepare": "node scripts/prepare-release.mjs",
     "start": "npm run start --workspace @orchestrator/server",
     "test": "vitest run",
     "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run",
@@ -70,6 +76,7 @@
       "node_modules/node-pty/**/*"
     ],
     "directories": {
+      "buildResources": "build",
       "output": "release"
     },
     "files": [
@@ -83,12 +90,51 @@
       "package.json"
     ],
     "linux": {
+      "artifactName": "${productName}-linux-x64.${ext}",
       "category": "Development",
       "executableName": "agent-orchestrator",
+      "icon": "build/icon.png",
       "syncDesktopName": true,
       "target": [
         "AppImage"
       ]
+    },
+    "mac": {
+      "artifactName": "${productName}-mac-${arch}.${ext}",
+      "category": "public.app-category.developer-tools",
+      "darkModeSupport": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "forceCodeSigning": true,
+      "hardenedRuntime": true,
+      "icon": "build/icon.png",
+      "minimumSystemVersion": "12.0",
+      "notarize": true,
+      "strictVerify": true,
+      "target": [
+        "dmg"
+      ]
+    },
+    "dmg": {
+      "backgroundColor": "#ffffff",
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "path": "/Applications",
+          "type": "link",
+          "x": 400,
+          "y": 190
+        }
+      ],
+      "iconSize": 96,
+      "sign": false,
+      "window": {
+        "height": 380,
+        "width": 540
+      }
     },
     "toolsets": {
       "appimage": "1.0.3"
