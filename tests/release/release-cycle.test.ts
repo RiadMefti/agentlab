@@ -153,7 +153,9 @@ async function createAssetFixture(version = "0.1.0"): Promise<string> {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true }))
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { force: true, recursive: true }))
   );
 });
 
