@@ -70,7 +70,8 @@ The tag starts `.github/workflows/release.yml`. It performs the following gates 
 1. Match the tag against every package and lockfile version, and prove its commit is on `main`.
 2. Run formatting, type checking, linting, tests, the production build, and the production audit.
 3. Build and launch-smoke-test the Linux AppImage on Ubuntu 22.04.
-4. Build native Apple-silicon and Intel DMGs on matching macOS runners.
+4. Install dependencies and compile before Apple credentials are made available, then build native
+   Apple-silicon and Intel DMGs on matching macOS runners.
 5. Fail if Apple credentials, Developer ID signing, hardened runtime, notarization, Gatekeeper
    acceptance, the expected team ID, or the stapled ticket cannot be verified.
 6. Validate the exact artifact set and container signatures, then generate checksums, a CycloneDX
@@ -95,6 +96,8 @@ command.
 
 - A failed build publishes nothing. Fix the cause and rerun the workflow; an incomplete draft for
   that exact tag is replaced safely.
+- Re-running a published tag never replaces its binaries. The workflow downloads the immutable
+  assets and re-verifies their exact names, checksums, container signatures, and attestations.
 - A published release is immutable. Never move or reuse its tag and never replace its binaries.
 - If a published version is bad, fix forward with a new patch version. Mark the old release clearly
   in its notes if users should avoid it.

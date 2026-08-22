@@ -148,13 +148,6 @@ jobs:
           - arch: x64
             machine_arch: x86_64
             runner: macos-15-intel
-    env:
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-      MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -168,7 +161,19 @@ jobs:
       - name: Verify the native runner architecture
         shell: bash
         run: test "$(uname -m)" = "${{ matrix.machine_arch }}"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build desktop sources without release credentials
+        run: npm run build
       - name: Prepare signing and notarization credentials
+        id: credentials
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -217,13 +222,19 @@ jobs:
           openssl pkcs12 -in "$certificate_path" -passin env:CSC_KEY_PASSWORD -noout
           grep -q '^-----BEGIN PRIVATE KEY-----$' "$api_key_path"
           grep -q '^-----END PRIVATE KEY-----$' "$api_key_path"
-          echo "CSC_LINK=$certificate_path" >> "$GITHUB_ENV"
-          echo "APPLE_API_KEY=$api_key_path" >> "$GITHUB_ENV"
-      - name: Install locked dependencies
-        run: npm ci
+          echo "certificate_path=$certificate_path" >> "$GITHUB_OUTPUT"
+          echo "api_key_path=$api_key_path" >> "$GITHUB_OUTPUT"
       - name: Build, sign, and notarize the DMG
-        run: npm run desktop:package:mac -- --${{ matrix.arch }}
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ steps.credentials.outputs.api_key_path }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          CSC_LINK: ${{ steps.credentials.outputs.certificate_path }}
+        run: ./node_modules/.bin/electron-builder --mac dmg --publish never --${{ matrix.arch }}
       - name: Verify the signed and notarized app
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -295,8 +306,6 @@ jobs:
       attestations: write
       contents: write
       id-token: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -317,20 +326,12 @@ jobs:
           cd release-assets
           sha256sum Orchestrator-* > SHA256SUMS
           sha256sum --check SHA256SUMS
-      - name: Attest build provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: release-assets/Orchestrator-*
-      - name: Attest the production SBOM
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-path: |
-            release-assets/Orchestrator-linux-x64.AppImage
-            release-assets/Orchestrator-mac-arm64.dmg
-            release-assets/Orchestrator-mac-x64.dmg
-          sbom-path: release-assets/Orchestrator-${{ needs.validate.outputs.version }}.cdx.json
+          cd ..
+          node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets --published
       - name: Inspect any existing release
         id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -344,11 +345,29 @@ jobs:
           else
             echo "state=missing" >> "$GITHUB_OUTPUT"
           fi
+      - name: Attest build provenance
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/Orchestrator-*
+      - name: Attest the production SBOM
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/Orchestrator-linux-x64.AppImage
+            release-assets/Orchestrator-mac-arm64.dmg
+            release-assets/Orchestrator-mac-x64.dmg
+          sbom-path: release-assets/Orchestrator-${{ needs.validate.outputs.version }}.cdx.json
       - name: Replace an incomplete draft
         if: steps.existing.outputs.state == 'draft'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh release delete "$GITHUB_REF_NAME" --yes
       - name: Create the complete draft release
         if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -361,6 +380,8 @@ jobs:
             --verify-tag
       - name: Verify draft assets against local digests
         if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -385,8 +406,13 @@ jobs:
           done < <(cd release-assets && sha256sum *)
       - name: Publish the release
         if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
       - name: Verify the published release
+        env:
+          EXISTING_RELEASE_STATE: ${{ steps.existing.outputs.state }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -401,10 +427,42 @@ jobs:
             exit 1
           fi
 
-          while read -r digest filename; do
-            remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
-            if [[ "$remote_digest" != "sha256:$digest" ]]; then
-              echo "Published digest mismatch for $filename." >&2
+          if [[ "$EXISTING_RELEASE_STATE" == "published" ]]; then
+            download_directory="$RUNNER_TEMP/published-release-assets"
+            mkdir -p "$download_directory"
+            gh release download "$GITHUB_REF_NAME" --dir "$download_directory"
+            downloaded_names="$(find "$download_directory" -maxdepth 1 -type f -printf '%f\n' | sort)"
+            if [[ "$downloaded_names" != "$remote_names" ]]; then
+              echo "Downloaded immutable assets do not match GitHub's release metadata." >&2
               exit 1
             fi
-          done < <(cd release-assets && sha256sum *)
+            node scripts/check-release-assets.mjs \
+              "$GITHUB_REF_NAME" \
+              "$download_directory" \
+              --published
+
+            while read -r digest filename; do
+              remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+              if [[ "$remote_digest" != "sha256:$digest" ]]; then
+                echo "Immutable release digest mismatch for $filename." >&2
+                exit 1
+              fi
+            done < <(cd "$download_directory" && sha256sum *)
+
+            for asset in "$download_directory"/Orchestrator-*; do
+              gh attestation verify "$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-digest "$GITHUB_SHA" \
+                --source-ref "$GITHUB_REF" \
+                --deny-self-hosted-runners
+            done
+          else
+            while read -r digest filename; do
+              remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+              if [[ "$remote_digest" != "sha256:$digest" ]]; then
+                echo "Published digest mismatch for $filename." >&2
+                exit 1
+              fi
+            done < <(cd release-assets && sha256sum *)
+          fi

@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { open, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -127,7 +129,16 @@ async function createSparseBinary(
   }
 }
 
-async function createAssetFixture(version = "0.1.0"): Promise<string> {
+async function sha256(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) {
+    if (!Buffer.isBuffer(chunk)) throw new Error(`Could not hash binary file ${path}.`);
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function createAssetFixture(version = "0.1.0", includeChecksums = false): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "orchestrator-release-assets-"));
   temporaryDirectories.push(root);
   const appImageHeader = Buffer.alloc(11);
@@ -147,6 +158,19 @@ async function createAssetFixture(version = "0.1.0"): Promise<string> {
       components: [{ name: "node-pty", version: "1.1.0" }]
     })
   ]);
+
+  if (includeChecksums) {
+    const assetNames = [
+      `Orchestrator-${version}.cdx.json`,
+      "Orchestrator-linux-x64.AppImage",
+      "Orchestrator-mac-arm64.dmg",
+      "Orchestrator-mac-x64.dmg"
+    ].sort();
+    const checksums = await Promise.all(
+      assetNames.map(async (name) => `${await sha256(join(root, name))}  ${name}`)
+    );
+    await writeFile(join(root, "SHA256SUMS"), `${checksums.join("\n")}\n`, "utf8");
+  }
 
   return root;
 }
@@ -252,6 +276,25 @@ describe("release asset validation", () => {
     expect(malformed.status).toBe(1);
     expect(malformed.stderr).toContain("valid type-2 AppImage header");
   });
+
+  it("verifies the exact checksum manifest for published assets", async () => {
+    const root = await createAssetFixture("0.1.0", true);
+    const valid = runScript("check-release-assets.mjs", "v0.1.0", root, "--published");
+    const checksumPath = join(root, "SHA256SUMS");
+    const checksumSource = await readFile(checksumPath, "utf8");
+    await writeFile(
+      checksumPath,
+      checksumSource.replace(/^[0-9a-f]/, (character) => (character === "0" ? "1" : "0")),
+      "utf8"
+    );
+
+    const invalid = runScript("check-release-assets.mjs", "v0.1.0", root, "--published");
+
+    expect(valid.status).toBe(0);
+    expect(valid.stdout).toContain("Validated 5 release assets for v0.1.0.");
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain("wrong digest");
+  });
 });
 
 describe("dependency update policy", () => {
@@ -267,5 +310,57 @@ describe("dependency update policy", () => {
     expect(configuration).toMatch(
       /ignore:[\s\S]*?dependency-name: "\*"[\s\S]*?- version-update:semver-major/
     );
+  });
+});
+
+describe("release workflow credential boundaries", () => {
+  it("keeps Apple secrets out of dependency installation and compilation", async () => {
+    const workflow = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+    const macosJob = workflow.slice(
+      workflow.indexOf("\n  macos:"),
+      workflow.indexOf("\n  publish:")
+    );
+
+    expect(macosJob.indexOf("- name: Install locked dependencies")).toBeLessThan(
+      macosJob.indexOf("- name: Prepare signing and notarization credentials")
+    );
+    expect(
+      macosJob.indexOf("- name: Build desktop sources without release credentials")
+    ).toBeLessThan(macosJob.indexOf("- name: Prepare signing and notarization credentials"));
+    expect(macosJob.slice(0, macosJob.indexOf("- name: Prepare signing"))).not.toContain(
+      "${{ secrets."
+    );
+    expect(macosJob.match(/\$\{\{ secrets\.MACOS_CERTIFICATE_BASE64 \}\}/g)).toHaveLength(1);
+    expect(macosJob.match(/\$\{\{ secrets\.APPLE_API_KEY_BASE64 \}\}/g)).toHaveLength(1);
+  });
+
+  it("exposes the write-capable GitHub token only to publication commands", async () => {
+    const workflow = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+    const publishJob = workflow.slice(workflow.indexOf("\n  publish:"));
+    const tokenBindings = publishJob.match(/GH_TOKEN: \$\{\{ github\.token \}\}/g);
+
+    expect(tokenBindings).toHaveLength(6);
+    expect(publishJob.slice(0, publishJob.indexOf("    steps:"))).not.toContain("GH_TOKEN:");
+  });
+
+  it("verifies an existing immutable release instead of replacing it", async () => {
+    const workflow = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+    const inspectIndex = workflow.indexOf("- name: Inspect any existing release");
+    const attestIndex = workflow.indexOf("- name: Attest build provenance");
+
+    expect(inspectIndex).toBeGreaterThan(0);
+    expect(inspectIndex).toBeLessThan(attestIndex);
+    expect(workflow).toContain("if: steps.existing.outputs.state != 'published'");
+    expect(workflow).toContain('gh release download "$GITHUB_REF_NAME"');
+    expect(workflow).toContain('gh attestation verify "$asset"');
   });
 });
