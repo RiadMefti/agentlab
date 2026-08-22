@@ -18,7 +18,6 @@ from the same workspace.
 | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Linux x64             | [AppImage](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-linux-x64.AppImage) |
 | macOS — Apple silicon | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-arm64.dmg)           |
-| macOS — Intel         | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-x64.dmg)             |
 
 [Checksums](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/SHA256SUMS) and
 GitHub build provenance attestations are attached to every release.
@@ -39,7 +38,7 @@ GitHub build provenance attestations are attached to every release.
 
 ## Requirements
 
-- Linux x64, or macOS 12 or newer
+- Linux x64, or macOS 12 or newer on Apple silicon
 - `tmux`
 - at least one installed and authenticated CLI: `codex`, `claude`, or `opencode`
 

@@ -166,8 +166,7 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
   const assetNames = [
     `Orchestrator-${version}.cdx.json`,
     "Orchestrator-linux-x64.AppImage",
-    "Orchestrator-mac-arm64.dmg",
-    "Orchestrator-mac-x64.dmg"
+    "Orchestrator-mac-arm64.dmg"
   ].sort();
   const expectedNames = includeChecksums ? [...assetNames, CHECKSUM_FILE].sort() : assetNames;
   const entries = await readdir(directory, { withFileTypes: true });
@@ -186,7 +185,6 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
   await Promise.all([
     verifyAppImage(join(directory, "Orchestrator-linux-x64.AppImage")),
     verifyDmg(join(directory, "Orchestrator-mac-arm64.dmg")),
-    verifyDmg(join(directory, "Orchestrator-mac-x64.dmg")),
     verifySbom(join(directory, `Orchestrator-${version}.cdx.json`), version)
   ]);
   if (includeChecksums) {

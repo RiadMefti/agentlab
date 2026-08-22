@@ -133,20 +133,10 @@ jobs:
           retention-days: 7
 
   macos:
-    name: macOS ${{ matrix.arch }} (unsigned)
+    name: macOS Apple silicon (unsigned)
     needs: validate
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            machine_arch: arm64
-            runner: macos-15
-          - arch: x64
-            machine_arch: x86_64
-            runner: macos-15-intel
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,7 +149,7 @@ jobs:
           cache: npm
       - name: Verify the native runner architecture
         shell: bash
-        run: test "$(uname -m)" = "${{ matrix.machine_arch }}"
+        run: test "$(uname -m)" = "arm64"
       - name: Install locked dependencies
         run: npm ci
       - name: Build desktop sources
@@ -167,12 +157,12 @@ jobs:
       - name: Build the unsigned DMG
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: ./node_modules/.bin/electron-builder --mac dmg --publish never --${{ matrix.arch }}
+        run: ./node_modules/.bin/electron-builder --mac dmg --publish never --arm64
       - name: Verify the unsigned app and DMG
         shell: bash
         run: |
           set -euo pipefail
-          dmg_path="release/Orchestrator-mac-${{ matrix.arch }}.dmg"
+          dmg_path="release/Orchestrator-mac-arm64.dmg"
           app_count="$(find release -type d -name 'Orchestrator.app' | wc -l | tr -d ' ')"
           app_path="$(find release -type d -name 'Orchestrator.app' -print -quit)"
           if [[ "$app_count" != "1" || -z "$app_path" || ! -s "$dmg_path" ]]; then
@@ -181,7 +171,7 @@ jobs:
           fi
 
           executable="$app_path/Contents/MacOS/Orchestrator"
-          test "$(lipo -archs "$executable")" = "${{ matrix.machine_arch }}"
+          test "$(lipo -archs "$executable")" = "arm64"
           if codesign --display --verbose=4 "$app_path" >/dev/null 2>&1; then
             echo "Expected an unsigned macOS app, but a code signature was found." >&2
             exit 1
@@ -197,7 +187,7 @@ jobs:
           hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_directory"
           mounted_app="$mount_directory/Orchestrator.app"
           test -d "$mounted_app"
-          test "$(lipo -archs "$mounted_app/Contents/MacOS/Orchestrator")" = "${{ matrix.machine_arch }}"
+          test "$(lipo -archs "$mounted_app/Contents/MacOS/Orchestrator")" = "arm64"
           if codesign --display --verbose=4 "$mounted_app" >/dev/null 2>&1; then
             echo "The mounted app unexpectedly contains a code signature." >&2
             exit 1
@@ -207,8 +197,8 @@ jobs:
       - name: Upload the macOS artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-macos-${{ matrix.arch }}
-          path: release/Orchestrator-mac-${{ matrix.arch }}.dmg
+          name: release-macos-arm64
+          path: release/Orchestrator-mac-arm64.dmg
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -277,7 +267,6 @@ jobs:
           subject-path: |
             release-assets/Orchestrator-linux-x64.AppImage
             release-assets/Orchestrator-mac-arm64.dmg
-            release-assets/Orchestrator-mac-x64.dmg
           sbom-path: release-assets/Orchestrator-${{ needs.validate.outputs.version }}.cdx.json
       - name: Replace an incomplete draft
         if: steps.existing.outputs.state == 'draft'

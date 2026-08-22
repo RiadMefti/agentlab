@@ -159,7 +159,6 @@ async function createAssetFixture(version = "0.1.0", includeChecksums = false): 
   await Promise.all([
     createSparseBinary(join(root, "Orchestrator-linux-x64.AppImage"), appImageHeader),
     createSparseBinary(join(root, "Orchestrator-mac-arm64.dmg"), Buffer.alloc(0), dmgTrailer),
-    createSparseBinary(join(root, "Orchestrator-mac-x64.dmg"), Buffer.alloc(0), dmgTrailer),
     writeJson(join(root, `Orchestrator-${version}.cdx.json`), {
       bomFormat: "CycloneDX",
       specVersion: "1.5",
@@ -172,8 +171,7 @@ async function createAssetFixture(version = "0.1.0", includeChecksums = false): 
     const assetNames = [
       `Orchestrator-${version}.cdx.json`,
       "Orchestrator-linux-x64.AppImage",
-      "Orchestrator-mac-arm64.dmg",
-      "Orchestrator-mac-x64.dmg"
+      "Orchestrator-mac-arm64.dmg"
     ].sort();
     const checksums = await Promise.all(
       assetNames.map(async (name) => `${await sha256(join(root, name))}  ${name}`)
@@ -262,7 +260,7 @@ describe("release asset validation", () => {
     const result = runScript("check-release-assets.mjs", "v0.1.0", root);
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Validated 4 release assets for v0.1.0.");
+    expect(result.stdout).toContain("Validated 3 release assets for v0.1.0.");
   });
 
   it("rejects extra files and malformed binary containers", async () => {
@@ -300,7 +298,7 @@ describe("release asset validation", () => {
     const invalid = runScript("check-release-assets.mjs", "v0.1.0", root, "--published");
 
     expect(valid.status).toBe(0);
-    expect(valid.stdout).toContain("Validated 5 release assets for v0.1.0.");
+    expect(valid.stdout).toContain("Validated 4 release assets for v0.1.0.");
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("wrong digest");
   });

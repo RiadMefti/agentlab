@@ -5,7 +5,6 @@ workflow publishes these fixed assets:
 
 - `Orchestrator-linux-x64.AppImage`
 - `Orchestrator-mac-arm64.dmg`
-- `Orchestrator-mac-x64.dmg`
 - `Orchestrator-MAJOR.MINOR.PATCH.cdx.json`
 - `SHA256SUMS`
 
@@ -20,8 +19,8 @@ release secrets.
 
 ## macOS distribution
 
-The Apple-silicon and Intel DMGs are intentionally built without an Apple Developer identity and are
-not notarized. The workflow explicitly disables signing discovery and fails if a packaged app
+The Apple-silicon DMG is intentionally built without an Apple Developer identity and is not
+notarized. The workflow explicitly disables signing discovery and fails if the packaged app
 unexpectedly contains a code signature.
 
 On first launch, macOS blocks the app because it cannot verify the developer:
@@ -61,8 +60,7 @@ The tag starts `.github/workflows/release.yml`. It performs the following gates 
 1. Match the tag against every package and lockfile version, and prove its commit is on `main`.
 2. Run formatting, type checking, linting, tests, the production build, and the production audit.
 3. Build and launch-smoke-test the Linux AppImage on Ubuntu 22.04.
-4. Build native unsigned Apple-silicon and Intel DMGs on matching macOS runners without release
-   credentials.
+4. Build a native unsigned Apple-silicon DMG on an arm64 macOS runner without release credentials.
 5. Verify each app is unsigned, has the expected native architecture, and survives DMG integrity and
    read-only mount checks.
 6. Validate the exact artifact set and container formats, then generate checksums, a CycloneDX SBOM,
