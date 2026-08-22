@@ -10,5 +10,5 @@
     "types": ["node", "electron"]
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../server" }]
+  "references": [{ "path": "../../packages/contracts" }, { "path": "../server" }]
 }

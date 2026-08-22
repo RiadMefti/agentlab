@@ -10,6 +10,7 @@ import {
   useCreateConversation
 } from "./api/queries.js";
 import { AgentTabs } from "./components/AgentTabs.js";
+import { AppearancePicker } from "./components/AppearancePicker.js";
 import { ConversationReel } from "./components/ConversationReel.js";
 import { EmptyState } from "./components/EmptyState.js";
 import { NewConversationDialog } from "./components/NewConversationDialog.js";
@@ -51,6 +52,7 @@ export function App() {
           selectedName={selectedSession?.name ?? null}
           onSelect={setSelectedSessionName}
         />
+        <AppearancePicker />
         <button
           className="new"
           type="button"

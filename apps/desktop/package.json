@@ -12,6 +12,7 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
+    "@orchestrator/contracts": "0.1.0",
     "@orchestrator/server": "0.1.0"
   }
 }

@@ -1,0 +1,34 @@
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-canvas: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-hover: #eef2f6;
+  --color-text: #18202a;
+  --color-text-muted: #596574;
+  --color-text-quiet: #667382;
+  --color-border-subtle: #d8dee6;
+  --color-border-control: #7a8796;
+  --color-border-control-hover: #667484;
+  --color-focus-ring: #1d4ed8;
+  --color-scrollbar: #7a8796;
+  --color-backdrop: rgb(248 250 252 / 88%);
+  --color-shadow: rgb(15 23 42 / 10%);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #15191e;
+  --color-surface: #1c2229;
+  --color-surface-hover: #242b33;
+  --color-text: #edf1f5;
+  --color-text-muted: #aeb8c4;
+  --color-text-quiet: #919daa;
+  --color-border-subtle: #333b45;
+  --color-border-control: #74808d;
+  --color-border-control-hover: #8995a2;
+  --color-focus-ring: #75a7ff;
+  --color-scrollbar: #74808d;
+  --color-backdrop: rgb(21 25 30 / 90%);
+  --color-shadow: rgb(0 0 0 / 36%);
+}

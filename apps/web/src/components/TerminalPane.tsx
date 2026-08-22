@@ -9,6 +9,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 
+import { terminalThemeFor } from "../theme/theme-palette.js";
+import { useTheme } from "../theme/use-theme.js";
+
 interface TerminalPaneProps {
   readonly conversationId: string;
   readonly session: AgentSession;
@@ -16,6 +19,9 @@ interface TerminalPaneProps {
 
 export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const { resolvedTheme } = useTheme();
+  const resolvedThemeRef = useRef(resolvedTheme);
   const [attempt, setAttempt] = useState(0);
   const [connection, setConnection] = useState<"connecting" | "connected" | "closed">("connecting");
 
@@ -33,19 +39,11 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
       fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.35,
+      minimumContrastRatio: 4.5,
       scrollback: sessionHistoryLimit,
-      theme: {
-        background: "#fafafa",
-        foreground: "#292929",
-        cursor: "#171717",
-        cursorAccent: "#fafafa",
-        selectionBackground: "#dedede",
-        black: "#171717",
-        brightBlack: "#777777",
-        white: "#d7d7d7",
-        brightWhite: "#ffffff"
-      }
+      theme: terminalThemeFor(resolvedThemeRef.current)
     });
+    terminalRef.current = terminal;
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container);
@@ -104,8 +102,15 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
       observer.disconnect();
       socket.close();
       terminal.dispose();
+      if (terminalRef.current === terminal) terminalRef.current = null;
     };
   }, [attempt, conversationId, session.name]);
+
+  useEffect(() => {
+    resolvedThemeRef.current = resolvedTheme;
+    const terminal = terminalRef.current;
+    if (terminal !== null) terminal.options.theme = terminalThemeFor(resolvedTheme);
+  }, [resolvedTheme]);
 
   return (
     <main className="terminal-main">

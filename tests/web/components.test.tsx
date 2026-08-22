@@ -8,8 +8,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
 
 import { AgentTabs } from "../../apps/web/src/components/AgentTabs.js";
+import { AppearancePicker } from "../../apps/web/src/components/AppearancePicker.js";
 import { ConversationReel } from "../../apps/web/src/components/ConversationReel.js";
 import { NewConversationDialog } from "../../apps/web/src/components/NewConversationDialog.js";
+import { ThemeProvider } from "../../apps/web/src/theme/react-theme.js";
+import { ThemeStore } from "../../apps/web/src/theme/theme-store.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
 
 const captain: AgentSession = {
@@ -114,6 +117,39 @@ describe("lean interface components", () => {
       model: "gpt-test",
       reasoning: "xhigh"
     });
+  });
+
+  it("offers only the accessible built-in appearance choices and persists a selection", () => {
+    const storage = {
+      value: "system",
+      read() {
+        return this.value;
+      },
+      write(appearance: "system" | "light" | "dark") {
+        this.value = appearance;
+      }
+    };
+    const store = new ThemeStore(storage, {
+      getTheme: () => "light",
+      subscribe: () => () => undefined
+    });
+    render(
+      <ThemeProvider store={store}>
+        <AppearancePicker />
+      </ThemeProvider>
+    );
+
+    const picker = screen.getByRole("combobox", { name: "Appearance" });
+    expect(picker).toHaveValue("system");
+    expect(
+      within(picker)
+        .getAllByRole("option")
+        .map((option) => option.textContent)
+    ).toEqual(["System", "Light", "Dark"]);
+
+    fireEvent.change(picker, { target: { value: "dark" } });
+    expect(picker).toHaveValue("dark");
+    expect(storage.value).toBe("dark");
   });
 
   it("submits provider defaults as nullable selections", () => {

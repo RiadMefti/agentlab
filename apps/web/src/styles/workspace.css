@@ -2,7 +2,7 @@
   height: 100%;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 76px;
-  background: var(--background);
+  background: var(--color-canvas);
 }
 
 .app-empty {
@@ -15,7 +15,7 @@
   display: flex;
   align-items: center;
   gap: 28px;
-  border-bottom: 1px solid var(--faint);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .brand {
@@ -29,7 +29,7 @@
   min-width: 0;
   margin-right: auto;
   overflow: hidden;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -54,18 +54,46 @@
   border: 0;
   border-bottom: 1px solid transparent;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
   white-space: nowrap;
 }
 
 .agent:hover,
 .agent.active {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .agent.active {
-  border-bottom-color: var(--text);
+  border-bottom-color: var(--color-text);
+}
+
+.appearance-picker {
+  flex: 0 0 auto;
+}
+
+.appearance-picker select {
+  height: 30px;
+  padding: 0 24px 0 9px;
+  border: 1px solid var(--color-border-control);
+  border-radius: 6px;
+  appearance: none;
+  background-color: var(--color-surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--color-text-muted) 50%),
+    linear-gradient(135deg, var(--color-text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 11px) 13px,
+    calc(100% - 7px) 13px;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.appearance-picker select:hover {
+  border-color: var(--color-border-control-hover);
+  background-color: var(--color-surface-hover);
 }
 
 .new {
@@ -75,12 +103,12 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 18px;
 }
 
 .new:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .terminal-main {
@@ -116,7 +144,7 @@
 .session-heading p,
 .empty-state p {
   margin: 8px 0 0;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
@@ -133,7 +161,7 @@
 
 .terminal-mount .xterm-viewport {
   background: transparent !important;
-  scrollbar-color: #d8d8d8 transparent;
+  scrollbar-color: var(--color-scrollbar) transparent;
   scrollbar-width: thin;
 }
 
@@ -144,12 +172,12 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .reconnect:hover {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .empty-state {
@@ -171,19 +199,23 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 12px;
 }
 
 .text-action {
   margin-top: 28px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #cfcfcf;
+  border-bottom: 1px solid var(--color-border-control);
 }
 
 .text-action:hover,
 .quiet-action:hover {
-  color: var(--text);
+  color: var(--color-text);
+}
+
+.text-action:hover {
+  border-bottom-color: var(--color-border-control-hover);
 }
 
 .reel {
@@ -194,7 +226,7 @@
   grid-auto-flow: column;
   grid-template-columns: 110px;
   align-items: stretch;
-  border-top: 1px solid var(--faint);
+  border-top: 1px solid var(--color-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -202,7 +234,7 @@
 .reel-label {
   display: flex;
   align-items: center;
-  color: var(--muted);
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
@@ -214,13 +246,13 @@
   gap: 10px;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--color-text-muted);
   text-align: left;
 }
 
 .conversation:hover,
 .conversation.active {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 .conversation .number {
@@ -244,7 +276,7 @@
   display: block;
   margin-top: 4px;
   overflow: hidden;
-  color: var(--quiet);
+  color: var(--color-text-quiet);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
