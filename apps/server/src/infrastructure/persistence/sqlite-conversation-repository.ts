@@ -86,6 +86,11 @@ export class SqliteConversationRepository implements ConversationRepository {
     return Promise.resolve();
   }
 
+  public delete(id: string): Promise<void> {
+    this.#database.prepare("DELETE FROM conversations WHERE id = ?").run(id);
+    return Promise.resolve();
+  }
+
   public close(): void {
     this.#database.close();
   }

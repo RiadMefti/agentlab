@@ -33,6 +33,12 @@ export function registerRoutes(app: FastifyInstance, dependencies: RouteDependen
     return reply.status(201).send(conversation);
   });
 
+  app.delete("/api/conversations/:conversationId", async (request, reply) => {
+    const { conversationId } = conversationParamsSchema.parse(request.params);
+    await dependencies.conversations.deleteConversation(conversationId);
+    return reply.status(204).send();
+  });
+
   app.get("/api/conversations/:conversationId/sessions", async (request) => {
     const { conversationId } = conversationParamsSchema.parse(request.params);
     return {

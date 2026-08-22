@@ -250,6 +250,40 @@ describe("local HTTP API", () => {
     expect(sessions.killed).toEqual([workerName]);
   });
 
+  it("deletes a master and all of its agent sessions", async () => {
+    const sessions = new MemorySessionRuntime();
+    const server = await createApp(new StaticProviderCatalog(), sessions);
+    await server.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: { prompt: "Coordinate", provider: "codex", model: null, reasoning: null }
+    });
+    const captainName = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+    const workerName = buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "review");
+    sessions.liveSessions = [
+      {
+        name: workerName,
+        conversationId: TEST_CONVERSATION_ID,
+        role: "worker",
+        provider: "codex",
+        label: "Review",
+        status: "running",
+        attached: false,
+        startedAt: "2026-08-21T12:01:00.000Z"
+      }
+    ];
+
+    const deleted = await server.inject({
+      method: "DELETE",
+      url: `/api/conversations/${TEST_CONVERSATION_ID}`
+    });
+    expect(deleted.statusCode).toBe(204);
+    expect(sessions.killed).toEqual([captainName, workerName]);
+
+    const listed = await server.inject({ method: "GET", url: "/api/conversations" });
+    expect(listed.json()).toEqual({ conversations: [] });
+  });
+
   it("rejects unsafe worker creation input", async () => {
     const sessions = new MemorySessionRuntime();
     const server = await createApp(new StaticProviderCatalog(), sessions);

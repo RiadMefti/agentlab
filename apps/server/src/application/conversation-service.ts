@@ -119,6 +119,26 @@ export class ConversationService {
     return conversation;
   }
 
+  public async deleteConversation(conversationId: string): Promise<void> {
+    const conversation = await this.requireConversation(conversationId);
+
+    // Stop the supervisor first so it cannot create another worker while cleanup is in progress.
+    await this.#sessions.kill(conversation.captainSessionName);
+
+    const remainingSessions = await this.#sessions.list(conversationId);
+    for (const session of remainingSessions) {
+      const identity = parseSessionName(session.name);
+      if (
+        session.name !== conversation.captainSessionName &&
+        identity?.conversationId === conversationId
+      ) {
+        await this.#sessions.kill(session.name);
+      }
+    }
+
+    await this.#repository.delete(conversationId);
+  }
+
   public async listSessions(conversationId: string): Promise<readonly AgentSession[]> {
     const conversation = await this.requireConversation(conversationId);
     const sessions = [...(await this.#sessions.list(conversationId))];

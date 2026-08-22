@@ -23,6 +23,7 @@ export const TEST_CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 export class MemoryConversationRepository implements ConversationRepository {
   public readonly conversations: Conversation[] = [];
   public createError: Error | null = null;
+  public deleteError: Error | null = null;
   public closed = false;
 
   public list(): Promise<readonly Conversation[]> {
@@ -41,6 +42,13 @@ export class MemoryConversationRepository implements ConversationRepository {
     return Promise.resolve();
   }
 
+  public delete(id: string): Promise<void> {
+    if (this.deleteError !== null) return Promise.reject(this.deleteError);
+    const index = this.conversations.findIndex((conversation) => conversation.id === id);
+    if (index >= 0) this.conversations.splice(index, 1);
+    return Promise.resolve();
+  }
+
   public close(): void {
     this.closed = true;
   }
@@ -52,6 +60,7 @@ export class MemorySessionRuntime implements SessionRuntime {
   public readonly killed: string[] = [];
   public liveSessions: AgentSession[] = [];
   public createError: Error | null = null;
+  public readonly killErrors = new Map<string, Error>();
 
   public createCaptain(input: CreateCaptainSessionInput): Promise<void> {
     if (this.createError !== null) return Promise.reject(this.createError);
@@ -66,7 +75,10 @@ export class MemorySessionRuntime implements SessionRuntime {
   }
 
   public kill(name: string): Promise<void> {
+    const error = this.killErrors.get(name);
+    if (error !== undefined) return Promise.reject(error);
     this.killed.push(name);
+    this.liveSessions = this.liveSessions.filter((session) => session.name !== name);
     return Promise.resolve();
   }
 

@@ -187,6 +187,31 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
       expect(workerDeleted.statusCode).toBe(204);
       await expect(runtime.exists(workerSessionName)).resolves.toBe(false);
       workerSessionName = null;
+
+      const replacementWorker = await app.inject({
+        method: "POST",
+        url: `/api/conversations/${conversation.id}/sessions`,
+        payload: {
+          label: "Final Review",
+          prompt: "Review the finished test suite",
+          provider: "codex"
+        }
+      });
+      expect(replacementWorker.statusCode).toBe(201);
+      workerSessionName = replacementWorker.json<{ sessionName: string }>().sessionName;
+
+      const conversationDeleted = await app.inject({
+        method: "DELETE",
+        url: `/api/conversations/${conversation.id}`
+      });
+      expect(conversationDeleted.statusCode).toBe(204);
+      await expect(runtime.exists(sessionName)).resolves.toBe(false);
+      await expect(runtime.exists(workerSessionName)).resolves.toBe(false);
+      captainSessionName = null;
+      workerSessionName = null;
+
+      const empty = await app.inject({ method: "GET", url: "/api/conversations" });
+      expect(empty.json()).toEqual({ conversations: [] });
     });
   }
 );

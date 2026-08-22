@@ -46,6 +46,14 @@ export async function createConversation(input: CreateConversationInput): Promis
   );
 }
 
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await request(
+    `/api/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" },
+    z.null()
+  );
+}
+
 export async function getSessions(conversationId: string): Promise<SessionsResponse> {
   return request(
     `/api/conversations/${encodeURIComponent(conversationId)}/sessions`,

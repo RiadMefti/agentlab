@@ -233,6 +233,55 @@ describe("ConversationService", () => {
     expect(sessions.killed).toEqual([worker.name]);
   });
 
+  it("deletes a conversation after stopping its captain and workers", async () => {
+    const { repository, sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    const worker: AgentSession = {
+      name: buildWorkerSessionName(TEST_CONVERSATION_ID, "claude", "review"),
+      conversationId: TEST_CONVERSATION_ID,
+      role: "worker",
+      provider: "claude",
+      label: "Review",
+      status: "running",
+      attached: false,
+      startedAt: "2026-08-21T12:01:00.000Z"
+    };
+    sessions.liveSessions = [worker];
+
+    await expect(service.deleteConversation(conversation.id)).resolves.toBeUndefined();
+
+    expect(sessions.killed).toEqual([conversation.captainSessionName, worker.name]);
+    expect(repository.conversations).toHaveLength(0);
+  });
+
+  it("keeps conversation metadata when session cleanup fails", async () => {
+    const { repository, sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    sessions.killErrors.set(conversation.captainSessionName, new Error("tmux unavailable"));
+
+    await expect(service.deleteConversation(conversation.id)).rejects.toThrow("tmux unavailable");
+    expect(repository.conversations).toEqual([conversation]);
+  });
+
+  it("rejects deleting a missing conversation", async () => {
+    const { sessions, service } = createFixture();
+
+    await expect(service.deleteConversation(TEST_CONVERSATION_ID)).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    expect(sessions.killed).toHaveLength(0);
+  });
+
   it("never deletes the Captain", async () => {
     const { sessions, service } = createFixture();
     const conversation = await service.createConversation({

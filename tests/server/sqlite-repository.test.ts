@@ -39,6 +39,9 @@ describe("SqliteConversationRepository", () => {
       await expect(repository.findById(conversation.id)).resolves.toEqual(conversation);
       await expect(repository.list()).resolves.toEqual([conversation]);
       await expect(repository.findById("22222222-2222-4222-8222-222222222222")).resolves.toBeNull();
+      await repository.delete(conversation.id);
+      await expect(repository.findById(conversation.id)).resolves.toBeNull();
+      await expect(repository.list()).resolves.toEqual([]);
     } finally {
       repository.close();
     }

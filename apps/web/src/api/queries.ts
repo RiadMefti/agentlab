@@ -5,6 +5,7 @@ import type { CreateConversationInput, CreateWorkerInput } from "@orchestrator/c
 import {
   createConversation,
   createWorker,
+  deleteConversation,
   deleteWorker,
   getConversations,
   getProviders,
@@ -54,6 +55,20 @@ export function useCreateWorker() {
       await queryClient.invalidateQueries({
         queryKey: ["conversations", conversationId, "sessions"]
       });
+    }
+  });
+}
+
+export function useDeleteConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: string) => deleteConversation(conversationId),
+    onSuccess: async (_response, conversationId) => {
+      queryClient.removeQueries({
+        queryKey: ["conversations", conversationId, "sessions"],
+        exact: true
+      });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"], exact: true });
     }
   });
 }
