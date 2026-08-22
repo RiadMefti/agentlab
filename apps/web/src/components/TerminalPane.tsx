@@ -26,7 +26,7 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
     let active = true;
     setConnection("connecting");
     const terminal = new Terminal({
-      allowTransparency: true,
+      allowTransparency: false,
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "bar",
