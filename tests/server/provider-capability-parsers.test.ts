@@ -39,8 +39,8 @@ describe("provider capability parsers", () => {
           description: "Test model",
           hidden: false,
           supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "Low" },
-            { reasoningEffort: "xhigh", description: "Extra high" },
+            { reasoningEffort: "low", description: "Fast responses with lighter reasoning" },
+            { reasoningEffort: "xhigh", description: "Extra high reasoning depth" },
             { reasoningEffort: "ultra", description: "Automatic delegation" }
           ],
           defaultReasoningEffort: "xhigh",
@@ -217,7 +217,7 @@ describe("provider capability parsers", () => {
           displayName: "Default (recommended)",
           description: "Sonnet Test",
           supportsEffort: true,
-          supportedEffortLevels: ["low", "high", "max"]
+          supportedEffortLevels: ["low", "high", "xhigh", "max"]
         },
         {
           value: "haiku",
@@ -237,6 +237,7 @@ describe("provider capability parsers", () => {
           reasoningOptions: [
             { id: "low", label: "Low" },
             { id: "high", label: "High" },
+            { id: "xhigh", label: "Extra high" },
             { id: "max", label: "Max" }
           ]
         },

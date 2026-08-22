@@ -67,6 +67,7 @@
 
 .field select {
   appearance: none;
+  background-color: var(--color-surface);
   background-image:
     linear-gradient(45deg, transparent 50%, var(--color-text-muted) 50%),
     linear-gradient(135deg, var(--color-text-muted) 50%, transparent 50%);
@@ -75,6 +76,11 @@
     calc(100% - 3px) 16px;
   background-repeat: no-repeat;
   background-size: 4px 4px;
+}
+
+.field select:disabled {
+  background-image: none;
+  color: var(--color-text-muted);
 }
 
 .field textarea {

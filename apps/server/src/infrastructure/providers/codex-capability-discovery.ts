@@ -10,6 +10,7 @@ import type {
 } from "../../domain/provider-capability-discovery.js";
 import { IncompatibleProviderCapabilityError } from "../../domain/provider-capability-discovery.js";
 import { terminateProcessTree } from "../process/process-tree.js";
+import { reasoningLabel } from "./capability-labels.js";
 
 const MAX_PROTOCOL_BYTES = 2 * 1024 * 1024;
 const MAX_STDERR_BYTES = 32 * 1024;
@@ -91,10 +92,7 @@ export function parseCodexModels(input: unknown): DiscoveredProviderCapability {
         defaultReasoning: model.defaultReasoningEffort,
         reasoningOptions: reasoning.map((option) => ({
           id: option.reasoningEffort,
-          label:
-            option.description.trim() === ""
-              ? titleCase(option.reasoningEffort)
-              : option.description
+          label: reasoningLabel(option.reasoningEffort)
         }))
       };
     })
@@ -316,8 +314,4 @@ function firstLine(value: string): string | null {
       .map((line) => line.trim())
       .find(Boolean) ?? null
   );
-}
-
-function titleCase(value: string): string {
-  return value.replaceAll(/[-_.]+/gu, " ").replace(/\b\w/gu, (letter) => letter.toUpperCase());
 }

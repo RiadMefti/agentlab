@@ -50,7 +50,7 @@ const provider: ProviderCapability = {
     defaultReasoning: "high",
     reasoningOptions: ["low", "high", "xhigh"].map((level) => ({
       id: level,
-      label: level
+      label: level === "xhigh" ? "Extra high" : `${level.charAt(0).toUpperCase()}${level.slice(1)}`
     }))
   })),
   customModelPolicy: "allowed"
@@ -165,6 +165,17 @@ describe("lean interface components", () => {
     );
     const dialog = within(view.container);
 
+    expect(
+      within(dialog.getByLabelText("Model"))
+        .getAllByRole("option")
+        .map((option) => option.textContent)
+    ).toEqual(["Default Model · default", "GPT Test", "Custom model…"]);
+    expect(
+      within(dialog.getByLabelText("Thinking"))
+        .getAllByRole("option")
+        .map((option) => option.textContent)
+    ).toEqual(["High · default", "Low", "Extra high"]);
+
     fireEvent.change(dialog.getByLabelText("Task"), { target: { value: "Use defaults" } });
     fireEvent.click(dialog.getByRole("button", { name: "Start" }));
 
@@ -174,6 +185,40 @@ describe("lean interface components", () => {
       model: null,
       reasoning: null
     });
+  });
+
+  it("disables thinking when the selected model has no launch-time control", () => {
+    const noThinkingProvider: ProviderCapability = {
+      ...provider,
+      id: "opencode",
+      label: "OpenCode",
+      defaultModel: null,
+      models: [
+        {
+          id: "opencode/model",
+          label: "OpenCode Model",
+          description: null,
+          defaultReasoning: null,
+          reasoningOptions: []
+        }
+      ],
+      customModelPolicy: "catalog-only"
+    };
+    const view = render(
+      <NewConversationDialog
+        providers={[noThinkingProvider]}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onCreate={vi.fn()}
+      />
+    );
+    const dialog = within(view.container);
+
+    fireEvent.change(dialog.getByLabelText("Model"), { target: { value: "opencode/model" } });
+
+    expect(dialog.getByLabelText("Thinking")).toBeDisabled();
+    expect(dialog.getByRole("option", { name: "In OpenCode" })).toBeInTheDocument();
   });
 
   it("explains fallback discovery and gates custom model entry behind policy", () => {

@@ -7,6 +7,7 @@ import type {
   ProviderCapabilityDiscovery,
   ProviderDiscoveryContext
 } from "../../domain/provider-capability-discovery.js";
+import { reasoningLabel } from "./capability-labels.js";
 
 const DISCOVERY_TIMEOUT_MS = 5_000;
 const MAX_MODELS = 200;
@@ -53,7 +54,7 @@ export function parseClaudeModels(input: unknown): DiscoveredProviderCapability 
         model.supportsEffort === true
           ? (model.supportedEffortLevels ?? []).map((level) => ({
               id: level,
-              label: titleCase(level)
+              label: reasoningLabel(level)
             }))
           : []
     }))
@@ -102,8 +103,4 @@ export async function supportedModelsWithTimeout(
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
-}
-
-function titleCase(value: string): string {
-  return value.replaceAll(/[-_.]+/gu, " ").replace(/\b\w/gu, (letter) => letter.toUpperCase());
 }

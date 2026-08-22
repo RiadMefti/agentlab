@@ -2,6 +2,7 @@ import { useEffect, useState, type SyntheticEvent } from "react";
 
 import type {
   CreateConversationInput,
+  ModelCapability,
   ProviderCapability,
   ProviderId
 } from "@orchestrator/contracts";
@@ -90,6 +91,10 @@ export function NewConversationDialog({
   }
 
   const selectableModels = provider?.models.filter(({ id }) => id !== provider.defaultModel) ?? [];
+  const reasoningOptions = modelCapability?.reasoningOptions ?? [];
+  const selectableReasoning = reasoningOptions.filter(
+    ({ id }) => id !== modelCapability?.defaultReasoning
+  );
 
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onCancel}>
@@ -164,7 +169,7 @@ export function NewConversationDialog({
                   }));
                 }}
               >
-                <option value="">Provider default</option>
+                <option value="">{modelDefaultLabel(provider)}</option>
                 {selectableModels.map((model) => (
                   <option value={model.id} key={model.id}>
                     {model.label}
@@ -180,6 +185,7 @@ export function NewConversationDialog({
               <span>Thinking</span>
               <select
                 value={reasoning ?? ""}
+                disabled={reasoningOptions.length === 0}
                 onChange={(event) => {
                   setStoredSelection((current) => ({
                     ...current,
@@ -188,8 +194,8 @@ export function NewConversationDialog({
                   }));
                 }}
               >
-                <option value="">Provider default</option>
-                {(modelCapability?.reasoningOptions ?? []).map((option) => (
+                <option value="">{reasoningDefaultLabel(provider, modelCapability)}</option>
+                {selectableReasoning.map((option) => (
                   <option value={option.id} key={option.id}>
                     {option.label}
                   </option>
@@ -298,6 +304,27 @@ function isModelChoiceValid(provider: ProviderCapability | null, modelChoice: st
   if (provider === null) return false;
   if (modelChoice === CUSTOM_MODEL_CHOICE) return provider.customModelPolicy === "allowed";
   return provider.models.some(({ id }) => id === modelChoice);
+}
+
+function modelDefaultLabel(provider: ProviderCapability | null): string {
+  const model = provider?.models.find(({ id }) => id === provider.defaultModel);
+  if (model === undefined) return "Default";
+  if (model.label.toLowerCase() === "default" || /\brecommended\b/iu.test(model.label)) {
+    return model.label;
+  }
+  return `${model.label} · default`;
+}
+
+function reasoningDefaultLabel(
+  provider: ProviderCapability | null,
+  model: ModelCapability | null
+): string {
+  if (model === null) return "Default";
+  if (model.reasoningOptions.length === 0) {
+    return provider?.id === "opencode" ? "In OpenCode" : "Not available";
+  }
+  const option = model.reasoningOptions.find(({ id }) => id === model.defaultReasoning);
+  return option === undefined ? "Default" : `${option.label} · default`;
 }
 
 function ProviderNotice({ provider }: { readonly provider: ProviderCapability | null }) {

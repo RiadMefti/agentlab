@@ -30,6 +30,11 @@ textarea {
   font: inherit;
 }
 
+select option {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
 button {
   cursor: pointer;
 }

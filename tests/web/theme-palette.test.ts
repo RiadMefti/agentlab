@@ -91,6 +91,19 @@ describe("theme palettes", () => {
     }
     expect(implementationStyles).not.toMatch(/#[0-9a-f]{3,8}|rgb\(/iu);
   });
+
+  it("gives native selector popups an opaque themed surface", () => {
+    const stylesRoot = new URL("../../apps/web/src/styles/", import.meta.url);
+    const base = readFileSync(new URL("base.css", stylesRoot), "utf8");
+    const dialog = readFileSync(new URL("dialog.css", stylesRoot), "utf8");
+
+    expect(base).toMatch(
+      /select option\s*\{[^}]*background-color:\s*var\(--color-surface\);[^}]*color:\s*var\(--color-text\);[^}]*\}/su
+    );
+    expect(dialog).toMatch(
+      /\.field select\s*\{[^}]*background-color:\s*var\(--color-surface\);[^}]*\}/su
+    );
+  });
 });
 
 function contrast(first: string, second: string): number {
