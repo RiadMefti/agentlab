@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 
+import type { AgentSession } from "@orchestrator/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiClientError } from "./api/client.js";
@@ -7,13 +8,17 @@ import {
   conversationQuery,
   providerQuery,
   sessionQuery,
-  useCreateConversation
+  useCreateConversation,
+  useCreateWorker,
+  useDeleteWorker
 } from "./api/queries.js";
 import { AgentTabs } from "./components/AgentTabs.js";
 import { AppearancePicker } from "./components/AppearancePicker.js";
 import { ConversationReel } from "./components/ConversationReel.js";
+import { DeleteWorkerDialog } from "./components/DeleteWorkerDialog.js";
 import { EmptyState } from "./components/EmptyState.js";
 import { NewConversationDialog } from "./components/NewConversationDialog.js";
+import { NewWorkerDialog } from "./components/NewWorkerDialog.js";
 
 const TerminalPane = lazy(() => import("./components/TerminalPane.js"));
 
@@ -23,7 +28,11 @@ export function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [workerDialogOpen, setWorkerDialogOpen] = useState(false);
+  const [workerToDelete, setWorkerToDelete] = useState<AgentSession | null>(null);
   const createConversation = useCreateConversation();
+  const createWorker = useCreateWorker();
+  const deleteWorker = useDeleteWorker();
 
   const conversationList = conversations.data?.conversations ?? [];
   const selectedConversation =
@@ -50,7 +59,16 @@ export function App() {
         <AgentTabs
           sessions={sessionList}
           selectedName={selectedSession?.name ?? null}
+          canCreate={selectedConversation !== null}
           onSelect={setSelectedSessionName}
+          onCreate={() => {
+            createWorker.reset();
+            setWorkerDialogOpen(true);
+          }}
+          onDelete={(worker) => {
+            deleteWorker.reset();
+            setWorkerToDelete(worker);
+          }}
         />
         <AppearancePicker />
         <button
@@ -114,6 +132,65 @@ export function App() {
                 setDialogOpen(false);
               }
             });
+          }}
+        />
+      ) : null}
+
+      {workerDialogOpen && selectedConversation !== null ? (
+        <NewWorkerDialog
+          providers={providers.data?.providers ?? []}
+          pending={createWorker.isPending}
+          error={
+            createWorker.error !== null
+              ? errorMessage(createWorker.error)
+              : providers.isError
+                ? errorMessage(providers.error)
+                : null
+          }
+          onCancel={() => {
+            if (!createWorker.isPending) {
+              createWorker.reset();
+              setWorkerDialogOpen(false);
+            }
+          }}
+          onCreate={(input) => {
+            createWorker.mutate(
+              { conversationId: selectedConversation.id, input },
+              {
+                onSuccess: ({ sessionName }) => {
+                  setSelectedSessionName(sessionName);
+                  setWorkerDialogOpen(false);
+                }
+              }
+            );
+          }}
+        />
+      ) : null}
+
+      {workerToDelete !== null && selectedConversation !== null ? (
+        <DeleteWorkerDialog
+          worker={workerToDelete}
+          pending={deleteWorker.isPending}
+          error={deleteWorker.error === null ? null : errorMessage(deleteWorker.error)}
+          onCancel={() => {
+            if (!deleteWorker.isPending) {
+              deleteWorker.reset();
+              setWorkerToDelete(null);
+            }
+          }}
+          onConfirm={() => {
+            deleteWorker.mutate(
+              {
+                conversationId: selectedConversation.id,
+                sessionName: workerToDelete.name
+              },
+              {
+                onSuccess: () => {
+                  setSelectedSessionName(selectedConversation.captainSessionName);
+                  setWorkerToDelete(null);
+                }
+              }
+            );
           }}
         />
       ) : null}

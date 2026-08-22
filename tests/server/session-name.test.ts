@@ -4,7 +4,8 @@ import {
   buildCaptainSessionName,
   buildWorkerSessionName,
   parseSessionName,
-  sessionLabel
+  sessionLabel,
+  workerSlugFromLabel
 } from "../../apps/server/src/domain/agent-session-name.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
 
@@ -34,5 +35,10 @@ describe("agent session names", () => {
     expect(() => buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "../../bad")).toThrow(
       /Worker slug/u
     );
+  });
+
+  it("normalizes a friendly worker label into the managed session slug", () => {
+    expect(workerSlugFromLabel(" Auth Tests ")).toBe("auth-tests");
+    expect(() => workerSlugFromLabel("../../bad")).toThrow(/Worker name/u);
   });
 });

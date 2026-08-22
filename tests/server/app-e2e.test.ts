@@ -12,7 +12,7 @@ import { buildApp } from "../../apps/server/src/app.js";
 import { SqliteConversationRepository } from "../../apps/server/src/infrastructure/persistence/sqlite-conversation-repository.js";
 import { NodeCommandRunner } from "../../apps/server/src/infrastructure/process/command-runner.js";
 import { BinaryLocator } from "../../apps/server/src/infrastructure/providers/binary-locator.js";
-import { codexCaptainLauncher } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
+import { codexAgentLauncher } from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
 import { LocalProviderCatalog } from "../../apps/server/src/infrastructure/providers/local-provider-catalog.js";
 import { TmuxSessionRuntime } from "../../apps/server/src/infrastructure/tmux/tmux-session-runtime.js";
 
@@ -24,8 +24,13 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
     let repository: SqliteConversationRepository | null = null;
     let runtime: TmuxSessionRuntime | null = null;
     let captainSessionName: string | null = null;
+    let workerSessionName: string | null = null;
 
     afterEach(async () => {
+      if (workerSessionName !== null && runtime !== null) {
+        await runtime.kill(workerSessionName);
+      }
+      workerSessionName = null;
       if (captainSessionName !== null && runtime !== null) {
         await runtime.kill(captainSessionName);
       }
@@ -40,7 +45,7 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
       }
     });
 
-    it("creates, saves, and discovers one real captain from the HTTP boundary", async () => {
+    it("runs the captain and explicit worker lifecycle from the HTTP boundary", async () => {
       const root = mkdtempSync(join(tmpdir(), "agent-orchestrator-e2e-"));
       temporaryRoots.push(root);
       const fakeCodex = join(root, "codex");
@@ -55,7 +60,7 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
       runtime = new TmuxSessionRuntime(runner, socketPath);
       repository = new SqliteConversationRepository(join(root, "conversations.sqlite"));
       const providers = new LocalProviderCatalog(
-        [codexCaptainLauncher],
+        [codexAgentLauncher],
         [
           {
             id: "codex",
@@ -138,6 +143,50 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
           return stdout;
         })
         .toContain("fake captain ready");
+
+      const workerCreated = await app.inject({
+        method: "POST",
+        url: `/api/conversations/${conversation.id}/sessions`,
+        payload: {
+          label: "Review Tests",
+          prompt: "Review the test suite",
+          provider: "codex"
+        }
+      });
+      expect(workerCreated.statusCode).toBe(201);
+      workerSessionName = workerCreated.json<{ sessionName: string }>().sessionName;
+      await expect(runtime.exists(workerSessionName)).resolves.toBe(true);
+
+      const duplicateWorker = await app.inject({
+        method: "POST",
+        url: `/api/conversations/${conversation.id}/sessions`,
+        payload: {
+          label: "Review Tests",
+          prompt: "Duplicate task",
+          provider: "codex"
+        }
+      });
+      expect(duplicateWorker.statusCode).toBe(409);
+      expect(duplicateWorker.json()).toMatchObject({ error: { code: "CONFLICT" } });
+
+      const withWorker = await app.inject({
+        method: "GET",
+        url: `/api/conversations/${conversation.id}/sessions`
+      });
+      expect(withWorker.json()).toMatchObject({
+        sessions: [
+          { name: captainSessionName, role: "captain" },
+          { name: workerSessionName, role: "worker", label: "Review Tests" }
+        ]
+      });
+
+      const workerDeleted = await app.inject({
+        method: "DELETE",
+        url: `/api/conversations/${conversation.id}/sessions/${encodeURIComponent(workerSessionName)}`
+      });
+      expect(workerDeleted.statusCode).toBe(204);
+      await expect(runtime.exists(workerSessionName)).resolves.toBe(false);
+      workerSessionName = null;
     });
   }
 );

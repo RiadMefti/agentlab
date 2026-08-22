@@ -7,10 +7,10 @@ import {
 } from "@orchestrator/contracts";
 
 import type {
-  CaptainLauncher,
+  AgentLauncher,
   ProviderCatalog,
-  ResolvedCaptainProvider
-} from "../../domain/captain-launcher.js";
+  ResolvedProvider
+} from "../../domain/agent-launcher.js";
 import {
   discoveredProviderCapabilitySchema,
   IncompatibleProviderCapabilityError,
@@ -90,14 +90,14 @@ export interface LocalProviderCatalogOptions {
 }
 
 export class LocalProviderCatalog implements ProviderCatalog {
-  readonly #launchers: ReadonlyMap<ProviderId, CaptainLauncher>;
+  readonly #launchers: ReadonlyMap<ProviderId, AgentLauncher>;
   readonly #discoveries: ReadonlyMap<ProviderId, ProviderCapabilityDiscovery>;
   readonly #cacheDurationMs: number;
   readonly #now: () => number;
   readonly #cache: ProviderCapabilityCache;
 
   public constructor(
-    launchers: readonly CaptainLauncher[],
+    launchers: readonly AgentLauncher[],
     discoveries: readonly ProviderCapabilityDiscovery[],
     private readonly locator: ProviderBinaryLocator,
     private readonly runner: CommandRunner,
@@ -116,7 +116,7 @@ export class LocalProviderCatalog implements ProviderCatalog {
     );
   }
 
-  public async resolveCaptain(id: ProviderId): Promise<ResolvedCaptainProvider | null> {
+  public async resolve(id: ProviderId): Promise<ResolvedProvider | null> {
     const launcher = this.#launchers.get(id);
     if (launcher === undefined) return null;
     const probe = await this.probe(id);
@@ -257,7 +257,7 @@ export class LocalProviderCatalog implements ProviderCatalog {
   }
 }
 
-function unavailableProbe(launcher: CaptainLauncher, reason: string): ProviderProbe {
+function unavailableProbe(launcher: AgentLauncher, reason: string): ProviderProbe {
   return {
     installed: null,
     capability: providerCapabilitySchema.parse({

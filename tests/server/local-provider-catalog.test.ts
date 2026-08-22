@@ -13,7 +13,7 @@ import type {
   RunResult
 } from "../../apps/server/src/infrastructure/process/command-runner.js";
 import { NodeCommandRunner } from "../../apps/server/src/infrastructure/process/command-runner.js";
-import { codexCaptainLauncher } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
+import { codexAgentLauncher } from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
 import { parseCodexModels } from "../../apps/server/src/infrastructure/providers/codex-capability-discovery.js";
 import {
   LocalProviderCatalog,
@@ -66,7 +66,7 @@ describe("LocalProviderCatalog", () => {
     const discoverModels = vi.fn(() => Promise.resolve(discoveredModels()));
     const modelDiscovery = discovery(discoverModels);
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [modelDiscovery],
       locator(),
       runner,
@@ -82,10 +82,10 @@ describe("LocalProviderCatalog", () => {
         defaultModel: "gpt-test"
       })
     ]);
-    await expect(catalog.resolveCaptain("codex")).resolves.toMatchObject({
+    await expect(catalog.resolve("codex")).resolves.toMatchObject({
       executable: "/opt/codex",
       version: "codex-cli 1.2.3",
-      launcher: codexCaptainLauncher,
+      launcher: codexAgentLauncher,
       capability: { source: "cache" }
     });
     expect(runner.run).toHaveBeenCalledTimes(1);
@@ -104,7 +104,7 @@ describe("LocalProviderCatalog", () => {
       }
     };
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery()],
       locator([]),
       runner,
@@ -120,12 +120,12 @@ describe("LocalProviderCatalog", () => {
         reason: "Executable not found."
       })
     ]);
-    await expect(catalog.resolveCaptain("codex")).resolves.toBeNull();
+    await expect(catalog.resolve("codex")).resolves.toBeNull();
   });
 
   it("does not create a version-ambiguous cache entry", async () => {
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery()],
       locator(),
       versionRunner(""),
@@ -144,7 +144,7 @@ describe("LocalProviderCatalog", () => {
   it("cleans an ignored-TERM version process tree after a timeout", async () => {
     const fixture = createIgnoredTermVersionFixture("version-timeout-", 'wait "$child_pid"');
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery()],
       locator([fixture.executable]),
       new NodeCommandRunner({ gracefulShutdownMs: 25, forcedShutdownMs: 1_000 }),
@@ -165,7 +165,7 @@ describe("LocalProviderCatalog", () => {
   it("cleans lingering version-probe descendants before rejecting malformed output", async () => {
     const fixture = createIgnoredTermVersionFixture("version-malformed-", "printf '%s\\n' '   '");
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery()],
       locator([fixture.executable]),
       new NodeCommandRunner({ gracefulShutdownMs: 25, forcedShutdownMs: 1_000 }),
@@ -193,7 +193,7 @@ describe("LocalProviderCatalog", () => {
     );
     const runner = versionRunner();
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       runner,
@@ -201,7 +201,7 @@ describe("LocalProviderCatalog", () => {
     );
 
     const listed = catalog.list();
-    const resolved = catalog.resolveCaptain("codex");
+    const resolved = catalog.resolve("codex");
     await vi.waitFor(() => {
       expect(discover).toHaveBeenCalledTimes(1);
     });
@@ -217,7 +217,7 @@ describe("LocalProviderCatalog", () => {
       .mockResolvedValueOnce(discoveredModels())
       .mockRejectedValueOnce(new Error("catalog timeout"));
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       versionRunner(),
@@ -264,7 +264,7 @@ describe("LocalProviderCatalog", () => {
         )
       );
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       versionRunner(),
@@ -282,7 +282,7 @@ describe("LocalProviderCatalog", () => {
         reason: expect.stringContaining("defaults to ultra")
       })
     ]);
-    await expect(catalog.resolveCaptain("codex")).resolves.toBeNull();
+    await expect(catalog.resolve("codex")).resolves.toBeNull();
   });
 
   it("does not reuse stale capabilities across CLI versions", async () => {
@@ -296,7 +296,7 @@ describe("LocalProviderCatalog", () => {
       .mockResolvedValueOnce(discoveredModels())
       .mockRejectedValueOnce(new Error("new catalog unavailable"));
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       runner,
@@ -323,7 +323,7 @@ describe("LocalProviderCatalog", () => {
       .mockResolvedValueOnce(discoveredModels())
       .mockRejectedValueOnce(new Error("second version unavailable"));
     const catalog = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       runner,
@@ -362,14 +362,14 @@ describe("LocalProviderCatalog", () => {
       now: () => 100
     };
     const first = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       versionRunner(),
       { ...shared, workspace: "/work/one" }
     );
     const second = new LocalProviderCatalog(
-      [codexCaptainLauncher],
+      [codexAgentLauncher],
       [discovery(discover)],
       locator(),
       versionRunner(),

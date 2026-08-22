@@ -10,7 +10,9 @@ import type { AgentSession, Conversation, ProviderCapability } from "@orchestrat
 import { AgentTabs } from "../../apps/web/src/components/AgentTabs.js";
 import { AppearancePicker } from "../../apps/web/src/components/AppearancePicker.js";
 import { ConversationReel } from "../../apps/web/src/components/ConversationReel.js";
+import { DeleteWorkerDialog } from "../../apps/web/src/components/DeleteWorkerDialog.js";
 import { NewConversationDialog } from "../../apps/web/src/components/NewConversationDialog.js";
+import { NewWorkerDialog } from "../../apps/web/src/components/NewWorkerDialog.js";
 import { ThemeProvider } from "../../apps/web/src/theme/react-theme.js";
 import { ThemeStore } from "../../apps/web/src/theme/theme-store.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
@@ -60,12 +62,52 @@ describe("lean interface components", () => {
   it("switches directly between captain and worker tabs", () => {
     const onSelect = vi.fn();
     render(
-      <AgentTabs sessions={[captain, worker]} selectedName={captain.name} onSelect={onSelect} />
+      <AgentTabs
+        sessions={[captain, worker]}
+        selectedName={captain.name}
+        canCreate={true}
+        onSelect={onSelect}
+        onCreate={vi.fn()}
+        onDelete={vi.fn()}
+      />
     );
 
     expect(screen.getByRole("button", { name: "Captain" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", { name: "Auth Tests" }));
     expect(onSelect).toHaveBeenCalledWith(worker.name);
+  });
+
+  it("keeps worker lifecycle controls quiet and never offers to delete the Captain", () => {
+    const onCreate = vi.fn();
+    const onDelete = vi.fn();
+    const view = render(
+      <AgentTabs
+        sessions={[captain, worker]}
+        selectedName={worker.name}
+        canCreate={true}
+        onSelect={vi.fn()}
+        onCreate={onCreate}
+        onDelete={onDelete}
+      />
+    );
+    const tabs = within(view.container);
+
+    fireEvent.click(tabs.getByRole("button", { name: "New agent" }));
+    fireEvent.click(tabs.getByRole("button", { name: "Delete Auth Tests" }));
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onDelete).toHaveBeenCalledWith(worker);
+
+    view.rerender(
+      <AgentTabs
+        sessions={[captain, worker]}
+        selectedName={captain.name}
+        canCreate={true}
+        onSelect={vi.fn()}
+        onCreate={onCreate}
+        onDelete={onDelete}
+      />
+    );
+    expect(tabs.queryByRole("button", { name: /Delete/u })).not.toBeInTheDocument();
   });
 
   it("selects a saved conversation from the Reel", () => {
@@ -404,5 +446,50 @@ describe("lean interface components", () => {
 
     expect(dialog.getByLabelText("Model")).toHaveValue("");
     expect(dialog.queryByLabelText("Custom model ID")).not.toBeInTheDocument();
+  });
+
+  it("creates a named worker with provider defaults", () => {
+    const onCreate = vi.fn();
+    const view = render(
+      <NewWorkerDialog
+        providers={[provider]}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onCreate={onCreate}
+      />
+    );
+    const dialog = within(view.container);
+
+    fireEvent.change(dialog.getByLabelText("Name"), { target: { value: "Auth Tests" } });
+    fireEvent.change(dialog.getByLabelText("Task"), {
+      target: { value: "Add authentication coverage" }
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "Start agent" }));
+
+    expect(onCreate).toHaveBeenCalledWith({
+      label: "Auth Tests",
+      prompt: "Add authentication coverage",
+      provider: "codex"
+    });
+  });
+
+  it("requires confirmation before deleting a worker", () => {
+    const onConfirm = vi.fn();
+    const view = render(
+      <DeleteWorkerDialog
+        worker={worker}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onConfirm={onConfirm}
+      />
+    );
+    const dialog = within(view.container);
+
+    expect(dialog.getByText(/stops the agent and removes its session/u)).toBeInTheDocument();
+    expect(dialog.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    fireEvent.click(dialog.getByRole("button", { name: "Delete agent" }));
+    expect(onConfirm).toHaveBeenCalledOnce();
   });
 });

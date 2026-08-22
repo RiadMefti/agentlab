@@ -8,8 +8,15 @@ export interface CreateCaptainSessionInput {
   readonly command: CommandSpec;
 }
 
+export interface CreateWorkerSessionInput {
+  readonly name: string;
+  readonly cwd: string;
+  readonly command: CommandSpec;
+}
+
 export interface SessionRuntime {
   createCaptain(input: CreateCaptainSessionInput): Promise<void>;
+  createWorker(input: CreateWorkerSessionInput): Promise<void>;
   kill(name: string): Promise<void>;
   exists(name: string): Promise<boolean>;
   list(conversationId: string): Promise<readonly AgentSession[]>;

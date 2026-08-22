@@ -1,10 +1,14 @@
-import type { CaptainCommandInput, CaptainLauncher } from "../../domain/captain-launcher.js";
+import type {
+  AgentLauncher,
+  CaptainCommandInput,
+  WorkerCommandInput
+} from "../../domain/agent-launcher.js";
 
 function promptFrom(input: CaptainCommandInput): string {
   return `<captain_instructions>\n${input.supervisorInstructions}\n</captain_instructions>\n\n<user_request>\n${input.userPrompt}\n</user_request>`;
 }
 
-export const codexCaptainLauncher: CaptainLauncher = {
+export const codexAgentLauncher: AgentLauncher = {
   id: "codex",
   label: "Codex",
   customModelPolicy: "allowed",
@@ -28,10 +32,28 @@ export const codexCaptainLauncher: CaptainLauncher = {
     if (input.model !== null) args.push("-m", input.model);
     args.push("--", input.userPrompt);
     return { executable: input.executable, args };
+  },
+  buildWorkerCommand(input) {
+    return {
+      executable: input.executable,
+      args: [
+        "--no-alt-screen",
+        "--sandbox",
+        "workspace-write",
+        "--ask-for-approval",
+        "on-request",
+        "-C",
+        input.workspace,
+        "-c",
+        "features.multi_agent=false",
+        "--",
+        input.userPrompt
+      ]
+    };
   }
 };
 
-export const claudeCaptainLauncher: CaptainLauncher = {
+export const claudeAgentLauncher: AgentLauncher = {
   id: "claude",
   label: "Claude",
   customModelPolicy: "allowed",
@@ -42,10 +64,16 @@ export const claudeCaptainLauncher: CaptainLauncher = {
     if (input.model !== null) args.push("--model", input.model);
     args.push("--append-system-prompt", input.supervisorInstructions, "--", input.userPrompt);
     return { executable: input.executable, args };
+  },
+  buildWorkerCommand(input) {
+    return {
+      executable: input.executable,
+      args: ["--ax-screen-reader", "--name", workerProcessName(input), "--", input.userPrompt]
+    };
   }
 };
 
-export const opencodeCaptainLauncher: CaptainLauncher = {
+export const opencodeAgentLauncher: AgentLauncher = {
   id: "opencode",
   label: "OpenCode",
   customModelPolicy: "catalog-only",
@@ -62,11 +90,21 @@ export const opencodeCaptainLauncher: CaptainLauncher = {
     if (input.model !== null) args.push("--model", input.model);
     args.push("--prompt", promptFrom(input));
     return { executable: input.executable, args };
+  },
+  buildWorkerCommand(input) {
+    return {
+      executable: input.executable,
+      args: [input.workspace, "--prompt", input.userPrompt]
+    };
   }
 };
 
-export const captainLaunchers = [
-  codexCaptainLauncher,
-  claudeCaptainLauncher,
-  opencodeCaptainLauncher
+export const agentLaunchers = [
+  codexAgentLauncher,
+  claudeAgentLauncher,
+  opencodeAgentLauncher
 ] as const;
+
+function workerProcessName(input: WorkerCommandInput): string {
+  return `worker-${input.conversationId.slice(0, 8)}-${input.workerSlug}`;
+}

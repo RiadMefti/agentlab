@@ -19,10 +19,13 @@ interface RecordedCall {
 class RecordingRunner implements CommandRunner {
   public readonly calls: RecordedCall[] = [];
 
+  public constructor(private readonly sessionExists = false) {}
+
   public run(executable: string, args: readonly string[]): Promise<RunResult> {
     this.calls.push({ executable, args });
     const subcommand = args[0];
     if (subcommand === "has-session") {
+      if (this.sessionExists) return Promise.resolve({ stdout: "", stderr: "" });
       const error = Object.assign(new Error("can't find session"), {
         stderr: "can't find session"
       });
@@ -121,5 +124,60 @@ describe("TmuxSessionRuntime", () => {
       })
     ).rejects.toThrow(/only a managed captain/u);
     expect(runner.calls).toHaveLength(0);
+  });
+
+  it("creates a strictly named worker through the same safe tmux lifecycle", async () => {
+    const runner = new RecordingRunner();
+    const runtime = new TmuxSessionRuntime(runner);
+    const name = buildWorkerSessionName(TEST_CONVERSATION_ID, "claude", "review");
+
+    await runtime.createWorker({
+      name,
+      cwd: "/work/project",
+      command: { executable: "/opt/claude cli", args: ["--", "review; exit 1"] }
+    });
+
+    expect(runner.calls[1]?.args).toEqual([
+      "new-session",
+      "-d",
+      "-s",
+      name,
+      "-c",
+      "/work/project",
+      "-x",
+      "120",
+      "-y",
+      "40"
+    ]);
+    expect(runner.calls.at(-1)?.args.at(-1)).toBe("'/opt/claude cli' -- 'review; exit 1'");
+  });
+
+  it("refuses to launch a Captain through the worker boundary", async () => {
+    const runner = new RecordingRunner();
+    const runtime = new TmuxSessionRuntime(runner);
+
+    await expect(
+      runtime.createWorker({
+        name: buildCaptainSessionName(TEST_CONVERSATION_ID, "codex"),
+        cwd: "/work/project",
+        command: { executable: "codex", args: [] }
+      })
+    ).rejects.toThrow(/only a managed worker/u);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it("rejects an exact duplicate worker name before creating tmux state", async () => {
+    const runner = new RecordingRunner(true);
+    const runtime = new TmuxSessionRuntime(runner);
+    const name = buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "review");
+
+    await expect(
+      runtime.createWorker({
+        name,
+        cwd: "/work/project",
+        command: { executable: "codex", args: [] }
+      })
+    ).rejects.toThrow("That session already exists.");
+    expect(runner.calls).toEqual([{ executable: "tmux", args: ["has-session", "-t", `=${name}`] }]);
   });
 });

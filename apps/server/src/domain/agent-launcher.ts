@@ -17,16 +17,25 @@ export interface CaptainCommandInput {
   readonly userPrompt: string;
 }
 
-/** Builds the one command used to start a conversation's captain. */
-export interface CaptainLauncher {
+export interface WorkerCommandInput {
+  readonly executable: string;
+  readonly conversationId: string;
+  readonly workspace: string;
+  readonly workerSlug: string;
+  readonly userPrompt: string;
+}
+
+/** Builds provider-native commands for captains and explicitly user-created workers. */
+export interface AgentLauncher {
   readonly id: ProviderId;
   readonly label: string;
   readonly customModelPolicy: CustomModelPolicy;
   buildCaptainCommand(input: CaptainCommandInput): CommandSpec;
+  buildWorkerCommand(input: WorkerCommandInput): CommandSpec;
 }
 
-export interface ResolvedCaptainProvider {
-  readonly launcher: CaptainLauncher;
+export interface ResolvedProvider {
+  readonly launcher: AgentLauncher;
   readonly executable: string;
   readonly version: string;
   readonly capability: ProviderCapability;
@@ -34,5 +43,5 @@ export interface ResolvedCaptainProvider {
 
 export interface ProviderCatalog {
   list(): Promise<readonly ProviderCapability[]>;
-  resolveCaptain(id: ProviderId): Promise<ResolvedCaptainProvider | null>;
+  resolve(id: ProviderId): Promise<ResolvedProvider | null>;
 }

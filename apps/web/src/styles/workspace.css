@@ -49,6 +49,12 @@
   display: none;
 }
 
+.agent-tab {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+}
+
 .agent {
   padding: 0 10px;
   border: 0;
@@ -66,6 +72,30 @@
 
 .agent.active {
   border-bottom-color: var(--color-text);
+}
+
+.agent-delete,
+.agent-add {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-quiet);
+}
+
+.agent-delete {
+  width: 24px;
+  margin-left: -7px;
+  font-size: 14px;
+}
+
+.agent-add {
+  width: 32px;
+  font-size: 17px;
+}
+
+.agent-delete:hover,
+.agent-add:hover {
+  color: var(--color-text);
 }
 
 .appearance-picker {

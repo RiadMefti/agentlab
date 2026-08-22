@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { CaptainCommandInput } from "../../apps/server/src/domain/captain-launcher.js";
+import type {
+  CaptainCommandInput,
+  WorkerCommandInput
+} from "../../apps/server/src/domain/agent-launcher.js";
 import {
-  claudeCaptainLauncher,
-  codexCaptainLauncher,
-  opencodeCaptainLauncher
-} from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
+  claudeAgentLauncher,
+  codexAgentLauncher,
+  opencodeAgentLauncher
+} from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
 import { TEST_CONVERSATION_ID } from "../helpers/fakes.js";
 import { LONG_BEDROCK_MODEL_ID } from "../helpers/model-ids.js";
 
@@ -19,9 +22,17 @@ const input: CaptainCommandInput = {
   userPrompt: "Implement the task"
 };
 
-describe("captain launchers", () => {
+const workerInput: WorkerCommandInput = {
+  executable: "/opt/provider",
+  conversationId: TEST_CONVERSATION_ID,
+  workspace: "/work/project",
+  workerSlug: "auth-tests",
+  userPrompt: "Implement the task"
+};
+
+describe("agent launchers", () => {
   it("builds Codex arguments without a shell boundary", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand(input);
+    const command = codexAgentLauncher.buildCaptainCommand(input);
     expect(command.executable).toBe("/opt/provider");
     expect(command.args).toEqual([
       "--no-alt-screen",
@@ -45,7 +56,7 @@ describe("captain launchers", () => {
   });
 
   it("passes a long Bedrock deployment identifier as one literal launcher argument", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand({
+    const command = codexAgentLauncher.buildCaptainCommand({
       ...input,
       model: LONG_BEDROCK_MODEL_ID,
       reasoning: null
@@ -57,7 +68,7 @@ describe("captain launchers", () => {
   });
 
   it("builds Claude arguments with effort and a named session", () => {
-    const command = claudeCaptainLauncher.buildCaptainCommand(input);
+    const command = claudeAgentLauncher.buildCaptainCommand(input);
     expect(command.args).toContain("--ax-screen-reader");
     expect(command.args).toContain("--effort");
     expect(command.args).toContain("high");
@@ -68,7 +79,7 @@ describe("captain launchers", () => {
   });
 
   it("starts OpenCode's persistent root TUI with a model and prompt", () => {
-    const command = opencodeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
+    const command = opencodeAgentLauncher.buildCaptainCommand({ ...input, reasoning: null });
     expect(command.args).toEqual([
       "/work/project",
       "--model",
@@ -81,13 +92,13 @@ describe("captain launchers", () => {
   });
 
   it("fails closed for unsupported OpenCode startup variants", () => {
-    expect(() => opencodeCaptainLauncher.buildCaptainCommand(input)).toThrow(
+    expect(() => opencodeAgentLauncher.buildCaptainCommand(input)).toThrow(
       "OpenCode does not support selecting a variant"
     );
   });
 
   it("lets the provider choose its default model and reasoning", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand({
+    const command = codexAgentLauncher.buildCaptainCommand({
       ...input,
       model: null,
       reasoning: null
@@ -97,15 +108,15 @@ describe("captain launchers", () => {
       false
     );
 
-    const claude = claudeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
+    const claude = claudeAgentLauncher.buildCaptainCommand({ ...input, reasoning: null });
     expect(claude.args).not.toContain("--effort");
 
-    const opencode = opencodeCaptainLauncher.buildCaptainCommand({ ...input, reasoning: null });
+    const opencode = opencodeAgentLauncher.buildCaptainCommand({ ...input, reasoning: null });
     expect(opencode.args).not.toContain("--variant");
   });
 
   it("terminates options before a dash-prefixed task", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand({
+    const command = codexAgentLauncher.buildCaptainCommand({
       ...input,
       userPrompt: "--dangerously-bypass-approvals-and-sandbox"
     });
@@ -113,7 +124,7 @@ describe("captain launchers", () => {
   });
 
   it("injects Codex orchestration as native developer instructions", () => {
-    const command = codexCaptainLauncher.buildCaptainCommand({
+    const command = codexAgentLauncher.buildCaptainCommand({
       ...input,
       supervisorInstructions: 'Orchestrate "only"\nand never implement.'
     });
@@ -121,5 +132,42 @@ describe("captain launchers", () => {
       'developer_instructions="Orchestrate \\"only\\"\\nand never implement."'
     );
     expect(command.args).toContain("features.multi_agent=false");
+  });
+
+  it("starts workers without Captain instructions or model overrides", () => {
+    const codex = codexAgentLauncher.buildWorkerCommand(workerInput);
+    expect(codex.args).toEqual([
+      "--no-alt-screen",
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "on-request",
+      "-C",
+      "/work/project",
+      "-c",
+      "features.multi_agent=false",
+      "--",
+      "Implement the task"
+    ]);
+
+    const claude = claudeAgentLauncher.buildWorkerCommand(workerInput);
+    expect(claude.args).toEqual([
+      "--ax-screen-reader",
+      "--name",
+      "worker-11111111-auth-tests",
+      "--",
+      "Implement the task"
+    ]);
+
+    const opencode = opencodeAgentLauncher.buildWorkerCommand(workerInput);
+    expect(opencode.args).toEqual(["/work/project", "--prompt", "Implement the task"]);
+  });
+
+  it("terminates worker options before a dash-prefixed Codex task", () => {
+    const command = codexAgentLauncher.buildWorkerCommand({
+      ...workerInput,
+      userPrompt: "--dangerously-bypass-approvals-and-sandbox"
+    });
+    expect(command.args.slice(-2)).toEqual(["--", "--dangerously-bypass-approvals-and-sandbox"]);
   });
 });

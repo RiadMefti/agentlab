@@ -55,6 +55,11 @@
     grid-template-columns: 1fr;
     gap: 20px;
   }
+
+  .worker-configuration {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

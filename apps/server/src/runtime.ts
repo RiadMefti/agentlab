@@ -5,7 +5,7 @@ import { buildApp } from "./app.js";
 import { NodeCommandRunner } from "./infrastructure/process/command-runner.js";
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { BinaryLocator } from "./infrastructure/providers/binary-locator.js";
-import { captainLaunchers } from "./infrastructure/providers/captain-launchers.js";
+import { agentLaunchers } from "./infrastructure/providers/agent-launchers.js";
 import { LocalProviderCatalog } from "./infrastructure/providers/local-provider-catalog.js";
 import { createProviderDiscoveries } from "./infrastructure/providers/provider-discoveries.js";
 import { TerminalGateway } from "./infrastructure/terminal/terminal-gateway.js";
@@ -29,7 +29,7 @@ export async function createOrchestratorServer(
   try {
     const sessions = new TmuxSessionRuntime(runner);
     const providers = new LocalProviderCatalog(
-      captainLaunchers,
+      agentLaunchers,
       createProviderDiscoveries(runner),
       new BinaryLocator(runner),
       runner,

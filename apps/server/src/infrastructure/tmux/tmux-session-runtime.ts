@@ -2,7 +2,11 @@ import { sessionHistoryLimit, type AgentSession } from "@orchestrator/contracts"
 
 import { parseSessionName, sessionLabel } from "../../domain/agent-session-name.js";
 import { ConflictError } from "../../domain/errors.js";
-import type { CreateCaptainSessionInput, SessionRuntime } from "../../domain/session-runtime.js";
+import type {
+  CreateCaptainSessionInput,
+  CreateWorkerSessionInput,
+  SessionRuntime
+} from "../../domain/session-runtime.js";
 import { type CommandRunner, errorOutput } from "../process/command-runner.js";
 import { renderShellCommand } from "./shell-command.js";
 
@@ -23,9 +27,20 @@ export class TmuxSessionRuntime implements SessionRuntime {
   ) {}
 
   public async createCaptain(input: CreateCaptainSessionInput): Promise<void> {
+    await this.createManagedSession(input, "captain");
+  }
+
+  public async createWorker(input: CreateWorkerSessionInput): Promise<void> {
+    await this.createManagedSession(input, "worker");
+  }
+
+  private async createManagedSession(
+    input: CreateCaptainSessionInput | CreateWorkerSessionInput,
+    expectedRole: "captain" | "worker"
+  ): Promise<void> {
     const identity = parseSessionName(input.name);
-    if (identity?.role !== "captain") {
-      throw new Error("The app may create only a managed captain session.");
+    if (identity?.role !== expectedRole) {
+      throw new Error(`The app may create only a managed ${expectedRole} session.`);
     }
     if (await this.exists(input.name)) {
       throw new ConflictError("That session already exists.");

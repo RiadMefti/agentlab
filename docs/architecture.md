@@ -21,18 +21,23 @@ captain ── raw tmux/provider CLI commands ──▶ workers
 
 Observation and direct interaction
 Electron renderer or browser ◀── WebSocket ── PTY ──▶ exact tmux session
+
+Explicit user lifecycle
+Electron renderer or browser ── validated HTTP ──▶ provider launcher + tmux worker
 ```
 
-The second path never carries captain-to-worker instructions. There is no app command language,
-captain API, wrapper CLI, MCP bridge, or provider-session translation layer.
+The observation path never carries captain-to-worker instructions. The lifecycle path only lets the
+user start a worker with an initial task or delete that worker; it does not mediate ongoing agent
+communication. There is no app command language, captain API, wrapper CLI, MCP bridge, or
+provider-session translation layer.
 
 ## Components
 
 - `packages/contracts`: strict HTTP and terminal-message schemas shared by server and web.
 - `apps/server/src/domain`: conversation ports, session identity, launch command values, and errors.
 - `apps/server/src/application`: conversation use cases and the captain's invariant instructions.
-- `apps/server/src/infrastructure`: SQLite, process discovery, one-time captain launch definitions,
-  tmux, and PTY implementations.
+- `apps/server/src/infrastructure`: SQLite, process discovery, provider launch definitions, tmux,
+  and PTY implementations.
 - `apps/server/src/http`: loopback-only HTTP/WebSocket transport and boundary validation.
 - `apps/web`: the conversation reel, agent tabs, creation dialog, and terminal view.
 - `apps/desktop`: a thin Electron lifecycle shell that embeds the same server and web build.
@@ -41,7 +46,7 @@ Domain code imports neither framework code nor concrete infrastructure. ESLint r
 boundary. Server composition lives in `apps/server/src/runtime.ts`; the CLI and Electron entry
 points only own their respective process lifecycles.
 
-## Create flow
+## Conversation create flow
 
 1. HTTP validates provider, nullable model/thinking selections, and task.
 2. The application resolves an installed provider CLI and its cached model capabilities.
@@ -50,8 +55,20 @@ points only own their respective process lifecycles.
 5. The tmux implementation creates and configures one retained session, then starts the captain.
 6. SQLite stores the conversation only after its captain session starts.
 
-Captain launchers are not used again. Worker creation and captain-worker communication happen
-directly inside the captain through native commands.
+Captain-worker communication still happens directly inside the captain through native commands.
+
+## Explicit worker lifecycle
+
+1. HTTP validates the worker's friendly name, provider, and initial task.
+2. The application resolves that installed provider and generates a strictly managed worker session
+   name owned by the conversation.
+3. The provider launcher starts the real CLI with provider-default model settings; process values
+   remain individual arguments until the tested tmux quoting boundary.
+4. Deletion parses the managed identity, verifies that it belongs to the conversation and is a
+   worker, confirms that it still exists, and then stops that exact tmux session.
+
+Captain is rejected by the application boundary and is never offered as a deletion target in the UI.
+The captain may continue creating and controlling workers directly with native commands.
 
 ## Provider capability discovery
 
@@ -77,7 +94,7 @@ root TUI with `--prompt` inside tmux. In 1.18.21, `run --interactive` is parsed 
 
 ## Discovery flow
 
-The captain gives each worker a strict session name:
+The captain and the explicit lifecycle flow give each worker a strict session name:
 
 ```text
 ao__<conversation-uuid>__worker__<provider>__<slug>

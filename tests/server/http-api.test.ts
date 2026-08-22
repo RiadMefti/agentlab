@@ -6,8 +6,12 @@ import type { ProviderCapability } from "@orchestrator/contracts";
 import { ConversationService } from "../../apps/server/src/application/conversation-service.js";
 import { buildApp } from "../../apps/server/src/app.js";
 import { TerminalGateway } from "../../apps/server/src/infrastructure/terminal/terminal-gateway.js";
-import { opencodeCaptainLauncher } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
-import type { ProviderCatalog } from "../../apps/server/src/domain/captain-launcher.js";
+import { opencodeAgentLauncher } from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
+import type { ProviderCatalog } from "../../apps/server/src/domain/agent-launcher.js";
+import {
+  buildCaptainSessionName,
+  buildWorkerSessionName
+} from "../../apps/server/src/domain/agent-session-name.js";
 import {
   MemoryConversationRepository,
   MemorySessionRuntime,
@@ -26,11 +30,12 @@ describe("local HTTP API", () => {
   });
 
   async function createApp(
-    providers: ProviderCatalog = new StaticProviderCatalog()
+    providers: ProviderCatalog = new StaticProviderCatalog(),
+    sessions: MemorySessionRuntime = new MemorySessionRuntime()
   ): Promise<FastifyInstance> {
     const service = new ConversationService({
       repository: new MemoryConversationRepository(),
-      sessions: new MemorySessionRuntime(),
+      sessions,
       providers,
       workspace: "/work/project",
       createId: () => TEST_CONVERSATION_ID,
@@ -132,13 +137,13 @@ describe("local HTTP API", () => {
 
   it("rejects a model that is outside a catalog-only provider", async () => {
     const capability: ProviderCapability = {
-      ...testProviderCapability(opencodeCaptainLauncher),
+      ...testProviderCapability(opencodeAgentLauncher),
       defaultModel: null,
       models: [],
       customModelPolicy: "catalog-only"
     };
     const catalog = new StaticProviderCatalog(
-      new Map([["opencode", opencodeCaptainLauncher]]),
+      new Map([["opencode", opencodeAgentLauncher]]),
       "/opt/opencode",
       { opencode: capability }
     );
@@ -204,6 +209,90 @@ describe("local HTTP API", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("creates and deletes a worker through validated session endpoints", async () => {
+    const sessions = new MemorySessionRuntime();
+    const server = await createApp(new StaticProviderCatalog(), sessions);
+    await server.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: { prompt: "Coordinate", provider: "codex", model: null, reasoning: null }
+    });
+
+    const created = await server.inject({
+      method: "POST",
+      url: `/api/conversations/${TEST_CONVERSATION_ID}/sessions`,
+      payload: { label: "Auth Tests", prompt: "Test authentication", provider: "codex" }
+    });
+    const workerName = buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "auth-tests");
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toEqual({ sessionName: workerName });
+    expect(sessions.createdWorkers).toHaveLength(1);
+
+    sessions.liveSessions = [
+      {
+        name: workerName,
+        conversationId: TEST_CONVERSATION_ID,
+        role: "worker",
+        provider: "codex",
+        label: "Auth Tests",
+        status: "running",
+        attached: false,
+        startedAt: "2026-08-21T12:01:00.000Z"
+      }
+    ];
+    const deleted = await server.inject({
+      method: "DELETE",
+      url: `/api/conversations/${TEST_CONVERSATION_ID}/sessions/${encodeURIComponent(workerName)}`
+    });
+    expect(deleted.statusCode).toBe(204);
+    expect(sessions.killed).toEqual([workerName]);
+  });
+
+  it("rejects unsafe worker creation input", async () => {
+    const sessions = new MemorySessionRuntime();
+    const server = await createApp(new StaticProviderCatalog(), sessions);
+    await server.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: { prompt: "Coordinate", provider: "codex", model: null, reasoning: null }
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: `/api/conversations/${TEST_CONVERSATION_ID}/sessions`,
+      payload: {
+        label: "../../personal",
+        prompt: "Run this",
+        provider: "codex",
+        unrecognized: true
+      }
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(sessions.createdWorkers).toHaveLength(0);
+  });
+
+  it("protects the Captain from the worker deletion endpoint", async () => {
+    const sessions = new MemorySessionRuntime();
+    const server = await createApp(new StaticProviderCatalog(), sessions);
+    await server.inject({
+      method: "POST",
+      url: "/api/conversations",
+      payload: { prompt: "Coordinate", provider: "codex", model: null, reasoning: null }
+    });
+    const captainName = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    const response = await server.inject({
+      method: "DELETE",
+      url: `/api/conversations/${TEST_CONVERSATION_ID}/sessions/${encodeURIComponent(captainName)}`
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: { code: "CONFLICT", message: "The Captain cannot be deleted." }
+    });
+    expect(sessions.killed).toHaveLength(0);
   });
 
   it("rejects non-loopback Host headers", async () => {

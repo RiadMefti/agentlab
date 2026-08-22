@@ -1,13 +1,7 @@
 import { z } from "zod";
 
 import { modelIdSchema, providerIdSchema, reasoningIdSchema } from "./provider.js";
-
-const promptSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(20_000)
-  .refine((prompt) => !prompt.includes("\0"), { message: "Prompt cannot contain null bytes." });
+import { agentPromptSchema } from "./session.js";
 
 export const conversationSchema = z
   .object({
@@ -26,7 +20,7 @@ export type Conversation = z.infer<typeof conversationSchema>;
 
 export const createConversationInputSchema = z
   .object({
-    prompt: promptSchema,
+    prompt: agentPromptSchema,
     title: z.string().trim().min(1).max(80).optional(),
     provider: providerIdSchema,
     model: modelIdSchema.nullable().optional(),

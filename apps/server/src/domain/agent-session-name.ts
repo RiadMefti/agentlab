@@ -36,6 +36,14 @@ export function buildWorkerSessionName(
   return `${buildWorkerSessionPrefix(conversationId)}${provider}__${slug}`;
 }
 
+export function workerSlugFromLabel(label: string): string {
+  const slug = label.trim().toLowerCase().replaceAll(" ", "-");
+  if (!WORKER_SLUG_PATTERN.test(slug)) {
+    throw new Error("Worker name must be 1–32 letters, digits, spaces, or hyphens.");
+  }
+  return slug;
+}
+
 export function parseSessionName(name: string): ParsedSessionName | null {
   const match = SESSION_PATTERN.exec(name);
   if (match === null) return null;

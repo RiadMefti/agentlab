@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { AgentSession } from "@orchestrator/contracts";
 
 import { ConversationService } from "../../apps/server/src/application/conversation-service.js";
-import { ConflictError, ProviderUnavailableError } from "../../apps/server/src/domain/errors.js";
+import {
+  ConflictError,
+  NotFoundError,
+  ProviderUnavailableError
+} from "../../apps/server/src/domain/errors.js";
 import {
   buildCaptainSessionName,
   buildWorkerSessionName
@@ -171,5 +175,96 @@ describe("ConversationService", () => {
       name: conversation.captainSessionName,
       status: "stopped"
     });
+  });
+
+  it("creates a named worker with the selected provider's defaults", async () => {
+    const { sessions, service } = createFixture();
+    await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    const sessionName = await service.createWorker(TEST_CONVERSATION_ID, {
+      label: "Auth Tests",
+      prompt: "Add focused authentication tests",
+      provider: "codex"
+    });
+
+    expect(sessionName).toBe(buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "auth-tests"));
+    expect(sessions.createdWorkers).toEqual([
+      {
+        name: sessionName,
+        cwd: "/work/project",
+        command: {
+          executable: "/opt/bin/codex",
+          args: expect.arrayContaining(["-C", "/work/project", "features.multi_agent=false"])
+        }
+      }
+    ]);
+    expect(sessions.createdWorkers[0]?.command.args.slice(-2)).toEqual([
+      "--",
+      "Add focused authentication tests"
+    ]);
+  });
+
+  it("deletes only an existing worker owned by the conversation", async () => {
+    const { sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    const worker: AgentSession = {
+      name: buildWorkerSessionName(TEST_CONVERSATION_ID, "claude", "review"),
+      conversationId: TEST_CONVERSATION_ID,
+      role: "worker",
+      provider: "claude",
+      label: "Review",
+      status: "running",
+      attached: false,
+      startedAt: "2026-08-21T12:01:00.000Z"
+    };
+    sessions.liveSessions = [worker];
+
+    await expect(service.deleteWorker(conversation.id, worker.name)).resolves.toBeUndefined();
+    expect(sessions.killed).toEqual([worker.name]);
+  });
+
+  it("never deletes the Captain", async () => {
+    const { sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    await expect(
+      service.deleteWorker(conversation.id, conversation.captainSessionName)
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(sessions.killed).toHaveLength(0);
+  });
+
+  it("does not target a missing or cross-conversation worker", async () => {
+    const { sessions, service } = createFixture();
+    await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    const foreignWorker = buildWorkerSessionName(
+      "22222222-2222-4222-8222-222222222222",
+      "codex",
+      "review"
+    );
+
+    await expect(service.deleteWorker(TEST_CONVERSATION_ID, foreignWorker)).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    expect(sessions.killed).toHaveLength(0);
   });
 });

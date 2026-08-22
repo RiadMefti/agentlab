@@ -1,11 +1,11 @@
-import { createConversationInputSchema } from "@orchestrator/contracts";
+import { createConversationInputSchema, createWorkerInputSchema } from "@orchestrator/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import type { BrowserTerminalPort } from "../application/browser-terminal.js";
 import type { ConversationService } from "../application/conversation-service.js";
 
-const conversationParamsSchema = z.object({ conversationId: z.uuid() });
+const conversationParamsSchema = z.object({ conversationId: z.uuid() }).strict();
 const terminalParamsSchema = conversationParamsSchema.extend({
   sessionName: z.string().min(1).max(180)
 });
@@ -38,6 +38,19 @@ export function registerRoutes(app: FastifyInstance, dependencies: RouteDependen
     return {
       sessions: await dependencies.conversations.listSessions(conversationId)
     };
+  });
+
+  app.post("/api/conversations/:conversationId/sessions", async (request, reply) => {
+    const { conversationId } = conversationParamsSchema.parse(request.params);
+    const input = createWorkerInputSchema.parse(request.body);
+    const sessionName = await dependencies.conversations.createWorker(conversationId, input);
+    return reply.status(201).send({ sessionName });
+  });
+
+  app.delete("/api/conversations/:conversationId/sessions/:sessionName", async (request, reply) => {
+    const { conversationId, sessionName } = terminalParamsSchema.parse(request.params);
+    await dependencies.conversations.deleteWorker(conversationId, sessionName);
+    return reply.status(204).send();
   });
 
   app.get(

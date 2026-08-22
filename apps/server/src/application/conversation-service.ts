@@ -4,14 +4,20 @@ import type {
   AgentSession,
   Conversation,
   CreateConversationInput,
+  CreateWorkerInput,
   ProviderCapability,
   ProviderId
 } from "@orchestrator/contracts";
 
 import type { ConversationRepository } from "../domain/conversation-repository.js";
 import { ConflictError, NotFoundError, ProviderUnavailableError } from "../domain/errors.js";
-import type { ProviderCatalog } from "../domain/captain-launcher.js";
-import { buildCaptainSessionName } from "../domain/agent-session-name.js";
+import type { ProviderCatalog } from "../domain/agent-launcher.js";
+import {
+  buildCaptainSessionName,
+  buildWorkerSessionName,
+  parseSessionName,
+  workerSlugFromLabel
+} from "../domain/agent-session-name.js";
 import type { SessionRuntime } from "../domain/session-runtime.js";
 import { buildSupervisorInstructions } from "./supervisor-prompt.js";
 import { deriveTitle } from "./title.js";
@@ -51,7 +57,7 @@ export class ConversationService {
   }
 
   public async createConversation(input: CreateConversationInput): Promise<Conversation> {
-    const resolved = await this.#providers.resolveCaptain(input.provider);
+    const resolved = await this.#providers.resolve(input.provider);
     if (resolved === null) {
       throw new ProviderUnavailableError(
         `${providerLabel(input.provider)} is not available on this machine.`
@@ -78,7 +84,7 @@ export class ConversationService {
     const providerExecutables: Partial<Record<ProviderId, string>> = {};
     for (const capability of availableProviders) {
       if (!capability.available) continue;
-      const provider = await this.#providers.resolveCaptain(capability.id);
+      const provider = await this.#providers.resolve(capability.id);
       if (provider !== null) providerExecutables[capability.id] = provider.executable;
     }
 
@@ -134,6 +140,49 @@ export class ConversationService {
       if (left.role !== right.role) return left.role === "captain" ? -1 : 1;
       return left.name.localeCompare(right.name);
     });
+  }
+
+  public async createWorker(conversationId: string, input: CreateWorkerInput): Promise<string> {
+    await this.requireConversation(conversationId);
+    const resolved = await this.#providers.resolve(input.provider);
+    if (resolved === null) {
+      throw new ProviderUnavailableError(
+        `${providerLabel(input.provider)} is not available on this machine.`
+      );
+    }
+
+    const workerSlug = workerSlugFromLabel(input.label);
+    const sessionName = buildWorkerSessionName(conversationId, input.provider, workerSlug);
+    const command = resolved.launcher.buildWorkerCommand({
+      executable: resolved.executable,
+      conversationId,
+      workspace: this.#workspace,
+      workerSlug,
+      userPrompt: input.prompt
+    });
+    await this.#sessions.createWorker({
+      name: sessionName,
+      cwd: this.#workspace,
+      command
+    });
+    return sessionName;
+  }
+
+  public async deleteWorker(conversationId: string, sessionName: string): Promise<void> {
+    await this.requireConversation(conversationId);
+    const identity = parseSessionName(sessionName);
+    if (identity?.conversationId !== conversationId) {
+      throw new NotFoundError("Worker session not found.");
+    }
+    if (identity.role === "captain") {
+      throw new ConflictError("The Captain cannot be deleted.");
+    }
+
+    const sessions = await this.#sessions.list(conversationId);
+    if (!sessions.some(({ name, role }) => name === sessionName && role === "worker")) {
+      throw new NotFoundError("Worker session not found.");
+    }
+    await this.#sessions.kill(sessionName);
   }
 
   public async requireAttachableSession(

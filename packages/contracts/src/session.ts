@@ -29,6 +29,40 @@ export const sessionsResponseSchema = z.object({
 
 export type SessionsResponse = z.infer<typeof sessionsResponseSchema>;
 
+export const agentPromptSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20_000)
+  .refine((prompt) => !prompt.includes("\0"), { message: "Prompt cannot contain null bytes." });
+
+export const workerLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(32)
+  .regex(/^[A-Za-z0-9]+(?:[ -][A-Za-z0-9]+)*$/u, {
+    message: "Name can contain letters, numbers, spaces, and hyphens."
+  });
+
+export const createWorkerInputSchema = z
+  .object({
+    label: workerLabelSchema,
+    prompt: agentPromptSchema,
+    provider: providerIdSchema
+  })
+  .strict();
+
+export type CreateWorkerInput = z.infer<typeof createWorkerInputSchema>;
+
+export const workerCreatedResponseSchema = z
+  .object({
+    sessionName: z.string().min(1)
+  })
+  .strict();
+
+export type WorkerCreatedResponse = z.infer<typeof workerCreatedResponseSchema>;
+
 export const terminalClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("input"), data: z.string().max(64_000) }).strict(),
   z

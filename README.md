@@ -30,10 +30,12 @@ GitHub build provenance attestations are attached to every release.
 
 1. Start a conversation and choose Codex, Claude Code, or OpenCode as the captain.
 2. Select the model and thinking level, then give the captain an objective.
-3. The captain delegates work by creating real agent sessions.
+3. The captain delegates work by creating real agent sessions, or you start one directly with the
+   quiet agent action.
 4. Each agent appears automatically as a tab beside the captain.
-5. Switch tabs to read a session or speak directly to that agent.
-6. Return to any saved conversation and continue where the team left off.
+5. Switch tabs to read a session, speak directly to that agent, or delete a finished worker.
+6. Captain remains pinned and cannot be deleted.
+7. Return to any saved conversation and continue where the team left off.
 
 ## Requirements
 

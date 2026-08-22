@@ -4,13 +4,16 @@ import {
   conversationsResponseSchema,
   providersResponseSchema,
   sessionsResponseSchema,
+  workerCreatedResponseSchema,
   type Conversation,
   type ConversationsResponse,
   type CreateConversationInput,
+  type CreateWorkerInput,
   type ProvidersResponse,
-  type SessionsResponse
+  type SessionsResponse,
+  type WorkerCreatedResponse
 } from "@orchestrator/contracts";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 export class ApiClientError extends Error {
   public constructor(
@@ -48,6 +51,29 @@ export async function getSessions(conversationId: string): Promise<SessionsRespo
     `/api/conversations/${encodeURIComponent(conversationId)}/sessions`,
     undefined,
     sessionsResponseSchema
+  );
+}
+
+export async function createWorker(
+  conversationId: string,
+  input: CreateWorkerInput
+): Promise<WorkerCreatedResponse> {
+  return request(
+    `/api/conversations/${encodeURIComponent(conversationId)}/sessions`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input)
+    },
+    workerCreatedResponseSchema
+  );
+}
+
+export async function deleteWorker(conversationId: string, sessionName: string): Promise<void> {
+  await request(
+    `/api/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(sessionName)}`,
+    { method: "DELETE" },
+    z.null()
   );
 }
 

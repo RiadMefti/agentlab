@@ -7,15 +7,16 @@ import type {
 
 import type { ConversationRepository } from "../../apps/server/src/domain/conversation-repository.js";
 import type {
-  CaptainLauncher,
+  AgentLauncher,
   ProviderCatalog,
-  ResolvedCaptainProvider
-} from "../../apps/server/src/domain/captain-launcher.js";
+  ResolvedProvider
+} from "../../apps/server/src/domain/agent-launcher.js";
 import type {
   CreateCaptainSessionInput,
+  CreateWorkerSessionInput,
   SessionRuntime
 } from "../../apps/server/src/domain/session-runtime.js";
-import { codexCaptainLauncher } from "../../apps/server/src/infrastructure/providers/captain-launchers.js";
+import { codexAgentLauncher } from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
 
 export const TEST_CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -47,6 +48,7 @@ export class MemoryConversationRepository implements ConversationRepository {
 
 export class MemorySessionRuntime implements SessionRuntime {
   public readonly created: CreateCaptainSessionInput[] = [];
+  public readonly createdWorkers: CreateWorkerSessionInput[] = [];
   public readonly killed: string[] = [];
   public liveSessions: AgentSession[] = [];
   public createError: Error | null = null;
@@ -54,6 +56,12 @@ export class MemorySessionRuntime implements SessionRuntime {
   public createCaptain(input: CreateCaptainSessionInput): Promise<void> {
     if (this.createError !== null) return Promise.reject(this.createError);
     this.created.push(input);
+    return Promise.resolve();
+  }
+
+  public createWorker(input: CreateWorkerSessionInput): Promise<void> {
+    if (this.createError !== null) return Promise.reject(this.createError);
+    this.createdWorkers.push(input);
     return Promise.resolve();
   }
 
@@ -75,8 +83,8 @@ export class MemorySessionRuntime implements SessionRuntime {
 
 export class StaticProviderCatalog implements ProviderCatalog {
   public constructor(
-    private readonly launchers: ReadonlyMap<ProviderId, CaptainLauncher> = new Map([
-      ["codex", codexCaptainLauncher]
+    private readonly launchers: ReadonlyMap<ProviderId, AgentLauncher> = new Map([
+      ["codex", codexAgentLauncher]
     ]),
     private readonly executable = "/opt/bin/codex",
     private readonly capabilities: Partial<Record<ProviderId, ProviderCapability>> = {}
@@ -90,7 +98,7 @@ export class StaticProviderCatalog implements ProviderCatalog {
     );
   }
 
-  public resolveCaptain(id: ProviderId): Promise<ResolvedCaptainProvider | null> {
+  public resolve(id: ProviderId): Promise<ResolvedProvider | null> {
     const launcher = this.launchers.get(id);
     const capability =
       launcher === undefined ? null : (this.capabilities[id] ?? testProviderCapability(launcher));
@@ -102,7 +110,7 @@ export class StaticProviderCatalog implements ProviderCatalog {
   }
 }
 
-export function testProviderCapability(launcher: CaptainLauncher): ProviderCapability {
+export function testProviderCapability(launcher: AgentLauncher): ProviderCapability {
   return {
     id: launcher.id,
     label: launcher.label,
