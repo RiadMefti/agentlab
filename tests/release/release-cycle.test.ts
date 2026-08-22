@@ -321,7 +321,7 @@ describe("dependency update policy", () => {
 });
 
 describe("release workflow trust boundaries", () => {
-  it("builds intentionally unsigned macOS artifacts without Apple credentials", async () => {
+  it("builds an untrusted macOS artifact without Apple credentials", async () => {
     const workflow = await readFile(
       join(projectRoot, ".github", "workflows", "release.yml"),
       "utf8"
@@ -345,9 +345,13 @@ describe("release workflow trust boundaries", () => {
     expect(macosJob).not.toContain("APPLE_");
     expect(macosJob).not.toContain("CSC_LINK");
     expect(macosJob).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
-    expect(macosJob).toContain("Expected an unsigned macOS app");
+    expect(macosJob).toContain("codesign --verify --deep --strict --verbose=4");
+    expect(macosJob).toContain("unexpectedly passed strict code-signature verification");
+    expect(macosJob).not.toContain("codesign --display");
     expect(macosJob).toContain("hdiutil verify");
-    expect(workflow).toContain("The macOS DMGs are intentionally unsigned");
+    expect(workflow).toContain(
+      "The macOS DMG is intentionally distributed without a valid Apple Developer signature or notarization"
+    );
   });
 
   it("exposes the write-capable GitHub token only to publication commands", async () => {

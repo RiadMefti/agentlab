@@ -26,8 +26,9 @@ Packaged builds check GitHub at launch and once daily. A quiet update button app
 newer stable release exists; clicking it opens that release. The app never downloads updates in the
 background.
 
-> **macOS:** The DMGs are intentionally unsigned. After the first blocked launch, open **System
-> Settings → Privacy & Security** and choose **Open Anyway**. Do not disable Gatekeeper globally.
+> **macOS:** The DMG has no valid Apple Developer signature or notarization. After the first blocked
+> launch, open **System Settings → Privacy & Security** and choose **Open Anyway**. Do not disable
+> Gatekeeper globally.
 
 ## Workflow
 

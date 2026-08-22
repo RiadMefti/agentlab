@@ -11,7 +11,7 @@ Install desktop binaries only from this repository's GitHub Releases. Each publi
 immutable and includes SHA-256 checksums plus GitHub build and SBOM attestations; verification
 commands are documented in [Releasing](docs/releasing.md#verify-a-download).
 
-macOS DMGs are intentionally not signed or notarized with an Apple Developer identity. Verify their
+The macOS DMG intentionally has no valid Apple Developer signature or notarization. Verify its
 checksum and GitHub attestation before approving the app through macOS Privacy & Security.
 
 Please report security issues privately to the repository owner rather than opening a public issue.

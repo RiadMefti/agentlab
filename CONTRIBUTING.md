@@ -20,5 +20,5 @@ Prefer small cohesive modules. Update an ADR when a change alters a durable arch
 
 Use the version and tag process in [Releasing](docs/releasing.md) for production artifacts. Do not
 publish binaries manually or bypass the platform packaging, checksum, provenance, and immutable
-release gates. macOS artifacts are intentionally unsigned and follow the documented verification and
-installation policy.
+release gates. The macOS artifact intentionally has no valid Apple Developer signature or
+notarization and follows the documented verification and installation policy.
