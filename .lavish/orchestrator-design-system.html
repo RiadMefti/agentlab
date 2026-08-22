@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orchestrator</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      :root {
+        color-scheme: light;
+        --background: #fafafa;
+        --text: #171717;
+        --muted: #8a8a8a;
+        --faint: #e9e9e9;
+        --hover: #f2f2f2;
+        --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+        overflow: hidden;
+        background: var(--background);
+        color: var(--text);
+        font-family: var(--font);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button,
+      textarea {
+        color: inherit;
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      :focus-visible {
+        outline: 1px solid var(--text);
+        outline-offset: 2px;
+      }
+
+      .app {
+        height: 100vh;
+        display: grid;
+        grid-template-rows: 52px minmax(0, 1fr) 76px;
+      }
+
+      header {
+        min-width: 0;
+        padding: 0 24px;
+        display: flex;
+        align-items: center;
+        gap: 28px;
+        border-bottom: 1px solid var(--faint);
+      }
+
+      .brand {
+        flex: 0 0 auto;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .current {
+        min-width: 0;
+        margin-right: auto;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .agents {
+        min-width: 0;
+        height: 100%;
+        display: flex;
+        align-items: stretch;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .agents::-webkit-scrollbar {
+        display: none;
+      }
+
+      .agent {
+        padding: 0 10px;
+        border: 0;
+        border-bottom: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .agent:hover {
+        color: var(--text);
+      }
+      .agent.active {
+        color: var(--text);
+        border-bottom-color: var(--text);
+      }
+
+      .new {
+        width: 28px;
+        height: 28px;
+        flex: 0 0 auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .new:hover {
+        color: var(--text);
+      }
+
+      main {
+        min-width: 0;
+        overflow: auto;
+        display: flex;
+        justify-content: center;
+      }
+
+      .thread {
+        width: min(720px, calc(100% - 36px));
+        padding: clamp(44px, 8vh, 82px) 0 56px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(25px, 3.4vw, 34px);
+        font-weight: 550;
+        line-height: 1.15;
+        letter-spacing: -0.035em;
+      }
+
+      .state {
+        margin: 9px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .entries {
+        margin-top: clamp(38px, 7vh, 64px);
+      }
+
+      .entry {
+        display: grid;
+        grid-template-columns: 82px minmax(0, 1fr);
+        gap: 22px;
+        padding: 13px 0;
+      }
+
+      .author {
+        padding-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .entry p {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+
+      .entry.user p {
+        font-size: 16px;
+      }
+
+      .assignments {
+        margin-top: 15px;
+        padding-left: 1px;
+      }
+
+      .assignment {
+        min-height: 28px;
+        display: grid;
+        grid-template-columns: 94px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .assignment strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .assignment.attention span:last-child {
+        color: var(--text);
+      }
+
+      .question {
+        margin-top: 15px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .question strong {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .terminal {
+        margin-top: 16px;
+        overflow-x: auto;
+        color: #666;
+        font:
+          12px/1.65 ui-monospace,
+          "SFMono-Regular",
+          Menlo,
+          Consolas,
+          monospace;
+        white-space: pre;
+      }
+
+      .composer {
+        margin-top: clamp(38px, 7vh, 66px);
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+        border-bottom: 1px solid #cfcfcf;
+      }
+
+      textarea {
+        min-width: 0;
+        min-height: 48px;
+        max-height: 160px;
+        padding: 12px 0;
+        resize: vertical;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      textarea::placeholder {
+        color: #aaa;
+      }
+
+      .send {
+        padding: 12px 0 12px 16px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .send:hover {
+        color: var(--text);
+      }
+
+      .reel {
+        min-width: 0;
+        padding: 0 24px;
+        display: grid;
+        grid-template-columns: 110px repeat(3, minmax(170px, 1fr));
+        align-items: stretch;
+        border-top: 1px solid var(--faint);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .reel::-webkit-scrollbar {
+        display: none;
+      }
+
+      .reel-label {
+        display: flex;
+        align-items: center;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .conversation {
+        min-width: 0;
+        padding: 0 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        text-align: left;
+      }
+
+      .conversation:hover {
+        color: var(--text);
+      }
+      .conversation.active {
+        color: var(--text);
+      }
+      .conversation .number {
+        font-size: 10px;
+      }
+
+      .conversation-copy {
+        min-width: 0;
+      }
+      .conversation strong {
+        display: block;
+        overflow: hidden;
+        font-size: 12px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .conversation small {
+        display: block;
+        margin-top: 4px;
+        color: #aaa;
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      .conversation.active::before {
+        content: "•";
+        flex: 0 0 auto;
+        margin-left: -11px;
+        font-size: 10px;
+      }
+
+      @media (max-width: 720px) {
+        .app {
+          grid-template-rows: auto minmax(0, 1fr) 68px;
+        }
+        header {
+          padding: 11px 14px 0;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+        .current {
+          display: none;
+        }
+        .agents {
+          order: 4;
+          width: 100%;
+          height: 38px;
+        }
+        .agent {
+          flex: 1;
+          padding-inline: 8px;
+        }
+        .thread {
+          width: calc(100% - 28px);
+          padding-top: 40px;
+        }
+        .entry {
+          grid-template-columns: 58px minmax(0, 1fr);
+          gap: 12px;
+        }
+        .assignment {
+          grid-template-columns: 72px minmax(110px, 1fr);
+        }
+        .assignment span:last-child {
+          display: none;
+        }
+        .reel {
+          padding-inline: 8px;
+          grid-template-columns: repeat(3, 190px);
+        }
+        .reel-label {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="brand">orchestrator</div>
+        <div class="current" id="current">Fix authentication · acme/web</div>
+        <nav class="agents" aria-label="Supervisor and agents">
+          <button class="agent active" type="button" data-agent="supervisor">Supervisor</button>
+          <button class="agent" type="button" data-agent="claude">Claude</button>
+          <button class="agent" type="button" data-agent="codex">Codex</button>
+          <button class="agent" type="button" data-agent="opencode">OpenCode</button>
+        </nav>
+        <button class="new" type="button" aria-label="New conversation">+</button>
+      </header>
+
+      <main>
+        <section class="thread">
+          <h1 id="title">Fix authentication</h1>
+          <p class="state" id="state">Supervisor coordinating three agents</p>
+          <div class="entries" id="entries" aria-live="polite"></div>
+
+          <form class="composer" id="composer">
+            <textarea
+              id="message"
+              aria-label="Message selected session"
+              placeholder="Message the supervisor"
+            ></textarea>
+            <button class="send" type="submit">Send</button>
+          </form>
+        </section>
+      </main>
+
+      <nav class="reel" aria-label="Conversations">
+        <div class="reel-label">Conversations</div>
+        <button class="conversation active" type="button" data-conversation="auth">
+          <span class="number">01</span>
+          <span class="conversation-copy"
+            ><strong>Fix authentication</strong><small>3 agents</small></span
+          >
+        </button>
+        <button class="conversation" type="button" data-conversation="latency">
+          <span class="number">02</span>
+          <span class="conversation-copy"
+            ><strong>Editor latency</strong><small>waiting</small></span
+          >
+        </button>
+        <button class="conversation" type="button" data-conversation="release">
+          <span class="number">03</span>
+          <span class="conversation-copy"><strong>Release 0.4</strong><small>complete</small></span>
+        </button>
+      </nav>
+    </div>
+
+    <script>
+      const conversations = {
+        auth: {
+          title: "Fix authentication",
+          current: "Fix authentication · acme/web",
+          state: "Supervisor coordinating three agents",
+          prompt:
+            "Users are being signed out during refresh. Coordinate the work without changing the public session contract.",
+          summary:
+            "I split the investigation into a trace, a regression case, and a boundary review. Implementation is waiting until the trace and test point to the same cause.",
+          update:
+            "The race is confirmed. I authorized a narrow single-flight fix while the other agents hold the test and contract boundaries."
+        },
+        latency: {
+          title: "Editor latency",
+          current: "Editor latency · foundry/editor",
+          state: "Supervisor waiting on one result",
+          prompt:
+            "The editor freezes during large refactors. Find the bottleneck and keep typing responsive.",
+          summary:
+            "One agent is profiling the render loop. Another is inspecting invalidation. Neither is changing code until the measurements agree.",
+          update:
+            "The profiler isolated repeated index invalidation. I requested one focused patch and a before-and-after trace."
+        },
+        release: {
+          title: "Release 0.4",
+          current: "Release 0.4 · orch/main",
+          state: "Complete · sessions preserved",
+          prompt: "Prepare the release, validate every integration, and report anything uncertain.",
+          summary:
+            "Verification, changelog, and packaging were handled in separate sessions. Each agent completed its assignment.",
+          update:
+            "The release is ready. Every agent session remains attached if you want to inspect it."
+        }
+      };
+
+      const workers = {
+        claude: {
+          name: "Claude",
+          task: "Trace the refresh path from expiry detection through token rotation.",
+          result:
+            "The concurrency gap is between the stale-token check and rotation. I have a narrow implementation ready."
+        },
+        codex: {
+          name: "Codex",
+          task: "Build a deterministic reproduction before implementation.",
+          result:
+            "The regression fails consistently under two concurrent refresh calls. Production code is unchanged."
+        },
+        opencode: {
+          name: "OpenCode",
+          task: "Review the boundary for accidental changes in session behavior.",
+          result:
+            "One question remains: whether cross-tab refresh sharing is already part of the contract."
+        }
+      };
+
+      let activeConversation = "auth";
+      let activeAgent = "supervisor";
+      const entries = document.querySelector("#entries");
+
+      function supervisorView(conversation) {
+        return `
+        <article class="entry user">
+          <div class="author">You</div>
+          <div><p>${conversation.prompt}</p></div>
+        </article>
+        <article class="entry">
+          <div class="author">Supervisor</div>
+          <div>
+            <p>${conversation.summary}</p>
+            <div class="assignments">
+              <div class="assignment"><strong>Claude</strong><span>Tracing refresh path</span><span>working</span></div>
+              <div class="assignment"><strong>Codex</strong><span>Reproducing the race</span><span>ready</span></div>
+              <div class="assignment attention"><strong>OpenCode</strong><span>Reviewing boundaries</span><span>question</span></div>
+            </div>
+          </div>
+        </article>
+        <article class="entry">
+          <div class="author">Supervisor</div>
+          <div>
+            <p>${conversation.update}</p>
+            <div class="question"><strong>Question:</strong> should concurrent browser tabs share one refresh?</div>
+          </div>
+        </article>`;
+      }
+
+      function workerView(worker) {
+        return `
+        <article class="entry">
+          <div class="author">Supervisor</div>
+          <div><p>${worker.task}</p></div>
+        </article>
+        <article class="entry">
+          <div class="author">${worker.name}</div>
+          <div>
+            <p>${worker.result}</p>
+            <div class="terminal">M  src/auth/refresh.ts
+?? tests/refresh-race.test.ts
+
+focused test   pass
+scope check    pass</div>
+          </div>
+        </article>`;
+      }
+
+      function render() {
+        const conversation = conversations[activeConversation];
+        const worker = workers[activeAgent];
+        const direct = activeAgent !== "supervisor";
+
+        document.querySelector("#title").textContent = conversation.title;
+        document.querySelector("#current").textContent = conversation.current;
+        document.querySelector("#state").textContent = direct
+          ? `Directly speaking with ${worker.name} · supervisor observing`
+          : conversation.state;
+        document.querySelector("#message").placeholder = direct
+          ? `Message ${worker.name}`
+          : "Message the supervisor";
+        entries.innerHTML = direct ? workerView(worker) : supervisorView(conversation);
+
+        document.querySelectorAll("[data-agent]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.agent === activeAgent);
+        });
+        document.querySelectorAll("[data-conversation]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.conversation === activeConversation);
+        });
+      }
+
+      document.querySelectorAll("[data-agent]").forEach((button) => {
+        button.addEventListener("click", () => {
+          activeAgent = button.dataset.agent;
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-conversation]").forEach((button) => {
+        button.addEventListener("click", () => {
+          activeConversation = button.dataset.conversation;
+          activeAgent = "supervisor";
+          render();
+        });
+      });
+
+      document.querySelector("#composer").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const input = document.querySelector("#message");
+        const text = input.value.trim();
+        if (!text) return;
+        const entry = document.createElement("article");
+        entry.className = "entry user";
+        entry.innerHTML = '<div class="author">You</div><div><p></p></div>';
+        entry.querySelector("p").textContent = text;
+        entries.appendChild(entry);
+        input.value = "";
+        entry.scrollIntoView({ behavior: "smooth", block: "end" });
+      });
+
+      render();
+    </script>
+  </body>
+</html>

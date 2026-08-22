@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./apps/server" },
+    { "path": "./apps/web" },
+    { "path": "./apps/desktop" },
+    { "path": "./tsconfig.tests.json" }
+  ]
+}

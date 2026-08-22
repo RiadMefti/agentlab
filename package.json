@@ -1,0 +1,89 @@
+{
+  "name": "agent-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A lean local desktop interface for supervising real coding-agent terminals.",
+  "main": "apps/desktop/dist/main.js",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run clean && npm run build --workspace @orchestrator/contracts && npm run build --workspace @orchestrator/web && npm run build --workspace @orchestrator/server && npm run build --workspace @orchestrator/desktop",
+    "clean": "node scripts/clean-build.mjs",
+    "dev": "npm run build --workspace @orchestrator/contracts && concurrently --kill-others-on-fail --names server,web \"npm run dev --workspace @orchestrator/server\" \"npm run dev --workspace @orchestrator/web\"",
+    "desktop": "npm run build && electron .",
+    "desktop:open": "electron .",
+    "desktop:package": "npm run build && electron-builder --linux AppImage",
+    "desktop:package:dir": "npm run build && electron-builder --linux dir",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings 0",
+    "start": "npm run start --workspace @orchestrator/server",
+    "test": "vitest run",
+    "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --build --pretty false",
+    "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build"
+  },
+  "dependencies": {
+    "@orchestrator/desktop": "0.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^24.10.0",
+    "concurrently": "^9.2.1",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "jsdom": "^27.2.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vitest": "^4.0.15"
+  },
+  "build": {
+    "appId": "dev.agentorchestrator.desktop",
+    "productName": "Orchestrator",
+    "asar": {
+      "smartUnpack": true
+    },
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "apps/desktop/dist/**/*.js",
+      "apps/desktop/package.json",
+      "apps/server/dist/**/*.js",
+      "apps/server/package.json",
+      "apps/web/dist/**/*",
+      "packages/contracts/dist/**/*.js",
+      "packages/contracts/package.json",
+      "package.json"
+    ],
+    "linux": {
+      "category": "Development",
+      "executableName": "agent-orchestrator",
+      "target": [
+        "AppImage"
+      ]
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
+    }
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "node-pty@1.1.0": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@orchestrator/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build && vite build",
+    "dev": "vite",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@orchestrator/contracts": "0.1.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "vite": "^8.2.2"
+  }
+}
