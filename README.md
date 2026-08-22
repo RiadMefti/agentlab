@@ -21,7 +21,10 @@ from the same workspace.
 | macOS — Intel         | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-x64.dmg)             |
 
 [Checksums](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/SHA256SUMS) and
-signed build provenance are attached to every release.
+GitHub build provenance attestations are attached to every release.
+
+> **macOS:** The DMGs are intentionally unsigned. After the first blocked launch, open **System
+> Settings → Privacy & Security** and choose **Open Anyway**. Do not disable Gatekeeper globally.
 
 ## Workflow
 
@@ -58,8 +61,13 @@ chmod +x ./release/Orchestrator-linux-x64.AppImage
 ./release/Orchestrator-linux-x64.AppImage
 ```
 
-Production macOS builds require Apple signing and notarization credentials. See
-[Releasing](docs/releasing.md).
+Build an unsigned macOS DMG locally on macOS:
+
+```bash
+npm run desktop:package:mac
+```
+
+See [Releasing](docs/releasing.md) for the versioned GitHub release process.
 
 ## Run in a browser
 

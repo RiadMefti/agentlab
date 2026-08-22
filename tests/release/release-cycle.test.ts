@@ -12,6 +12,15 @@ const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const temporaryDirectories: string[] = [];
 
 interface PackageMetadata {
+  build?: {
+    mac?: {
+      forceCodeSigning?: boolean;
+      hardenedRuntime?: boolean;
+      identity?: string | null;
+      notarize?: boolean;
+      strictVerify?: boolean;
+    };
+  };
   dependencies?: Record<string, string>;
   version: string;
 }
@@ -247,7 +256,7 @@ describe("release version metadata", () => {
 });
 
 describe("release asset validation", () => {
-  it("accepts only the complete release set with valid container signatures", async () => {
+  it("accepts only the complete release set with valid container formats", async () => {
     const root = await createAssetFixture();
 
     const result = runScript("check-release-assets.mjs", "v0.1.0", root);
@@ -313,28 +322,34 @@ describe("dependency update policy", () => {
   });
 });
 
-describe("release workflow credential boundaries", () => {
-  it("keeps Apple secrets out of dependency installation and compilation", async () => {
+describe("release workflow trust boundaries", () => {
+  it("builds intentionally unsigned macOS artifacts without Apple credentials", async () => {
     const workflow = await readFile(
       join(projectRoot, ".github", "workflows", "release.yml"),
       "utf8"
+    );
+    const packageMetadata = parsePackageMetadata(
+      await readFile(join(projectRoot, "package.json"), "utf8")
     );
     const macosJob = workflow.slice(
       workflow.indexOf("\n  macos:"),
       workflow.indexOf("\n  publish:")
     );
 
-    expect(macosJob.indexOf("- name: Install locked dependencies")).toBeLessThan(
-      macosJob.indexOf("- name: Prepare signing and notarization credentials")
-    );
-    expect(
-      macosJob.indexOf("- name: Build desktop sources without release credentials")
-    ).toBeLessThan(macosJob.indexOf("- name: Prepare signing and notarization credentials"));
-    expect(macosJob.slice(0, macosJob.indexOf("- name: Prepare signing"))).not.toContain(
-      "${{ secrets."
-    );
-    expect(macosJob.match(/\$\{\{ secrets\.MACOS_CERTIFICATE_BASE64 \}\}/g)).toHaveLength(1);
-    expect(macosJob.match(/\$\{\{ secrets\.APPLE_API_KEY_BASE64 \}\}/g)).toHaveLength(1);
+    expect(packageMetadata.build?.mac).toMatchObject({
+      forceCodeSigning: false,
+      hardenedRuntime: false,
+      identity: null,
+      notarize: false,
+      strictVerify: false
+    });
+    expect(macosJob).not.toContain("${{ secrets.");
+    expect(macosJob).not.toContain("APPLE_");
+    expect(macosJob).not.toContain("CSC_LINK");
+    expect(macosJob).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(macosJob).toContain("Expected an unsigned macOS app");
+    expect(macosJob).toContain("hdiutil verify");
+    expect(workflow).toContain("The macOS DMGs are intentionally unsigned");
   });
 
   it("exposes the write-capable GitHub token only to publication commands", async () => {

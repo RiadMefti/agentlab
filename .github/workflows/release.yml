@@ -133,11 +133,10 @@ jobs:
           retention-days: 7
 
   macos:
-    name: macOS ${{ matrix.arch }}
+    name: macOS ${{ matrix.arch }} (unsigned)
     needs: validate
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
-    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -163,78 +162,13 @@ jobs:
         run: test "$(uname -m)" = "${{ matrix.machine_arch }}"
       - name: Install locked dependencies
         run: npm ci
-      - name: Build desktop sources without release credentials
+      - name: Build desktop sources
         run: npm run build
-      - name: Prepare signing and notarization credentials
-        id: credentials
+      - name: Build the unsigned DMG
         env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in \
-            APPLE_API_ISSUER \
-            APPLE_API_KEY_BASE64 \
-            APPLE_API_KEY_ID \
-            APPLE_TEAM_ID \
-            CSC_KEY_PASSWORD \
-            MACOS_CERTIFICATE_BASE64
-          do
-            if [[ -z "${!name:-}" ]]; then
-              echo "Required release secret $name is not configured." >&2
-              missing=1
-            fi
-          done
-          if [[ "$missing" -ne 0 ]]; then exit 1; fi
-
-          certificate_path="$RUNNER_TEMP/orchestrator-developer-id.p12"
-          api_key_path="$RUNNER_TEMP/orchestrator-notary-key.p8"
-          CERTIFICATE_PATH="$certificate_path" API_KEY_PATH="$api_key_path" node --input-type=module <<'NODE'
-          import { writeFileSync } from "node:fs";
-
-          function decodeBase64(value, label) {
-            const compact = value.replace(/\s/g, "");
-            if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
-              throw new Error(`${label} is not valid base64.`);
-            }
-            const decoded = Buffer.from(compact, "base64");
-            if (decoded.length === 0) throw new Error(`${label} decoded to an empty file.`);
-            return decoded;
-          }
-
-          writeFileSync(
-            process.env.CERTIFICATE_PATH,
-            decodeBase64(process.env.MACOS_CERTIFICATE_BASE64, "MACOS_CERTIFICATE_BASE64"),
-            { mode: 0o600 }
-          );
-          writeFileSync(
-            process.env.API_KEY_PATH,
-            decodeBase64(process.env.APPLE_API_KEY_BASE64, "APPLE_API_KEY_BASE64"),
-            { mode: 0o600 }
-          );
-          NODE
-          openssl pkcs12 -in "$certificate_path" -passin env:CSC_KEY_PASSWORD -noout
-          grep -q '^-----BEGIN PRIVATE KEY-----$' "$api_key_path"
-          grep -q '^-----END PRIVATE KEY-----$' "$api_key_path"
-          echo "certificate_path=$certificate_path" >> "$GITHUB_OUTPUT"
-          echo "api_key_path=$api_key_path" >> "$GITHUB_OUTPUT"
-      - name: Build, sign, and notarize the DMG
-        env:
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ steps.credentials.outputs.api_key_path }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          CSC_LINK: ${{ steps.credentials.outputs.certificate_path }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: ./node_modules/.bin/electron-builder --mac dmg --publish never --${{ matrix.arch }}
-      - name: Verify the signed and notarized app
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify the unsigned app and DMG
         shell: bash
         run: |
           set -euo pipefail
@@ -248,20 +182,10 @@ jobs:
 
           executable="$app_path/Contents/MacOS/Orchestrator"
           test "$(lipo -archs "$executable")" = "${{ matrix.machine_arch }}"
-          codesign --verify --deep --strict --verbose=4 "$app_path"
-          signature_details="$(codesign --display --verbose=4 "$app_path" 2>&1)"
-          printf '%s\n' "$signature_details"
-          grep -F "Authority=Developer ID Application:" <<< "$signature_details"
-          grep -E 'flags=.*\(runtime\)' <<< "$signature_details"
-          signed_team="$(sed -n 's/^TeamIdentifier=//p' <<< "$signature_details" | head -n 1)"
-          if [[ "$signed_team" != "$APPLE_TEAM_ID" ]]; then
-            echo "The app was signed by unexpected team $signed_team." >&2
+          if codesign --display --verbose=4 "$app_path" >/dev/null 2>&1; then
+            echo "Expected an unsigned macOS app, but a code signature was found." >&2
             exit 1
           fi
-          gatekeeper_result="$(spctl --assess --type execute --verbose=4 "$app_path" 2>&1)"
-          printf '%s\n' "$gatekeeper_result"
-          grep -F "source=Notarized Developer ID" <<< "$gatekeeper_result"
-          xcrun stapler validate "$app_path"
           hdiutil verify "$dmg_path"
 
           mount_directory="$(mktemp -d)"
@@ -272,9 +196,12 @@ jobs:
           trap cleanup_mount EXIT
           hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_directory"
           mounted_app="$mount_directory/Orchestrator.app"
-          codesign --verify --deep --strict --verbose=4 "$mounted_app"
+          test -d "$mounted_app"
           test "$(lipo -archs "$mounted_app/Contents/MacOS/Orchestrator")" = "${{ matrix.machine_arch }}"
-          xcrun stapler validate "$mounted_app"
+          if codesign --display --verbose=4 "$mounted_app" >/dev/null 2>&1; then
+            echo "The mounted app unexpectedly contains a code signature." >&2
+            exit 1
+          fi
           cleanup_mount
           trap - EXIT
       - name: Upload the macOS artifact
@@ -285,13 +212,6 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-      - name: Remove signing material
-        if: always()
-        shell: bash
-        run: |
-          rm -f \
-            "$RUNNER_TEMP/orchestrator-developer-id.p12" \
-            "$RUNNER_TEMP/orchestrator-notary-key.p8"
 
   publish:
     name: Publish immutable GitHub Release
@@ -371,11 +291,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          release_notice=$'### macOS installation\n\nThe macOS DMGs are intentionally unsigned. After the first blocked launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.'
           gh release create "$GITHUB_REF_NAME" \
             release-assets/* \
             --draft \
             --fail-on-no-commits \
             --generate-notes \
+            --notes "$release_notice" \
             --title "Orchestrator ${{ needs.validate.outputs.version }}" \
             --verify-tag
       - name: Verify draft assets against local digests

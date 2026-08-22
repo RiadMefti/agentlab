@@ -12,35 +12,26 @@ workflow publishes these fixed assets:
 The filenames stay stable so the README's `/releases/latest/download/…` links always resolve to the
 newest release.
 
-## One-time Apple setup
+## One-time GitHub setup
 
-Direct macOS distribution requires an Apple Developer Program membership, a **Developer ID
-Application** certificate, and an App Store Connect API key. Export the certificate and private key
-from Keychain Access as a password-protected `.p12` file.
+Create a GitHub environment named `release` and restrict deployment branches and tags to `v*`. The
+environment protects the final publication job; it does not require Apple credentials or other
+release secrets.
 
-Create a GitHub environment named `release`, restrict it to tags matching `v*`, and configure these
-environment secrets:
+## macOS distribution
 
-| Secret                       | Value                                      |
-| ---------------------------- | ------------------------------------------ |
-| `MACOS_CERTIFICATE_BASE64`   | Base64-encoded `.p12` file                 |
-| `MACOS_CERTIFICATE_PASSWORD` | Password used when exporting the `.p12`    |
-| `APPLE_API_KEY_BASE64`       | Base64-encoded App Store Connect `.p8` key |
-| `APPLE_API_KEY_ID`           | App Store Connect API key ID               |
-| `APPLE_API_ISSUER`           | App Store Connect issuer UUID              |
-| `APPLE_TEAM_ID`              | Ten-character Apple Developer team ID      |
+The Apple-silicon and Intel DMGs are intentionally built without an Apple Developer identity and are
+not notarized. The workflow explicitly disables signing discovery and fails if a packaged app
+unexpectedly contains a code signature.
 
-The binary files can be uploaded without writing their contents to shell history:
+On first launch, macOS blocks the app because it cannot verify the developer:
 
-```bash
-openssl base64 -A -in DeveloperIDApplication.p12 \
-  | gh secret set MACOS_CERTIFICATE_BASE64 --env release
-openssl base64 -A -in AuthKey_KEYID.p8 \
-  | gh secret set APPLE_API_KEY_BASE64 --env release
-```
+1. Try to open `Orchestrator.app` once.
+2. Open **System Settings → Privacy & Security**.
+3. Choose **Open Anyway**, then confirm **Open**.
 
-Run `gh secret set NAME --env release` for each remaining value and enter it at the hidden prompt.
-Never commit certificates, private keys, passwords, or notarization credentials.
+This creates an exception for Orchestrator. Never disable Gatekeeper globally. A managed Mac may
+prevent the override; in that case the administrator must allow the app.
 
 ## Cut a release
 
@@ -70,12 +61,12 @@ The tag starts `.github/workflows/release.yml`. It performs the following gates 
 1. Match the tag against every package and lockfile version, and prove its commit is on `main`.
 2. Run formatting, type checking, linting, tests, the production build, and the production audit.
 3. Build and launch-smoke-test the Linux AppImage on Ubuntu 22.04.
-4. Install dependencies and compile before Apple credentials are made available, then build native
-   Apple-silicon and Intel DMGs on matching macOS runners.
-5. Fail if Apple credentials, Developer ID signing, hardened runtime, notarization, Gatekeeper
-   acceptance, the expected team ID, or the stapled ticket cannot be verified.
-6. Validate the exact artifact set and container signatures, then generate checksums, a CycloneDX
-   SBOM, SLSA provenance, and an SBOM attestation.
+4. Build native unsigned Apple-silicon and Intel DMGs on matching macOS runners without release
+   credentials.
+5. Verify each app is unsigned, has the expected native architecture, and survives DMG integrity and
+   read-only mount checks.
+6. Validate the exact artifact set and container formats, then generate checksums, a CycloneDX SBOM,
+   SLSA provenance, and an SBOM attestation.
 7. Upload everything to a draft, compare GitHub's asset digests with the local files, and only then
    publish it as the latest release.
 
@@ -90,14 +81,14 @@ gh attestation verify Orchestrator-linux-x64.AppImage \
 ```
 
 On macOS, use `shasum -a 256 -c SHA256SUMS` and replace the artifact name in the attestation
-command.
+command. Verify the download before using the **Open Anyway** procedure above.
 
 ## Failed releases and rollback
 
 - A failed build publishes nothing. Fix the cause and rerun the workflow; an incomplete draft for
   that exact tag is replaced safely.
 - Re-running a published tag never replaces its binaries. The workflow downloads the immutable
-  assets and re-verifies their exact names, checksums, container signatures, and attestations.
+  assets and re-verifies their exact names, checksums, container formats, and attestations.
 - A published release is immutable. Never move or reuse its tag and never replace its binaries.
 - If a published version is bad, fix forward with a new patch version. Mark the old release clearly
   in its notes if users should avoid it.

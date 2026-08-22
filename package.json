@@ -103,14 +103,13 @@
       "artifactName": "${productName}-mac-${arch}.${ext}",
       "category": "public.app-category.developer-tools",
       "darkModeSupport": true,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "forceCodeSigning": true,
-      "hardenedRuntime": true,
+      "forceCodeSigning": false,
+      "hardenedRuntime": false,
+      "identity": null,
       "icon": "build/icon.png",
       "minimumSystemVersion": "12.0",
-      "notarize": true,
-      "strictVerify": true,
+      "notarize": false,
+      "strictVerify": false,
       "target": [
         "dmg"
       ]
