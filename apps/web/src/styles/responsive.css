@@ -1,35 +1,32 @@
-@media (max-width: 720px) {
-  .app {
-    grid-template-rows: auto minmax(0, 1fr) 68px;
-  }
-
-  .topbar {
-    padding: 11px 14px 0;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .current {
-    display: none;
-  }
-
-  .agents {
-    order: 4;
-    width: 100%;
-    height: 38px;
-  }
-
-  .appearance-picker {
-    margin-left: auto;
-  }
-
-  .agent {
-    flex: 1;
-    padding-inline: 8px;
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 176px minmax(0, 1fr) 164px;
   }
 
   .terminal-shell {
-    width: calc(100% - 28px);
+    width: calc(100% - 36px);
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    padding-inline: 14px;
+  }
+
+  .workspace {
+    grid-template-columns: 148px minmax(0, 1fr) 140px;
+  }
+
+  .side-tabs-header {
+    padding-inline: 12px;
+  }
+
+  .side-tab-select {
+    padding-left: 12px;
+  }
+
+  .terminal-shell {
+    width: calc(100% - 24px);
     padding-top: 28px;
   }
 
@@ -37,25 +34,11 @@
     margin-bottom: 18px;
   }
 
-  .reel {
-    padding-inline: 8px;
-    grid-template-columns: none;
-    grid-auto-columns: 190px;
-  }
-
-  .reel-label {
-    display: none;
-  }
-
   .dialog {
     padding: 24px 22px;
   }
 
-  .configuration-row {
-    grid-template-columns: 1fr;
-    gap: 20px;
-  }
-
+  .configuration-row,
   .worker-configuration {
     grid-template-columns: 1fr;
     gap: 20px;

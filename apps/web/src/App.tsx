@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 
-import type { AgentSession } from "@orchestrator/contracts";
+import type { AgentSession, Conversation } from "@orchestrator/contracts";
 import { useQuery } from "@tanstack/react-query";
 
 import { ApiClientError } from "./api/client.js";
@@ -10,16 +10,18 @@ import {
   sessionQuery,
   useCreateConversation,
   useCreateWorker,
+  useDeleteConversation,
   useDeleteWorker
 } from "./api/queries.js";
-import { AgentTabs } from "./components/AgentTabs.js";
 import { AppearancePicker } from "./components/AppearancePicker.js";
-import { ConversationReel } from "./components/ConversationReel.js";
+import { DeleteMasterDialog } from "./components/DeleteMasterDialog.js";
 import { DeleteWorkerDialog } from "./components/DeleteWorkerDialog.js";
 import { EmptyState } from "./components/EmptyState.js";
+import { MasterTabs } from "./components/MasterTabs.js";
 import { NewConversationDialog } from "./components/NewConversationDialog.js";
 import { NewWorkerDialog } from "./components/NewWorkerDialog.js";
 import { UpdateButton } from "./components/UpdateButton.js";
+import { WorkerTabs } from "./components/WorkerTabs.js";
 
 const TerminalPane = lazy(() => import("./components/TerminalPane.js"));
 
@@ -30,9 +32,11 @@ export function App() {
   const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [workerDialogOpen, setWorkerDialogOpen] = useState(false);
+  const [masterToDelete, setMasterToDelete] = useState<Conversation | null>(null);
   const [workerToDelete, setWorkerToDelete] = useState<AgentSession | null>(null);
   const createConversation = useCreateConversation();
   const createWorker = useCreateWorker();
+  const deleteConversation = useDeleteConversation();
   const deleteWorker = useDeleteWorker();
 
   const conversationList = conversations.data?.conversations ?? [];
@@ -42,7 +46,10 @@ export function App() {
   const sessions = useQuery(sessionQuery(effectiveConversationId));
   const sessionList = sessions.data?.sessions ?? [];
   const selectedSession =
-    sessionList.find(({ name }) => name === selectedSessionName) ?? sessionList[0] ?? null;
+    sessionList.find(({ name }) => name === selectedSessionName) ??
+    sessionList.find(({ role }) => role === "captain") ??
+    sessionList[0] ??
+    null;
 
   if (conversations.isError) {
     return (
@@ -56,8 +63,46 @@ export function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">orchestrator</div>
-        <div className="current">{selectedConversation?.title ?? ""}</div>
-        <AgentTabs
+        <div className="topbar-actions">
+          <UpdateButton />
+          <AppearancePicker />
+        </div>
+      </header>
+
+      <div className="workspace">
+        <MasterTabs
+          conversations={conversationList}
+          selectedId={effectiveConversationId}
+          onSelect={(conversation) => {
+            setSelectedConversationId(conversation.id);
+            setSelectedSessionName(conversation.captainSessionName);
+          }}
+          onCreate={() => {
+            setDialogOpen(true);
+          }}
+          onDelete={(conversation) => {
+            deleteConversation.reset();
+            setMasterToDelete(conversation);
+          }}
+        />
+
+        <div className="active-agent">
+          {sessions.isError ? (
+            <EmptyState error={errorMessage(sessions.error)} onCreate={() => undefined} />
+          ) : selectedConversation !== null && selectedSession !== null ? (
+            <Suspense fallback={<TerminalPlaceholder label={selectedSession.label} />}>
+              <TerminalPane conversationId={selectedConversation.id} session={selectedSession} />
+            </Suspense>
+          ) : (
+            <EmptyState
+              onCreate={() => {
+                setDialogOpen(true);
+              }}
+            />
+          )}
+        </div>
+
+        <WorkerTabs
           sessions={sessionList}
           selectedName={selectedSession?.name ?? null}
           canCreate={selectedConversation !== null}
@@ -71,43 +116,7 @@ export function App() {
             setWorkerToDelete(worker);
           }}
         />
-        <UpdateButton />
-        <AppearancePicker />
-        <button
-          className="new"
-          type="button"
-          aria-label="New conversation"
-          title="New conversation"
-          onClick={() => {
-            setDialogOpen(true);
-          }}
-        >
-          +
-        </button>
-      </header>
-
-      {sessions.isError ? (
-        <EmptyState error={errorMessage(sessions.error)} onCreate={() => undefined} />
-      ) : selectedConversation !== null && selectedSession !== null ? (
-        <Suspense fallback={<TerminalPlaceholder label={selectedSession.label} />}>
-          <TerminalPane conversationId={selectedConversation.id} session={selectedSession} />
-        </Suspense>
-      ) : (
-        <EmptyState
-          onCreate={() => {
-            setDialogOpen(true);
-          }}
-        />
-      )}
-
-      <ConversationReel
-        conversations={conversationList}
-        selectedId={effectiveConversationId}
-        onSelect={(id) => {
-          setSelectedConversationId(id);
-          setSelectedSessionName(null);
-        }}
-      />
+      </div>
 
       {dialogOpen ? (
         <NewConversationDialog
@@ -165,6 +174,30 @@ export function App() {
                 }
               }
             );
+          }}
+        />
+      ) : null}
+
+      {masterToDelete !== null ? (
+        <DeleteMasterDialog
+          master={masterToDelete}
+          pending={deleteConversation.isPending}
+          error={deleteConversation.error === null ? null : errorMessage(deleteConversation.error)}
+          onCancel={() => {
+            if (!deleteConversation.isPending) {
+              deleteConversation.reset();
+              setMasterToDelete(null);
+            }
+          }}
+          onConfirm={() => {
+            const nextMaster = conversationList.find(({ id }) => id !== masterToDelete.id) ?? null;
+            deleteConversation.mutate(masterToDelete.id, {
+              onSuccess: () => {
+                setSelectedConversationId(nextMaster?.id ?? null);
+                setSelectedSessionName(nextMaster?.captainSessionName ?? null);
+                setMasterToDelete(null);
+              }
+            });
           }}
         />
       ) : null}
