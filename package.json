@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestrator",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "description": "One captain for all your coding agents. Direct the work, follow every session, and jump in at any time.",
@@ -48,7 +48,7 @@
     "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build"
   },
   "dependencies": {
-    "@orchestrator/desktop": "0.1.6"
+    "@orchestrator/desktop": "0.1.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

@@ -1,6 +1,6 @@
 {
   "name": "@orchestrator/desktop",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "main": "dist/main.js",
@@ -12,8 +12,8 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@orchestrator/contracts": "0.1.6",
-    "@orchestrator/server": "0.1.6",
+    "@orchestrator/contracts": "0.1.7",
+    "@orchestrator/server": "0.1.7",
     "electron-updater": "^6.8.9"
   }
 }
