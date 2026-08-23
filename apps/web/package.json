@@ -1,6 +1,6 @@
 {
   "name": "@orchestrator/web",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@orchestrator/contracts": "0.1.8",
+    "@orchestrator/contracts": "0.1.9",
     "@tanstack/react-query": "^5.90.11",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
