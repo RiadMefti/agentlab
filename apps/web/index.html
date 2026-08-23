@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#f8fafc" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data:; font-src 'self'; script-src 'self' 'sha256-FaadOS/ut4JljED7Nj9xBWIUcc6tIq0LKgILvNLpTPU='; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*"
+      content="default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; img-src 'self' data:; font-src 'self'; script-src 'self' 'sha256-s9+Jorh21OZ8d6S8gTV62FCZWID5YfN+nAXbsWm6EQI='; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*"
     />
     <script id="theme-bootstrap">
       (() => {
@@ -17,15 +17,24 @@
           .map((value) => value.trim())
           .find((value) => value.startsWith(`${name}=`));
         const stored = part === undefined ? "" : part.slice(name.length + 1);
-        const appearance = ["system", "light", "dark"].includes(stored) ? stored : "system";
+        const themes = {
+          light: ["light", "#f8fafc"],
+          "solarized-light": ["light", "#eee8d5"],
+          dark: ["dark", "#15191e"],
+          nord: ["dark", "#3b4252"],
+          "tokyo-night": ["dark", "#16161e"]
+        };
+        const appearance = stored === "system" || Object.hasOwn(themes, stored) ? stored : "system";
         const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
         const theme = appearance === "system" ? (systemDark ? "dark" : "light") : appearance;
         document.documentElement.dataset.appearance = appearance;
         document.documentElement.dataset.theme = theme;
-        document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", theme);
+        document
+          .querySelector('meta[name="color-scheme"]')
+          ?.setAttribute("content", themes[theme][0]);
         document
           .querySelector('meta[name="theme-color"]')
-          ?.setAttribute("content", theme === "dark" ? "#15191e" : "#f8fafc");
+          ?.setAttribute("content", themes[theme][1]);
       })();
     </script>
     <title>Orchestrator</title>

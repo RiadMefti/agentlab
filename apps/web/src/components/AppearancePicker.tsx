@@ -1,30 +1,44 @@
-import { appearances, parseAppearance } from "../theme/theme-policy.js";
+import { parseAppearance, themeIds, themeSchemes } from "../theme/theme-policy.js";
 import { useTheme } from "../theme/use-theme.js";
 
-const appearanceLabels = {
-  system: "System",
+const themeLabels = {
   light: "Light",
-  dark: "Dark"
+  "solarized-light": "Solarized Light",
+  dark: "Dark",
+  nord: "Nord",
+  "tokyo-night": "Tokyo Night"
 } as const;
+
+const groups = [
+  { label: "Light", scheme: "light" },
+  { label: "Dark", scheme: "dark" }
+] as const;
 
 export function AppearancePicker() {
   const { appearance, setAppearance } = useTheme();
 
   return (
     <label className="appearance-picker">
-      <span className="visually-hidden">Appearance</span>
+      <span className="visually-hidden">Theme</span>
       <select
-        aria-label="Appearance"
+        aria-label="Theme"
         value={appearance}
         onChange={(event) => {
           const selected = parseAppearance(event.target.value);
           if (selected !== null) setAppearance(selected);
         }}
       >
-        {appearances.map((option) => (
-          <option value={option} key={option}>
-            {appearanceLabels[option]}
-          </option>
+        <option value="system">System</option>
+        {groups.map(({ label, scheme }) => (
+          <optgroup label={label} key={scheme}>
+            {themeIds
+              .filter((id) => themeSchemes[id] === scheme)
+              .map((id) => (
+                <option value={id} key={id}>
+                  {themeLabels[id]}
+                </option>
+              ))}
+          </optgroup>
         ))}
       </select>
     </label>

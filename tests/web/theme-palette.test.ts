@@ -32,9 +32,27 @@ describe("theme palettes", () => {
   it("keeps normal and secondary UI text above WCAG AA contrast", () => {
     for (const palette of Object.values(uiPalettes)) {
       expect(contrast(palette.text, palette.canvas)).toBeGreaterThanOrEqual(7);
-      expect(contrast(palette.textMuted, palette.canvas)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(palette.textQuiet, palette.canvas)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(palette.focusRing, palette.canvas)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  // Muted text labels sit on the canvas, on dialog surfaces, and on a hovered tab;
+  // quiet text (tab subtitles at rest, field placeholders) never sits on a hover surface.
+  it("keeps secondary text readable on every background it is actually painted on", () => {
+    const textBackgrounds = {
+      textMuted: ["canvas", "surface", "surfaceHover"],
+      textQuiet: ["canvas", "surface"]
+    } as const;
+
+    for (const [theme, palette] of Object.entries(uiPalettes)) {
+      for (const [token, backgrounds] of Object.entries(textBackgrounds)) {
+        for (const background of backgrounds) {
+          expect(
+            contrast(palette[token as keyof typeof palette], palette[background]),
+            `${theme} ${token} against ${background}`
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
     }
   });
 
@@ -67,9 +85,11 @@ describe("theme palettes", () => {
     }
   });
 
-  it("defines a complete, readable xterm palette for both themes", () => {
+  it("defines a complete, readable xterm palette for every theme", () => {
     for (const theme of Object.values(terminalThemes)) {
-      expect(contrast(theme.foreground, theme.background)).toBeGreaterThanOrEqual(7);
+      // AA, matching the minimumContrastRatio floor TerminalPane applies at paint time.
+      // Solarized Light is built on deliberately low-contrast body text and cannot meet AAA.
+      expect(contrast(theme.foreground, theme.background)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(theme.cursor, theme.background)).toBeGreaterThanOrEqual(3);
       expect(theme.cursorAccent).toBeTruthy();
       expect(theme.selectionBackground).toBeTruthy();
@@ -92,6 +112,44 @@ describe("theme palettes", () => {
     expect(implementationStyles).not.toMatch(/#[0-9a-f]{3,8}|rgb\(/iu);
   });
 
+  it("seats the terminal in a well that is a visible step off the app canvas", () => {
+    for (const [theme, palette] of Object.entries(uiPalettes)) {
+      const terminal = terminalThemes[theme as keyof typeof terminalThemes];
+      expect(palette.terminalCanvas, `${theme} well matches the xterm background`).toBe(
+        terminal.background
+      );
+      expect(terminal.cursorAccent, `${theme} cursor accent matches the well`).toBe(
+        terminal.background
+      );
+
+      // Perceptible as a change of plane, far below anything that reads as banding.
+      const step = contrast(palette.terminalCanvas, palette.canvas);
+      expect(step, `${theme} well against canvas`).toBeGreaterThan(1.02);
+      expect(step, `${theme} well against canvas`).toBeLessThan(1.6);
+    }
+  });
+
+  it("styles the terminal well and its focused state from semantic tokens", () => {
+    const mount = terminalMountRule(".terminal-mount");
+
+    expect(mount).toContain("background: var(--color-terminal-canvas);");
+    expect(mount).toContain("inset 0 0 0 1px var(--color-border-subtle)");
+    expect(terminalMountRule(".terminal-mount:has(.xterm.focus)")).toContain(
+      "inset 0 0 0 1px var(--color-focus-ring)"
+    );
+  });
+
+  // FitAddon derives rows and columns from the mount's border-box size minus the padding
+  // on .xterm itself, so inner spacing on the mount would be invisible to it and the
+  // terminal would be sized larger than the space it has.
+  it("keeps the terminal well free of geometry xterm cannot measure", () => {
+    const mount = terminalMountRule(".terminal-mount");
+
+    expect(mount).not.toMatch(/(^|[^-])padding:/u);
+    expect(mount).not.toMatch(/(^|[^-])border:/u);
+    expect(terminalMountRule(".terminal-mount .xterm")).toContain("padding:");
+  });
+
   it("gives native selector popups an opaque themed surface", () => {
     const stylesRoot = new URL("../../apps/web/src/styles/", import.meta.url);
     const base = readFileSync(new URL("base.css", stylesRoot), "utf8");
@@ -105,6 +163,17 @@ describe("theme palettes", () => {
     );
   });
 });
+
+function terminalMountRule(selector: string): string {
+  const workspace = readFileSync(
+    new URL("../../apps/web/src/styles/workspace.css", import.meta.url),
+    "utf8"
+  );
+  const start = workspace.indexOf(`\n${selector} {`);
+  const end = workspace.indexOf("}", start);
+  if (start === -1 || end === -1) throw new Error(`Missing CSS rule for ${selector}.`);
+  return workspace.slice(start + selector.length + 3, end);
+}
 
 function contrast(first: string, second: string): number {
   const light = Math.max(luminance(first), luminance(second));

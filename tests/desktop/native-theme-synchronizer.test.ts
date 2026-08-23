@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appearanceCookieName,
   themeBackgroundColors,
-  type Appearance
+  type ColorScheme
 } from "@orchestrator/contracts";
 
 import { registerNativeThemeSynchronization } from "../../apps/desktop/src/native-theme-synchronizer.js";
@@ -38,18 +38,18 @@ class FakeNativeTheme {
   readonly removeListener = vi.fn();
   systemDark = false;
   private listener: (() => void) | null = null;
-  private source: Appearance = "system";
+  private source: ColorScheme | "system" = "system";
 
   get shouldUseDarkColors(): boolean {
     return this.source === "system" ? this.systemDark : this.source === "dark";
   }
 
-  get themeSource(): Appearance {
+  get themeSource(): ColorScheme | "system" {
     return this.source;
   }
 
-  set themeSource(appearance: Appearance) {
-    this.source = appearance;
+  set themeSource(scheme: ColorScheme | "system") {
+    this.source = scheme;
     this.listener?.();
   }
 }
@@ -66,6 +66,7 @@ describe("Electron native theme synchronization", () => {
       nativeTheme,
       windows,
       serverUrl,
+      "system",
       onError
     );
 
@@ -86,6 +87,46 @@ describe("Electron native theme synchronization", () => {
     expect(nativeTheme.removeListener).toHaveBeenCalledWith("updated", expect.any(Function));
   });
 
+  it("gives native windows the background of the selected named theme", async () => {
+    const cookies = new FakeCookies();
+    cookies.get.mockResolvedValue([{ value: "nord" }]);
+    const nativeTheme = new FakeNativeTheme();
+    const window = { setBackgroundColor: vi.fn() };
+    registerNativeThemeSynchronization(
+      cookies,
+      nativeTheme,
+      { getAllWindows: () => [window] },
+      serverUrl,
+      "system",
+      vi.fn()
+    );
+
+    cookies.emit(cookie({ name: appearanceCookieName }));
+
+    await vi.waitFor(() => {
+      expect(window.setBackgroundColor).toHaveBeenLastCalledWith(themeBackgroundColors.nord);
+    });
+    expect(nativeTheme.themeSource).toBe("dark");
+  });
+
+  it("keeps the persisted named theme when the native scheme updates before any cookie change", () => {
+    const cookies = new FakeCookies();
+    const nativeTheme = new FakeNativeTheme();
+    const window = { setBackgroundColor: vi.fn() };
+    registerNativeThemeSynchronization(
+      cookies,
+      nativeTheme,
+      { getAllWindows: () => [window] },
+      serverUrl,
+      "nord",
+      vi.fn()
+    );
+
+    nativeTheme.themeSource = "dark";
+
+    expect(window.setBackgroundColor).toHaveBeenLastCalledWith(themeBackgroundColors.nord);
+  });
+
   it("updates native window backgrounds when the System scheme changes", () => {
     const cookies = new FakeCookies();
     const nativeTheme = new FakeNativeTheme();
@@ -95,6 +136,7 @@ describe("Electron native theme synchronization", () => {
       nativeTheme,
       { getAllWindows: () => [window] },
       serverUrl,
+      "system",
       vi.fn()
     );
 

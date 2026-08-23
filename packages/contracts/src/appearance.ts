@@ -1,13 +1,29 @@
-export const appearances = ["system", "light", "dark"] as const;
+export type ColorScheme = "light" | "dark";
+
+export const themeIds = ["light", "solarized-light", "dark", "nord", "tokyo-night"] as const;
+
+export type ResolvedTheme = (typeof themeIds)[number];
+
+export const appearances = ["system", ...themeIds] as const;
 
 export type Appearance = (typeof appearances)[number];
-export type ResolvedTheme = Exclude<Appearance, "system">;
 
 export const appearanceCookieName = "ao-appearance";
 
+export const themeSchemes = {
+  light: "light",
+  "solarized-light": "light",
+  dark: "dark",
+  nord: "dark",
+  "tokyo-night": "dark"
+} as const satisfies Record<ResolvedTheme, ColorScheme>;
+
 export const themeBackgroundColors = {
   light: "#f8fafc",
-  dark: "#15191e"
+  "solarized-light": "#eee8d5",
+  dark: "#15191e",
+  nord: "#3b4252",
+  "tokyo-night": "#16161e"
 } as const satisfies Record<ResolvedTheme, string>;
 
 export function parseAppearance(value: unknown): Appearance | null {
@@ -16,9 +32,10 @@ export function parseAppearance(value: unknown): Appearance | null {
     : null;
 }
 
+// The two scheme names are also the ids of the themes System falls back to.
 export function resolveAppearance(
   appearance: Appearance,
-  systemTheme: ResolvedTheme
+  systemScheme: ColorScheme
 ): ResolvedTheme {
-  return appearance === "system" ? systemTheme : appearance;
+  return appearance === "system" ? systemScheme : appearance;
 }

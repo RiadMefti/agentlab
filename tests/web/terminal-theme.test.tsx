@@ -84,6 +84,28 @@ afterEach(() => {
 });
 
 describe("TerminalPane theme integration", () => {
+  it("marks the caret as the input point", () => {
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+    const store = new ThemeStore(
+      { read: () => "light", write: () => undefined },
+      { getScheme: () => "light", subscribe: () => () => undefined }
+    );
+
+    render(
+      <ThemeProvider store={store}>
+        <TerminalPane conversationId={TEST_CONVERSATION_ID} session={session} />
+      </ThemeProvider>
+    );
+
+    expect(mocks.terminals[0]?.options).toMatchObject({
+      cursorBlink: true,
+      cursorInactiveStyle: "outline",
+      cursorStyle: "bar",
+      cursorWidth: 2
+    });
+  });
+
   it("updates the live xterm palette without recreating xterm or its WebSocket", () => {
     vi.stubGlobal("WebSocket", MockWebSocket);
     vi.stubGlobal("ResizeObserver", MockResizeObserver);
@@ -92,12 +114,12 @@ describe("TerminalPane theme integration", () => {
       read() {
         return this.value;
       },
-      write(appearance: "system" | "light" | "dark") {
+      write(appearance: string) {
         this.value = appearance;
       }
     };
     const store = new ThemeStore(storage, {
-      getTheme: () => "light",
+      getScheme: () => "light",
       subscribe: () => () => undefined
     });
 
@@ -113,11 +135,11 @@ describe("TerminalPane theme integration", () => {
     expect(mocks.terminals[0]?.options.minimumContrastRatio).toBe(4.5);
 
     act(() => {
-      store.setAppearance("dark");
+      store.setAppearance("tokyo-night");
     });
 
     expect(mocks.terminals).toHaveLength(1);
     expect(mocks.sockets).toHaveLength(1);
-    expect(mocks.terminals[0]?.options.theme).toEqual(terminalThemes.dark);
+    expect(mocks.terminals[0]?.options.theme).toEqual(terminalThemes["tokyo-night"]);
   });
 });

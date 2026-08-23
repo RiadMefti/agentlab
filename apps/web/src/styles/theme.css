@@ -2,6 +2,7 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --color-canvas: #f8fafc;
+  --color-terminal-canvas: #ffffff;
   --color-surface: #ffffff;
   --color-surface-hover: #eef2f6;
   --color-text: #18202a;
@@ -16,9 +17,28 @@
   --color-shadow: rgb(15 23 42 / 10%);
 }
 
+:root[data-theme="solarized-light"] {
+  color-scheme: light;
+  --color-canvas: #eee8d5;
+  --color-terminal-canvas: #fdf6e3;
+  --color-surface: #fdf6e3;
+  --color-surface-hover: #e8e1cd;
+  --color-text: #073642;
+  --color-text-muted: #3f5560;
+  --color-text-quiet: #4e646c;
+  --color-border-subtle: #ddd6c3;
+  --color-border-control: #657b83;
+  --color-border-control-hover: #586e75;
+  --color-focus-ring: #1c6ca8;
+  --color-scrollbar: #657b83;
+  --color-backdrop: rgb(238 232 213 / 90%);
+  --color-shadow: rgb(101 123 131 / 22%);
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --color-canvas: #15191e;
+  --color-terminal-canvas: #101418;
   --color-surface: #1c2229;
   --color-surface-hover: #242b33;
   --color-text: #edf1f5;
@@ -31,4 +51,40 @@
   --color-scrollbar: #74808d;
   --color-backdrop: rgb(21 25 30 / 90%);
   --color-shadow: rgb(0 0 0 / 36%);
+}
+
+:root[data-theme="nord"] {
+  color-scheme: dark;
+  --color-canvas: #3b4252;
+  --color-terminal-canvas: #2e3440;
+  --color-surface: #434c5e;
+  --color-surface-hover: #4c566a;
+  --color-text: #eceff4;
+  --color-text-muted: #c5cddb;
+  --color-text-quiet: #b4bdcd;
+  --color-border-subtle: #434c5e;
+  --color-border-control: #9aa6bd;
+  --color-border-control-hover: #b3bccd;
+  --color-focus-ring: #88c0d0;
+  --color-scrollbar: #9aa6bd;
+  --color-backdrop: rgb(59 66 82 / 92%);
+  --color-shadow: rgb(0 0 0 / 40%);
+}
+
+:root[data-theme="tokyo-night"] {
+  color-scheme: dark;
+  --color-canvas: #16161e;
+  --color-terminal-canvas: #1a1b26;
+  --color-surface: #1a1b26;
+  --color-surface-hover: #292e42;
+  --color-text: #c0caf5;
+  --color-text-muted: #a9b1d6;
+  --color-text-quiet: #8189b3;
+  --color-border-subtle: #292e42;
+  --color-border-control: #7f88b8;
+  --color-border-control-hover: #98a0c9;
+  --color-focus-ring: #7aa2f7;
+  --color-scrollbar: #7f88b8;
+  --color-backdrop: rgb(22 22 30 / 92%);
+  --color-shadow: rgb(0 0 0 / 45%);
 }

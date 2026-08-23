@@ -53,6 +53,35 @@ describe("first-paint theme bootstrap", () => {
     );
   });
 
+  it("applies a named theme and its underlying scheme", () => {
+    const document = runBootstrap(`${appearanceCookieName}=tokyo-night`, false);
+
+    expect(document.documentElement.dataset).toMatchObject({
+      appearance: "tokyo-night",
+      theme: "tokyo-night"
+    });
+    expect(document.querySelector('meta[name="color-scheme"]')?.getAttribute("content")).toBe(
+      "dark"
+    );
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe(
+      uiPalettes["tokyo-night"].canvas
+    );
+  });
+
+  it("rejects inherited object keys as stored appearances", () => {
+    for (const key of ["__proto__", "constructor"]) {
+      const document = runBootstrap(`${appearanceCookieName}=${key}`, false);
+
+      expect(document.documentElement.dataset).toMatchObject({
+        appearance: "system",
+        theme: "light"
+      });
+      expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe(
+        uiPalettes.light.canvas
+      );
+    }
+  });
+
   it("uses the system scheme for missing or invalid preferences", () => {
     const missing = runBootstrap(null, true);
     const invalid = runBootstrap(`${appearanceCookieName}=sepia`, false);

@@ -1,7 +1,7 @@
-import { appearanceCookieName } from "@orchestrator/contracts";
+import { appearanceCookieName, themeSchemes } from "@orchestrator/contracts";
 
 import { uiPalettes } from "./theme-palette.js";
-import type { Appearance, ResolvedTheme } from "./theme-policy.js";
+import type { Appearance, ColorScheme } from "./theme-policy.js";
 import {
   ThemeStore,
   type AppearanceStorage,
@@ -46,7 +46,7 @@ export class BrowserSystemThemeSource implements SystemThemeSource {
     this.#mediaQuery = matchMedia(darkSchemeQuery);
   }
 
-  getTheme(): ResolvedTheme {
+  getScheme(): ColorScheme {
     return this.#mediaQuery.matches ? "dark" : "light";
   }
 
@@ -85,7 +85,7 @@ export function createBrowserThemeRuntime(window: Window, document: Document): B
 export function applyThemeToDocument(document: Document, snapshot: ThemeSnapshot): void {
   document.documentElement.dataset.appearance = snapshot.appearance;
   document.documentElement.dataset.theme = snapshot.resolvedTheme;
-  setMetaContent(document, "color-scheme", snapshot.resolvedTheme);
+  setMetaContent(document, "color-scheme", themeSchemes[snapshot.resolvedTheme]);
   setMetaContent(document, "theme-color", uiPalettes[snapshot.resolvedTheme].canvas);
 }
 

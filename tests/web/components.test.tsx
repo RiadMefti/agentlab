@@ -233,18 +233,18 @@ describe("lean interface components", () => {
     });
   });
 
-  it("offers only the accessible built-in appearance choices and persists a selection", () => {
+  it("groups the built-in themes by scheme and persists a selection", () => {
     const storage = {
       value: "system",
       read() {
         return this.value;
       },
-      write(appearance: "system" | "light" | "dark") {
+      write(appearance: string) {
         this.value = appearance;
       }
     };
     const store = new ThemeStore(storage, {
-      getTheme: () => "light",
+      getScheme: () => "light",
       subscribe: () => () => undefined
     });
     render(
@@ -253,17 +253,21 @@ describe("lean interface components", () => {
       </ThemeProvider>
     );
 
-    const picker = screen.getByRole("combobox", { name: "Appearance" });
+    const picker = screen.getByRole("combobox", { name: "Theme" });
     expect(picker).toHaveValue("system");
     expect(
       within(picker)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["System", "Light", "Dark"]);
+    ).toEqual(["System", "Light", "Solarized Light", "Dark", "Nord", "Tokyo Night"]);
+    expect([...picker.querySelectorAll("optgroup")].map((group) => group.label)).toEqual([
+      "Light",
+      "Dark"
+    ]);
 
-    fireEvent.change(picker, { target: { value: "dark" } });
-    expect(picker).toHaveValue("dark");
-    expect(storage.value).toBe("dark");
+    fireEvent.change(picker, { target: { value: "tokyo-night" } });
+    expect(picker).toHaveValue("tokyo-night");
+    expect(storage.value).toBe("tokyo-night");
   });
 
   it("submits provider defaults as nullable selections", () => {

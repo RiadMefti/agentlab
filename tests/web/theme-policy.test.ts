@@ -5,7 +5,7 @@ import {
   parseAppearance,
   resolveAppearance,
   type Appearance,
-  type ResolvedTheme
+  type ColorScheme
 } from "../../apps/web/src/theme/theme-policy.js";
 import {
   ThemeStore,
@@ -31,10 +31,10 @@ class MemoryAppearanceStorage implements AppearanceStorage {
 class MutableSystemTheme implements SystemThemeSource {
   readonly #listeners = new Set<() => void>();
 
-  constructor(private theme: ResolvedTheme) {}
+  constructor(private scheme: ColorScheme) {}
 
-  getTheme(): ResolvedTheme {
-    return this.theme;
+  getScheme(): ColorScheme {
+    return this.scheme;
   }
 
   subscribe(listener: () => void): () => void {
@@ -44,26 +44,37 @@ class MutableSystemTheme implements SystemThemeSource {
     };
   }
 
-  set(theme: ResolvedTheme): void {
-    this.theme = theme;
+  set(scheme: ColorScheme): void {
+    this.scheme = scheme;
     for (const listener of this.#listeners) listener();
   }
 }
 
 describe("theme policy", () => {
-  it("accepts only the three built-in appearances", () => {
-    expect(appearances).toEqual(["system", "light", "dark"]);
+  it("accepts only the built-in appearances", () => {
+    expect(appearances).toEqual([
+      "system",
+      "light",
+      "solarized-light",
+      "dark",
+      "nord",
+      "tokyo-night"
+    ]);
     expect(parseAppearance("system")).toBe("system");
-    expect(parseAppearance("light")).toBe("light");
-    expect(parseAppearance("dark")).toBe("dark");
+    expect(parseAppearance("nord")).toBe("nord");
+    expect(parseAppearance("tokyo-night")).toBe("tokyo-night");
     expect(parseAppearance("sepia")).toBeNull();
     expect(parseAppearance({ appearance: "dark" })).toBeNull();
   });
 
-  it("resolves System from the operating-system preference", () => {
+  it("resolves System to the default of the operating-system scheme", () => {
     expect(resolveAppearance("system", "dark")).toBe("dark");
     expect(resolveAppearance("system", "light")).toBe("light");
-    expect(resolveAppearance("light", "dark")).toBe("light");
+  });
+
+  it("keeps a named theme regardless of the operating-system scheme", () => {
+    expect(resolveAppearance("nord", "light")).toBe("nord");
+    expect(resolveAppearance("solarized-light", "dark")).toBe("solarized-light");
   });
 });
 
@@ -90,13 +101,13 @@ describe("ThemeStore", () => {
     const listener = vi.fn();
     store.subscribe(listener);
 
-    expect(store.setAppearance("dark")).toBe(true);
+    expect(store.setAppearance("nord")).toBe(true);
     expect(store.setAppearance("sepia")).toBe(false);
     system.set("dark");
     system.set("light");
 
-    expect(storage.value).toBe("dark");
-    expect(store.getSnapshot()).toEqual({ appearance: "dark", resolvedTheme: "dark" });
+    expect(storage.value).toBe("nord");
+    expect(store.getSnapshot()).toEqual({ appearance: "nord", resolvedTheme: "nord" });
     expect(listener).toHaveBeenCalledOnce();
   });
 });
