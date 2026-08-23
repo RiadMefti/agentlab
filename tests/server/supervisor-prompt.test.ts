@@ -54,4 +54,28 @@ describe("supervisor instructions", () => {
     expect(instructions).toContain("cleanup retries are idempotent");
     expect(instructions).toContain("The captain session must remain alive after cleanup");
   });
+
+  it("keeps the captain turn open only for captain-owned supervisory processes", () => {
+    const instructions = buildSupervisorInstructions(context);
+
+    expect(instructions).toContain("only to supervisory or verification commands");
+    expect(instructions).toContain(
+      "never authorizes delegated code work outside a managed worker session"
+    );
+    expect(instructions).toContain("delegated work must still run in workers");
+    expect(instructions).toContain("A captain-owned supervisory or verification process");
+    expect(instructions).toContain("keep the same turn open");
+    expect(instructions).toContain("state the action still required");
+    expect(instructions).toContain("remind the user at a low frequency what action remains");
+    expect(instructions).toContain(
+      "continuing to monitor workers, reconcile terminal outcomes, and perform eligible cleanup"
+    );
+    expect(instructions).toContain(
+      "Do not issue a final response while such a process is still relevant and running"
+    );
+    expect(instructions).toContain(
+      "Do not assume that later output or process exit will start a new captain turn"
+    );
+    expect(instructions).toContain("collect and incorporate the process output and exit status");
+  });
 });

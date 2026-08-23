@@ -13,6 +13,7 @@ const temporaryDirectories: string[] = [];
 
 interface PackageMetadata {
   build?: {
+    files?: string[];
     mac?: {
       forceCodeSigning?: boolean;
       hardenedRuntime?: boolean;
@@ -22,7 +23,14 @@ interface PackageMetadata {
     };
   };
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   version: string;
+}
+
+interface SbomMetadata {
+  components: Record<string, unknown>[];
+  dependencies: { ref: string; dependsOn: string[] }[];
+  metadata: { component: { "bom-ref": string } };
 }
 
 interface PackageLockMetadata {
@@ -156,7 +164,11 @@ async function sha512(path: string): Promise<string> {
   return hash.digest("base64");
 }
 
-async function createAssetFixture(version = "0.1.0", includeChecksums = false): Promise<string> {
+async function createAssetFixture(
+  version = "0.1.0",
+  includeChecksums = false,
+  includeElectron = true
+): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "orchestrator-release-assets-"));
   temporaryDirectories.push(root);
   const appImageHeader = Buffer.alloc(11);
@@ -171,8 +183,34 @@ async function createAssetFixture(version = "0.1.0", includeChecksums = false): 
     writeJson(join(root, `Orchestrator-${version}.cdx.json`), {
       bomFormat: "CycloneDX",
       specVersion: "1.5",
-      metadata: { component: { name: "agent-orchestrator", version } },
-      components: [{ name: "node-pty", version: "1.1.0" }]
+      metadata: {
+        component: {
+          "bom-ref": `agent-orchestrator@${version}`,
+          name: "agent-orchestrator",
+          version
+        }
+      },
+      components: [
+        { name: "node-pty", version: "1.1.0" },
+        ...(includeElectron
+          ? [
+              {
+                "bom-ref": "electron@43.4.1",
+                type: "framework",
+                name: "electron",
+                version: "43.4.1",
+                scope: "required",
+                purl: "pkg:npm/electron@43.4.1"
+              }
+            ]
+          : [])
+      ],
+      dependencies: [
+        {
+          ref: `agent-orchestrator@${version}`,
+          dependsOn: includeElectron ? ["electron@43.4.1"] : []
+        }
+      ]
     })
   ]);
 
@@ -305,6 +343,15 @@ describe("release asset validation", () => {
     expect(result.stderr).toContain("does not match the packaged AppImage");
   });
 
+  it("rejects a release SBOM that omits the shipped Electron runtime", async () => {
+    const root = await createAssetFixture("0.1.0", false, false);
+
+    const result = runScript("check-release-assets.mjs", "v0.1.0", root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("must describe the shipped Electron runtime");
+  });
+
   it("rejects extra files and malformed binary containers", async () => {
     const root = await createAssetFixture();
     await writeFile(join(root, "unexpected.txt"), "unexpected", "utf8");
@@ -343,6 +390,45 @@ describe("release asset validation", () => {
     expect(valid.stdout).toContain("Validated 5 release assets for v0.1.0.");
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("wrong digest");
+  });
+});
+
+describe("release SBOM generation", () => {
+  it("adds only the shipped Electron runtime while keeping its package development-only", async () => {
+    const outputDirectory = await mkdtemp(join(tmpdir(), "orchestrator-release-sbom-"));
+    temporaryDirectories.push(outputDirectory);
+    const outputPath = join(outputDirectory, "Orchestrator-0.1.6.cdx.json");
+
+    const result = runScript("generate-release-sbom.mjs", outputPath);
+    const sbom = JSON.parse(await readFile(outputPath, "utf8")) as SbomMetadata;
+    const packageMetadata = parsePackageMetadata(
+      await readFile(join(projectRoot, "package.json"), "utf8")
+    );
+    const packageLock = parsePackageLockMetadata(
+      await readFile(join(projectRoot, "package-lock.json"), "utf8")
+    );
+    const electronVersion = packageLock.packages["node_modules/electron"]?.version;
+    if (electronVersion === undefined) throw new Error("Locked Electron fixture is missing.");
+    const electron = sbom.components.find(({ name }) => name === "electron");
+    const applicationDependency = sbom.dependencies.find(
+      ({ ref }) => ref === sbom.metadata.component["bom-ref"]
+    );
+
+    expect(result.status).toBe(0);
+    expect(electron).toMatchObject({
+      "bom-ref": `electron@${electronVersion}`,
+      type: "framework",
+      name: "electron",
+      version: electronVersion,
+      scope: "required",
+      purl: `pkg:npm/electron@${electronVersion}`
+    });
+    expect(applicationDependency?.dependsOn).toContain(`electron@${electronVersion}`);
+    expect(packageMetadata.devDependencies?.electron).toBeDefined();
+    expect(packageMetadata.dependencies?.electron).toBeUndefined();
+    expect(
+      packageMetadata.build?.files?.some((path) => path.includes("node_modules/electron"))
+    ).toBe(false);
   });
 });
 

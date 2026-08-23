@@ -104,6 +104,39 @@ async function verifySbom(path, version) {
   if (!Array.isArray(value.components) || value.components.length === 0) {
     throw new Error(`${path} must describe the packaged production dependencies.`);
   }
+  /** @type {unknown} */
+  let electron;
+  for (const component of /** @type {unknown[]} */ (value.components)) {
+    if (isJsonObject(component) && component.name === "electron") electron = component;
+  }
+  if (
+    !isJsonObject(electron) ||
+    electron.type !== "framework" ||
+    electron.scope !== "required" ||
+    typeof electron.version !== "string" ||
+    electron["bom-ref"] !== `electron@${electron.version}` ||
+    electron.purl !== `pkg:npm/electron@${electron.version}`
+  ) {
+    throw new Error(`${path} must describe the shipped Electron runtime.`);
+  }
+  const applicationReference = value.metadata.component["bom-ref"];
+  /** @type {unknown} */
+  let applicationDependency;
+  if (Array.isArray(value.dependencies)) {
+    for (const dependency of /** @type {unknown[]} */ (value.dependencies)) {
+      if (isJsonObject(dependency) && dependency.ref === applicationReference) {
+        applicationDependency = dependency;
+      }
+    }
+  }
+  if (
+    typeof applicationReference !== "string" ||
+    !isJsonObject(applicationDependency) ||
+    !Array.isArray(applicationDependency.dependsOn) ||
+    !applicationDependency.dependsOn.includes(electron["bom-ref"])
+  ) {
+    throw new Error(`${path} must link the shipped Electron runtime to the application.`);
+  }
 }
 
 /**

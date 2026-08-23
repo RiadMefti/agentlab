@@ -11,3 +11,4 @@ coverage/
 .DS_Store
 apps/web/vite.config.js
 apps/web/vite.config.d.ts
+.agent-html-render/

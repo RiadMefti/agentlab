@@ -19,6 +19,7 @@ import {
   workerSlugFromLabel
 } from "../domain/agent-session-name.js";
 import type { SessionRuntime } from "../domain/session-runtime.js";
+import { ConversationLifecycle } from "./conversation-lifecycle.js";
 import { buildSupervisorInstructions } from "./supervisor-prompt.js";
 import { deriveTitle } from "./title.js";
 
@@ -38,6 +39,7 @@ export class ConversationService {
   readonly #workspace: string;
   readonly #now: () => Date;
   readonly #createId: () => string;
+  readonly #lifecycle = new ConversationLifecycle();
 
   public constructor(dependencies: ConversationServiceDependencies) {
     this.#repository = dependencies.repository;
@@ -120,23 +122,25 @@ export class ConversationService {
   }
 
   public async deleteConversation(conversationId: string): Promise<void> {
-    const conversation = await this.requireConversation(conversationId);
+    await this.#lifecycle.serialize(conversationId, async () => {
+      const conversation = await this.requireConversation(conversationId);
 
-    // Stop the supervisor first so it cannot create another worker while cleanup is in progress.
-    await this.#sessions.kill(conversation.captainSessionName);
+      // Stop the supervisor first so it cannot create another worker while cleanup is in progress.
+      await this.#sessions.kill(conversation.captainSessionName);
 
-    const remainingSessions = await this.#sessions.list(conversationId);
-    for (const session of remainingSessions) {
-      const identity = parseSessionName(session.name);
-      if (
-        session.name !== conversation.captainSessionName &&
-        identity?.conversationId === conversationId
-      ) {
-        await this.#sessions.kill(session.name);
+      const remainingSessions = await this.#sessions.list(conversationId);
+      for (const session of remainingSessions) {
+        const identity = parseSessionName(session.name);
+        if (
+          session.name !== conversation.captainSessionName &&
+          identity?.conversationId === conversationId
+        ) {
+          await this.#sessions.kill(session.name);
+        }
       }
-    }
 
-    await this.#repository.delete(conversationId);
+      await this.#repository.delete(conversationId);
+    });
   }
 
   public async listSessions(conversationId: string): Promise<readonly AgentSession[]> {
@@ -163,46 +167,50 @@ export class ConversationService {
   }
 
   public async createWorker(conversationId: string, input: CreateWorkerInput): Promise<string> {
-    await this.requireConversation(conversationId);
-    const resolved = await this.#providers.resolve(input.provider);
-    if (resolved === null) {
-      throw new ProviderUnavailableError(
-        `${providerLabel(input.provider)} is not available on this machine.`
-      );
-    }
+    return this.#lifecycle.serialize(conversationId, async () => {
+      await this.requireConversation(conversationId);
+      const resolved = await this.#providers.resolve(input.provider);
+      if (resolved === null) {
+        throw new ProviderUnavailableError(
+          `${providerLabel(input.provider)} is not available on this machine.`
+        );
+      }
 
-    const workerSlug = workerSlugFromLabel(input.label);
-    const sessionName = buildWorkerSessionName(conversationId, input.provider, workerSlug);
-    const command = resolved.launcher.buildWorkerCommand({
-      executable: resolved.executable,
-      conversationId,
-      workspace: this.#workspace,
-      workerSlug,
-      userPrompt: input.prompt
+      const workerSlug = workerSlugFromLabel(input.label);
+      const sessionName = buildWorkerSessionName(conversationId, input.provider, workerSlug);
+      const command = resolved.launcher.buildWorkerCommand({
+        executable: resolved.executable,
+        conversationId,
+        workspace: this.#workspace,
+        workerSlug,
+        userPrompt: input.prompt
+      });
+      await this.#sessions.createWorker({
+        name: sessionName,
+        cwd: this.#workspace,
+        command
+      });
+      return sessionName;
     });
-    await this.#sessions.createWorker({
-      name: sessionName,
-      cwd: this.#workspace,
-      command
-    });
-    return sessionName;
   }
 
   public async deleteWorker(conversationId: string, sessionName: string): Promise<void> {
-    await this.requireConversation(conversationId);
-    const identity = parseSessionName(sessionName);
-    if (identity?.conversationId !== conversationId) {
-      throw new NotFoundError("Worker session not found.");
-    }
-    if (identity.role === "captain") {
-      throw new ConflictError("The Captain cannot be deleted.");
-    }
+    await this.#lifecycle.serialize(conversationId, async () => {
+      await this.requireConversation(conversationId);
+      const identity = parseSessionName(sessionName);
+      if (identity?.conversationId !== conversationId) {
+        throw new NotFoundError("Worker session not found.");
+      }
+      if (identity.role === "captain") {
+        throw new ConflictError("The Captain cannot be deleted.");
+      }
 
-    const sessions = await this.#sessions.list(conversationId);
-    if (!sessions.some(({ name, role }) => name === sessionName && role === "worker")) {
-      throw new NotFoundError("Worker session not found.");
-    }
-    await this.#sessions.kill(sessionName);
+      const sessions = await this.#sessions.list(conversationId);
+      if (!sessions.some(({ name, role }) => name === sessionName && role === "worker")) {
+        throw new NotFoundError("Worker session not found.");
+      }
+      await this.#sessions.kill(sessionName);
+    });
   }
 
   public async requireAttachableSession(

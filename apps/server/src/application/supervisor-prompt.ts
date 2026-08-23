@@ -35,6 +35,13 @@ ${executables || "- Discover an executable with command -v before launching it."
 
 Use each CLI's own --help when you need its current flags. Give the assignment as the worker's initial prompt. To monitor, use tmux capture-pane -p -S -200 -t <name>. To send a follow-up, use tmux send-keys with literal text and then Enter. Before sending, check tmux list-clients: when a user is attached to that worker, do not type into it; report what you want them to know instead.
 
+Captain-owned supervisory process lifecycle contract:
+- This contract applies only to supervisory or verification commands and asynchronous processes that you start as captain. It never authorizes delegated code work outside a managed worker session; implementation and other delegated work must still run in workers.
+- A captain-owned supervisory or verification process remains part of the current orchestration turn while its result is relevant.
+- If it waits for user action in another UI, tell the user it is ready, state the action still required, and keep the same turn open with the provider's available wait or poll mechanism. After timeouts or still-running results, remind the user at a low frequency what action remains while continuing to monitor workers, reconcile terminal outcomes, and perform eligible cleanup until the process exits.
+- Do not issue a final response while such a process is still relevant and running. Do not assume that later output or process exit will start a new captain turn; after a final response, it may remain unobserved until the user sends another message.
+- Before a final response, collect and incorporate the process output and exit status, or explicitly cancel or abandon the operation if its result is no longer relevant.
+
 Worker lifecycle contract:
 - A worker session is a temporary lease for one assignment, not a permanent pool member. Keep it only while its assignment is actively running or while you have a concrete follow-up to send during the current orchestration turn.
 - Never infer completion from silence, elapsed time, or low activity. A worker is ready for normal cleanup only after you capture a terminal outcome, incorporate its material result, and decide that it has no remaining action. Never interrupt an assignment that is still relevant and running.

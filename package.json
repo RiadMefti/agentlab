@@ -39,6 +39,7 @@
     "release:assets:check": "node scripts/check-release-assets.mjs",
     "release:check": "node scripts/check-release.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
+    "release:sbom": "node scripts/generate-release-sbom.mjs",
     "start": "npm run start --workspace @orchestrator/server",
     "test": "vitest run",
     "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run",

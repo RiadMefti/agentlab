@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentSession } from "@orchestrator/contracts";
 
 import { ConversationService } from "../../apps/server/src/application/conversation-service.js";
+import type { CreateWorkerSessionInput } from "../../apps/server/src/domain/session-runtime.js";
 import {
   ConflictError,
   NotFoundError,
@@ -19,9 +20,8 @@ import {
   TEST_CONVERSATION_ID
 } from "../helpers/fakes.js";
 
-function createFixture() {
+function createFixture(sessions: MemorySessionRuntime = new MemorySessionRuntime()) {
   const repository = new MemoryConversationRepository();
-  const sessions = new MemorySessionRuntime();
   const providers = new StaticProviderCatalog();
   const service = new ConversationService({
     repository,
@@ -32,6 +32,42 @@ function createFixture() {
     createId: () => TEST_CONVERSATION_ID
   });
   return { repository, sessions, providers, service };
+}
+
+interface Signal {
+  readonly promise: Promise<void>;
+  resolve(): void;
+}
+
+function signal(): Signal {
+  let resolve = (): void => undefined;
+  const promise = new Promise<void>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
+class GatedWorkerSessionRuntime extends MemorySessionRuntime {
+  public readonly workerCreateStarted = signal();
+  public readonly workerCreateRelease = signal();
+  public workerCreateError: Error | null = null;
+
+  public override async createWorker(input: CreateWorkerSessionInput): Promise<void> {
+    this.workerCreateStarted.resolve();
+    await this.workerCreateRelease.promise;
+    if (this.workerCreateError !== null) throw this.workerCreateError;
+    await super.createWorker(input);
+    this.liveSessions.push({
+      name: input.name,
+      conversationId: TEST_CONVERSATION_ID,
+      role: "worker",
+      provider: "codex",
+      label: "Gated Worker",
+      status: "running",
+      attached: false,
+      startedAt: "2026-08-21T12:01:00.000Z"
+    });
+  }
 }
 
 describe("ConversationService", () => {
@@ -207,6 +243,93 @@ describe("ConversationService", () => {
       "--",
       "Add focused authentication tests"
     ]);
+  });
+
+  it("serializes worker creation with conversation deletion so no worker is orphaned", async () => {
+    const sessions = new GatedWorkerSessionRuntime();
+    const { repository, service } = createFixture(sessions);
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    const workerCreation = service.createWorker(conversation.id, {
+      label: "Race Reproduction",
+      prompt: "Wait at the reproduced worker creation boundary",
+      provider: "codex"
+    });
+    await sessions.workerCreateStarted.promise;
+
+    let deletionSettled = false;
+    const deletion = service.deleteConversation(conversation.id).finally(() => {
+      deletionSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(deletionSettled).toBe(false);
+    expect(sessions.killed).toEqual([]);
+
+    sessions.workerCreateRelease.resolve();
+    const workerName = await workerCreation;
+    await deletion;
+
+    expect(sessions.killed).toEqual([conversation.captainSessionName, workerName]);
+    expect(sessions.liveSessions).toEqual([]);
+    expect(repository.conversations).toEqual([]);
+  });
+
+  it("continues a queued deletion after worker creation fails", async () => {
+    const sessions = new GatedWorkerSessionRuntime();
+    const { repository, service } = createFixture(sessions);
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    const workerCreation = service.createWorker(conversation.id, {
+      label: "Failing Worker",
+      prompt: "Fail at the session boundary",
+      provider: "codex"
+    });
+    await sessions.workerCreateStarted.promise;
+    const deletion = service.deleteConversation(conversation.id);
+    sessions.workerCreateError = new Error("worker launch failed");
+    sessions.workerCreateRelease.resolve();
+
+    await expect(workerCreation).rejects.toThrow("worker launch failed");
+    await expect(deletion).resolves.toBeUndefined();
+    expect(sessions.createdWorkers).toEqual([]);
+    expect(sessions.killed).toEqual([conversation.captainSessionName]);
+    expect(repository.conversations).toEqual([]);
+  });
+
+  it("continues a queued worker creation after conversation deletion fails", async () => {
+    const { repository, sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    repository.deleteError = new Error("database busy");
+
+    const deletion = service.deleteConversation(conversation.id);
+    const workerCreation = service.createWorker(conversation.id, {
+      label: "After Failed Delete",
+      prompt: "Start only after the failed deletion releases its lifecycle turn",
+      provider: "codex"
+    });
+
+    await expect(deletion).rejects.toThrow("database busy");
+    await expect(workerCreation).resolves.toBe(
+      buildWorkerSessionName(TEST_CONVERSATION_ID, "codex", "after-failed-delete")
+    );
+    expect(repository.conversations).toEqual([conversation]);
+    expect(sessions.createdWorkers).toHaveLength(1);
   });
 
   it("deletes only an existing worker owned by the conversation", async () => {
