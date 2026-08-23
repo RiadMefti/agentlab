@@ -17,7 +17,7 @@ describe("Electron initial window theme", () => {
   it.each([
     { stored: "dark", systemDark: false, scheme: "dark" },
     { stored: "light", systemDark: true, scheme: "light" },
-    { stored: "nord", systemDark: false, scheme: "dark" },
+    { stored: "tokyo-night", systemDark: false, scheme: "dark" },
     { stored: "solarized-light", systemDark: true, scheme: "light" }
   ] as const)(
     "uses persisted $stored before BrowserWindow creation",

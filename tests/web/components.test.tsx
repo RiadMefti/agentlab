@@ -259,7 +259,7 @@ describe("lean interface components", () => {
       within(picker)
         .getAllByRole("option")
         .map((option) => option.textContent)
-    ).toEqual(["System", "Light", "Solarized Light", "Dark", "Nord", "Tokyo Night"]);
+    ).toEqual(["System", "Light", "Solarized Light", "Dark", "Tokyo Night"]);
     expect([...picker.querySelectorAll("optgroup")].map((group) => group.label)).toEqual([
       "Light",
       "Dark"

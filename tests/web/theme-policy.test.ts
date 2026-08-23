@@ -52,16 +52,8 @@ class MutableSystemTheme implements SystemThemeSource {
 
 describe("theme policy", () => {
   it("accepts only the built-in appearances", () => {
-    expect(appearances).toEqual([
-      "system",
-      "light",
-      "solarized-light",
-      "dark",
-      "nord",
-      "tokyo-night"
-    ]);
+    expect(appearances).toEqual(["system", "light", "solarized-light", "dark", "tokyo-night"]);
     expect(parseAppearance("system")).toBe("system");
-    expect(parseAppearance("nord")).toBe("nord");
     expect(parseAppearance("tokyo-night")).toBe("tokyo-night");
     expect(parseAppearance("sepia")).toBeNull();
     expect(parseAppearance({ appearance: "dark" })).toBeNull();
@@ -73,7 +65,7 @@ describe("theme policy", () => {
   });
 
   it("keeps a named theme regardless of the operating-system scheme", () => {
-    expect(resolveAppearance("nord", "light")).toBe("nord");
+    expect(resolveAppearance("tokyo-night", "light")).toBe("tokyo-night");
     expect(resolveAppearance("solarized-light", "dark")).toBe("solarized-light");
   });
 });
@@ -101,13 +93,16 @@ describe("ThemeStore", () => {
     const listener = vi.fn();
     store.subscribe(listener);
 
-    expect(store.setAppearance("nord")).toBe(true);
+    expect(store.setAppearance("tokyo-night")).toBe(true);
     expect(store.setAppearance("sepia")).toBe(false);
     system.set("dark");
     system.set("light");
 
-    expect(storage.value).toBe("nord");
-    expect(store.getSnapshot()).toEqual({ appearance: "nord", resolvedTheme: "nord" });
+    expect(storage.value).toBe("tokyo-night");
+    expect(store.getSnapshot()).toEqual({
+      appearance: "tokyo-night",
+      resolvedTheme: "tokyo-night"
+    });
     expect(listener).toHaveBeenCalledOnce();
   });
 });

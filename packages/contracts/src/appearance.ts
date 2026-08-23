@@ -1,6 +1,6 @@
 export type ColorScheme = "light" | "dark";
 
-export const themeIds = ["light", "solarized-light", "dark", "nord", "tokyo-night"] as const;
+export const themeIds = ["light", "solarized-light", "dark", "tokyo-night"] as const;
 
 export type ResolvedTheme = (typeof themeIds)[number];
 
@@ -14,15 +14,13 @@ export const themeSchemes = {
   light: "light",
   "solarized-light": "light",
   dark: "dark",
-  nord: "dark",
   "tokyo-night": "dark"
 } as const satisfies Record<ResolvedTheme, ColorScheme>;
 
 export const themeBackgroundColors = {
   light: "#f8fafc",
-  "solarized-light": "#eee8d5",
+  "solarized-light": "#fdf6e3",
   dark: "#15191e",
-  nord: "#3b4252",
   "tokyo-night": "#16161e"
 } as const satisfies Record<ResolvedTheme, string>;
 

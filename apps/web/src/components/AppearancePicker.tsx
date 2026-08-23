@@ -5,7 +5,6 @@ const themeLabels = {
   light: "Light",
   "solarized-light": "Solarized Light",
   dark: "Dark",
-  nord: "Nord",
   "tokyo-night": "Tokyo Night"
 } as const;
 

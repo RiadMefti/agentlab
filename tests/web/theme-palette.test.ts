@@ -112,42 +112,27 @@ describe("theme palettes", () => {
     expect(implementationStyles).not.toMatch(/#[0-9a-f]{3,8}|rgb\(/iu);
   });
 
-  it("seats the terminal in a well that is a visible step off the app canvas", () => {
+  it("paints the terminal on the app canvas so it has no edge of its own", () => {
     for (const [theme, palette] of Object.entries(uiPalettes)) {
       const terminal = terminalThemes[theme as keyof typeof terminalThemes];
-      expect(palette.terminalCanvas, `${theme} well matches the xterm background`).toBe(
-        terminal.background
+      // xterm fills its rect opaquely (allowTransparency is false), so merging with the
+      // page means matching the canvas exactly rather than approaching it.
+      expect(terminal.background, `${theme} terminal background matches the canvas`).toBe(
+        palette.canvas
       );
-      expect(terminal.cursorAccent, `${theme} cursor accent matches the well`).toBe(
-        terminal.background
+      expect(terminal.cursorAccent, `${theme} cursor accent matches the canvas`).toBe(
+        palette.canvas
       );
-
-      // Perceptible as a change of plane, far below anything that reads as banding.
-      const step = contrast(palette.terminalCanvas, palette.canvas);
-      expect(step, `${theme} well against canvas`).toBeGreaterThan(1.02);
-      expect(step, `${theme} well against canvas`).toBeLessThan(1.6);
     }
   });
 
-  it("styles the terminal well and its focused state from semantic tokens", () => {
-    const mount = terminalMountRule(".terminal-mount");
+  it("leaves the terminal mount without a frame, well, or inner spacing", () => {
+    const rules = terminalMountRules();
 
-    expect(mount).toContain("background: var(--color-terminal-canvas);");
-    expect(mount).toContain("inset 0 0 0 1px var(--color-border-subtle)");
-    expect(terminalMountRule(".terminal-mount:has(.xterm.focus)")).toContain(
-      "inset 0 0 0 1px var(--color-focus-ring)"
-    );
-  });
-
-  // FitAddon derives rows and columns from the mount's border-box size minus the padding
-  // on .xterm itself, so inner spacing on the mount would be invisible to it and the
-  // terminal would be sized larger than the space it has.
-  it("keeps the terminal well free of geometry xterm cannot measure", () => {
-    const mount = terminalMountRule(".terminal-mount");
-
-    expect(mount).not.toMatch(/(^|[^-])padding:/u);
-    expect(mount).not.toMatch(/(^|[^-])border:/u);
-    expect(terminalMountRule(".terminal-mount .xterm")).toContain("padding:");
+    expect(rules).not.toMatch(/border[^:]*:|box-shadow:|padding:/u);
+    for (const [, background] of rules.matchAll(/background:([^;]+);/gu)) {
+      expect(background).toContain("transparent");
+    }
   });
 
   it("gives native selector popups an opaque themed surface", () => {
@@ -164,15 +149,16 @@ describe("theme palettes", () => {
   });
 });
 
-function terminalMountRule(selector: string): string {
+// Every declaration block whose selector touches the terminal mount or what xterm
+// renders inside it.
+function terminalMountRules(): string {
   const workspace = readFileSync(
     new URL("../../apps/web/src/styles/workspace.css", import.meta.url),
     "utf8"
   );
-  const start = workspace.indexOf(`\n${selector} {`);
-  const end = workspace.indexOf("}", start);
-  if (start === -1 || end === -1) throw new Error(`Missing CSS rule for ${selector}.`);
-  return workspace.slice(start + selector.length + 3, end);
+  const rules = [...workspace.matchAll(/([^{}]*\.terminal-mount[^{}]*)\{([^}]*)\}/gu)];
+  if (rules.length === 0) throw new Error("Missing CSS rules for the terminal mount.");
+  return rules.map(([rule]) => rule).join("\n");
 }
 
 function contrast(first: string, second: string): number {

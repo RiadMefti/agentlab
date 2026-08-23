@@ -89,7 +89,7 @@ describe("Electron native theme synchronization", () => {
 
   it("gives native windows the background of the selected named theme", async () => {
     const cookies = new FakeCookies();
-    cookies.get.mockResolvedValue([{ value: "nord" }]);
+    cookies.get.mockResolvedValue([{ value: "tokyo-night" }]);
     const nativeTheme = new FakeNativeTheme();
     const window = { setBackgroundColor: vi.fn() };
     registerNativeThemeSynchronization(
@@ -104,7 +104,9 @@ describe("Electron native theme synchronization", () => {
     cookies.emit(cookie({ name: appearanceCookieName }));
 
     await vi.waitFor(() => {
-      expect(window.setBackgroundColor).toHaveBeenLastCalledWith(themeBackgroundColors.nord);
+      expect(window.setBackgroundColor).toHaveBeenLastCalledWith(
+        themeBackgroundColors["tokyo-night"]
+      );
     });
     expect(nativeTheme.themeSource).toBe("dark");
   });
@@ -118,13 +120,15 @@ describe("Electron native theme synchronization", () => {
       nativeTheme,
       { getAllWindows: () => [window] },
       serverUrl,
-      "nord",
+      "tokyo-night",
       vi.fn()
     );
 
     nativeTheme.themeSource = "dark";
 
-    expect(window.setBackgroundColor).toHaveBeenLastCalledWith(themeBackgroundColors.nord);
+    expect(window.setBackgroundColor).toHaveBeenLastCalledWith(
+      themeBackgroundColors["tokyo-night"]
+    );
   });
 
   it("updates native window backgrounds when the System scheme changes", () => {
