@@ -2,7 +2,6 @@ import {
   parseAppearance,
   resolveAppearance,
   type Appearance,
-  type ColorScheme,
   type ResolvedTheme
 } from "./theme-policy.js";
 
@@ -12,7 +11,7 @@ export interface AppearanceStorage {
 }
 
 export interface SystemThemeSource {
-  getScheme(): ColorScheme;
+  getTheme(): ResolvedTheme;
   subscribe(listener: () => void): () => void;
 }
 
@@ -38,7 +37,7 @@ export class ThemeStore {
 
     this.#snapshot = {
       appearance,
-      resolvedTheme: resolveAppearance(appearance, systemTheme.getScheme())
+      resolvedTheme: resolveAppearance(appearance, systemTheme.getTheme())
     };
     this.#unsubscribeSystem = systemTheme.subscribe(() => {
       this.#refreshSystemTheme();
@@ -62,7 +61,7 @@ export class ThemeStore {
     this.#storage.write(appearance);
     this.#update({
       appearance,
-      resolvedTheme: resolveAppearance(appearance, this.#systemTheme.getScheme())
+      resolvedTheme: resolveAppearance(appearance, this.#systemTheme.getTheme())
     });
     return true;
   }
@@ -74,7 +73,7 @@ export class ThemeStore {
 
   #refreshSystemTheme(): void {
     if (this.#snapshot.appearance !== "system") return;
-    const resolvedTheme = resolveAppearance("system", this.#systemTheme.getScheme());
+    const resolvedTheme = this.#systemTheme.getTheme();
     if (resolvedTheme === this.#snapshot.resolvedTheme) return;
     this.#update({ appearance: "system", resolvedTheme });
   }

@@ -3,9 +3,7 @@ import {
   parseAppearance,
   resolveAppearance,
   themeBackgroundColors,
-  themeSchemes,
   type Appearance,
-  type ColorScheme,
   type ResolvedTheme
 } from "@orchestrator/contracts";
 
@@ -18,7 +16,7 @@ interface AppearanceCookieReader {
 
 interface NativeThemeTarget {
   readonly shouldUseDarkColors: boolean;
-  themeSource: ColorScheme | "system";
+  themeSource: Appearance;
 }
 
 interface AppearanceCookieChange {
@@ -40,9 +38,7 @@ export async function synchronizeNativeWindowTheme(
 ): Promise<InitialWindowTheme> {
   const storedAppearance = await readStoredAppearance(cookies, serverUrl);
   const appearance = parseAppearance(storedAppearance) ?? "system";
-  // Electron only understands the two schemes, so a named theme drives native chrome
-  // through its own scheme.
-  nativeTheme.themeSource = appearance === "system" ? "system" : themeSchemes[appearance];
+  nativeTheme.themeSource = appearance;
   const resolvedTheme = resolveAppearance(
     appearance,
     nativeTheme.shouldUseDarkColors ? "dark" : "light"

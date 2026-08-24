@@ -14,7 +14,8 @@ import {
   NodePtyTerminalFactory,
   type Disposable,
   type PseudoTerminal,
-  type PseudoTerminalFactory
+  type PseudoTerminalFactory,
+  type TerminalDimensions
 } from "./pseudo-terminal.js";
 import { TmuxTerminalHistoryReader, type TerminalHistoryReader } from "./terminal-history.js";
 
@@ -44,6 +45,11 @@ export class TerminalGateway implements BrowserTerminalPort {
     let pendingMessageCount = 0;
     let inputRejected = false;
     const pendingMessages: TerminalClientMessage[] = [];
+    let latestDimensions: TerminalDimensions | null = null;
+    let provideDimensionsReady: (ready: boolean) => void = () => undefined;
+    const dimensionsReady = new Promise<boolean>((resolve) => {
+      provideDimensionsReady = resolve;
+    });
 
     socket.on("message", (raw) => {
       if (inputRejected) return;
@@ -63,6 +69,10 @@ export class TerminalGateway implements BrowserTerminalPort {
           return;
         }
         pendingMessages.push(message);
+        if (message.type === "resize") {
+          latestDimensions = { columns: message.cols, rows: message.rows };
+          provideDimensionsReady(true);
+        }
         return;
       }
       dispatch(process, message);
@@ -71,6 +81,7 @@ export class TerminalGateway implements BrowserTerminalPort {
     const dispose = (): void => {
       if (disposed) return;
       disposed = true;
+      provideDimensionsReady(false);
       dataSubscription?.dispose();
       exitSubscription?.dispose();
       try {
@@ -86,6 +97,8 @@ export class TerminalGateway implements BrowserTerminalPort {
       socket,
       sessionName,
       cwd,
+      dimensionsReady,
+      getLatestDimensions: () => latestDimensions,
       isDisposed: () => disposed,
       onStarted: (startedProcess) => {
         process = startedProcess;
@@ -98,7 +111,7 @@ export class TerminalGateway implements BrowserTerminalPort {
           dispose();
         });
         for (const message of pendingMessages) {
-          dispatch(process, message);
+          if (message.type === "input") dispatch(process, message);
         }
         pendingMessages.length = 0;
       }
@@ -109,11 +122,18 @@ export class TerminalGateway implements BrowserTerminalPort {
     readonly socket: BrowserTerminalSocket;
     readonly sessionName: string;
     readonly cwd: string;
+    readonly dimensionsReady: Promise<boolean>;
+    readonly getLatestDimensions: () => TerminalDimensions | null;
     readonly isDisposed: () => boolean;
     readonly onStarted: (process: PseudoTerminal) => void;
   }): Promise<void> {
-    const history = await this.history.read(input.sessionName).catch(() => "");
-    if (input.isDisposed()) return;
+    const [history, dimensionsReady] = await Promise.all([
+      this.history.read(input.sessionName).catch(() => ""),
+      input.dimensionsReady
+    ]);
+    if (input.isDisposed() || !dimensionsReady) return;
+    const dimensions = input.getLatestDimensions();
+    if (dimensions === null) return;
     if (history !== "") {
       send(input.socket, {
         type: "data",
@@ -122,7 +142,7 @@ export class TerminalGateway implements BrowserTerminalPort {
     }
 
     try {
-      input.onStarted(this.terminals.attach(input.sessionName, input.cwd));
+      input.onStarted(this.terminals.attach(input.sessionName, input.cwd, dimensions));
     } catch (error: unknown) {
       send(input.socket, {
         type: "error",

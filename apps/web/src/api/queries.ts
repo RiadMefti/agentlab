@@ -1,6 +1,12 @@
 import { queryOptions, skipToken, useMutation, useQueryClient } from "@tanstack/react-query";
 
-import type { CreateConversationInput, CreateWorkerInput } from "@orchestrator/contracts";
+import type {
+  AgentSession,
+  ConversationsResponse,
+  CreateConversationInput,
+  CreateWorkerInput,
+  SessionsResponse
+} from "@orchestrator/contracts";
 
 import {
   createConversation,
@@ -35,7 +41,13 @@ export function useCreateConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateConversationInput) => createConversation(input),
-    onSuccess: async () => {
+    onSuccess: async (conversation) => {
+      queryClient.setQueryData<ConversationsResponse>(["conversations"], (current) => ({
+        conversations: [
+          conversation,
+          ...(current?.conversations ?? []).filter(({ id }) => id !== conversation.id)
+        ]
+      }));
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
     }
   });
@@ -51,7 +63,26 @@ export function useCreateWorker() {
       readonly conversationId: string;
       readonly input: CreateWorkerInput;
     }) => createWorker(conversationId, input),
-    onSuccess: async (_response, { conversationId }) => {
+    onSuccess: async ({ sessionName }, { conversationId, input }) => {
+      const createdSession: AgentSession = {
+        name: sessionName,
+        conversationId,
+        role: "worker",
+        provider: input.provider,
+        label: input.label,
+        status: "running",
+        attached: false,
+        startedAt: null
+      };
+      queryClient.setQueryData<SessionsResponse>(
+        ["conversations", conversationId, "sessions"],
+        (current) => ({
+          sessions: [
+            ...(current?.sessions ?? []).filter(({ name }) => name !== sessionName),
+            createdSession
+          ]
+        })
+      );
       await queryClient.invalidateQueries({
         queryKey: ["conversations", conversationId, "sessions"]
       });
@@ -68,6 +99,13 @@ export function useDeleteConversation() {
         queryKey: ["conversations", conversationId, "sessions"],
         exact: true
       });
+      queryClient.setQueryData<ConversationsResponse>(["conversations"], (current) =>
+        current === undefined
+          ? undefined
+          : {
+              conversations: current.conversations.filter(({ id }) => id !== conversationId)
+            }
+      );
       await queryClient.invalidateQueries({ queryKey: ["conversations"], exact: true });
     }
   });
@@ -83,7 +121,14 @@ export function useDeleteWorker() {
       readonly conversationId: string;
       readonly sessionName: string;
     }) => deleteWorker(conversationId, sessionName),
-    onSuccess: async (_response, { conversationId }) => {
+    onSuccess: async (_response, { conversationId, sessionName }) => {
+      queryClient.setQueryData<SessionsResponse>(
+        ["conversations", conversationId, "sessions"],
+        (current) =>
+          current === undefined
+            ? undefined
+            : { sessions: current.sessions.filter(({ name }) => name !== sessionName) }
+      );
       await queryClient.invalidateQueries({
         queryKey: ["conversations", conversationId, "sessions"]
       });

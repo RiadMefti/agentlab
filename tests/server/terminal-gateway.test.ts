@@ -97,7 +97,11 @@ describe("TerminalGateway", () => {
     terminal.emitData("world");
 
     expect(terminal.write).toHaveBeenCalledWith("hello\r");
-    expect(terminal.resize).toHaveBeenCalledWith(90, 30);
+    expect(attach).toHaveBeenCalledWith(name, "/work/project", {
+      columns: 90,
+      rows: 30
+    });
+    expect(terminal.resize).not.toHaveBeenCalled();
     expect(decoded(socket.sent)).toContainEqual({
       type: "data",
       data: "previous\r\noutput\r\n"
@@ -122,6 +126,7 @@ describe("TerminalGateway", () => {
       buildCaptainSessionName(TEST_CONVERSATION_ID, "claude"),
       "/work/project"
     );
+    socket.emitMessage({ type: "resize", cols: 80, rows: 24 });
     await vi.waitFor(() => {
       expect(attach).toHaveBeenCalled();
     });
@@ -157,6 +162,54 @@ describe("TerminalGateway", () => {
       message: "Too much input before attachment."
     });
     expect(socket.close).toHaveBeenCalledWith(1009, "Input buffer exceeded");
+  });
+
+  it("waits for browser dimensions instead of attaching and resizing tmux twice", async () => {
+    const terminal = new FakePseudoTerminal();
+    const attach = vi.fn(() => terminal);
+    const gateway = new TerminalGateway({ attach }, { read: () => Promise.resolve("ready") });
+    const socket = new FakeSocket();
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    gateway.attach(socket, name, "/work/project");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(attach).not.toHaveBeenCalled();
+
+    socket.emitMessage({ type: "resize", cols: 132, rows: 47 });
+    await vi.waitFor(() => {
+      expect(attach).toHaveBeenCalledWith(name, "/work/project", {
+        columns: 132,
+        rows: 47
+      });
+    });
+    expect(terminal.resize).not.toHaveBeenCalled();
+  });
+
+  it("uses the latest browser dimensions received while history is loading", async () => {
+    const terminal = new FakePseudoTerminal();
+    const attach = vi.fn(() => terminal);
+    let finishHistory: (history: string) => void = () => undefined;
+    const history = new Promise<string>((resolve) => {
+      finishHistory = resolve;
+    });
+    const gateway = new TerminalGateway({ attach }, { read: () => history });
+    const socket = new FakeSocket();
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    gateway.attach(socket, name, "/work/project");
+    socket.emitMessage({ type: "resize", cols: 80, rows: 24 });
+    socket.emitMessage({ type: "resize", cols: 132, rows: 47 });
+    expect(attach).not.toHaveBeenCalled();
+
+    finishHistory("");
+    await vi.waitFor(() => {
+      expect(attach).toHaveBeenCalledWith(name, "/work/project", {
+        columns: 132,
+        rows: 47
+      });
+    });
+    expect(terminal.resize).not.toHaveBeenCalled();
   });
 });
 

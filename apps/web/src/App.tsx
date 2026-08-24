@@ -22,14 +22,20 @@ import { NewConversationDialog } from "./components/NewConversationDialog.js";
 import { NewWorkerDialog } from "./components/NewWorkerDialog.js";
 import { UpdateButton } from "./components/UpdateButton.js";
 import { WorkerTabs } from "./components/WorkerTabs.js";
+import {
+  initialWorkspaceSelection,
+  removeConversation,
+  resolveSession,
+  selectConversation,
+  selectSession
+} from "./workspace-selection.js";
 
 const TerminalPane = lazy(() => import("./components/TerminalPane.js"));
 
 export function App() {
   const providers = useQuery(providerQuery);
   const conversations = useQuery(conversationQuery);
-  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null);
+  const [selection, setSelection] = useState(initialWorkspaceSelection);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [workerDialogOpen, setWorkerDialogOpen] = useState(false);
   const [masterToDelete, setMasterToDelete] = useState<Conversation | null>(null);
@@ -41,17 +47,20 @@ export function App() {
 
   const conversationList = conversations.data?.conversations ?? [];
   const selectedConversation =
-    conversationList.find(({ id }) => id === selectedConversationId) ?? conversationList[0] ?? null;
+    conversationList.find(({ id }) => id === selection.conversationId) ??
+    conversationList[0] ??
+    null;
   const effectiveConversationId = selectedConversation?.id ?? null;
   const sessions = useQuery(sessionQuery(effectiveConversationId));
   const sessionList = sessions.data?.sessions ?? [];
-  const selectedSession =
-    sessionList.find(({ name }) => name === selectedSessionName) ??
-    sessionList.find(({ role }) => role === "captain") ??
-    sessionList[0] ??
-    null;
+  const selectedSession = resolveSession(
+    sessionList,
+    effectiveConversationId === null
+      ? null
+      : (selection.sessionNames[effectiveConversationId] ?? null)
+  );
 
-  if (conversations.isError) {
+  if (conversations.isError && conversations.data === undefined) {
     return (
       <div className="app app-empty">
         <EmptyState error={errorMessage(conversations.error)} onCreate={() => undefined} />
@@ -74,8 +83,7 @@ export function App() {
           conversations={conversationList}
           selectedId={effectiveConversationId}
           onSelect={(conversation) => {
-            setSelectedConversationId(conversation.id);
-            setSelectedSessionName(conversation.captainSessionName);
+            setSelection((current) => selectConversation(current, conversation));
           }}
           onCreate={() => {
             setDialogOpen(true);
@@ -87,11 +95,22 @@ export function App() {
         />
 
         <div className="active-agent">
-          {sessions.isError ? (
+          {conversations.isPending ? (
+            <TerminalPlaceholder label="Orchestrator" message="Loading conversations…" />
+          ) : sessions.isError && sessions.data === undefined ? (
             <EmptyState error={errorMessage(sessions.error)} onCreate={() => undefined} />
+          ) : selectedConversation !== null && sessions.isPending ? (
+            <TerminalPlaceholder
+              label={selectedConversation.title}
+              message="Loading conversation…"
+            />
           ) : selectedConversation !== null && selectedSession !== null ? (
             <Suspense fallback={<TerminalPlaceholder label={selectedSession.label} />}>
-              <TerminalPane conversationId={selectedConversation.id} session={selectedSession} />
+              <TerminalPane
+                key={`${selectedConversation.id}:${selectedSession.name}`}
+                conversationId={selectedConversation.id}
+                session={selectedSession}
+              />
             </Suspense>
           ) : (
             <EmptyState
@@ -106,7 +125,13 @@ export function App() {
           sessions={sessionList}
           selectedName={selectedSession?.name ?? null}
           canCreate={selectedConversation !== null}
-          onSelect={setSelectedSessionName}
+          onSelect={(sessionName) => {
+            if (effectiveConversationId !== null) {
+              setSelection((current) =>
+                selectSession(current, effectiveConversationId, sessionName)
+              );
+            }
+          }}
           onCreate={() => {
             createWorker.reset();
             setWorkerDialogOpen(true);
@@ -138,8 +163,7 @@ export function App() {
           onCreate={(input) => {
             createConversation.mutate(input, {
               onSuccess: (conversation) => {
-                setSelectedConversationId(conversation.id);
-                setSelectedSessionName(conversation.captainSessionName);
+                setSelection((current) => selectConversation(current, conversation));
                 setDialogOpen(false);
               }
             });
@@ -169,7 +193,9 @@ export function App() {
               { conversationId: selectedConversation.id, input },
               {
                 onSuccess: ({ sessionName }) => {
-                  setSelectedSessionName(sessionName);
+                  setSelection((current) =>
+                    selectSession(current, selectedConversation.id, sessionName)
+                  );
                   setWorkerDialogOpen(false);
                 }
               }
@@ -193,8 +219,9 @@ export function App() {
             const nextMaster = conversationList.find(({ id }) => id !== masterToDelete.id) ?? null;
             deleteConversation.mutate(masterToDelete.id, {
               onSuccess: () => {
-                setSelectedConversationId(nextMaster?.id ?? null);
-                setSelectedSessionName(nextMaster?.captainSessionName ?? null);
+                setSelection((current) =>
+                  removeConversation(current, masterToDelete.id, nextMaster)
+                );
                 setMasterToDelete(null);
               }
             });
@@ -221,7 +248,13 @@ export function App() {
               },
               {
                 onSuccess: () => {
-                  setSelectedSessionName(selectedConversation.captainSessionName);
+                  setSelection((current) =>
+                    selectSession(
+                      current,
+                      selectedConversation.id,
+                      selectedConversation.captainSessionName
+                    )
+                  );
                   setWorkerToDelete(null);
                 }
               }
@@ -233,13 +266,19 @@ export function App() {
   );
 }
 
-function TerminalPlaceholder({ label }: { readonly label: string }) {
+function TerminalPlaceholder({
+  label,
+  message = "Loading terminal…"
+}: {
+  readonly label: string;
+  readonly message?: string;
+}) {
   return (
     <main className="terminal-main">
       <section className="terminal-shell">
         <div className="session-heading">
           <h1>{label}</h1>
-          <p>Loading terminal…</p>
+          <p>{message}</p>
         </div>
       </section>
     </main>

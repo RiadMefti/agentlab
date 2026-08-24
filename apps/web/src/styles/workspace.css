@@ -187,11 +187,6 @@
   color: var(--color-text);
 }
 
-.side-tab:hover .side-tab-select small,
-.side-tab.active .side-tab-select small {
-  color: var(--color-text-muted);
-}
-
 .side-tab-select strong,
 .side-tab-select small {
   display: block;

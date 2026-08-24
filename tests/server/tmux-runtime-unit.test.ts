@@ -42,6 +42,16 @@ class RecordingRunner implements CommandRunner {
   }
 }
 
+class ExitedServerRunner implements CommandRunner {
+  public run(): Promise<RunResult> {
+    return Promise.reject(
+      Object.assign(new Error("tmux server exited unexpectedly"), {
+        stderr: "server exited unexpectedly"
+      })
+    );
+  }
+}
+
 describe("TmuxSessionRuntime", () => {
   it("creates only a strictly named session with safely rendered arguments", async () => {
     const runner = new RecordingRunner();
@@ -110,6 +120,15 @@ describe("TmuxSessionRuntime", () => {
   it("refuses to target sessions the app does not own", async () => {
     const runtime = new TmuxSessionRuntime(new RecordingRunner());
     await expect(runtime.kill("personal-session")).rejects.toThrow(/unmanaged tmux session/u);
+  });
+
+  it("treats the last tmux server exiting during inspection as missing state", async () => {
+    const runtime = new TmuxSessionRuntime(new ExitedServerRunner());
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    await expect(runtime.exists(name)).resolves.toBe(false);
+    await expect(runtime.list(TEST_CONVERSATION_ID)).resolves.toEqual([]);
+    await expect(runtime.kill(name)).resolves.toBeUndefined();
   });
 
   it("refuses to launch workers on the captain's behalf", async () => {

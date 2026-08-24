@@ -32,27 +32,9 @@ describe("theme palettes", () => {
   it("keeps normal and secondary UI text above WCAG AA contrast", () => {
     for (const palette of Object.values(uiPalettes)) {
       expect(contrast(palette.text, palette.canvas)).toBeGreaterThanOrEqual(7);
+      expect(contrast(palette.textMuted, palette.canvas)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(palette.textQuiet, palette.canvas)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(palette.focusRing, palette.canvas)).toBeGreaterThanOrEqual(3);
-    }
-  });
-
-  // Muted text labels sit on the canvas, on dialog surfaces, and on a hovered tab;
-  // quiet text (tab subtitles at rest, field placeholders) never sits on a hover surface.
-  it("keeps secondary text readable on every background it is actually painted on", () => {
-    const textBackgrounds = {
-      textMuted: ["canvas", "surface", "surfaceHover"],
-      textQuiet: ["canvas", "surface"]
-    } as const;
-
-    for (const [theme, palette] of Object.entries(uiPalettes)) {
-      for (const [token, backgrounds] of Object.entries(textBackgrounds)) {
-        for (const background of backgrounds) {
-          expect(
-            contrast(palette[token as keyof typeof palette], palette[background]),
-            `${theme} ${token} against ${background}`
-          ).toBeGreaterThanOrEqual(4.5);
-        }
-      }
     }
   });
 
@@ -85,11 +67,9 @@ describe("theme palettes", () => {
     }
   });
 
-  it("defines a complete, readable xterm palette for every theme", () => {
+  it("defines a complete, readable xterm palette for both themes", () => {
     for (const theme of Object.values(terminalThemes)) {
-      // AA, matching the minimumContrastRatio floor TerminalPane applies at paint time.
-      // Solarized Light is built on deliberately low-contrast body text and cannot meet AAA.
-      expect(contrast(theme.foreground, theme.background)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme.foreground, theme.background)).toBeGreaterThanOrEqual(7);
       expect(contrast(theme.cursor, theme.background)).toBeGreaterThanOrEqual(3);
       expect(theme.cursorAccent).toBeTruthy();
       expect(theme.selectionBackground).toBeTruthy();
@@ -112,29 +92,6 @@ describe("theme palettes", () => {
     expect(implementationStyles).not.toMatch(/#[0-9a-f]{3,8}|rgb\(/iu);
   });
 
-  it("paints the terminal on the app canvas so it has no edge of its own", () => {
-    for (const [theme, palette] of Object.entries(uiPalettes)) {
-      const terminal = terminalThemes[theme as keyof typeof terminalThemes];
-      // xterm fills its rect opaquely (allowTransparency is false), so merging with the
-      // page means matching the canvas exactly rather than approaching it.
-      expect(terminal.background, `${theme} terminal background matches the canvas`).toBe(
-        palette.canvas
-      );
-      expect(terminal.cursorAccent, `${theme} cursor accent matches the canvas`).toBe(
-        palette.canvas
-      );
-    }
-  });
-
-  it("leaves the terminal mount without a frame, well, or inner spacing", () => {
-    const rules = terminalMountRules();
-
-    expect(rules).not.toMatch(/border[^:]*:|box-shadow:|padding:/u);
-    for (const [, background] of rules.matchAll(/background:([^;]+);/gu)) {
-      expect(background).toContain("transparent");
-    }
-  });
-
   it("gives native selector popups an opaque themed surface", () => {
     const stylesRoot = new URL("../../apps/web/src/styles/", import.meta.url);
     const base = readFileSync(new URL("base.css", stylesRoot), "utf8");
@@ -148,18 +105,6 @@ describe("theme palettes", () => {
     );
   });
 });
-
-// Every declaration block whose selector touches the terminal mount or what xterm
-// renders inside it.
-function terminalMountRules(): string {
-  const workspace = readFileSync(
-    new URL("../../apps/web/src/styles/workspace.css", import.meta.url),
-    "utf8"
-  );
-  const rules = [...workspace.matchAll(/([^{}]*\.terminal-mount[^{}]*)\{([^}]*)\}/gu)];
-  if (rules.length === 0) throw new Error("Missing CSS rules for the terminal mount.");
-  return rules.map(([rule]) => rule).join("\n");
-}
 
 function contrast(first: string, second: string): number {
   const light = Math.max(luminance(first), luminance(second));

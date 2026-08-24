@@ -34,8 +34,23 @@ describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")("browser PTY integra
       }
     });
 
-    const terminal = new NodePtyTerminalFactory(socketPath).attach(name, process.cwd());
+    const terminal = new NodePtyTerminalFactory(socketPath).attach(name, process.cwd(), {
+      columns: 91,
+      rows: 27
+    });
     await expect.poll(async () => (await runtime.list(conversationId))[0]?.attached).toBe(true);
+    await expect
+      .poll(async () => {
+        const { stdout } = await new NodeCommandRunner().run("tmux", [
+          "-S",
+          socketPath,
+          "list-clients",
+          "-F",
+          "#{client_width}x#{client_height}"
+        ]);
+        return stdout.trim();
+      })
+      .toBe("91x27");
 
     const exited = new Promise<void>((resolve) => {
       terminal.onExit(() => {

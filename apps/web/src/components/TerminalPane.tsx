@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   sessionHistoryLimit,
@@ -17,6 +17,8 @@ interface TerminalPaneProps {
   readonly session: AgentSession;
 }
 
+const initialDimensionsFallbackMs = 500;
+
 export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -25,7 +27,7 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
   const [attempt, setAttempt] = useState(0);
   const [connection, setConnection] = useState<"connecting" | "connected" | "closed">("connecting");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
 
@@ -35,9 +37,7 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
       allowTransparency: false,
       convertEol: false,
       cursorBlink: true,
-      cursorInactiveStyle: "outline",
       cursorStyle: "bar",
-      cursorWidth: 2,
       fontFamily: 'ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace',
       fontSize: 13,
       lineHeight: 1.35,
@@ -53,24 +53,52 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const path = `/api/conversations/${encodeURIComponent(conversationId)}/sessions/${encodeURIComponent(session.name)}/terminal`;
     const socket = new WebSocket(`${protocol}//${window.location.host}${path}`);
+    let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
+    let lastSentDimensions: string | null = null;
 
-    const resize = (): void => {
-      if (!active) return;
-      fit.fit();
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "resize", cols: terminal.cols, rows: terminal.rows }));
+    const applyDimensions = (cols: number, rows: number): boolean => {
+      if (!active || !Number.isInteger(cols) || !Number.isInteger(rows) || cols < 2 || rows < 1) {
+        return false;
       }
+      const boundedCols = Math.min(cols, 1_000);
+      const boundedRows = Math.min(rows, 1_000);
+      if (terminal.cols !== boundedCols || terminal.rows !== boundedRows) {
+        terminal.resize(boundedCols, boundedRows);
+      }
+      if (socket.readyState !== WebSocket.OPEN) return false;
+
+      const dimensions = `${String(boundedCols)}x${String(boundedRows)}`;
+      if (dimensions !== lastSentDimensions) {
+        socket.send(JSON.stringify({ type: "resize", cols: boundedCols, rows: boundedRows }));
+        lastSentDimensions = dimensions;
+      }
+      if (fallbackTimeout !== null) {
+        clearTimeout(fallbackTimeout);
+        fallbackTimeout = null;
+      }
+      return true;
     };
-    const observer = new ResizeObserver(resize);
+    const resize = (): boolean => {
+      const dimensions = fit.proposeDimensions();
+      return dimensions === undefined ? false : applyDimensions(dimensions.cols, dimensions.rows);
+    };
+    const observer = new ResizeObserver(() => {
+      resize();
+    });
     observer.observe(container);
 
     socket.addEventListener("open", () => {
       if (!active) return;
       setConnection("connected");
-      resize();
+      if (!resize()) {
+        fallbackTimeout = setTimeout(() => {
+          applyDimensions(terminal.cols, terminal.rows);
+        }, initialDimensionsFallbackMs);
+      }
       terminal.focus();
     });
     socket.addEventListener("message", (event) => {
+      if (!active) return;
       if (typeof event.data !== "string") return;
       let decoded: unknown;
       try {
@@ -100,6 +128,7 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
 
     return () => {
       active = false;
+      if (fallbackTimeout !== null) clearTimeout(fallbackTimeout);
       input.dispose();
       observer.disconnect();
       socket.close();
@@ -108,7 +137,7 @@ export function TerminalPane({ conversationId, session }: TerminalPaneProps) {
     };
   }, [attempt, conversationId, session.name]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     resolvedThemeRef.current = resolvedTheme;
     const terminal = terminalRef.current;
     if (terminal !== null) terminal.options.theme = terminalThemeFor(resolvedTheme);

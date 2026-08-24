@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appearanceCookieName,
   themeBackgroundColors,
-  type ColorScheme
+  type Appearance
 } from "@orchestrator/contracts";
 
 import {
@@ -15,13 +15,11 @@ const serverUrl = "http://127.0.0.1:59382";
 
 describe("Electron initial window theme", () => {
   it.each([
-    { stored: "dark", systemDark: false, scheme: "dark" },
-    { stored: "light", systemDark: true, scheme: "light" },
-    { stored: "tokyo-night", systemDark: false, scheme: "dark" },
-    { stored: "solarized-light", systemDark: true, scheme: "light" }
+    { stored: "dark", systemDark: false, resolvedTheme: "dark" },
+    { stored: "light", systemDark: true, resolvedTheme: "light" }
   ] as const)(
     "uses persisted $stored before BrowserWindow creation",
-    async ({ stored, systemDark, scheme }) => {
+    async ({ stored, systemDark, resolvedTheme }) => {
       const cookies = {
         get: vi.fn().mockResolvedValue([{ value: stored }])
       };
@@ -29,11 +27,10 @@ describe("Electron initial window theme", () => {
 
       await expect(synchronizeNativeWindowTheme(cookies, nativeTheme, serverUrl)).resolves.toEqual({
         appearance: stored,
-        resolvedTheme: stored,
-        backgroundColor: themeBackgroundColors[stored]
+        resolvedTheme,
+        backgroundColor: themeBackgroundColors[resolvedTheme]
       });
-      // Electron only understands the two schemes; the theme keeps its own background.
-      expect(nativeTheme.themeSource).toBe(scheme);
+      expect(nativeTheme.themeSource).toBe(stored);
       expect(cookies.get).toHaveBeenCalledWith({ name: appearanceCookieName, url: serverUrl });
     }
   );
@@ -99,7 +96,7 @@ describe("Electron initial window theme", () => {
 });
 
 function fakeNativeTheme(systemUsesDarkColors: boolean) {
-  let source: ColorScheme | "system" = "system";
+  let source: Appearance = "system";
   return {
     get shouldUseDarkColors() {
       return source === "system" ? systemUsesDarkColors : source === "dark";
@@ -107,8 +104,8 @@ function fakeNativeTheme(systemUsesDarkColors: boolean) {
     get themeSource() {
       return source;
     },
-    set themeSource(scheme: ColorScheme | "system") {
-      source = scheme;
+    set themeSource(appearance: Appearance) {
+      source = appearance;
     }
   };
 }

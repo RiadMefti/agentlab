@@ -59,7 +59,7 @@ async function startDesktop(): Promise<void> {
 
   registerLifecycleHandlers();
   await app.whenReady();
-  const startupTheme = await synchronizeNativeWindowTheme(
+  await synchronizeNativeWindowTheme(
     session.defaultSession.cookies,
     nativeTheme,
     appearanceCookieUrl
@@ -69,7 +69,6 @@ async function startDesktop(): Promise<void> {
     nativeTheme,
     BrowserWindow,
     appearanceCookieUrl,
-    startupTheme.appearance,
     (error) => {
       console.error("Failed to synchronize the native appearance.", error);
     }

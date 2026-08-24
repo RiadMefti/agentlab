@@ -12,22 +12,27 @@ export interface PseudoTerminal {
   onExit(listener: (event: { exitCode: number }) => void): Disposable;
 }
 
+export interface TerminalDimensions {
+  readonly columns: number;
+  readonly rows: number;
+}
+
 export interface PseudoTerminalFactory {
-  attach(sessionName: string, cwd: string): PseudoTerminal;
+  attach(sessionName: string, cwd: string, dimensions: TerminalDimensions): PseudoTerminal;
 }
 
 export class NodePtyTerminalFactory implements PseudoTerminalFactory {
   public constructor(private readonly socketPath?: string) {}
 
-  public attach(sessionName: string, cwd: string): PseudoTerminal {
+  public attach(sessionName: string, cwd: string, dimensions: TerminalDimensions): PseudoTerminal {
     const args = ["attach-session", "-t", `=${sessionName}`];
     return pty.spawn(
       "tmux",
       this.socketPath === undefined ? args : ["-S", this.socketPath, ...args],
       {
         name: "xterm-256color",
-        cols: 120,
-        rows: 40,
+        cols: dimensions.columns,
+        rows: dimensions.rows,
         cwd,
         env: stringEnvironment({
           ...process.env,

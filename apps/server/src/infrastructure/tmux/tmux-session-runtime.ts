@@ -185,6 +185,7 @@ function isMissingSessionError(error: unknown): boolean {
   const output = errorOutput(error).toLowerCase();
   return (
     output.includes("no server running") ||
+    output.includes("server exited unexpectedly") ||
     output.includes("can't find session") ||
     output.includes("no sessions") ||
     (output.includes("error connecting to") && output.includes("no such file or directory"))
