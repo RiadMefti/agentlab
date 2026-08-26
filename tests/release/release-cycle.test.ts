@@ -632,10 +632,29 @@ describe("release workflow trust boundaries", () => {
       "needs: [validate, github_release, npm_package, smoke_linux, smoke_macos]"
     );
     expect(workflow).toContain("id-token: write");
-    expect(workflow).toContain('npm publish "npm-artifact/agentlab-');
-    expect(workflow).toContain("npm install --global --ignore-scripts");
+    expect(workflow).toContain('npm publish "./npm-artifact/agentlab-');
+    expect(workflow).toContain('npm install --global --ignore-scripts "./npm-artifact/');
     expect(workflow).toContain("NODE_USE_ENV_PROXY=1");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(workflow).not.toContain('npm install --global --ignore-scripts "npm-artifact/');
     expect(workflow).not.toMatch(/npm publish[^\n]*--workspace/u);
+  });
+
+  it("recovers only an exact candidate from a failed immutable release run", async () => {
+    const workflow = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+
+    expect(workflow).toContain("recover_npm_candidate:");
+    expect(workflow).toContain("recover_npm_smoke:");
+    expect(workflow).toContain("recover_npm_publish:");
+    expect(workflow).toContain("+npm-recovery.RUN_ID");
+    expect(workflow).toContain('.conclusion == "failure"');
+    expect(workflow).toContain('.path == ".github/workflows/release.yml"');
+    expect(workflow).toContain(".isDraft == false and .isImmutable == true");
+    expect(workflow).toContain("--name npm-launcher");
+    expect(workflow).toContain("--source-digest");
+    expect(workflow).toContain("npm-launcher-recovery");
   });
 });

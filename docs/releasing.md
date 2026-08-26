@@ -121,8 +121,12 @@ not notarized; if Gatekeeper blocks the verified download, run
 
 - A failed binary build publishes nothing. Fix the cause and rerun the workflow; an incomplete draft
   for that exact tag may be replaced.
-- A published GitHub release is immutable. If a later npm step fails, rerun the same workflow; it
-  reuses and verifies the existing assets before retrying npm publication.
+- A published GitHub release is immutable. If a later npm step fails transiently, rerun the same
+  workflow. If the workflow itself needs a fix, land that fix on `main`, wait for CI, then create an
+  annotated `vX.Y.Z+npm-recovery.RUN_ID` tag using the failed release run ID. The recovery path
+  accepts only the exact failed `release.yml` run for that immutable release, reverifies its assets
+  and attestations, repeats both platform smoke tests, and publishes the same candidate through
+  OIDC. Delete the temporary recovery tag after the recovery succeeds.
 - A published npm version is immutable. The workflow treats an existing version as a rerun only when
   its public tarball is byte-for-byte identical to the tested candidate.
 - Never move or reuse a published tag. Fix a bad release forward with a new patch version.
