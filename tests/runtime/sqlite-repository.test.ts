@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { Conversation } from "@orchestrator/contracts";
+import type { Conversation } from "@agentlab/contracts";
 
 import { SqliteConversationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
@@ -52,7 +52,7 @@ describe("SqliteConversationRepository", () => {
   });
 
   it("creates the local metadata database with owner-only permissions", () => {
-    const root = mkdtempSync(join(tmpdir(), "agent-orchestrator-db-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlab-db-"));
     temporaryRoots.push(root);
     const databasePath = join(root, "conversations.sqlite");
     const repository = new SqliteConversationRepository(databasePath);
@@ -65,7 +65,7 @@ describe("SqliteConversationRepository", () => {
   });
 
   it("rejects a stored captain identity owned by another conversation", async () => {
-    const root = mkdtempSync(join(tmpdir(), "agent-orchestrator-corrupt-db-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlab-corrupt-db-"));
     temporaryRoots.push(root);
     const databasePath = join(root, "conversations.sqlite");
     const repository = new SqliteConversationRepository(databasePath);
@@ -104,7 +104,7 @@ describe("SqliteConversationRepository", () => {
   });
 
   it("migrates version-one rows without losing their selections", async () => {
-    const root = mkdtempSync(join(tmpdir(), "agent-orchestrator-migration-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlab-migration-"));
     temporaryRoots.push(root);
     const databasePath = join(root, "conversations.sqlite");
     const legacy = new DatabaseSync(databasePath);

@@ -18,6 +18,7 @@
   ],
   "references": [
     { "path": "./packages/contracts" },
+    { "path": "./packages/launcher" },
     { "path": "./packages/runtime" },
     { "path": "./apps/tui" }
   ]

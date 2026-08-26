@@ -19,6 +19,6 @@ async function main(): Promise<void> {
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : "Unexpected startup failure.";
-  process.stderr.write(`orchestrator: ${message}\n`);
+  process.stderr.write(`agentlab: ${message}\n`);
   process.exitCode = 1;
 });

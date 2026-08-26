@@ -35,40 +35,45 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 }
 
 async function createVersionFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "orchestrator-release-version-"));
+  const root = await mkdtemp(join(tmpdir(), "agentlab-release-version-"));
   temporaryDirectories.push(root);
   await Promise.all([
     mkdir(join(root, "apps", "tui", "src"), { recursive: true }),
     mkdir(join(root, "packages", "contracts"), { recursive: true }),
+    mkdir(join(root, "packages", "launcher"), { recursive: true }),
     mkdir(join(root, "packages", "runtime"), { recursive: true })
   ]);
 
   const workspaces = ["apps/*", "packages/*"];
   const rootPackage = {
-    name: "agent-orchestrator",
+    name: "agentlab-monorepo",
     version: "0.1.0",
     private: true,
     workspaces
   };
   const tui = {
-    name: "@orchestrator/tui",
+    name: "@agentlab/tui",
     version: "0.1.0",
     private: true,
     dependencies: {
-      "@orchestrator/contracts": "0.1.0",
-      "@orchestrator/runtime": "0.1.0"
+      "@agentlab/contracts": "0.1.0",
+      "@agentlab/runtime": "0.1.0"
     }
   };
   const contracts = {
-    name: "@orchestrator/contracts",
+    name: "@agentlab/contracts",
     version: "0.1.0",
     private: true
   };
   const runtime = {
-    name: "@orchestrator/runtime",
+    name: "@agentlab/runtime",
     version: "0.1.0",
     private: true,
-    dependencies: { "@orchestrator/contracts": "0.1.0" }
+    dependencies: { "@agentlab/contracts": "0.1.0" }
+  };
+  const launcher = {
+    name: "agentlab",
+    version: "0.1.0"
   };
   await Promise.all([
     writeJson(join(root, "package.json"), rootPackage),
@@ -79,6 +84,7 @@ async function createVersionFixture(): Promise<string> {
       "utf8"
     ),
     writeJson(join(root, "packages", "contracts", "package.json"), contracts),
+    writeJson(join(root, "packages", "launcher", "package.json"), launcher),
     writeJson(join(root, "packages", "runtime", "package.json"), runtime),
     writeJson(join(root, "package-lock.json"), {
       name: rootPackage.name,
@@ -89,6 +95,7 @@ async function createVersionFixture(): Promise<string> {
         "": rootPackage,
         "apps/tui": tui,
         "packages/contracts": contracts,
+        "packages/launcher": launcher,
         "packages/runtime": runtime
       }
     })
@@ -136,10 +143,10 @@ async function createAssetFixture(
   includeChecksums = false,
   includeBun = true
 ): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "orchestrator-release-assets-"));
+  const root = await mkdtemp(join(tmpdir(), "agentlab-release-assets-"));
   temporaryDirectories.push(root);
-  const linuxName = `agent-orchestrator-v${version}-linux-x64`;
-  const macName = `agent-orchestrator-v${version}-mac-arm64`;
+  const linuxName = `agentlab-v${version}-linux-x64`;
+  const macName = `agentlab-v${version}-mac-arm64`;
   const linuxSbomName = `${linuxName}.cdx.json`;
   const macSbomName = `${macName}.cdx.json`;
   const linuxHeader = Buffer.alloc(24);
@@ -157,7 +164,7 @@ async function createAssetFixture(
     purl: "pkg:github/oven-sh/bun@1.4.0",
     properties: [
       {
-        name: "agent-orchestrator:component:distribution",
+        name: "agentlab:component:distribution",
         value: "embedded-runtime"
       }
     ]
@@ -171,7 +178,7 @@ async function createAssetFixture(
     purl: `pkg:npm/${encodeURIComponent(name).replace("%2F", "/")}@0.5.8`,
     properties: [
       {
-        name: "agent-orchestrator:component:distribution",
+        name: "agentlab:component:distribution",
         value: "bundled"
       }
     ]
@@ -185,7 +192,7 @@ async function createAssetFixture(
     purl: "pkg:npm/%40anthropic-ai/claude-agent-sdk@0.3.239",
     properties: [
       {
-        name: "agent-orchestrator:component:distribution",
+        name: "agentlab:component:distribution",
         value: "bundled"
       }
     ]
@@ -199,11 +206,11 @@ async function createAssetFixture(
     purl: "pkg:npm/%40anthropic-ai/sdk@0.112.1",
     properties: [
       {
-        name: "agent-orchestrator:component:distribution",
+        name: "agentlab:component:distribution",
         value: "prebundled"
       },
       {
-        name: "agent-orchestrator:component:provenance",
+        name: "agentlab:component:provenance",
         value: "anthropic-stainless-runtime-marker"
       }
     ],
@@ -218,12 +225,12 @@ async function createAssetFixture(
       specVersion: "1.5",
       metadata: {
         component: {
-          "bom-ref": `agent-orchestrator@${version}`,
-          name: "agent-orchestrator",
+          "bom-ref": `agentlab@${version}`,
+          name: "agentlab",
           version,
           properties: [
             {
-              name: "agent-orchestrator:binary:target",
+              name: "agentlab:binary:target",
               value: target
             }
           ]
@@ -232,7 +239,7 @@ async function createAssetFixture(
       components: includeBun ? [native, claude, anthropic, bun] : [native, claude, anthropic],
       dependencies: [
         {
-          ref: `agent-orchestrator@${version}`,
+          ref: `agentlab@${version}`,
           dependsOn: includeBun
             ? [native["bom-ref"], claude["bom-ref"], bun["bom-ref"]]
             : [native["bom-ref"], claude["bom-ref"]]
@@ -283,7 +290,7 @@ describe("release version metadata", () => {
     const tuiPath = join(root, "apps", "tui", "package.json");
     const tui = parsePackageMetadata(await readFile(tuiPath, "utf8"));
     if (!tui.dependencies) throw new Error("TUI fixture dependencies are missing.");
-    tui.dependencies["@orchestrator/runtime"] = "0.0.9";
+    tui.dependencies["@agentlab/runtime"] = "0.0.9";
     await writeJson(tuiPath, tui);
     const wrongDependency = runScript("check-release.mjs", "v0.1.0", "--root", root);
 
@@ -298,6 +305,7 @@ describe("release version metadata", () => {
       "package.json",
       "apps/tui/package.json",
       "packages/contracts/package.json",
+      "packages/launcher/package.json",
       "packages/runtime/package.json"
     ];
     const manifests = await Promise.all(
@@ -309,10 +317,11 @@ describe("release version metadata", () => {
 
     expect(result.status).toBe(0);
     expect(manifests.every((manifest) => manifest.version === "0.2.0")).toBe(true);
-    expect(manifests[1]?.dependencies?.["@orchestrator/runtime"]).toBe("0.2.0");
-    expect(manifests[3]?.dependencies?.["@orchestrator/contracts"]).toBe("0.2.0");
+    expect(manifests[1]?.dependencies?.["@agentlab/runtime"]).toBe("0.2.0");
+    expect(manifests[4]?.dependencies?.["@agentlab/contracts"]).toBe("0.2.0");
     expect(lock.version).toBe("0.2.0");
-    expect(lock.packages["apps/tui"]?.dependencies?.["@orchestrator/contracts"]).toBe("0.2.0");
+    expect(lock.packages["apps/tui"]?.dependencies?.["@agentlab/contracts"]).toBe("0.2.0");
+    expect(lock.packages["packages/launcher"]?.version).toBe("0.2.0");
     expect(await readFile(join(root, "apps", "tui", "src", "version.ts"), "utf8")).toBe(
       'export const appVersion = "0.2.0";\n'
     );
@@ -347,7 +356,7 @@ describe("release asset validation", () => {
     await writeFile(join(root, "unexpected.txt"), "unexpected", "utf8");
     const extraFile = runScript("check-release-assets.mjs", "v0.1.0", root);
     await rm(join(root, "unexpected.txt"));
-    const linuxPath = join(root, "agent-orchestrator-v0.1.0-linux-x64");
+    const linuxPath = join(root, "agentlab-v0.1.0-linux-x64");
     const handle = await open(linuxPath, "r+");
     try {
       await handle.write(Buffer.from("NOPE"), 0, 4, 0);
@@ -379,7 +388,7 @@ describe("release asset validation", () => {
 
 describe("release SBOM generation", () => {
   it("derives target inputs and exact upstream prebundle versions from Bun provenance", async () => {
-    const root = await mkdtemp(join(tmpdir(), "orchestrator-sbom-"));
+    const root = await mkdtemp(join(tmpdir(), "agentlab-sbom-"));
     temporaryDirectories.push(root);
     const metafilePath = join(root, "metafile.json");
     const outputPath = join(root, "binary.cdx.json");
@@ -394,7 +403,7 @@ describe("release SBOM generation", () => {
     ]);
     await writeJson(join(root, "package-lock.json"), {
       packages: {
-        "": { name: "agent-orchestrator", version: "0.1.10" },
+        "": { name: "agentlab", version: "0.1.10" },
         "node_modules/@opentui/core": { version: "0.5.8" },
         "node_modules/@opentui/core-linux-x64": { version: "0.5.8" },
         "node_modules/@opentui/core-darwin-arm64": { version: "0.5.8" },
@@ -451,9 +460,7 @@ describe("release SBOM generation", () => {
       bunVersion: "1.4.0"
     });
     const bun = sbom.components.find(({ name }) => name === "bun");
-    const applicationDependency = sbom.dependencies.find(
-      ({ ref }) => ref === "agent-orchestrator@0.1.10"
-    );
+    const applicationDependency = sbom.dependencies.find(({ ref }) => ref === "agentlab@0.1.10");
     const componentNames = sbom.components.map(({ name }) => name);
     const vendored = sbom.components.find(({ name }) => name === "vendored-lib");
     const core = sbom.components.find(({ name }) => name === "@opentui/core");
@@ -478,11 +485,11 @@ describe("release SBOM generation", () => {
       version: "2.3.4",
       properties: expect.arrayContaining([
         {
-          name: "agent-orchestrator:component:distribution",
+          name: "agentlab:component:distribution",
           value: "prebundled"
         },
         {
-          name: "agent-orchestrator:component:provenance",
+          name: "agentlab:component:provenance",
           value: "bun-module-marker"
         }
       ]),
@@ -496,11 +503,11 @@ describe("release SBOM generation", () => {
       version: "0.112.1",
       properties: expect.arrayContaining([
         {
-          name: "agent-orchestrator:component:distribution",
+          name: "agentlab:component:distribution",
           value: "prebundled"
         },
         {
-          name: "agent-orchestrator:component:provenance",
+          name: "agentlab:component:provenance",
           value: "anthropic-stainless-runtime-marker"
         }
       ]),
@@ -516,7 +523,7 @@ describe("release SBOM generation", () => {
       expect.objectContaining({ name: "@anthropic-ai/sdk", version: "9.9.9" })
     );
     expect(sbom.metadata.component.properties).toContainEqual({
-      name: "agent-orchestrator:binary:target",
+      name: "agentlab:binary:target",
       value: "linux-x64"
     });
     expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(sbom);
@@ -564,12 +571,8 @@ describe("release workflow trust boundaries", () => {
       join(projectRoot, ".github", "workflows", "release.yml"),
       "utf8"
     );
-    expect(workflow).toContain(
-      "agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64"
-    );
-    expect(workflow).toContain(
-      "agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64"
-    );
+    expect(workflow).toContain("agentlab-v${{ needs.validate.outputs.version }}-linux-x64");
+    expect(workflow).toContain("agentlab-v${{ needs.validate.outputs.version }}-mac-arm64");
     expect(workflow).toContain('npm install --global "bun@${BUN_VERSION}"');
     expect(workflow).toContain("npm run package");
     expect(workflow).not.toMatch(/Electron|AppImage|\.dmg|electron-builder/u);
@@ -590,6 +593,31 @@ describe("release workflow trust boundaries", () => {
     expect(workflow).toContain("xattr -d com.apple.quarantine");
     expect(workflow).toContain("sbom-path:");
     expect(workflow).toContain("SHA256SUMS");
+    expect(workflow).toContain(".isImmutable == true");
     expect(workflow.split('test "$remote_digest" = "sha256:$digest"')).toHaveLength(3);
+  });
+
+  it("publishes one tested npm launcher through OIDC without a registry token", async () => {
+    const workflow = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+    const linuxSmoke = workflow.indexOf("smoke_linux:");
+    const macSmoke = workflow.indexOf("smoke_macos:");
+    const npmPublish = workflow.indexOf("npm_publish:");
+
+    expect(linuxSmoke).toBeGreaterThan(0);
+    expect(macSmoke).toBeGreaterThan(linuxSmoke);
+    expect(npmPublish).toBeGreaterThan(macSmoke);
+    expect(workflow).toContain("node scripts/prepare-npm-package.mjs");
+    expect(workflow).toContain(
+      "needs: [validate, github_release, npm_package, smoke_linux, smoke_macos]"
+    );
+    expect(workflow).toContain("id-token: write");
+    expect(workflow).toContain('npm publish "npm-artifact/agentlab-');
+    expect(workflow).toContain("npm install --global --ignore-scripts");
+    expect(workflow).toContain("NODE_USE_ENV_PROXY=1");
+    expect(workflow).not.toContain("NODE_AUTH_TOKEN");
+    expect(workflow).not.toMatch(/npm publish[^\n]*--workspace/u);
   });
 });

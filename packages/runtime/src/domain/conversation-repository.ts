@@ -1,4 +1,4 @@
-import type { Conversation } from "@orchestrator/contracts";
+import type { Conversation } from "@agentlab/contracts";
 
 /** Persistence port for durable conversation metadata. */
 export interface ConversationRepository {

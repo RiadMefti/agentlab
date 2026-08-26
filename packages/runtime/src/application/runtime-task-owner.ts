@@ -1,6 +1,6 @@
-import type { OrchestratorCommandPort } from "./orchestrator-commands.js";
+import type { AgentLabCommandPort } from "./agentlab-commands.js";
 
-const CLOSED_RUNTIME_MESSAGE = "The orchestrator runtime is closing.";
+const CLOSED_RUNTIME_MESSAGE = "The agentlab runtime is closing.";
 
 /** Admission gate and drain barrier for application work owned by one runtime. */
 export class RuntimeTaskOwner {
@@ -32,10 +32,10 @@ export class RuntimeTaskOwner {
 }
 
 /** Applies runtime ownership to every command without coupling domain services to shutdown. */
-export function ownOrchestratorCommands(
-  commands: OrchestratorCommandPort,
+export function ownAgentLabCommands(
+  commands: AgentLabCommandPort,
   tasks: RuntimeTaskOwner
-): OrchestratorCommandPort {
+): AgentLabCommandPort {
   return {
     listConversations: () => tasks.run(() => commands.listConversations()),
     inspectWorkspace: (workspacePath) => tasks.run(() => commands.inspectWorkspace(workspacePath)),

@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function temporaryRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "orchestrator-project-path-"));
+  const root = mkdtempSync(join(tmpdir(), "agentlab-project-path-"));
   temporaryRoots.push(root);
   return root;
 }

@@ -12,7 +12,7 @@ function openCodeCaptainConfiguration(input: CaptainCommandInput): string {
   return JSON.stringify({
     agent: {
       [openCodeCaptainAgentName(input.conversationId)]: {
-        description: "Agent Orchestrator captain",
+        description: "AgentLab captain",
         mode: "primary",
         prompt: input.supervisorInstructions
       }

@@ -12,23 +12,23 @@ import { stableVersionFromTag } from "./release-versions.mjs";
 const MINIMUM_BINARY_SIZE = 20 * 1024 * 1024;
 const CHECKSUM_FILE = "SHA256SUMS";
 const RUNTIME_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "embedded-runtime"
 };
 const BUNDLED_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "bundled"
 };
 const PREBUNDLED_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "prebundled"
 };
-const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agent-orchestrator:component:provenance";
+const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agentlab:component:provenance";
 const PREBUNDLE_PROVENANCE_METHODS = new Set([
   "anthropic-stainless-runtime-marker",
   "bun-module-marker"
 ]);
-const TARGET_PROPERTY_NAME = "agent-orchestrator:binary:target";
+const TARGET_PROPERTY_NAME = "agentlab:binary:target";
 const NATIVE_PACKAGE_BY_TARGET = {
   "linux-x64": "@opentui/core-linux-x64",
   "mac-arm64": "@opentui/core-darwin-arm64"
@@ -100,8 +100,8 @@ async function verifySbom(path, version, target) {
     throw new Error(`${path} is missing metadata.component.`);
   }
   const application = value.metadata.component;
-  if (application.name !== "agent-orchestrator" || application.version !== version) {
-    throw new Error(`${path} component identity does not match agent-orchestrator@${version}.`);
+  if (application.name !== "agentlab" || application.version !== version) {
+    throw new Error(`${path} component identity does not match agentlab@${version}.`);
   }
   if (typeof application["bom-ref"] !== "string") {
     throw new Error(`${path} application component is missing its bom-ref.`);
@@ -376,8 +376,8 @@ async function verifyChecksums(path, directory, assetNames) {
 export async function checkReleaseAssets(tag, directoryPath, includeChecksums = false) {
   const version = stableVersionFromTag(tag);
   const directory = resolve(directoryPath);
-  const linuxName = `agent-orchestrator-v${version}-linux-x64`;
-  const macName = `agent-orchestrator-v${version}-mac-arm64`;
+  const linuxName = `agentlab-v${version}-linux-x64`;
+  const macName = `agentlab-v${version}-mac-arm64`;
   const linuxSbomName = `${linuxName}.cdx.json`;
   const macSbomName = `${macName}.cdx.json`;
   const assetNames = [linuxName, linuxSbomName, macName, macSbomName].sort();

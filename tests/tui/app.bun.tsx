@@ -6,14 +6,14 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { useKeyboard } from "@opentui/react";
 import { testRender } from "@opentui/react/test-utils";
 
-import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
+import type { AgentSession, Conversation, ProviderCapability } from "@agentlab/contracts";
 import {
   maximumTerminalDimension,
-  type LocalOrchestratorRuntime,
+  type LocalAgentLabRuntime,
   type OpenSessionTerminalInput,
-  type OrchestratorCommandPort,
+  type AgentLabCommandPort,
   type SessionTerminal
-} from "@orchestrator/runtime";
+} from "@agentlab/runtime";
 
 import { App } from "../../apps/tui/src/app.js";
 import {
@@ -154,7 +154,7 @@ describe("terminal workspace", () => {
       releaseBufferedOutput: mock(() => undefined)
     });
     const base = fakeRuntime({ conversations: [conversation], sessions });
-    const runtime: LocalOrchestratorRuntime = {
+    const runtime: LocalAgentLabRuntime = {
       ...base,
       openTerminal: mock((input: OpenSessionTerminalInput) =>
         input.sessionName === sessions[0]?.name
@@ -323,7 +323,7 @@ describe("terminal workspace", () => {
   test("seeds terminal history before releasing output captured during synchronous attach", async () => {
     const base = fakeRuntime({ conversations: [conversation], sessions });
     const terminal = fakeTerminal();
-    const runtime: LocalOrchestratorRuntime = {
+    const runtime: LocalAgentLabRuntime = {
       ...base,
       openTerminal: mock((input: OpenSessionTerminalInput) => {
         const outputCapturedDuringAttach = ["newer-live-output\r\n"];
@@ -406,7 +406,7 @@ describe("terminal workspace", () => {
       finishClose = resolve;
     });
     const base = fakeRuntime({ conversations: [conversation], sessions });
-    const runtime: LocalOrchestratorRuntime = {
+    const runtime: LocalAgentLabRuntime = {
       ...base,
       close: mock(() => closePending)
     };
@@ -454,7 +454,7 @@ const conversation: Conversation = {
   provider: "codex",
   model: null,
   reasoning: null,
-  captainSessionName: "ao__11111111-1111-4111-8111-111111111111__captain__codex",
+  captainSessionName: "agentlab__11111111-1111-4111-8111-111111111111__captain__codex",
   createdAt: "2026-08-25T12:00:00.000Z",
   updatedAt: "2026-08-25T12:00:00.000Z"
 };
@@ -471,7 +471,7 @@ const sessions: readonly AgentSession[] = [
     startedAt: "2026-08-25T12:00:00.000Z"
   },
   {
-    name: "ao__11111111-1111-4111-8111-111111111111__worker__claude__test-writer",
+    name: "agentlab__11111111-1111-4111-8111-111111111111__worker__claude__test-writer",
     conversationId: conversation.id,
     role: "worker",
     provider: "claude",
@@ -491,7 +491,7 @@ function conversationAt(index: number): Conversation {
     ...conversation,
     id,
     title: `Conversation ${String(index).padStart(2, "0")}`,
-    captainSessionName: `ao__${id}__captain__codex`
+    captainSessionName: `agentlab__${id}__captain__codex`
   };
 }
 
@@ -507,7 +507,7 @@ function workerAt(owner: Conversation, index: number): AgentSession {
   const worker = String(index).padStart(2, "0");
   return {
     ...sessionFixture(1),
-    name: `ao__${owner.id}__worker__claude__worker-${worker}`,
+    name: `agentlab__${owner.id}__worker__claude__worker-${worker}`,
     conversationId: owner.id,
     label: `Worker ${worker}`
   };
@@ -576,11 +576,11 @@ function fakeRuntime(
       { readonly history: string; readonly terminal: SessionTerminal }
     >;
   } = {}
-): LocalOrchestratorRuntime {
+): LocalAgentLabRuntime {
   const conversations = options.conversations ?? [];
   const listedSessions = options.sessions ?? [];
   const terminal = options.terminal ?? fakeTerminal();
-  const commands: OrchestratorCommandPort = {
+  const commands: AgentLabCommandPort = {
     listConversations: mock(() => deferred(conversations)),
     inspectWorkspace: mock((workspacePath) =>
       deferred({

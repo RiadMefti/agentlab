@@ -3,7 +3,7 @@ import type {
   Conversation,
   ProviderCapability,
   ProviderId
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 
 import type { ConversationRepository } from "../../packages/runtime/src/domain/conversation-repository.js";
 import type {

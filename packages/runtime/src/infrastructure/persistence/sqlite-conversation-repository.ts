@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { chmodSync } from "node:fs";
 
-import { conversationSchema, type Conversation } from "@orchestrator/contracts";
+import { conversationSchema, type Conversation } from "@agentlab/contracts";
 
 import type { ConversationRepository } from "../../domain/conversation-repository.js";
 import { assertCaptainSessionOwnership } from "../../domain/agent-session-name.js";

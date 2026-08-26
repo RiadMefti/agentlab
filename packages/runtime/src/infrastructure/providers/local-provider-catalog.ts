@@ -4,7 +4,7 @@ import {
   providerCapabilitySchema,
   type ProviderCapability,
   type ProviderId
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 
 import type {
   AgentLauncher,

@@ -1,14 +1,14 @@
-# Agent Orchestrator
+# AgentLab
 
-[![CI](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml)
-[![Release](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml)
+[![CI](https://github.com/RiadMefti/agentlab/actions/workflows/ci.yml/badge.svg)](https://github.com/RiadMefti/agentlab/actions/workflows/ci.yml)
+[![Release](https://github.com/RiadMefti/agentlab/actions/workflows/release.yml/badge.svg)](https://github.com/RiadMefti/agentlab/actions/workflows/release.yml)
 
 **One captain per project folder, with all your coding agents in one fast local terminal.**
 
-Agent Orchestrator runs Codex, Claude Code, and OpenCode as their real CLIs. They keep their
-existing authentication, configuration, tools, and context. Each saved project is a named local
-folder with exactly one captain. The captain may coordinate any number of workers, and every live
-session remains directly accessible.
+AgentLab runs Codex, Claude Code, and OpenCode as their real CLIs. They keep their existing
+authentication, configuration, tools, and context. Each saved project is a named local folder with
+exactly one captain. The captain may coordinate any number of workers, and every live session
+remains directly accessible.
 
 ```text
 ┌─ PROJECTS ───────┬─ SELECTED AGENT TERMINAL ───────────────┬─ AGENTS ─────────┐
@@ -23,23 +23,40 @@ durable sessions; the UI attaches exactly one PTY to the selected agent.
 
 ## Install
 
-Download the executable for your platform from the
-[latest GitHub release](https://github.com/RiadMefti/agent-orchestrator/releases/latest):
+Install the single public package, then start the app from anywhere:
 
-- `agent-orchestrator-vVERSION-linux-x64`
-- `agent-orchestrator-vVERSION-mac-arm64`
+```bash
+npm install --global agentlab
+agentlab
+```
+
+The npm package is a small cross-platform launcher. On first use it selects the matching AgentLab
+release, downloads that exact executable from GitHub, verifies its pinned size and SHA-256 digest,
+and caches it by version. Cached starts recheck the digest and make no network request. Updates are
+always explicit:
+
+```bash
+agentlab update --check
+agentlab update
+```
+
+You can alternatively download an executable from the
+[latest GitHub release](https://github.com/RiadMefti/agentlab/releases/latest):
+
+- `agentlab-vVERSION-linux-x64`
+- `agentlab-vVERSION-mac-arm64`
 
 Then make it executable and place it on your `PATH`:
 
 ```bash
-chmod +x agent-orchestrator-vVERSION-PLATFORM
-mv agent-orchestrator-vVERSION-PLATFORM ~/.local/bin/orchestrator
-orchestrator
+chmod +x agentlab-vVERSION-PLATFORM
+mv agentlab-vVERSION-PLATFORM ~/.local/bin/agentlab
+agentlab
 ```
 
 The macOS executable is not notarized. Verify its checksum and GitHub attestation first; if
 Gatekeeper then blocks it, clear the download quarantine with
-`xattr -d com.apple.quarantine agent-orchestrator-vVERSION-mac-arm64`.
+`xattr -d com.apple.quarantine agentlab-vVERSION-mac-arm64`.
 
 Every release also includes `SHA256SUMS`, a target-specific CycloneDX SBOM generated from each
 binary's Bun input graph and verified exact package/version markers in supported upstream
@@ -50,23 +67,23 @@ versions. GitHub build/SBOM attestations bind those documents to the binaries. S
 ## Requirements
 
 - Linux x64 with glibc, or macOS on Apple silicon
+- Node.js 20 or newer when installing through npm; direct executables do not need Node.js or Bun
 - `tmux`
 - at least one installed and authenticated provider CLI: `codex`, `claude`, or `opencode`
 - a terminal at least 90 columns by 18 rows
 
-Install tmux with `brew install tmux` on macOS or your distribution's package manager on Linux. Bun
-and Node.js are embedded/not required in release executables.
+Install tmux with `brew install tmux` on macOS or your distribution's package manager on Linux.
 
 ## Use
 
-1. Run `orchestrator`. Startup never infers a project from the current directory and nothing is
-   selected until you choose it.
+1. Run `agentlab`. Startup never infers a project from the current directory and nothing is selected
+   until you choose it.
 2. Press `Alt+N`, paste any existing folder path, name the project, and choose its captain
    provider/model/thinking level. Absolute paths, relative paths, spaces, and `~/…` are supported.
 3. Select projects on the left. Each project keeps exactly one captain pinned above its workers.
 4. The captain can create real worker sessions, or press `Alt+W` to start one explicitly. Press
    `Enter` to focus and interact with the selected exact agent CLI.
-5. Removing a project stops its managed sessions and forgets it in Orchestrator. It never deletes or
+5. Removing a project stops its managed sessions and forgets it in AgentLab. It never deletes or
    modifies the project folder.
 
 ### Keys
@@ -97,22 +114,21 @@ Build and smoke-test the standalone executable for the current platform:
 
 ```bash
 npm run package
-./release/agent-orchestrator-vVERSION-linux-x64 --help
+./release/agentlab-vVERSION-linux-x64 --help
 ```
 
 ## Configuration
 
-| Variable           | Default                                                 | Purpose                         |
-| ------------------ | ------------------------------------------------------- | ------------------------------- |
-| `AO_DATABASE_PATH` | `$XDG_DATA_HOME/agent-orchestrator/orchestrator.sqlite` | Local project metadata database |
-| `AO_CODEX_BIN`     | discovered                                              | Codex executable override       |
-| `AO_CLAUDE_BIN`    | discovered                                              | Claude Code executable override |
-| `AO_OPENCODE_BIN`  | discovered                                              | OpenCode executable override    |
+| Variable                 | Default                                   | Purpose                         |
+| ------------------------ | ----------------------------------------- | ------------------------------- |
+| `AGENTLAB_CACHE_PATH`    | `$XDG_CACHE_HOME/agentlab`                | npm launcher binary cache       |
+| `AGENTLAB_DATABASE_PATH` | `$XDG_DATA_HOME/agentlab/agentlab.sqlite` | Local project metadata database |
+| `AGENTLAB_CODEX_BIN`     | discovered                                | Codex executable override       |
+| `AGENTLAB_CLAUDE_BIN`    | discovered                                | Claude Code executable override |
+| `AGENTLAB_OPENCODE_BIN`  | discovered                                | OpenCode executable override    |
 
-Project folders are chosen only inside the application. If the new XDG database does not exist, the
-first terminal launch reuses an existing desktop-era database in place; it never copies or deletes
-that file merely to migrate paths. `AO_DATABASE_PATH` always takes precedence. Provider credentials
-remain in each CLI's own local authentication store.
+Project folders are chosen only inside the application. `AGENTLAB_DATABASE_PATH` always takes
+precedence. Provider credentials remain in each CLI's own local authentication store.
 
 ## Architecture
 
@@ -140,7 +156,8 @@ integration, the production build, and the standalone executable. See
 
 ## Security
 
-Agent Orchestrator opens no network listener. Managed session identities and all local command input
-are validated before process boundaries; child processes receive argument arrays, and the one tmux
-shell-command boundary uses tested POSIX quoting. Published executables are checksummed, attested,
-and immutable. See [Security](SECURITY.md) for reporting guidance.
+AgentLab opens no network listener. The npm launcher only connects to GitHub when its exact binary
+is missing and to npm when you explicitly request an update. Managed session identities and all
+local command input are validated before process boundaries; child processes receive argument
+arrays, and the one tmux shell-command boundary uses tested POSIX quoting. Published executables are
+checksummed, attested, and immutable. See [Security](SECURITY.md) for reporting guidance.

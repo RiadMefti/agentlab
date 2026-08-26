@@ -5,7 +5,7 @@ import {
   type AgentSession,
   type Conversation,
   type ProviderCapability
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import { parseSessionName } from "../domain/agent-session-name.js";
@@ -13,7 +13,7 @@ import type { ConversationService } from "./conversation-service.js";
 import type { WorkspaceInspection } from "./conversation-service.js";
 
 /** Provider- and transport-neutral command surface exposed to presentation layers. */
-export interface OrchestratorCommandPort {
+export interface AgentLabCommandPort {
   listConversations(): Promise<readonly Conversation[]>;
   inspectWorkspace(workspacePath: unknown): Promise<WorkspaceInspection>;
   listProviders(conversationId: unknown): Promise<readonly ProviderCapability[]>;
@@ -43,7 +43,7 @@ const sessionNameSchema = z
   .refine((name) => parseSessionName(name) !== null, "Invalid managed session name.");
 
 /** Validated, transport-independent commands exposed directly to local UIs. */
-export class OrchestratorCommands implements OrchestratorCommandPort {
+export class AgentLabCommands implements AgentLabCommandPort {
   public constructor(private readonly conversations: ConversationOperations) {}
 
   public listConversations(): Promise<readonly Conversation[]> {

@@ -8,7 +8,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
   }
-  throw new Error("Usage: orchestrator");
+  throw new Error("Usage: agentlab");
 }
 
 export function assertSupportedTerminalRuntime(
@@ -20,15 +20,15 @@ export function assertSupportedTerminalRuntime(
   }
 }
 
-export const helpText = `orchestrator
+export const helpText = `agentlab
 
 Open the local terminal UI, then choose or add a project folder.
 
 Environment:
-  AO_DATABASE_PATH   Override the local SQLite database path
-  AO_CODEX_BIN       Override the Codex executable
-  AO_CLAUDE_BIN      Override the Claude executable
-  AO_OPENCODE_BIN    Override the OpenCode executable
+  AGENTLAB_DATABASE_PATH   Override the local SQLite database path
+  AGENTLAB_CODEX_BIN       Override the Codex executable
+  AGENTLAB_CLAUDE_BIN      Override the Claude executable
+  AGENTLAB_OPENCODE_BIN    Override the OpenCode executable
 
 Keys:
   Alt+1 / Alt+2 / Alt+3        Focus projects / terminal / agents

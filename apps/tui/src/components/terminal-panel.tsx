@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { sessionHistoryLimit, type AgentSession } from "@orchestrator/contracts";
+import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
 import type { EmbeddedTerminalRenderable } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
-import { maximumTerminalDimension, type SessionTerminal } from "@orchestrator/runtime";
+import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtime";
 
 import "../terminal/embedded-terminal.js";
 import { paintTerminalDefaults } from "../terminal/terminal-appearance.js";

@@ -22,12 +22,8 @@ export async function assertBinarySbomCorrespondence(
     throw new Error("The SBOM does not link Claude Agent SDK to its embedded Anthropic SDK.");
   }
   if (
-    !hasProperty(sdk, "agent-orchestrator:component:distribution", "prebundled") ||
-    !hasProperty(
-      sdk,
-      "agent-orchestrator:component:provenance",
-      "anthropic-stainless-runtime-marker"
-    ) ||
+    !hasProperty(sdk, "agentlab:component:distribution", "prebundled") ||
+    !hasProperty(sdk, "agentlab:component:provenance", "anthropic-stainless-runtime-marker") ||
     !sdk.evidence?.occurrences.some(({ location }) =>
       location.endsWith("node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs")
     )

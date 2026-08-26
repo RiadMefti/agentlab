@@ -1,0 +1,35 @@
+{
+  "name": "agentlab",
+  "version": "0.2.0",
+  "description": "One captain for all your coding agents in a fast local terminal UI.",
+  "type": "module",
+  "bin": {
+    "agentlab": "dist/agentlab.js"
+  },
+  "files": [
+    "dist/*.js",
+    "release-manifest.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "prepack": "npm run build && node dist/prepack.js",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RiadMefti/agentlab.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RiadMefti/agentlab/issues"
+  },
+  "homepage": "https://github.com/RiadMefti/agentlab#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -3,8 +3,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 
-import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
-import type { LocalOrchestratorRuntime, OrchestratorCommandPort } from "@orchestrator/runtime";
+import type { AgentSession, Conversation, ProviderCapability } from "@agentlab/contracts";
+import type { LocalAgentLabRuntime, AgentLabCommandPort } from "@agentlab/runtime";
 
 import { RuntimeContext } from "../../apps/tui/src/runtime-context.js";
 import { useWorkspace, type WorkspaceState } from "../../apps/tui/src/use-workspace.js";
@@ -186,7 +186,7 @@ const firstConversation: Conversation = {
   provider: "codex",
   model: null,
   reasoning: null,
-  captainSessionName: "ao__11111111-1111-4111-8111-111111111111__captain__codex",
+  captainSessionName: "agentlab__11111111-1111-4111-8111-111111111111__captain__codex",
   createdAt: "2026-08-25T12:00:00.000Z",
   updatedAt: "2026-08-25T12:00:00.000Z"
 };
@@ -198,7 +198,7 @@ const secondConversation: Conversation = {
   provider: "claude",
   model: null,
   reasoning: null,
-  captainSessionName: "ao__22222222-2222-4222-8222-222222222222__captain__claude",
+  captainSessionName: "agentlab__22222222-2222-4222-8222-222222222222__captain__claude",
   createdAt: "2026-08-25T12:01:00.000Z",
   updatedAt: "2026-08-25T12:01:00.000Z"
 };
@@ -220,7 +220,7 @@ function captainSession(
 }
 
 async function renderWorkspace(
-  runtime: LocalOrchestratorRuntime,
+  runtime: LocalAgentLabRuntime,
   onRender: (workspace: WorkspaceState) => void
 ) {
   const setup = await testRender(
@@ -245,9 +245,9 @@ function WorkspaceProbe({ onRender }: { readonly onRender: (state: WorkspaceStat
   );
 }
 
-function fakeRuntime(overrides: Partial<OrchestratorCommandPort>): LocalOrchestratorRuntime {
+function fakeRuntime(overrides: Partial<AgentLabCommandPort>): LocalAgentLabRuntime {
   const providers: readonly ProviderCapability[] = [];
-  const commands: OrchestratorCommandPort = {
+  const commands: AgentLabCommandPort = {
     listConversations: mock(() => Promise.resolve([])),
     inspectWorkspace: mock(() => Promise.reject(new Error("not used"))),
     listProviders: mock(() => Promise.resolve(providers)),

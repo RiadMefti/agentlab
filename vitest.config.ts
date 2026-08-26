@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@orchestrator/contracts": fileURLToPath(
+      "@agentlab/contracts": fileURLToPath(
         new URL("./packages/contracts/src/index.ts", import.meta.url)
       )
     }

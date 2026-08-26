@@ -5,7 +5,7 @@ import {
   modelIdSchema,
   type ModelCapability,
   type ProviderId
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 
 export const discoveredProviderCapabilitySchema = z
   .object({

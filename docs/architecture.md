@@ -105,7 +105,7 @@ Explicit worker creation validates a friendly name, provider, and initial task. 
 strict identity owned by the conversation:
 
 ```text
-ao__<conversation-uuid>__worker__<provider>__<slug>
+agentlab__<conversation-uuid>__worker__<provider>__<slug>
 ```
 
 Deletion parses that identity, proves it is a worker in the selected conversation, confirms the
@@ -144,13 +144,10 @@ system prompt.
 
 SQLite stores app-owned project metadata: name, canonical folder, captain configuration, and managed
 session identity. Provider transcripts and credentials remain in provider-owned storage; tmux owns
-live output and terminal state. The normal database is
-`$XDG_DATA_HOME/agent-orchestrator/orchestrator.sqlite` (falling back to
-`~/.local/share/agent-orchestrator/orchestrator.sqlite`).
+live output and terminal state. The normal database is `$XDG_DATA_HOME/agentlab/agentlab.sqlite`
+(falling back to `~/.local/share/agentlab/agentlab.sqlite`).
 
-When that file does not exist, local configuration may select an existing legacy desktop database in
-place. Explicit `AO_DATABASE_PATH` wins. This compatibility lookup does not copy or remove user
-data.
+Explicit `AGENTLAB_DATABASE_PATH` wins and may point to any local database path the user chooses.
 
 ## Performance model
 

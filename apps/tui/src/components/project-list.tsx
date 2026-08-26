@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import type { Conversation } from "@orchestrator/contracts";
+import type { Conversation } from "@agentlab/contracts";
 import type { ScrollBoxRenderable } from "@opentui/core";
 
 import { palette } from "../theme.js";

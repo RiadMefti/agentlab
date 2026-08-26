@@ -21,13 +21,13 @@ describe("supervisor instructions", () => {
     expect(instructions).toContain("real CLI processes in tmux");
     expect(instructions).toContain("not built-in subagents");
     expect(instructions).toContain("tmux respawn-pane -k");
-    expect(instructions).toContain(`ao__${TEST_CONVERSATION_ID}__worker__<provider>__<slug>`);
+    expect(instructions).toContain(`agentlab__${TEST_CONVERSATION_ID}__worker__<provider>__<slug>`);
     expect(instructions).toContain("/opt/claude");
   });
 
   it("gives the captain a safe, conversation-scoped worker cleanup contract", () => {
     const instructions = buildSupervisorInstructions(context);
-    const workerPrefix = `ao__${TEST_CONVERSATION_ID}__worker__`;
+    const workerPrefix = `agentlab__${TEST_CONVERSATION_ID}__worker__`;
 
     expect(instructions).toContain("A worker session is a temporary lease for one assignment");
     expect(instructions).toContain(

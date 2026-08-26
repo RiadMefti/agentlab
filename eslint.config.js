@@ -54,7 +54,7 @@ export default tseslint.config(
               message: "Domain modules must not depend on application or infrastructure code."
             },
             {
-              group: ["react", "react/*", "@opentui/*", "@orchestrator/tui"],
+              group: ["react", "react/*", "@opentui/*", "@agentlab/tui"],
               message: "Domain modules must remain independent of presentation frameworks."
             }
           ]
@@ -74,7 +74,7 @@ export default tseslint.config(
               message: "Application modules must depend on ports, not concrete infrastructure."
             },
             {
-              group: ["react", "react/*", "@opentui/*", "@orchestrator/tui"],
+              group: ["react", "react/*", "@opentui/*", "@agentlab/tui"],
               message: "Application modules must remain independent of presentation frameworks."
             }
           ]

@@ -1,4 +1,4 @@
-import { sessionHistoryLimit, type ProviderId } from "@orchestrator/contracts";
+import { sessionHistoryLimit, type ProviderId } from "@agentlab/contracts";
 
 import { buildWorkerSessionPrefix } from "../domain/agent-session-name.js";
 

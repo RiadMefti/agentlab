@@ -75,7 +75,7 @@ describe("Bun prebundle provenance", () => {
   });
 
   it("rejects an unrecognized Claude package input instead of silently omitting its bundle", async () => {
-    const root = await mkdtemp(join(tmpdir(), "orchestrator-opaque-prebundle-"));
+    const root = await mkdtemp(join(tmpdir(), "agentlab-opaque-prebundle-"));
     const inputPath = "node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs";
     const owner = "node_modules/@anthropic-ai/claude-agent-sdk";
     try {

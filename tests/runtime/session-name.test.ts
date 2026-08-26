@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { providerIdSchema } from "@orchestrator/contracts";
+import { providerIdSchema } from "@agentlab/contracts";
 
 import {
   assertCaptainSessionOwnership,

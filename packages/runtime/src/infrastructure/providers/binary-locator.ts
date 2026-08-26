@@ -3,14 +3,14 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { constants } from "node:fs";
 
-import type { ProviderId } from "@orchestrator/contracts";
+import type { ProviderId } from "@agentlab/contracts";
 
 import type { CommandRunner } from "../process/command-runner.js";
 
 const ENVIRONMENT_KEYS: Record<ProviderId, string> = {
-  codex: "AO_CODEX_BIN",
-  claude: "AO_CLAUDE_BIN",
-  opencode: "AO_OPENCODE_BIN"
+  codex: "AGENTLAB_CODEX_BIN",
+  claude: "AGENTLAB_CLAUDE_BIN",
+  opencode: "AGENTLAB_OPENCODE_BIN"
 };
 
 /** Finds executable provider candidates without shell evaluation. */

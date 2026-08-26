@@ -40,9 +40,9 @@ describe("terminal binary target", () => {
   });
 
   it("extracts the opaque Anthropic SDK marker across compiled-binary chunks", async () => {
-    const root = await mkdtemp(join(tmpdir(), "orchestrator-binary-provenance-"));
+    const root = await mkdtemp(join(tmpdir(), "agentlab-binary-provenance-"));
     temporaryDirectories.push(root);
-    const binaryPath = join(root, "agent-orchestrator");
+    const binaryPath = join(root, "agentlab");
     const prefix = Buffer.alloc(1024 * 1024 - 96);
     const marker = Buffer.from(
       [
@@ -59,9 +59,9 @@ describe("terminal binary target", () => {
   });
 
   it("rejects a compiled marker without independent repeated bindings", async () => {
-    const root = await mkdtemp(join(tmpdir(), "orchestrator-binary-provenance-"));
+    const root = await mkdtemp(join(tmpdir(), "agentlab-binary-provenance-"));
     temporaryDirectories.push(root);
-    const binaryPath = join(root, "agent-orchestrator");
+    const binaryPath = join(root, "agentlab");
     await writeFile(
       binaryPath,
       'https://api.anthropic.com X-Stainless-Lang;var V="0.112.1";{"X-Stainless-Package-Version":V}'

@@ -485,8 +485,8 @@ while :; do sleep 1; done
         id: 1,
         params: {
           clientInfo: {
-            name: "agent-orchestrator",
-            title: "Agent Orchestrator",
+            name: "agentlab",
+            title: "AgentLab",
             version: "0.1.0"
           },
           capabilities: null

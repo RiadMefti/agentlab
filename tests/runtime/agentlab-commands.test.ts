@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  OrchestratorCommands,
+  AgentLabCommands,
   type ConversationOperations
-} from "../../packages/runtime/src/application/orchestrator-commands.js";
+} from "../../packages/runtime/src/application/agentlab-commands.js";
 
 function service(): ConversationOperations {
   return {
@@ -19,10 +19,10 @@ function service(): ConversationOperations {
   };
 }
 
-describe("OrchestratorCommands", () => {
+describe("AgentLabCommands", () => {
   it("validates create-conversation input before invoking domain behavior", async () => {
     const conversations = service();
-    const commands = new OrchestratorCommands(conversations);
+    const commands = new AgentLabCommands(conversations);
 
     await expect(
       commands.createConversation({
@@ -37,7 +37,7 @@ describe("OrchestratorCommands", () => {
 
   it("validates selected folder paths before filesystem inspection", () => {
     const conversations = service();
-    const commands = new OrchestratorCommands(conversations);
+    const commands = new AgentLabCommands(conversations);
 
     expect(() => commands.inspectWorkspace("\0unsafe")).toThrow();
     expect(conversations.inspectWorkspace).not.toHaveBeenCalled();
@@ -46,7 +46,7 @@ describe("OrchestratorCommands", () => {
   it("normalizes optional model and reasoning selections", async () => {
     const conversations = service();
     vi.mocked(conversations.createConversation).mockResolvedValue({} as never);
-    const commands = new OrchestratorCommands(conversations);
+    const commands = new AgentLabCommands(conversations);
 
     await commands.createConversation({
       title: "Project",
@@ -67,7 +67,7 @@ describe("OrchestratorCommands", () => {
 
   it("rejects unmanaged terminal targets", async () => {
     const conversations = service();
-    const commands = new OrchestratorCommands(conversations);
+    const commands = new AgentLabCommands(conversations);
     const conversationId = "11111111-1111-4111-8111-111111111111";
 
     await expect(commands.requireAttachableSession(conversationId, "user-shell")).rejects.toThrow(

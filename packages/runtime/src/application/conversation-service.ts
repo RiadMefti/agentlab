@@ -7,7 +7,7 @@ import type {
   CreateWorkerInput,
   ProviderCapability,
   ProviderId
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 
 import type { ConversationRepository } from "../domain/conversation-repository.js";
 import { ConflictError, NotFoundError, ProviderUnavailableError } from "../domain/errors.js";
@@ -273,9 +273,7 @@ export class ConversationService {
 
   private async requireWorkspace(conversation: Conversation): Promise<string> {
     if (conversation.workspacePath === null) {
-      throw new ConflictError(
-        "This legacy project does not have a folder. Remove and add it again."
-      );
+      throw new ConflictError("This project does not have a folder. Remove and add it again.");
     }
     return (await this.#workspacePaths.resolve(conversation.workspacePath)).path;
   }

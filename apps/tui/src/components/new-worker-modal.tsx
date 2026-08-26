@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import type { CreateWorkerInput, ProviderCapability } from "@orchestrator/contracts";
+import type { CreateWorkerInput, ProviderCapability } from "@agentlab/contracts";
 import type { TextareaRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
 

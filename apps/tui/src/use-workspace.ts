@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
+import type { AgentSession, Conversation, ProviderCapability } from "@agentlab/contracts";
 
 import { useRuntime } from "./runtime-context.js";
 

@@ -11,7 +11,7 @@ import {
 import { renderShellCommand } from "../../packages/runtime/src/infrastructure/tmux/shell-command.js";
 import { TmuxSessionRuntime } from "../../packages/runtime/src/infrastructure/tmux/tmux-session-runtime.js";
 
-describe.runIf(process.env.AO_RUN_TMUX_INTEGRATION === "1")(
+describe.runIf(process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1")(
   "TmuxSessionRuntime integration",
   () => {
     const runner = new NodeCommandRunner();

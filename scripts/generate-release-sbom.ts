@@ -4,19 +4,19 @@ import { resolve } from "node:path";
 import { discoverPrebundledPackages } from "./bun-bundle-provenance.js";
 
 const BUNDLED_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "bundled"
 } as const;
 const RUNTIME_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "embedded-runtime"
 } as const;
 const PREBUNDLED_PROPERTY = {
-  name: "agent-orchestrator:component:distribution",
+  name: "agentlab:component:distribution",
   value: "prebundled"
 } as const;
-const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agent-orchestrator:component:provenance";
-const TARGET_PROPERTY_NAME = "agent-orchestrator:binary:target";
+const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agentlab:component:provenance";
+const TARGET_PROPERTY_NAME = "agentlab:binary:target";
 const NATIVE_PACKAGE_BY_TARGET = {
   "linux-x64": "@opentui/core-linux-x64",
   "linux-arm64": "@opentui/core-linux-arm64",
@@ -78,7 +78,7 @@ export interface BinarySbom {
     readonly component: {
       readonly "bom-ref": string;
       readonly type: "application";
-      readonly name: "agent-orchestrator";
+      readonly name: "agentlab";
       readonly version: string;
       readonly properties: readonly { readonly name: string; readonly value: string }[];
     };
@@ -195,7 +195,7 @@ export async function generateBinarySbom(input: BinarySbomInput): Promise<Binary
     );
   }
 
-  const applicationRef = `agent-orchestrator@${input.version}`;
+  const applicationRef = `agentlab@${input.version}`;
   const bunRef = `bun@${input.bunVersion}`;
   const edges = new Map<string, Set<string>>();
   edges.set(applicationRef, new Set([bunRef]));
@@ -252,7 +252,7 @@ export async function generateBinarySbom(input: BinarySbomInput): Promise<Binary
       component: {
         "bom-ref": applicationRef,
         type: "application",
-        name: "agent-orchestrator",
+        name: "agentlab",
         version: input.version,
         properties: [{ name: TARGET_PROPERTY_NAME, value: input.target }]
       }

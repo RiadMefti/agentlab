@@ -282,7 +282,7 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
         method: "initialize",
         id: 1,
         params: {
-          clientInfo: { name: "agent-orchestrator", title: "Agent Orchestrator", version: "0.1.0" },
+          clientInfo: { name: "agentlab", title: "AgentLab", version: "0.1.0" },
           capabilities: null
         }
       });

@@ -17,9 +17,11 @@ describe("POSIX command rendering", () => {
       renderShellCommand({
         executable: "/tmp/provider cli",
         args: ["--prompt", "fix; $(touch /tmp/nope)", "x=y z"],
-        environment: { AO_TEST: "one two" }
+        environment: { AGENTLAB_TEST: "one two" }
       })
-    ).toBe("AO_TEST='one two' '/tmp/provider cli' --prompt 'fix; $(touch /tmp/nope)' 'x=y z'");
+    ).toBe(
+      "AGENTLAB_TEST='one two' '/tmp/provider cli' --prompt 'fix; $(touch /tmp/nope)' 'x=y z'"
+    );
   });
 
   it("rejects invalid environment names", () => {

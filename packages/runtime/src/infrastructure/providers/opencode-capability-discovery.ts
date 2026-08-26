@@ -1,4 +1,4 @@
-import { MODEL_ID_MAX_LENGTH } from "@orchestrator/contracts";
+import { MODEL_ID_MAX_LENGTH } from "@agentlab/contracts";
 import { z } from "zod";
 
 import { discoveredProviderCapabilitySchema } from "../../domain/provider-capability-discovery.js";

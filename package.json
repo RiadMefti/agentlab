@@ -1,19 +1,18 @@
 {
-  "name": "agent-orchestrator",
-  "version": "0.1.10",
+  "name": "agentlab-monorepo",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "One captain for all your coding agents, composed in one fast local terminal UI.",
-  "author": "Riad Mefti",
-  "copyright": "Copyright © 2026 Riad Mefti",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RiadMefti/agent-orchestrator.git"
+    "url": "git+https://github.com/RiadMefti/agentlab.git"
   },
   "bugs": {
-    "url": "https://github.com/RiadMefti/agent-orchestrator/issues"
+    "url": "https://github.com/RiadMefti/agentlab/issues"
   },
-  "homepage": "https://github.com/RiadMefti/agent-orchestrator#readme",
+  "homepage": "https://github.com/RiadMefti/agentlab#readme",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -23,7 +22,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "npm run clean && npm run build --workspace @orchestrator/contracts && npm run build --workspace @orchestrator/runtime && npm run build --workspace @orchestrator/tui",
+    "build": "npm run clean && npm run build --workspace @agentlab/contracts && npm run build --workspace @agentlab/runtime && npm run build --workspace @agentlab/tui && npm run build --workspace agentlab",
     "build:packages": "tsc --build packages/contracts packages/runtime --pretty false",
     "clean": "node scripts/clean-build.mjs",
     "dev": "npm run build:packages && bun apps/tui/src/main.tsx",
@@ -33,11 +32,12 @@
     "package": "npm run build:packages && bun scripts/build-binary.ts",
     "release:assets:check": "node scripts/check-release-assets.mjs",
     "release:check": "node scripts/check-release.mjs",
+    "release:npm:prepare": "npm run build --workspace agentlab && node scripts/prepare-npm-package.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
     "start": "npm run build:packages && bun apps/tui/src/main.tsx",
     "test": "vitest run && npm run test:bun",
     "test:bun": "npm run build:packages && bun test ./tests/tui/app.bun.tsx ./tests/tui/embedded-terminal.bun.tsx ./tests/tui/use-workspace.bun.tsx ./tests/runtime/terminal-pty.bun.ts",
-    "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run && AO_RUN_TMUX_INTEGRATION=1 npm run test:bun",
+    "test:integration": "AGENTLAB_RUN_TMUX_INTEGRATION=1 vitest run && AGENTLAB_RUN_TMUX_INTEGRATION=1 npm run test:bun",
     "test:watch": "vitest",
     "typecheck": "tsc --build --pretty false",
     "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build && npm run package"

@@ -1,6 +1,6 @@
 # Agent HTML Render default theme
 
-Use these defaults only when the user and project provide no design direction. They come from the `agent-orchestrator` interface and do not prescribe a page layout.
+Use these defaults only when the user and project provide no design direction. They come from the `agentlab` interface and do not prescribe a page layout.
 
 ## Tokens
 

@@ -1,4 +1,4 @@
-import { sessionHistoryLimit } from "@orchestrator/contracts";
+import { sessionHistoryLimit } from "@agentlab/contracts";
 
 import type { TerminalHistoryReader } from "../../domain/terminal.js";
 import type { CommandRunner } from "../process/command-runner.js";

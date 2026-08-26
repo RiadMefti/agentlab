@@ -39,14 +39,14 @@ function executable(path: string): string {
 }
 
 function temporaryRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "agent-orchestrator-bin-"));
+  const root = mkdtempSync(join(tmpdir(), "agentlab-bin-"));
   temporaryRoots.push(root);
   return root;
 }
 
 describe("BinaryLocator", () => {
   it("requires configured overrides to be absolute", async () => {
-    const locator = new BinaryLocator(unavailableRunner, { AO_CODEX_BIN: "relative/codex" });
+    const locator = new BinaryLocator(unavailableRunner, { AGENTLAB_CODEX_BIN: "relative/codex" });
     await expect(locator.candidates("codex")).rejects.toThrow(/must be an absolute path/u);
   });
 

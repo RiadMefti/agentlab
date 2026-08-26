@@ -5,7 +5,7 @@ import type {
   Conversation,
   CreateConversationInput,
   CreateWorkerInput
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 
 import { AgentList } from "./components/agent-list.js";
@@ -222,7 +222,7 @@ export function App() {
         backgroundColor={palette.background}
       >
         <text fg={palette.accent} attributes={1}>
-          orchestrator
+          agentlab
         </text>
         <text fg={palette.text}>Terminal too small for the three-pane workspace.</text>
         <text fg={palette.muted}>
@@ -246,7 +246,7 @@ export function App() {
         backgroundColor={palette.panel}
       >
         <text fg={palette.accent} attributes={1}>
-          orchestrator
+          agentlab
         </text>
         <text
           fg={workspace.error === null ? palette.muted : palette.danger}
@@ -332,7 +332,7 @@ export function App() {
       {modal?.kind === "remove-project" ? (
         <ConfirmDeleteModal
           title={`Remove ${modal.project.title}?`}
-          message="This stops its captain and workers, then removes it from Orchestrator. The folder and its files are never deleted."
+          message="This stops its captain and workers, then removes it from AgentLab. The folder and its files are never deleted."
           pending={pending}
           error={mutationError}
           onCancel={closeModal}

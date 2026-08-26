@@ -1,6 +1,6 @@
 {
-  "name": "@orchestrator/contracts",
-  "version": "0.1.10",
+  "name": "@agentlab/contracts",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {

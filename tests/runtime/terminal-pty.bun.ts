@@ -8,7 +8,8 @@ import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/pro
 import { BunTerminalFactory } from "../../packages/runtime/src/infrastructure/terminal/bun-terminal.js";
 import { TmuxSessionRuntime } from "../../packages/runtime/src/infrastructure/tmux/tmux-session-runtime.js";
 
-const describeIntegration = process.env.AO_RUN_TMUX_INTEGRATION === "1" ? describe : describe.skip;
+const describeIntegration =
+  process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1" ? describe : describe.skip;
 
 describeIntegration("Bun PTY integration", () => {
   const socketPath = `/tmp/ao-pty-${randomUUID()}.sock`;

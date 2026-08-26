@@ -3,7 +3,7 @@ import type {
   ProviderCapability,
   ProviderId,
   ReasoningId
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 
 import type { CommandSpec } from "./command.js";
 

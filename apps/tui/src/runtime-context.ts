@@ -1,11 +1,11 @@
 import { createContext, useContext } from "react";
 
-import type { LocalOrchestratorRuntime } from "@orchestrator/runtime";
+import type { LocalAgentLabRuntime } from "@agentlab/runtime";
 
-export const RuntimeContext = createContext<LocalOrchestratorRuntime | null>(null);
+export const RuntimeContext = createContext<LocalAgentLabRuntime | null>(null);
 
-export function useRuntime(): LocalOrchestratorRuntime {
+export function useRuntime(): LocalAgentLabRuntime {
   const runtime = useContext(RuntimeContext);
-  if (runtime === null) throw new Error("Local orchestrator runtime is not available.");
+  if (runtime === null) throw new Error("Local agentlab runtime is not available.");
   return runtime;
 }

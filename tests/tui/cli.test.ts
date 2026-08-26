@@ -8,7 +8,7 @@ describe("terminal CLI", () => {
   });
 
   it("rejects positional workspaces so startup cannot bypass the project chooser", () => {
-    expect(() => parseCliArguments(["/tmp/project"])).toThrow("Usage: orchestrator");
+    expect(() => parseCliArguments(["/tmp/project"])).toThrow("Usage: agentlab");
   });
 
   it("recognizes informational flags without requiring a TTY", () => {

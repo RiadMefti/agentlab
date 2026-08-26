@@ -1,4 +1,4 @@
-import type { AgentSession } from "@orchestrator/contracts";
+import type { AgentSession } from "@agentlab/contracts";
 
 import type { CommandSpec } from "./command.js";
 

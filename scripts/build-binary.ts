@@ -52,10 +52,10 @@ async function main(): Promise<void> {
   }
   const target = resolveBinaryTarget(process.platform, process.arch);
   const releaseDirectory = resolve(root, "release");
-  const artifactName = `agent-orchestrator-v${appVersion}-${target.artifactSuffix}`;
+  const artifactName = `agentlab-v${appVersion}-${target.artifactSuffix}`;
   const artifactPath = resolve(releaseDirectory, artifactName);
   const sbomPath = `${artifactPath}.cdx.json`;
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "agent-orchestrator-build-"));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), "agentlab-build-"));
   const metafilePath = resolve(temporaryDirectory, "bun-metafile.json");
   await mkdir(releaseDirectory, { recursive: true });
 
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
 
   await assertOutput(artifactPath, ["--version"], `${appVersion}\n`);
   const help = await capture(artifactPath, ["--help"]);
-  if (!help.includes("orchestrator")) {
+  if (!help.includes("agentlab")) {
     throw new Error("Packaged binary help smoke test failed.");
   }
 

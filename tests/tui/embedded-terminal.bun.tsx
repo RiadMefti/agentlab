@@ -6,7 +6,7 @@ import { testRender } from "@opentui/react/test-utils";
 import { afterEach, describe, expect, test } from "bun:test";
 
 import type { EmbeddedTerminalRenderable } from "@opentui/core";
-import { sessionHistoryLimit } from "@orchestrator/contracts";
+import { sessionHistoryLimit } from "@agentlab/contracts";
 
 import "../../apps/tui/src/terminal/embedded-terminal.js";
 import { paintTerminalDefaults } from "../../apps/tui/src/terminal/terminal-appearance.js";

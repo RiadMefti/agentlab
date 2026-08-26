@@ -1,8 +1,5 @@
-import {
-  OrchestratorCommands,
-  type OrchestratorCommandPort
-} from "./application/orchestrator-commands.js";
-import { RuntimeTaskOwner, ownOrchestratorCommands } from "./application/runtime-task-owner.js";
+import { AgentLabCommands, type AgentLabCommandPort } from "./application/agentlab-commands.js";
+import { RuntimeTaskOwner, ownAgentLabCommands } from "./application/runtime-task-owner.js";
 import { ConversationService } from "./application/conversation-service.js";
 import {
   AttachedSessionTerminal,
@@ -32,7 +29,7 @@ export { loadLocalConfig, type LocalAppConfig } from "./local-config.js";
 export { maximumTerminalDimension } from "./application/session-terminal.js";
 export type { SessionTerminal, SessionTerminalCallbacks } from "./application/session-terminal.js";
 
-export type { OrchestratorCommandPort } from "./application/orchestrator-commands.js";
+export type { AgentLabCommandPort } from "./application/agentlab-commands.js";
 export type { WorkspaceInspection } from "./application/conversation-service.js";
 
 export interface OpenSessionTerminalInput {
@@ -43,8 +40,8 @@ export interface OpenSessionTerminalInput {
   readonly callbacks: SessionTerminalCallbacks;
 }
 
-export interface LocalOrchestratorRuntime {
-  readonly commands: OrchestratorCommandPort;
+export interface LocalAgentLabRuntime {
+  readonly commands: AgentLabCommandPort;
   openTerminal(input: OpenSessionTerminalInput): Promise<{
     readonly history: string;
     readonly terminal: SessionTerminal;
@@ -53,16 +50,14 @@ export interface LocalOrchestratorRuntime {
   close(): Promise<void>;
 }
 
-export interface LocalOrchestratorOptions {
+export interface LocalAgentLabOptions {
   readonly databasePath: string;
   readonly terminalFactory?: PseudoTerminalFactory;
   readonly terminalHistory?: TerminalHistoryReader;
 }
 
 /** Composes the local application with concrete persistence, provider, tmux, and PTY adapters. */
-export function createLocalOrchestrator(
-  options: LocalOrchestratorOptions
-): LocalOrchestratorRuntime {
+export function createLocalAgentLab(options: LocalAgentLabOptions): LocalAgentLabRuntime {
   const runner = new NodeCommandRunner();
   const repository = new SqliteConversationRepository(options.databasePath);
   const sessions = new TmuxSessionRuntime(runner);
@@ -75,8 +70,8 @@ export function createLocalOrchestrator(
     workspacePaths
   });
   const commandTasks = new RuntimeTaskOwner();
-  const commandHandler = new OrchestratorCommands(conversations);
-  const commands = ownOrchestratorCommands(commandHandler, commandTasks);
+  const commandHandler = new AgentLabCommands(conversations);
+  const commands = ownAgentLabCommands(commandHandler, commandTasks);
   const terminalFactory = options.terminalFactory ?? new BunTerminalFactory();
   const terminalHistory =
     options.terminalHistory ?? new TmuxTerminalHistoryReader(new NodeCommandRunner());
@@ -132,7 +127,7 @@ export function createLocalOrchestrator(
           failures.push(error);
         }
         if (failures.length > 0) {
-          throw new AggregateError(failures, "The orchestrator runtime could not close cleanly.");
+          throw new AggregateError(failures, "The agentlab runtime could not close cleanly.");
         }
       });
     }
@@ -164,7 +159,7 @@ class RuntimeLifecycle {
   #closePromise: Promise<void> | null = null;
 
   public assertOpen(): void {
-    if (this.#closed) throw new Error("The orchestrator runtime is closed.");
+    if (this.#closed) throw new Error("The agentlab runtime is closed.");
   }
 
   public beginClose(): boolean {

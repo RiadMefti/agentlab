@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentSession } from "@orchestrator/contracts";
+import type { AgentSession } from "@agentlab/contracts";
 
 import { ConversationService } from "../../packages/runtime/src/application/conversation-service.js";
 import type { CreateWorkerSessionInput } from "../../packages/runtime/src/domain/session-runtime.js";

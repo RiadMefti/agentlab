@@ -1,4 +1,4 @@
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 
@@ -18,34 +18,11 @@ export function loadLocalConfig(
 }
 
 function resolveDatabasePath(environment: NodeJS.ProcessEnv, cwd: string): string {
-  if (environment.AO_DATABASE_PATH !== undefined) {
-    return resolve(cwd, environment.AO_DATABASE_PATH);
+  if (environment.AGENTLAB_DATABASE_PATH !== undefined) {
+    return resolve(cwd, environment.AGENTLAB_DATABASE_PATH);
   }
 
   const homeDirectory = environment.HOME ?? homedir();
   const dataHome = environment.XDG_DATA_HOME ?? resolve(homeDirectory, ".local", "share");
-  const preferred = resolve(dataHome, "agent-orchestrator", "orchestrator.sqlite");
-  if (isFile(preferred)) return preferred;
-
-  const configHome = environment.XDG_CONFIG_HOME ?? resolve(homeDirectory, ".config");
-  const legacyCandidates = [
-    resolve(configHome, "Orchestrator", "orchestrator.sqlite"),
-    resolve(configHome, "orchestrator", "orchestrator.sqlite"),
-    resolve(homeDirectory, "Library", "Application Support", "Orchestrator", "orchestrator.sqlite"),
-    ...(environment.APPDATA === undefined
-      ? []
-      : [resolve(environment.APPDATA, "Orchestrator", "orchestrator.sqlite")]),
-    resolve(cwd, "apps", "server", ".data", "orchestrator.sqlite")
-  ];
-  return legacyCandidates.find(isFile) ?? preferred;
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch (error: unknown) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return false;
-    throw error;
-  }
+  return resolve(dataHome, "agentlab", "agentlab.sqlite");
 }

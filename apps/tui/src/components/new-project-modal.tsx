@@ -4,9 +4,9 @@ import type {
   CreateConversationInput,
   ModelCapability,
   ProviderCapability
-} from "@orchestrator/contracts";
+} from "@agentlab/contracts";
 import { useKeyboard } from "@opentui/react";
-import type { WorkspaceInspection } from "@orchestrator/runtime";
+import type { WorkspaceInspection } from "@agentlab/runtime";
 
 import { palette } from "../theme.js";
 import { ModalFrame } from "./modal-frame.js";

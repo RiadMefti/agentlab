@@ -1,14 +1,14 @@
-import { providerIdSchema, type AgentRole, type ProviderId } from "@orchestrator/contracts";
+import { providerIdSchema, type AgentRole, type ProviderId } from "@agentlab/contracts";
 
 const UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const PROVIDER_PATTERN = providerIdSchema.options.map(escapeRegularExpression).join("|");
 const WORKER_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/u;
 const CAPTAIN_SESSION_PATTERN = new RegExp(
-  `^ao__(${UUID_PATTERN})__captain__(${PROVIDER_PATTERN})$`,
+  `^agentlab__(${UUID_PATTERN})__captain__(${PROVIDER_PATTERN})$`,
   "u"
 );
 const WORKER_SESSION_PATTERN = new RegExp(
-  `^ao__(${UUID_PATTERN})__worker__(${PROVIDER_PATTERN})__([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$`,
+  `^agentlab__(${UUID_PATTERN})__worker__(${PROVIDER_PATTERN})__([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$`,
   "u"
 );
 
@@ -22,12 +22,12 @@ export interface ParsedSessionName {
 
 export function buildCaptainSessionName(conversationId: string, provider: ProviderId): string {
   assertUuid(conversationId);
-  return `ao__${conversationId}__captain__${provider}`;
+  return `agentlab__${conversationId}__captain__${provider}`;
 }
 
 export function buildWorkerSessionPrefix(conversationId: string): string {
   assertUuid(conversationId);
-  return `ao__${conversationId}__worker__`;
+  return `agentlab__${conversationId}__worker__`;
 }
 
 export function buildWorkerSessionName(

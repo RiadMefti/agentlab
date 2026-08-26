@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { createLocalOrchestrator, loadLocalConfig } from "@orchestrator/runtime";
+import { createLocalAgentLab, loadLocalConfig } from "@agentlab/runtime";
 
 import { App } from "./app.js";
 import { RuntimeContext } from "./runtime-context.js";
@@ -8,11 +8,11 @@ import { palette } from "./theme.js";
 
 export async function runTerminalUi(): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error("Orchestrator must run in an interactive terminal.");
+    throw new Error("AgentLab must run in an interactive terminal.");
   }
 
   const config = loadLocalConfig();
-  const runtime = createLocalOrchestrator(config);
+  const runtime = createLocalAgentLab(config);
   let closePromise: Promise<void> | null = null;
   const closeRuntime = (): Promise<void> => {
     closePromise ??= runtime.close();

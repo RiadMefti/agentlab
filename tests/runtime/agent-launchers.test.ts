@@ -89,7 +89,7 @@ describe("agent launchers", () => {
     expect(JSON.parse(command.environment?.OPENCODE_CONFIG_CONTENT ?? "")).toEqual({
       agent: {
         "ao-captain-11111111-1111-4111-8111-111111111111": {
-          description: "Agent Orchestrator captain",
+          description: "AgentLab captain",
           mode: "primary",
           prompt: "Only orchestrate"
         }

@@ -1,4 +1,4 @@
-import { sessionHistoryLimit, type AgentSession } from "@orchestrator/contracts";
+import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
 
 import { parseSessionName, sessionLabel } from "../../domain/agent-session-name.js";
 import { ConflictError } from "../../domain/errors.js";

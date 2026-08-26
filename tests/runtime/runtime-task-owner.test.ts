@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { OrchestratorCommandPort } from "../../packages/runtime/src/application/orchestrator-commands.js";
+import type { AgentLabCommandPort } from "../../packages/runtime/src/application/agentlab-commands.js";
 import {
   RuntimeTaskOwner,
-  ownOrchestratorCommands
+  ownAgentLabCommands
 } from "../../packages/runtime/src/application/runtime-task-owner.js";
 
 describe("RuntimeTaskOwner", () => {
@@ -21,7 +21,7 @@ describe("RuntimeTaskOwner", () => {
       }
     });
     const tasks = new RuntimeTaskOwner();
-    const owned = ownOrchestratorCommands(commands, tasks);
+    const owned = ownAgentLabCommands(commands, tasks);
 
     const creation = owned.createWorker("conversation", {});
     await Promise.resolve();
@@ -48,7 +48,7 @@ describe("RuntimeTaskOwner", () => {
       createConversation: vi.fn(() => Promise.reject(new Error("provider failed")))
     });
     const tasks = new RuntimeTaskOwner();
-    const owned = ownOrchestratorCommands(commands, tasks);
+    const owned = ownAgentLabCommands(commands, tasks);
 
     const operation = owned.createConversation({});
     const shutdown = tasks.stopAndDrain();
@@ -58,7 +58,7 @@ describe("RuntimeTaskOwner", () => {
   });
 });
 
-function commandPort(overrides: Partial<OrchestratorCommandPort> = {}): OrchestratorCommandPort {
+function commandPort(overrides: Partial<AgentLabCommandPort> = {}): AgentLabCommandPort {
   return {
     listConversations: () => Promise.resolve([]),
     inspectWorkspace: () => Promise.reject(new Error("not implemented")),
