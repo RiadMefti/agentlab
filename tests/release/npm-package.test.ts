@@ -51,6 +51,8 @@ describe("npm package preparation", () => {
   });
 
   it("binds the npm launcher to the exact GitHub release binaries", async () => {
+    const version = await currentLauncherVersion();
+    const tag = `v${version}`;
     const root = await temporaryRoot();
     const assets = join(root, "assets");
     const output = join(root, "package");
@@ -58,11 +60,11 @@ describe("npm package preparation", () => {
     const linux = Buffer.from("linux agentlab executable");
     const mac = Buffer.from("mac agentlab executable");
     await Promise.all([
-      writeFile(join(assets, "agentlab-v0.2.0-linux-x64"), linux),
-      writeFile(join(assets, "agentlab-v0.2.0-mac-arm64"), mac)
+      writeFile(join(assets, `agentlab-${tag}-linux-x64`), linux),
+      writeFile(join(assets, `agentlab-${tag}-mac-arm64`), mac)
     ]);
 
-    const prepared = runScript("prepare-npm-package.mjs", "v0.2.0", assets, output);
+    const prepared = runScript("prepare-npm-package.mjs", tag, assets, output);
     expect(prepared.status, prepared.stderr).toBe(0);
 
     const manifest = JSON.parse(await readFile(join(output, "release-manifest.json"), "utf8")) as {
@@ -70,14 +72,14 @@ describe("npm package preparation", () => {
       targets: Record<string, { asset: string; sha256: string; size: number }>;
       version: string;
     };
-    expect(manifest).toMatchObject({ repository: "RiadMefti/agentlab", version: "0.2.0" });
+    expect(manifest).toMatchObject({ repository: "RiadMefti/agentlab", version });
     expect(manifest.targets["linux-x64"]).toEqual({
-      asset: "agentlab-v0.2.0-linux-x64",
+      asset: `agentlab-${tag}-linux-x64`,
       sha256: sha256(linux),
       size: linux.byteLength
     });
     expect(manifest.targets["mac-arm64"]).toEqual({
-      asset: "agentlab-v0.2.0-mac-arm64",
+      asset: `agentlab-${tag}-mac-arm64`,
       sha256: sha256(mac),
       size: mac.byteLength
     });
@@ -98,7 +100,7 @@ describe("npm package preparation", () => {
       encoding: "utf8"
     });
     expect(prepack.status, prepack.stderr).toBe(0);
-    expect(prepack.stdout).toContain("Validated agentlab@0.2.0 npm package.");
+    expect(prepack.stdout).toContain(`Validated agentlab@${version} npm package.`);
 
     const packed = spawnSync("npm", ["pack", output, "--dry-run", "--ignore-scripts", "--json"], {
       cwd: root,
@@ -113,15 +115,17 @@ describe("npm package preparation", () => {
   });
 
   it("refuses to overwrite an existing output directory", async () => {
+    const version = await currentLauncherVersion();
+    const tag = `v${version}`;
     const root = await temporaryRoot();
     const assets = join(root, "assets");
     const output = join(root, "package");
     await Promise.all([mkdir(assets), mkdir(output)]);
     await Promise.all([
-      writeFile(join(assets, "agentlab-v0.2.0-linux-x64"), "linux"),
-      writeFile(join(assets, "agentlab-v0.2.0-mac-arm64"), "mac")
+      writeFile(join(assets, `agentlab-${tag}-linux-x64`), "linux"),
+      writeFile(join(assets, `agentlab-${tag}-mac-arm64`), "mac")
     ]);
-    const prepared = runScript("prepare-npm-package.mjs", "v0.2.0", assets, output);
+    const prepared = runScript("prepare-npm-package.mjs", tag, assets, output);
     expect(prepared.status).toBe(1);
   });
 });
@@ -130,6 +134,13 @@ async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "agentlab-npm-package-"));
   temporaryDirectories.push(root);
   return root;
+}
+
+async function currentLauncherVersion(): Promise<string> {
+  const manifest = JSON.parse(
+    await readFile(join(projectRoot, "packages", "launcher", "package.json"), "utf8")
+  ) as { version: string };
+  return manifest.version;
 }
 
 function runScript(script: string, ...args: string[]) {

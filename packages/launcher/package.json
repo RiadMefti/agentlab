@@ -1,6 +1,6 @@
 {
   "name": "agentlab",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "One captain for all your coding agents in a fast local terminal UI.",
   "type": "module",
   "bin": {
