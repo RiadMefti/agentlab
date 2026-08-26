@@ -15,7 +15,8 @@ agentlab
 
 Run `agentlab` from any directory. The app opens to the project picker and waits for you to choose a
 folder. On first launch, the npm package downloads the matching AgentLab executable from GitHub and
-caches it. Later launches use the cached executable.
+caches it. The installer shows the percentage, downloaded size, and download speed while it works.
+Later launches use the cached executable.
 
 ## Requirements
 

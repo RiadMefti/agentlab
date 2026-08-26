@@ -30,9 +30,9 @@ npm install --global agentlab
 agentlab
 ```
 
-The npm package downloads the matching AgentLab executable from GitHub on first use and caches it by
-version. Later launches use the cached executable and make no update request. Updates are always
-explicit:
+The npm package downloads the matching AgentLab executable from GitHub on first use, shows live
+download progress, and caches it by version. Later launches use the cached executable and make no
+update request. Updates are always explicit:
 
 ```bash
 agentlab update --check

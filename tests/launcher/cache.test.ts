@@ -57,6 +57,23 @@ function downloadResponse(
   return response;
 }
 
+function chunkedDownloadResponse(chunks: readonly Uint8Array[]): Response {
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const response = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(chunk);
+        controller.close();
+      }
+    }),
+    { headers: { "content-length": String(size) }, status: 200 }
+  );
+  Object.defineProperty(response, "url", {
+    value: "https://release-assets.githubusercontent.com/chunked-agentlab"
+  });
+  return response;
+}
+
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
@@ -107,6 +124,38 @@ describe("AgentLab binary cache", () => {
     ).resolves.toBe(installed);
     expect(repairFetch).toHaveBeenCalledOnce();
     expect(await readFile(installed)).toEqual(Buffer.from(bytes));
+  });
+
+  it("reports each streamed download step and stays quiet on a cache hit", async () => {
+    const root = await temporaryRoot();
+    const chunks = [new TextEncoder().encode("agentlab "), new TextEncoder().encode("executable")];
+    const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    const manifest = releaseManifest(bytes);
+    const progress: { downloadedBytes: number; totalBytes: number }[] = [];
+
+    await ensureCachedBinary(manifest, "linux-x64", {
+      cacheRoot: root,
+      fetch: vi.fn(() =>
+        Promise.resolve(chunkedDownloadResponse(chunks))
+      ) as unknown as typeof fetch,
+      onDownloadProgress: (event) => progress.push(event)
+    });
+
+    expect(progress).toEqual([
+      { downloadedBytes: 0, totalBytes: bytes.byteLength },
+      { downloadedBytes: chunks[0]?.byteLength, totalBytes: bytes.byteLength },
+      { downloadedBytes: bytes.byteLength, totalBytes: bytes.byteLength }
+    ]);
+
+    const cachedProgress: { downloadedBytes: number; totalBytes: number }[] = [];
+    const offline = vi.fn(() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
+    await ensureCachedBinary(manifest, "linux-x64", {
+      cacheRoot: root,
+      fetch: offline,
+      onDownloadProgress: (event) => cachedProgress.push(event)
+    });
+    expect(cachedProgress).toEqual([]);
+    expect(offline).not.toHaveBeenCalled();
   });
 
   it("rejects checksum failures and removes temporary downloads", async () => {

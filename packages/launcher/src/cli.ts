@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ensureCachedBinary, resolveCacheRoot } from "./cache.js";
+import { InstallProgressReporter } from "./install-progress.js";
 import {
   currentRuntimePlatform,
   parseReleaseManifest,
@@ -29,6 +30,7 @@ export interface LauncherOptions {
   readonly packageDirectory?: string;
   readonly runtime?: RuntimePlatform;
   readonly stderr?: ((message: string) => void) | undefined;
+  readonly stderrIsTTY?: boolean | undefined;
   readonly stdout?: (message: string) => void;
 }
 
@@ -62,10 +64,27 @@ export async function runLauncher(
   }
   const runtime = options.runtime ?? currentRuntimePlatform();
   const target = resolveRuntimeTarget(runtime);
-  const binary = await ensureCachedBinary(manifest, target, {
-    cacheRoot: options.cacheRoot ?? resolveCacheRoot(environment),
-    fetch: options.fetch
+  const stderr = options.stderr ?? ((message: string) => process.stderr.write(message));
+  const progress = new InstallProgressReporter({
+    isTTY: options.stderrIsTTY ?? (options.stderr === undefined && process.stderr.isTTY),
+    target,
+    version: packageVersion,
+    write: stderr
   });
+  let binary: string;
+  try {
+    binary = await ensureCachedBinary(manifest, target, {
+      cacheRoot: options.cacheRoot ?? resolveCacheRoot(environment),
+      fetch: options.fetch,
+      onDownloadProgress: (downloadProgress) => {
+        progress.report(downloadProgress);
+      }
+    });
+  } catch (error: unknown) {
+    progress.clear();
+    throw error;
+  }
+  progress.complete();
   return execute(binary, args, {
     ...environment,
     AGENTLAB_INSTALL_METHOD: "npm",

@@ -13,6 +13,12 @@ const TRUSTED_DOWNLOAD_HOSTS = new Set(["github.com"]);
 export interface BinaryCacheOptions {
   readonly cacheRoot?: string;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  readonly onDownloadProgress?: ((progress: BinaryDownloadProgress) => void) | undefined;
+}
+
+export interface BinaryDownloadProgress {
+  readonly downloadedBytes: number;
+  readonly totalBytes: number;
 }
 
 export function resolveCacheRoot(
@@ -54,6 +60,7 @@ export async function ensureCachedBinary(
   const downloadUrl = releaseDownloadUrl(manifest, key);
 
   try {
+    options.onDownloadProgress?.({ downloadedBytes: 0, totalBytes: target.size });
     const response = await fetchImplementation(downloadUrl, {
       redirect: "follow",
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLISECONDS)
@@ -84,6 +91,7 @@ export async function ensureCachedBinary(
         }
         hash.update(chunk);
         await writeAll(file, chunk);
+        options.onDownloadProgress?.({ downloadedBytes: size, totalBytes: target.size });
       }
       await file.sync();
     } finally {

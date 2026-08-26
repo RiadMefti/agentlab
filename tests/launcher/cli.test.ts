@@ -81,6 +81,7 @@ describe("AgentLab npm launcher", () => {
   it("installs the target binary and forwards exact arguments without a shell", async () => {
     const bytes = new TextEncoder().encode("binary payload");
     const root = await packageFixture(bytes);
+    const installOutput: string[] = [];
     const executions: {
       command: string;
       args: readonly string[];
@@ -101,7 +102,9 @@ describe("AgentLab npm launcher", () => {
         execute,
         fetch: fetchImplementation,
         packageDirectory: root,
-        runtime: { arch: "x64", glibcVersionRuntime: "2.39", platform: "linux" }
+        runtime: { arch: "x64", glibcVersionRuntime: "2.39", platform: "linux" },
+        stderr: (message) => installOutput.push(message),
+        stderrIsTTY: false
       })
     ).resolves.toBe(7);
     expect(executions).toHaveLength(1);
@@ -111,6 +114,28 @@ describe("AgentLab npm launcher", () => {
     expect(executions[0]?.args).toEqual(["--help"]);
     expect(executions[0]?.environment.AGENTLAB_INSTALL_METHOD).toBe("npm");
     expect(executions[0]?.environment.AGENTLAB_LAUNCHER_VERSION).toBe("0.2.0");
+    expect(installOutput).toEqual([
+      "Downloading AgentLab 0.2.0 for Linux x64 (0.0 MB)...\n",
+      "AgentLab 0.2.0 installed for Linux x64.\n",
+      "Starting AgentLab...\n"
+    ]);
+
+    const cachedOutput: string[] = [];
+    const offline = vi.fn(() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
+    await expect(
+      runLauncher(["--help"], {
+        cacheRoot: join(root, "cache"),
+        environment: {},
+        execute,
+        fetch: offline,
+        packageDirectory: root,
+        runtime: { arch: "x64", glibcVersionRuntime: "2.39", platform: "linux" },
+        stderr: (message) => cachedOutput.push(message),
+        stderrIsTTY: false
+      })
+    ).resolves.toBe(7);
+    expect(cachedOutput).toEqual([]);
+    expect(offline).not.toHaveBeenCalled();
   });
 
   it("checks and explicitly installs npm updates", async () => {
