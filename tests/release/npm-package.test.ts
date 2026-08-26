@@ -17,6 +17,39 @@ afterEach(async () => {
 });
 
 describe("npm package preparation", () => {
+  it("keeps AgentLab as the only publishable package without personal author metadata", async () => {
+    const manifestPaths = [
+      "package.json",
+      "apps/tui/package.json",
+      "packages/contracts/package.json",
+      "packages/launcher/package.json",
+      "packages/runtime/package.json"
+    ];
+    const manifests = await Promise.all(
+      manifestPaths.map(async (path) => {
+        const manifest = JSON.parse(await readFile(join(projectRoot, path), "utf8")) as {
+          author?: unknown;
+          copyright?: unknown;
+          name: string;
+          private?: boolean;
+        };
+        return { ...manifest, path };
+      })
+    );
+
+    expect(
+      manifests
+        .filter((manifest) => manifest.private !== true)
+        .map(({ name, path }) => ({
+          name,
+          path
+        }))
+    ).toEqual([{ name: "agentlab", path: "packages/launcher/package.json" }]);
+    expect(
+      manifests.every(({ author, copyright }) => author === undefined && copyright === undefined)
+    ).toBe(true);
+  });
+
   it("binds the npm launcher to the exact GitHub release binaries", async () => {
     const root = await temporaryRoot();
     const assets = join(root, "assets");
