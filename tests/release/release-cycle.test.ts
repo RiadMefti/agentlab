@@ -110,6 +110,31 @@ function runScript(script: string, ...arguments_: string[]) {
   });
 }
 
+function runGit(root: string, ...arguments_: string[]) {
+  return spawnSync("git", arguments_, {
+    cwd: root,
+    encoding: "utf8"
+  });
+}
+
+async function createGitVersionFixture(): Promise<string> {
+  const root = await createVersionFixture();
+  const commands = [
+    ["init", "--initial-branch=main"],
+    ["config", "user.name", "Release Test"],
+    ["config", "user.email", "release-test@example.com"],
+    ["add", "."],
+    ["commit", "-m", "Initial release metadata"]
+  ];
+  for (const command of commands) {
+    const result = runGit(root, ...command);
+    if (result.status !== 0) {
+      throw new Error(result.stderr || `git ${command[0] ?? "command"} failed`);
+    }
+  }
+  return root;
+}
+
 async function createSparseBinary(
   path: string,
   header: Uint8Array,
@@ -333,6 +358,21 @@ describe("release version metadata", () => {
     expect(runScript("check-release.mjs", "v0.2.0", "--root", root).status).toBe(0);
   });
 
+  it.each([
+    ["patch", "0.1.1"],
+    ["minor", "0.2.0"],
+    ["major", "1.0.0"]
+  ])("resolves a %s release bump to %s", async (request, expectedVersion) => {
+    const root = await createVersionFixture();
+    const result = runScript("prepare-release.mjs", request, "--root", root);
+    const manifest = parsePackageMetadata(await readFile(join(root, "package.json"), "utf8"));
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`Prepared v${expectedVersion}`);
+    expect(manifest.version).toBe(expectedVersion);
+    expect(runScript("check-release.mjs", `v${expectedVersion}`, "--root", root).status).toBe(0);
+  });
+
   it("does not mutate metadata for a non-increasing version", async () => {
     const root = await createVersionFixture();
     const packagePath = join(root, "package.json");
@@ -340,6 +380,92 @@ describe("release version metadata", () => {
     const result = runScript("prepare-release.mjs", "0.1.0", "--root", root);
     expect(result.status).toBe(1);
     expect(await readFile(packagePath, "utf8")).toBe(before);
+  });
+});
+
+describe("release start validation", () => {
+  it("accepts a clean default-branch commit with no existing release tag", async () => {
+    const root = await createGitVersionFixture();
+    const result = runScript(
+      "check-release-start.mjs",
+      "0.1.0",
+      "--base-ref",
+      "HEAD",
+      "--root",
+      root,
+      "--json"
+    );
+    const metadata = JSON.parse(result.stdout) as {
+      commit: string;
+      tag: string;
+      tagState: string;
+      version: string;
+    };
+
+    expect(result.status).toBe(0);
+    expect(metadata).toMatchObject({ tag: "v0.1.0", tagState: "missing", version: "0.1.0" });
+    expect(metadata.commit).toMatch(/^[0-9a-f]{40}$/u);
+  });
+
+  it("accepts only an annotated existing tag on the exact release commit", async () => {
+    const root = await createGitVersionFixture();
+    expect(runGit(root, "tag", "-a", "v0.1.0", "-m", "AgentLab v0.1.0").status).toBe(0);
+    const valid = runScript(
+      "check-release-start.mjs",
+      "0.1.0",
+      "--base-ref",
+      "HEAD",
+      "--root",
+      root,
+      "--json"
+    );
+
+    expect(valid.status).toBe(0);
+    expect(JSON.parse(valid.stdout)).toMatchObject({ tagState: "existing" });
+
+    expect(runGit(root, "tag", "-d", "v0.1.0").status).toBe(0);
+    expect(runGit(root, "tag", "v0.1.0").status).toBe(0);
+    const lightweight = runScript(
+      "check-release-start.mjs",
+      "0.1.0",
+      "--base-ref",
+      "HEAD",
+      "--root",
+      root
+    );
+    expect(lightweight.status).toBe(1);
+    expect(lightweight.stderr).toContain("is not an annotated tag");
+  });
+
+  it("rejects dirty worktrees and commits that are not the requested branch head", async () => {
+    const root = await createGitVersionFixture();
+    await writeFile(join(root, "untracked.txt"), "not releasable\n", "utf8");
+    const dirty = runScript(
+      "check-release-start.mjs",
+      "0.1.0",
+      "--base-ref",
+      "HEAD",
+      "--root",
+      root
+    );
+    expect(dirty.status).toBe(1);
+    expect(dirty.stderr).toContain("clean working tree");
+
+    await rm(join(root, "untracked.txt"));
+    await writeFile(join(root, "release-note.txt"), "next commit\n", "utf8");
+    expect(runGit(root, "add", "release-note.txt").status).toBe(0);
+    expect(runGit(root, "commit", "-m", "Move branch head").status).toBe(0);
+    expect(runGit(root, "branch", "release-base", "HEAD~1").status).toBe(0);
+    const stale = runScript(
+      "check-release-start.mjs",
+      "0.1.0",
+      "--base-ref",
+      "release-base",
+      "--root",
+      root
+    );
+    expect(stale.status).toBe(1);
+    expect(stale.stderr).toContain("does not match release-base");
   });
 });
 
@@ -596,6 +722,30 @@ describe("release workflow trust boundaries", () => {
     expect(workflow).not.toMatch(/Electron|AppImage|\.dmg|electron-builder/u);
   });
 
+  it("coordinates releases only from the exact green default-branch commit", async () => {
+    const coordinator = await readFile(
+      join(projectRoot, ".github", "workflows", "start-release.yml"),
+      "utf8"
+    );
+    const release = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+
+    expect(coordinator).toContain('if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]');
+    expect(coordinator).toContain("release:start:check");
+    expect(coordinator).toContain('-f head_sha="$RELEASE_COMMIT"');
+    expect(coordinator).toContain('.event == "push"');
+    expect(coordinator).toContain('git tag -a "$RELEASE_TAG" "$RELEASE_COMMIT"');
+    expect(coordinator).toContain('gh workflow run release.yml --ref "$RELEASE_TAG"');
+    expect(coordinator).toContain('gh run watch "$RELEASE_RUN_ID" --exit-status');
+    expect(coordinator).toContain('npm view "agentlab@$RELEASE_VERSION" version');
+    expect(coordinator).not.toContain("npm publish");
+    expect(coordinator).not.toContain("NODE_AUTH_TOKEN");
+    expect(release).toContain("workflow_dispatch:");
+    expect(release).toContain('if [[ "$GITHUB_REF_TYPE" != "tag" ]]');
+  });
+
   it("keeps publication immutable and attests executables plus the SBOM", async () => {
     const workflow = await readFile(
       join(projectRoot, ".github", "workflows", "release.yml"),
@@ -653,6 +803,7 @@ describe("release workflow trust boundaries", () => {
     expect(workflow).toContain("recover_npm_publish:");
     expect(workflow).toContain("+npm-recovery.RUN_ID");
     expect(workflow).toContain('.conclusion == "failure"');
+    expect(workflow).toContain('.event == "workflow_dispatch"');
     expect(workflow).toContain('.path == ".github/workflows/release.yml"');
     expect(workflow).toContain(".isDraft == false and .isImmutable == true");
     expect(workflow).toContain("--name npm-launcher");

@@ -1,0 +1,183 @@
+name: Start release
+
+run-name: Start AgentLab v${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact version already prepared on main, such as 1.0.0
+        required: true
+        type: string
+
+concurrency:
+  group: start-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  coordinate:
+    name: Validate, tag, and verify release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Require the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo "Run this workflow from $DEFAULT_BRANCH, not $GITHUB_REF_NAME." >&2
+            exit 1
+          fi
+      - name: Check out current main with release credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Validate the prepared version and tag state
+        id: release
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin \
+            "refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          metadata="$(npm run --silent release:start:check -- \
+            "$RELEASE_VERSION" \
+            --base-ref "origin/$DEFAULT_BRANCH" \
+            --json)"
+          jq -e \
+            --arg version "$RELEASE_VERSION" \
+            '.version == $version and (.tagState == "missing" or .tagState == "existing")' \
+            <<< "$metadata" >/dev/null
+          echo "commit=$(jq -r '.commit' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "tag=$(jq -r '.tag' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "tag_state=$(jq -r '.tagState' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r '.version' <<< "$metadata")" >> "$GITHUB_OUTPUT"
+      - name: Wait for CI on the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_succeeded=false
+          for attempt in {1..90}; do
+            runs_file="$RUNNER_TEMP/ci-runs.json"
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f head_sha="$RELEASE_COMMIT" \
+              -f per_page=20 > "$runs_file"
+            state="$(jq -r \
+              --arg commit "$RELEASE_COMMIT" \
+              '[.workflow_runs[] | select(.head_sha == $commit and .event == "push")] | sort_by(.run_number) | last | if . == null then "missing" elif .status != "completed" then .status else .conclusion end' \
+              "$runs_file")"
+            if [[ "$state" == "success" ]]; then
+              ci_succeeded=true
+              break
+            fi
+            if [[ "$state" != "missing" && "$state" != "queued" && "$state" != "in_progress" && "$state" != "waiting" && "$state" != "pending" ]]; then
+              echo "CI for $RELEASE_COMMIT completed with $state." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          if [[ "$ci_succeeded" != "true" ]]; then
+            echo "CI for $RELEASE_COMMIT did not succeed within 15 minutes." >&2
+            exit 1
+          fi
+      - name: Create the annotated release tag
+        if: steps.release.outputs.tag_state == 'missing'
+        env:
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$RELEASE_TAG" "$RELEASE_COMMIT" -m "AgentLab $RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
+      - name: Reuse or dispatch the release pipeline
+        id: pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs_file="$RUNNER_TEMP/release-runs.json"
+          gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+            -f branch="$RELEASE_TAG" \
+            -f per_page=20 > "$runs_file"
+          run_id="$(jq -r \
+            --arg commit "$RELEASE_COMMIT" \
+            '[.workflow_runs[] | select(.head_sha == $commit and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .conclusion == "success"))] | sort_by(.run_number) | last | .id // empty' \
+            "$runs_file")"
+
+          if [[ -z "$run_id" ]]; then
+            gh workflow run release.yml --ref "$RELEASE_TAG"
+            for attempt in {1..30}; do
+              gh api --method GET \
+                "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs" \
+                -f branch="$RELEASE_TAG" \
+                -f event=workflow_dispatch \
+                -f per_page=20 > "$runs_file"
+              run_id="$(jq -r \
+                --arg commit "$RELEASE_COMMIT" \
+                '[.workflow_runs[] | select(.head_sha == $commit and (.status != "completed" or .conclusion == "success"))] | sort_by(.run_number) | last | .id // empty' \
+                "$runs_file")"
+              [[ -n "$run_id" ]] && break
+              sleep 2
+            done
+          fi
+
+          if [[ -z "$run_id" ]]; then
+            echo "The release workflow was dispatched but its run could not be located." >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_url=https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id" >> "$GITHUB_OUTPUT"
+      - name: Wait for the release pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ steps.pipeline.outputs.run_id }}
+        run: gh run watch "$RELEASE_RUN_ID" --exit-status --interval 10
+      - name: Verify the public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_RUN_URL: ${{ steps.pipeline.outputs.run_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,isImmutable --jq '(.isDraft == false and .isPrerelease == false and .isImmutable == true)')" = "true"
+          test "$(npm view "agentlab@$RELEASE_VERSION" version)" = "$RELEASE_VERSION"
+          {
+            echo "### AgentLab $RELEASE_VERSION released"
+            echo
+            echo "- Release pipeline: $RELEASE_RUN_URL"
+            echo "- GitHub release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+            echo "- npm: https://www.npmjs.com/package/agentlab/v/$RELEASE_VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

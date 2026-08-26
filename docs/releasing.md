@@ -1,7 +1,8 @@
 # Releasing
 
-AgentLab has one public npm package and two native release targets. An annotated
-`vMAJOR.MINOR.PATCH` tag on `main` publishes:
+AgentLab has one public npm package and two native release targets. A maintainer prepares one exact
+stable version on `main`, then runs the **Start release** workflow from GitHub Actions. The workflow
+waits for CI, creates an annotated `vMAJOR.MINOR.PATCH` tag, and publishes:
 
 - `agentlab` on npm, containing the Node.js launcher and its exact release manifest;
 - `agentlab-vMAJOR.MINOR.PATCH-linux-x64`;
@@ -23,9 +24,11 @@ neither Bun nor Node.js; tmux and at least one provider CLI remain host dependen
 
 ## One-time publication setup
 
-In GitHub, create an environment named `release`, restrict deployment branches and tags to `v*`, and
-add any desired reviewer protection. Enable immutable releases for the public repository under
-Settings → General → Releases. An administrator can do the same through the API:
+Protect `main` against force pushes and deletion, require changes to arrive through a pull request,
+and require the `verify` CI check against the current branch head. In GitHub, create an environment
+named `release`, restrict it to `v*` tags, and add any desired reviewer protection. Enable immutable
+releases for the public repository under Settings → General → Releases. An administrator can verify
+the latter through the API:
 
 ```bash
 gh api --method PUT repos/RiadMefti/agentlab/immutable-releases
@@ -45,37 +48,43 @@ npm trust github agentlab \
   --yes
 ```
 
-After the first successful OIDC publish, set the package's publishing access on npmjs.com to require
-two-factor authentication and disallow traditional write tokens. The workflow needs no npm token.
-Trusted publishing automatically records npm provenance because both the package and repository are
-public.
+The workflow needs no npm token and never changes npm account-security settings. If a GitHub
+repository is replaced by another repository with the same visible owner and name, recreate only
+this trusted-publisher record so npm binds it to the new repository identity.
 
 ## Cut a release
 
-Start from a clean, current `main` branch with Node.js 24, Bun 1.4, and tmux installed:
+Prepare the version on a branch from current `main`. The command accepts `patch`, `minor`, `major`,
+or an exact greater version. For example, `major` changes `0.2.3` to `1.0.0`:
 
 ```bash
 git switch main
 git pull --ff-only
+git switch -c release/next
 npm ci
-npm run release:prepare -- 0.2.0
-npm run release:check -- v0.2.0
+npm run release:prepare -- major
+npm run release:check -- v1.0.0
 npm run verify
 npm audit --omit=dev --audit-level=high
 ```
 
-Review the version-only diff, including the launcher and canonical app version, then commit and let
-CI pass before creating the tag:
+Review the version-only diff, including the launcher and canonical app version, commit it with the
+maintainer's normal Git identity, push the branch, and merge it through a pull request after CI:
 
 ```bash
 git add package.json package-lock.json apps/*/package.json packages/*/package.json apps/tui/src/version.ts
-git commit -m "chore: prepare v0.2.0"
-git push origin main
-git tag -a v0.2.0 -m "AgentLab v0.2.0"
-git push origin v0.2.0
+git commit -m "release: prepare v1.0.0"
+git push -u origin release/next
 ```
 
-The tag starts `.github/workflows/release.yml`, which:
+After the pull request is merged and `main` CI succeeds, open **Actions → Start release → Run
+workflow**, keep the branch set to `main`, and enter `1.0.0`. The coordinator refuses dirty or stale
+source state, mismatched metadata, lightweight or conflicting tags, and failed CI. It safely reuses
+an exact existing tag when retrying. A maintainer can still create and push an annotated tag
+manually as an emergency fallback.
+
+The coordinator dispatches `.github/workflows/release.yml` on the tag and waits for it. That
+workflow:
 
 1. Matches the tag against every workspace, lockfile entry, and `apps/tui/src/version.ts`, proves
    the annotated tag is already on `main`, and runs the complete verification and dependency audit.

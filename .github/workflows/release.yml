@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
@@ -48,6 +49,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" != "tag" ]]; then
+            echo "Release runs must use an annotated tag ref." >&2
+            exit 1
+          fi
           npm run release:check -- "$GITHUB_REF_NAME"
           if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
             echo "Release tags must be annotated." >&2
@@ -425,7 +430,7 @@ jobs:
           cmp "$RUNNER_TEMP/agentlab-help.txt" "$RUNNER_TEMP/agentlab-offline-help.txt"
 
   npm_publish:
-    name: Publish npm package with provenance
+    name: Publish npm package
     needs: [validate, github_release, npm_package, smoke_linux, smoke_macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -547,7 +552,7 @@ jobs:
           jq -e \
             --arg branch "$release_tag" \
             --arg sha "$release_commit" \
-            '.event == "push" and .head_branch == $branch and .head_sha == $sha and .conclusion == "failure" and .path == ".github/workflows/release.yml"' \
+            '(.event == "push" or .event == "workflow_dispatch") and .head_branch == $branch and .head_sha == $sha and .conclusion == "failure" and .path == ".github/workflows/release.yml"' \
             "$run_json" >/dev/null
           test "$(gh release view "$release_tag" --json isDraft,isImmutable --jq '(.isDraft == false and .isImmutable == true)')" = "true"
           error_file="$RUNNER_TEMP/npm-view-error.txt"

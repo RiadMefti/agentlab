@@ -1,6 +1,6 @@
 {
   "name": "agentlab-monorepo",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "One captain for all your coding agents, composed in one fast local terminal UI.",
@@ -34,6 +34,7 @@
     "release:check": "node scripts/check-release.mjs",
     "release:npm:prepare": "npm run build --workspace agentlab && node scripts/prepare-npm-package.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
+    "release:start:check": "node scripts/check-release-start.mjs",
     "start": "npm run build:packages && bun apps/tui/src/main.tsx",
     "test": "vitest run && npm run test:bun",
     "test:bun": "npm run build:packages && bun test ./tests/tui/app.bun.tsx ./tests/tui/embedded-terminal.bun.tsx ./tests/tui/use-workspace.bun.tsx ./tests/runtime/terminal-pty.bun.ts",

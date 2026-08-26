@@ -10,6 +10,7 @@ const DEPENDENCY_FIELDS = [
   "peerDependencies"
 ];
 const STABLE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const VERSION_BUMPS = new Set(["major", "minor", "patch"]);
 const WORKSPACE_PATTERN = /^([A-Za-z0-9._-]+)\/\*$/;
 
 /** @typedef {Record<string, unknown>} JsonObject */
@@ -219,6 +220,25 @@ export function compareStableVersions(candidate, current) {
 }
 
 /**
+ * Resolves either an exact stable version or a semantic bump from the current version.
+ *
+ * @param {string} request
+ * @param {string} current
+ * @returns {string}
+ */
+export function resolveReleaseVersion(request, current) {
+  const [major, minor, patch] = parseStableVersion(current);
+  if (VERSION_BUMPS.has(request)) {
+    if (request === "major") return `${String(major + 1n)}.0.0`;
+    if (request === "minor") return `${String(major)}.${String(minor + 1n)}.0`;
+    return `${String(major)}.${String(minor)}.${String(patch + 1n)}`;
+  }
+
+  parseStableVersion(request);
+  return request;
+}
+
+/**
  * @param {JsonObject} container
  * @param {string} field
  * @param {string} label
@@ -420,11 +440,10 @@ async function writeFilesAtomically(files) {
 
 /**
  * @param {string} rootPath
- * @param {string} version
+ * @param {string} request
  * @returns {Promise<string[]>}
  */
-export async function prepareRelease(rootPath, version) {
-  parseStableVersion(version);
+export async function prepareRelease(rootPath, request) {
   const state = await loadReleaseState(rootPath);
   assertVersionState(state);
 
@@ -432,6 +451,7 @@ export async function prepareRelease(rootPath, version) {
   if (!currentVersion) {
     throw new Error("The root package version is missing.");
   }
+  const version = resolveReleaseVersion(request, currentVersion);
   if (compareStableVersions(version, currentVersion) <= 0) {
     throw new Error(
       `Release version ${version} must be greater than current version ${currentVersion}.`
