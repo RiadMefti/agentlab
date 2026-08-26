@@ -24,6 +24,8 @@ const PREBUNDLED_PROPERTY = {
   value: "prebundled"
 };
 const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agentlab:component:provenance";
+const CYCLONE_DX_SERIAL_NUMBER =
+  /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const PREBUNDLE_PROVENANCE_METHODS = new Set([
   "anthropic-stainless-runtime-marker",
   "bun-module-marker"
@@ -95,6 +97,12 @@ async function verifySbom(path, version, target) {
 
   if (!isJsonObject(value) || value.bomFormat !== "CycloneDX" || value.specVersion !== "1.5") {
     throw new Error(`${path} must be a CycloneDX 1.5 document.`);
+  }
+  if (
+    typeof value.serialNumber !== "string" ||
+    !CYCLONE_DX_SERIAL_NUMBER.test(value.serialNumber)
+  ) {
+    throw new Error(`${path} must contain a valid CycloneDX UUID serial number.`);
   }
   if (!isJsonObject(value.metadata) || !isJsonObject(value.metadata.component)) {
     throw new Error(`${path} is missing metadata.component.`);

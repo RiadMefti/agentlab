@@ -223,6 +223,11 @@ async function createAssetFixture(
     return {
       bomFormat: "CycloneDX",
       specVersion: "1.5",
+      serialNumber:
+        target === "linux-x64"
+          ? "urn:uuid:11111111-1111-5111-8111-111111111111"
+          : "urn:uuid:22222222-2222-5222-8222-222222222222",
+      version: 1,
       metadata: {
         component: {
           "bom-ref": `agentlab@${version}`,
@@ -349,6 +354,16 @@ describe("release asset validation", () => {
     const root = await createAssetFixture("0.1.0", false, false);
     const result = runScript("check-release-assets.mjs", "v0.1.0", root);
     expect(result.status).toBe(1);
+  });
+
+  it("rejects a release SBOM without an attestation-compatible serial number", async () => {
+    const root = await createAssetFixture();
+    const path = join(root, "agentlab-v0.1.0-linux-x64.cdx.json");
+    const sbom = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    delete sbom.serialNumber;
+    await writeJson(path, sbom);
+
+    expect(runScript("check-release-assets.mjs", "v0.1.0", root).status).toBe(1);
   });
 
   it("rejects extra files and malformed binary architecture", async () => {
@@ -526,6 +541,9 @@ describe("release SBOM generation", () => {
       name: "agentlab:binary:target",
       value: "linux-x64"
     });
+    expect(sbom.serialNumber).toMatch(
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+    );
     expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(sbom);
   });
 });

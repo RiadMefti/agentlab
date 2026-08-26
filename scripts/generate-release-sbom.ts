@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -17,6 +18,7 @@ const PREBUNDLED_PROPERTY = {
 } as const;
 const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agentlab:component:provenance";
 const TARGET_PROPERTY_NAME = "agentlab:binary:target";
+const UUID_V5_DNS_NAMESPACE = Buffer.from("6ba7b8109dad11d180b400c04fd430c8", "hex");
 const NATIVE_PACKAGE_BY_TARGET = {
   "linux-x64": "@opentui/core-linux-x64",
   "linux-arm64": "@opentui/core-linux-arm64",
@@ -73,6 +75,7 @@ interface CycloneComponent {
 export interface BinarySbom {
   readonly bomFormat: "CycloneDX";
   readonly specVersion: "1.5";
+  readonly serialNumber: `urn:uuid:${string}`;
   readonly version: 1;
   readonly metadata: {
     readonly component: {
@@ -247,6 +250,7 @@ export async function generateBinarySbom(input: BinarySbomInput): Promise<Binary
   const sbom: BinarySbom = {
     bomFormat: "CycloneDX",
     specVersion: "1.5",
+    serialNumber: sbomSerialNumber(input.version, input.target),
     version: 1,
     metadata: {
       component: {
@@ -270,6 +274,18 @@ export async function generateBinarySbom(input: BinarySbomInput): Promise<Binary
 
   await writeFile(resolve(input.outputPath), `${JSON.stringify(sbom, null, 2)}\n`, "utf8");
   return sbom;
+}
+
+function sbomSerialNumber(version: string, target: BinarySbomTarget): `urn:uuid:${string}` {
+  const digest = createHash("sha1")
+    .update(UUID_V5_DNS_NAMESPACE)
+    .update(`agentlab:${version}:${target}`, "utf8")
+    .digest();
+  const uuid = Buffer.from(digest.subarray(0, 16));
+  uuid.writeUInt8((uuid.readUInt8(6) & 0x0f) | 0x50, 6);
+  uuid.writeUInt8((uuid.readUInt8(8) & 0x3f) | 0x80, 8);
+  const hex = uuid.toString("hex");
+  return `urn:uuid:${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
