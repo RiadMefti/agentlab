@@ -634,9 +634,11 @@ describe("release workflow trust boundaries", () => {
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain('npm publish "./npm-artifact/agentlab-');
     expect(workflow).toContain('npm install --global --ignore-scripts "./npm-artifact/');
+    expect(workflow).toContain('npm install --global --ignore-scripts "./published-package/');
     expect(workflow).toContain("NODE_USE_ENV_PROXY=1");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
     expect(workflow).not.toContain('npm install --global --ignore-scripts "npm-artifact/');
+    expect(workflow).not.toContain('npm install --global --ignore-scripts "published-package/');
     expect(workflow).not.toMatch(/npm publish[^\n]*--workspace/u);
   });
 

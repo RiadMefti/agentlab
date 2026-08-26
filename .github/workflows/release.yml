@@ -493,7 +493,7 @@ jobs:
           cmp \
             "npm-artifact/agentlab-$version.tgz" \
             "published-package/agentlab-$version.tgz"
-          npm install --global --ignore-scripts "published-package/agentlab-$version.tgz"
+          npm install --global --ignore-scripts "./published-package/agentlab-$version.tgz"
           test "$(agentlab --version)" = "$version"
 
   recover_npm_candidate:
