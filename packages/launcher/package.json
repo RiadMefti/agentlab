@@ -1,7 +1,18 @@
 {
   "name": "agentlab",
-  "version": "0.2.1",
-  "description": "One captain for all your coding agents in a fast local terminal UI.",
+  "version": "0.2.2",
+  "description": "Run Codex, Claude Code, and OpenCode in one local terminal, with one captain per project.",
+  "keywords": [
+    "ai",
+    "coding-agents",
+    "codex",
+    "claude-code",
+    "opencode",
+    "multi-agent",
+    "terminal",
+    "tui",
+    "tmux"
+  ],
   "type": "module",
   "bin": {
     "agentlab": "dist/agentlab.js"
@@ -23,12 +34,13 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RiadMefti/agentlab.git"
+    "url": "git+https://github.com/RiadMefti/agentlab.git",
+    "directory": "packages/launcher"
   },
   "bugs": {
     "url": "https://github.com/RiadMefti/agentlab/issues"
   },
-  "homepage": "https://github.com/RiadMefti/agentlab#readme",
+  "homepage": "https://github.com/RiadMefti/agentlab",
   "publishConfig": {
     "access": "public"
   }

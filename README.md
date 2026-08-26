@@ -30,10 +30,9 @@ npm install --global agentlab
 agentlab
 ```
 
-The npm package is a small cross-platform launcher. On first use it selects the matching AgentLab
-release, downloads that exact executable from GitHub, verifies its pinned size and SHA-256 digest,
-and caches it by version. Cached starts recheck the digest and make no network request. Updates are
-always explicit:
+The npm package downloads the matching AgentLab executable from GitHub on first use and caches it by
+version. Later launches use the cached executable and make no update request. Updates are always
+explicit:
 
 ```bash
 agentlab update --check
@@ -54,15 +53,8 @@ mv agentlab-vVERSION-PLATFORM ~/.local/bin/agentlab
 agentlab
 ```
 
-The macOS executable is not notarized. Verify its checksum and GitHub attestation first; if
-Gatekeeper then blocks it, clear the download quarantine with
-`xattr -d com.apple.quarantine agentlab-vVERSION-mac-arm64`.
-
-Every release also includes `SHA256SUMS`, a target-specific CycloneDX SBOM generated from each
-binary's Bun input graph and verified exact package/version markers in supported upstream
-prebundles. Packaging then proves the compiled executable carries the same opaque dependency
-versions. GitHub build/SBOM attestations bind those documents to the binaries. See
-[Releasing](docs/releasing.md) for verification commands.
+The macOS executable is not notarized. If Gatekeeper blocks a direct download, clear the download
+quarantine with `xattr -d com.apple.quarantine agentlab-vVERSION-mac-arm64`.
 
 ## Requirements
 
@@ -160,4 +152,4 @@ AgentLab opens no network listener. The npm launcher only connects to GitHub whe
 is missing and to npm when you explicitly request an update. Managed session identities and all
 local command input are validated before process boundaries; child processes receive argument
 arrays, and the one tmux shell-command boundary uses tested POSIX quoting. Published executables are
-checksummed, attested, and immutable. See [Security](SECURITY.md) for reporting guidance.
+immutable. See [Security](SECURITY.md) for reporting guidance.

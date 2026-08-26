@@ -86,14 +86,32 @@ describe("npm package preparation", () => {
 
     const packageJson = JSON.parse(await readFile(join(output, "package.json"), "utf8")) as {
       author?: unknown;
+      description: string;
       files: string[];
+      homepage: string;
+      keywords: string[];
       name: string;
+      repository: { directory?: string; url: string };
     };
     expect(packageJson).toMatchObject({
+      description:
+        "Run Codex, Claude Code, and OpenCode in one local terminal, with one captain per project.",
       files: ["dist/*.js", "release-manifest.json", "README.md", "LICENSE"],
-      name: "agentlab"
+      homepage: "https://github.com/RiadMefti/agentlab",
+      keywords: expect.arrayContaining(["coding-agents", "codex", "claude-code", "opencode"]),
+      name: "agentlab",
+      repository: {
+        directory: "packages/launcher",
+        url: "git+https://github.com/RiadMefti/agentlab.git"
+      }
     });
     expect(packageJson.author).toBeUndefined();
+
+    const readme = await readFile(join(output, "README.md"), "utf8");
+    expect(readme).toContain("npm install --global agentlab");
+    expect(readme).toContain("Run `agentlab` from any directory.");
+    expect(readme).toMatch(/one\s+captain\s+and\s+any\s+number\s+of\s+workers/u);
+    expect(readme).not.toMatch(/sha-?256|checksums?|sboms?|provenance/iu);
 
     const prepack = spawnSync(process.execPath, [join(output, "dist", "prepack.js")], {
       cwd: output,
