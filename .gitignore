@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-types/
+.test-types/
+coverage/
+/release/
+.data/
+.env
+*.log
+*.tsbuildinfo
+.DS_Store
+.agent-html-render/

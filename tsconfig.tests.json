@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2023"],
+    "outDir": ".test-types",
+    "rootDir": ".",
+    "tsBuildInfoFile": ".test-types/.tsbuildinfo",
+    "types": ["node", "vitest/globals", "bun"]
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "scripts/**/*.mts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vitest.config.ts"
+  ],
+  "references": [
+    { "path": "./packages/contracts" },
+    { "path": "./packages/launcher" },
+    { "path": "./packages/runtime" },
+    { "path": "./apps/tui" }
+  ]
+}

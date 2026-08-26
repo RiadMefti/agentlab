@@ -1,0 +1,708 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: "1.4.0"
+  NPM_VERSION: "11.19.0"
+  NODE_VERSION: "24"
+
+jobs:
+  validate:
+    name: Validate release
+    if: ${{ !contains(github.ref_name, '+npm-recovery.') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install terminal runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y tmux
+          npm install --global "bun@${BUN_VERSION}"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate tag and release metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run release:check -- "$GITHUB_REF_NAME"
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "Release tags must be annotated." >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-list -n 1 "refs/tags/$GITHUB_REF_NAME")"
+          if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "The checked-out commit does not match the release tag." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "Release tags must point to a commit already present on origin/main." >&2
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Run the full verification suite
+        run: npm run verify
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  linux:
+    name: Linux x64
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install Bun
+        run: npm install --global "bun@${BUN_VERSION}"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and smoke-test the executable
+        run: npm run package
+      - name: Verify the executable architecture
+        run:
+          file release/agentlab-v${{ needs.validate.outputs.version }}-linux-x64 | grep -F "x86-64"
+      - name: Upload the Linux executable and target-specific SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binary-linux-x64
+          path: |
+            release/agentlab-v${{ needs.validate.outputs.version }}-linux-x64
+            release/agentlab-v${{ needs.validate.outputs.version }}-linux-x64.cdx.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  macos:
+    name: macOS Apple silicon
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Verify the runner architecture
+        run: test "$(uname -m)" = "arm64"
+      - name: Install Bun
+        run: npm install --global "bun@${BUN_VERSION}"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and smoke-test the executable
+        run: npm run package
+      - name: Verify the executable architecture
+        run:
+          file release/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64 | grep -F "arm64"
+      - name: Upload the macOS executable and target-specific SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binary-macos-arm64
+          path: |
+            release/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64
+            release/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64.cdx.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  github_release:
+    name: Publish immutable GitHub Release
+    needs: [validate, linux, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: release
+      url: https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download all release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: binary-*
+          path: release-assets
+          merge-multiple: true
+      - name: Validate the complete asset set
+        run: node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum agentlab-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          cd ..
+          node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets --published
+      - name: Inspect any existing release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if existing_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+            if [[ "$existing_is_draft" == "true" ]]; then
+              echo "state=draft" >> "$GITHUB_OUTPUT"
+            elif [[ "$existing_is_draft" == "false" ]]; then
+              echo "state=published" >> "$GITHUB_OUTPUT"
+            else
+              echo "GitHub returned an invalid release state." >&2
+              exit 1
+            fi
+          else
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Attest build provenance
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-linux-x64
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-linux-x64.cdx.json
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64.cdx.json
+            release-assets/SHA256SUMS
+      - name: Attest the Linux bundle SBOM
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/agentlab-v${{ needs.validate.outputs.version }}-linux-x64
+          sbom-path:
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-linux-x64.cdx.json
+      - name: Attest the macOS bundle SBOM
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64
+          sbom-path:
+            release-assets/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64.cdx.json
+      - name: Replace an incomplete draft
+        if: steps.existing.outputs.state == 'draft'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$GITHUB_REF_NAME" --yes
+      - name: Create the complete draft release
+        if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_notice=$'Recommended install: `npm install --global agentlab`. The npm launcher requires Node.js 20 or newer and downloads the exact verified binary for this release. AgentLab also requires tmux and an authenticated provider CLI. For a direct install, download the executable for your platform, verify it, run `chmod +x agentlab-*`, and place it on your PATH. The macOS executable is not notarized; after verifying its checksum and attestation, run `xattr -d com.apple.quarantine agentlab-v${{ needs.validate.outputs.version }}-mac-arm64` if Gatekeeper blocks it.'
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --draft \
+            --fail-on-no-commits \
+            --generate-notes \
+            --notes "$release_notice" \
+            --title "AgentLab ${{ needs.validate.outputs.version }}" \
+            --verify-tag
+      - name: Verify draft assets against local digests
+        if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/draft-release.json"
+          gh release view "$GITHUB_REF_NAME" --json isDraft,assets > "$release_json"
+          jq -e '.isDraft == true' "$release_json" >/dev/null
+          local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+          remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
+          test "$local_names" = "$remote_names"
+          while read -r digest filename; do
+            remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+            test "$remote_digest" = "sha256:$digest"
+          done < <(cd release-assets && sha256sum *)
+      - name: Publish the release
+        if: steps.existing.outputs.state != 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+      - name: Verify the published release
+        env:
+          EXISTING_RELEASE_STATE: ${{ steps.existing.outputs.state }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$RUNNER_TEMP/published-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$release_json"
+          jq -e '.draft == false and .prerelease == false' "$release_json" >/dev/null
+          test "$(gh release view "$GITHUB_REF_NAME" --json isDraft,isImmutable --jq '(.isDraft == false and .isImmutable == true)')" = "true"
+          if [[ "$EXISTING_RELEASE_STATE" == "published" ]]; then
+            download_directory="$RUNNER_TEMP/published-release-assets"
+            mkdir -p "$download_directory"
+            gh release download "$GITHUB_REF_NAME" --dir "$download_directory"
+            node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" "$download_directory" --published
+            for asset in "$download_directory"/agentlab-* "$download_directory"/SHA256SUMS; do
+              gh attestation verify "$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-digest "$GITHUB_SHA" \
+                --source-ref "$GITHUB_REF" \
+                --deny-self-hosted-runners
+            done
+          else
+            local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+            remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
+            test "$local_names" = "$remote_names"
+            while read -r digest filename; do
+              remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
+              test "$remote_digest" = "sha256:$digest"
+            done < <(cd release-assets && sha256sum *)
+          fi
+
+  npm_package:
+    name: Build npm launcher package
+    needs: [validate, github_release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install the pinned npm CLI and locked dependencies
+        run: |
+          npm install --global "npm@${NPM_VERSION}"
+          npm ci
+      - name: Download and verify the immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          gh release download "$GITHUB_REF_NAME" --dir release-assets
+          node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets --published
+          for asset in release-assets/agentlab-* release-assets/SHA256SUMS; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners
+          done
+      - name: Bind the launcher to the published binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build --workspace agentlab
+          node scripts/prepare-npm-package.mjs "$GITHUB_REF_NAME" release-assets npm-package
+          mkdir npm-artifact
+          npm pack ./npm-package --pack-destination npm-artifact
+          test -f "npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz"
+      - name: Upload the exact npm candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-launcher
+          path: npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  smoke_linux:
+    name: Smoke-test npm launcher on Linux x64
+    needs: [validate, npm_package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Download the npm candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher
+          path: npm-artifact
+      - name: Verify first download and cached offline launch
+        env:
+          AGENTLAB_CACHE_PATH: ${{ runner.temp }}/agentlab-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "./npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz"
+          test "$(agentlab --version)" = "${{ needs.validate.outputs.version }}"
+          agentlab --help > "$RUNNER_TEMP/agentlab-help.txt"
+          grep -F "Open the local terminal UI" "$RUNNER_TEMP/agentlab-help.txt"
+          test -x "$AGENTLAB_CACHE_PATH/releases/${{ needs.validate.outputs.version }}/linux-x64/agentlab"
+          NODE_USE_ENV_PROXY=1 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            agentlab --help > "$RUNNER_TEMP/agentlab-offline-help.txt"
+          cmp "$RUNNER_TEMP/agentlab-help.txt" "$RUNNER_TEMP/agentlab-offline-help.txt"
+
+  smoke_macos:
+    name: Smoke-test npm launcher on macOS arm64
+    needs: [validate, npm_package]
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Verify the runner architecture
+        run: test "$(uname -m)" = "arm64"
+      - name: Download the npm candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher
+          path: npm-artifact
+      - name: Verify first download and cached offline launch
+        env:
+          AGENTLAB_CACHE_PATH: ${{ runner.temp }}/agentlab-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts "./npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz"
+          test "$(agentlab --version)" = "${{ needs.validate.outputs.version }}"
+          agentlab --help > "$RUNNER_TEMP/agentlab-help.txt"
+          grep -F "Open the local terminal UI" "$RUNNER_TEMP/agentlab-help.txt"
+          test -x "$AGENTLAB_CACHE_PATH/releases/${{ needs.validate.outputs.version }}/mac-arm64/agentlab"
+          NODE_USE_ENV_PROXY=1 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            agentlab --help > "$RUNNER_TEMP/agentlab-offline-help.txt"
+          cmp "$RUNNER_TEMP/agentlab-help.txt" "$RUNNER_TEMP/agentlab-offline-help.txt"
+
+  npm_publish:
+    name: Publish npm package with provenance
+    needs: [validate, github_release, npm_package, smoke_linux, smoke_macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: release
+      url: https://www.npmjs.com/package/agentlab/v/${{ needs.validate.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install the pinned npm CLI
+        run: npm install --global "npm@${NPM_VERSION}"
+      - name: Download the tested npm candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher
+          path: npm-artifact
+      - name: Inspect any existing npm version
+        id: existing_npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          error_file="$RUNNER_TEMP/npm-view-error.txt"
+          if published_version="$(npm view "agentlab@$version" version 2>"$error_file")"; then
+            test "$published_version" = "$version"
+            echo "state=published" >> "$GITHUB_OUTPUT"
+          elif grep -Fq "E404" "$error_file"; then
+            echo "state=missing" >> "$GITHUB_OUTPUT"
+          else
+            cat "$error_file" >&2
+            exit 1
+          fi
+      - name: Publish through npm trusted publishing
+        if: steps.existing_npm.outputs.state == 'missing'
+        run:
+          npm publish "./npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz" --access
+          public
+      - name: Verify the public registry contains the exact tested tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          mkdir published-package
+          for attempt in {1..12}; do
+            if npm pack "agentlab@$version" --ignore-scripts --pack-destination published-package; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "agentlab@$version did not become available from npm." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          cmp \
+            "npm-artifact/agentlab-$version.tgz" \
+            "published-package/agentlab-$version.tgz"
+          npm install --global --ignore-scripts "published-package/agentlab-$version.tgz"
+          test "$(agentlab --version)" = "$version"
+
+  recover_npm_candidate:
+    name: Recover exact npm candidate
+    if: ${{ contains(github.ref_name, '+npm-recovery.') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      release_commit: ${{ steps.recovery.outputs.release_commit }}
+      release_tag: ${{ steps.recovery.outputs.release_tag }}
+      source_run: ${{ steps.recovery.outputs.source_run }}
+      version: ${{ steps.recovery.outputs.version }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out recovery tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the recovery tag and source run
+        id: recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)\+npm-recovery\.([1-9][0-9]*)$ ]]; then
+            echo "Recovery tags must use vX.Y.Z+npm-recovery.RUN_ID." >&2
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          source_run="${BASH_REMATCH[2]}"
+          release_tag="v$version"
+          npm run release:check -- "$release_tag"
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "Recovery tags must be annotated." >&2
+            exit 1
+          fi
+          recovery_commit="$(git rev-list -n 1 "refs/tags/$GITHUB_REF_NAME")"
+          test "$recovery_commit" = "$(git rev-parse HEAD)"
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$recovery_commit" origin/main; then
+            echo "Recovery tags must point to a commit already present on origin/main." >&2
+            exit 1
+          fi
+          release_commit="$(git rev-list -n 1 "refs/tags/$release_tag")"
+          run_json="$RUNNER_TEMP/source-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$source_run" > "$run_json"
+          jq -e \
+            --arg branch "$release_tag" \
+            --arg sha "$release_commit" \
+            '.event == "push" and .head_branch == $branch and .head_sha == $sha and .conclusion == "failure" and .path == ".github/workflows/release.yml"' \
+            "$run_json" >/dev/null
+          test "$(gh release view "$release_tag" --json isDraft,isImmutable --jq '(.isDraft == false and .isImmutable == true)')" = "true"
+          error_file="$RUNNER_TEMP/npm-view-error.txt"
+          if npm view "agentlab@$version" version 2>"$error_file"; then
+            echo "agentlab@$version is already published; refusing recovery." >&2
+            exit 1
+          elif ! grep -Fq "E404" "$error_file"; then
+            cat "$error_file" >&2
+            exit 1
+          fi
+          echo "release_commit=$release_commit" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "source_run=$source_run" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Download the exact candidate from the failed release run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ steps.recovery.outputs.source_run }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name npm-launcher \
+            --dir npm-artifact
+          test -f "npm-artifact/agentlab-${{ steps.recovery.outputs.version }}.tgz"
+      - name: Reverify the immutable release and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          gh release download "${{ steps.recovery.outputs.release_tag }}" --dir release-assets
+          node scripts/check-release-assets.mjs \
+            "${{ steps.recovery.outputs.release_tag }}" \
+            release-assets \
+            --published
+          for asset in release-assets/agentlab-* release-assets/SHA256SUMS; do
+            gh attestation verify "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "${{ steps.recovery.outputs.release_commit }}" \
+              --source-ref "refs/tags/${{ steps.recovery.outputs.release_tag }}" \
+              --deny-self-hosted-runners
+          done
+      - name: Upload the recovered npm candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-launcher-recovery
+          path: npm-artifact/agentlab-${{ steps.recovery.outputs.version }}.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  recover_npm_smoke:
+    name: Recover npm smoke (${{ matrix.target }})
+    if: ${{ contains(github.ref_name, '+npm-recovery.') }}
+    needs: recover_npm_candidate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            os: ubuntu-24.04
+            target: linux-x64
+          - architecture: arm64
+            os: macos-15
+            target: mac-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Verify the runner architecture
+        run: test "$(uname -m)" = "${{ matrix.architecture }}"
+      - name: Download the recovered npm candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher-recovery
+          path: npm-artifact
+      - name: Verify first download and cached offline launch
+        env:
+          AGENTLAB_CACHE_PATH: ${{ runner.temp }}/agentlab-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.recover_npm_candidate.outputs.version }}"
+          npm install --global --ignore-scripts "./npm-artifact/agentlab-$version.tgz"
+          test "$(agentlab --version)" = "$version"
+          agentlab --help > "$RUNNER_TEMP/agentlab-help.txt"
+          grep -F "Open the local terminal UI" "$RUNNER_TEMP/agentlab-help.txt"
+          test -x "$AGENTLAB_CACHE_PATH/releases/$version/${{ matrix.target }}/agentlab"
+          NODE_USE_ENV_PROXY=1 \
+            HTTPS_PROXY=http://127.0.0.1:9 \
+            HTTP_PROXY=http://127.0.0.1:9 \
+            ALL_PROXY=http://127.0.0.1:9 \
+            NO_PROXY= \
+            agentlab --help > "$RUNNER_TEMP/agentlab-offline-help.txt"
+          cmp "$RUNNER_TEMP/agentlab-help.txt" "$RUNNER_TEMP/agentlab-offline-help.txt"
+
+  recover_npm_publish:
+    name: Recover npm trusted publication
+    if: ${{ contains(github.ref_name, '+npm-recovery.') }}
+    needs: [recover_npm_candidate, recover_npm_smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: release
+      url:
+        https://www.npmjs.com/package/agentlab/v/${{ needs.recover_npm_candidate.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the recovery workflow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install the pinned npm CLI
+        run: npm install --global "npm@${NPM_VERSION}"
+      - name: Download the twice-tested npm candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-launcher-recovery
+          path: npm-artifact
+      - name: Publish through npm trusted publishing
+        run: |
+          npm publish \
+            "./npm-artifact/agentlab-${{ needs.recover_npm_candidate.outputs.version }}.tgz" \
+            --access public
+      - name: Verify the public registry contains the exact tested tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.recover_npm_candidate.outputs.version }}"
+          mkdir published-package
+          for attempt in {1..12}; do
+            if npm pack "agentlab@$version" --ignore-scripts --pack-destination published-package; then
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "agentlab@$version did not become available from npm." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          cmp \
+            "npm-artifact/agentlab-$version.tgz" \
+            "published-package/agentlab-$version.tgz"
+          npm install --global --ignore-scripts "./published-package/agentlab-$version.tgz"
+          test "$(agentlab --version)" = "$version"

@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-types
+.test-types
+coverage
+*.tsbuildinfo
+package-lock.json
+.data
+.lavish
+.agent-html-render/
+.agents/
+.claude/
