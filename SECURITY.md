@@ -1,17 +1,18 @@
 # Security
 
-This application exposes interactive local shell sessions. It binds to `127.0.0.1` and validates
-Host and Origin headers. Do not expose its HTTP or WebSocket server through a network listener,
-reverse proxy, or public tunnel.
+Agent Orchestrator exposes interactive local shell sessions inside the current terminal. It opens no
+HTTP, WebSocket, or other network listener. Do not modify or wrap it to expose terminal sessions
+over a reverse proxy, public tunnel, or remote transport.
 
-Provider credentials remain owned by their installed CLIs. The application does not read, copy, or
-store them.
+Provider credentials remain owned by installed CLIs. The application does not read, copy, or store
+them. Conversation metadata stays in local SQLite; live terminal state stays in tmux.
 
-Install desktop binaries only from this repository's GitHub Releases. Each published release is
-immutable and includes SHA-256 checksums plus GitHub build and SBOM attestations; verification
-commands are documented in [Releasing](docs/releasing.md#verify-a-download).
+Managed session names, local commands, provider selections, and terminal dimensions are validated
+before infrastructure boundaries. Processes receive argument arrays. The only tmux command-string
+boundary applies tested POSIX quoting to executable, argument, and environment values.
 
-The macOS DMG intentionally has no valid Apple Developer signature or notarization. Verify its
-checksum and GitHub attestation before approving the app through macOS Privacy & Security.
+Install executables only from this repository's GitHub Releases. Every published release is
+immutable and includes SHA-256 checksums plus GitHub build and target-specific SBOM attestations.
+Verification commands are documented in [Releasing](docs/releasing.md#verify-a-download).
 
-Please report security issues privately to the repository owner rather than opening a public issue.
+Please report security issues privately to the repository owner instead of opening a public issue.

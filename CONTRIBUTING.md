@@ -1,24 +1,29 @@
 # Contributing
 
-Use Node.js 24 or newer and install tmux before running:
+Install Node.js 24+, Bun 1.4+, and tmux, then run:
 
 ```bash
 npm install
 npm run verify
 ```
 
-Keep changes inside the lean scope in the README and preserve these constraints:
+Keep changes inside the product's intentionally lean boundary:
 
 - conversation → one captain → zero or more workers;
-- captains use raw tmux and provider CLI commands;
-- domain and application code do not import concrete infrastructure;
-- external input is validated at HTTP, process, and terminal boundaries;
+- one local terminal process with left chats, center selected agent, and right agents;
+- exactly one live PTY attachment, while tmux owns durable session state;
+- captains communicate with workers through raw tmux and provider CLI commands;
+- domain and application code do not import UI or concrete infrastructure;
+- external input is validated at application, terminal, persistence, and process boundaries;
 - shell values cross only the tested quoting boundary;
 - every behavior change includes focused tests.
 
-Prefer small cohesive modules. Update an ADR when a change alters a durable architectural decision.
+Do not add a network server, browser renderer, desktop shell, remote mode, multipane terminal,
+unread state, or provider abstraction beyond the defined launch/capability adapters without explicit
+product scope. Prefer small cohesive modules and update an ADR when a durable architectural decision
+changes.
 
-Use the version and tag process in [Releasing](docs/releasing.md) for production artifacts. Do not
-publish binaries manually or bypass the platform packaging, checksum, provenance, and immutable
-release gates. The macOS artifact intentionally has no valid Apple Developer signature or
-notarization and follows the documented verification and installation policy.
+`npm run verify` is the handoff gate: formatting, strict TypeScript, linting, unit/component tests,
+real tmux and Bun PTY integration, the production build, and standalone executable packaging. Use
+the version/tag process in [Releasing](docs/releasing.md); do not bypass exact asset validation,
+checksums, provenance, SBOM attestation, or immutable publication.

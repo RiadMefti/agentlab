@@ -8,28 +8,32 @@ on:
 permissions:
   contents: read
 
+env:
+  BUN_VERSION: "1.4.0"
+  NODE_VERSION: "24"
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y tmux
+      - name: Install terminal runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y tmux
+          npm install --global "bun@${BUN_VERSION}"
       - run: npm ci
       - name: Validate release metadata
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
           npm run release:check -- "v$version"
-      - run: npm run format:check
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm run test:integration
-      - run: npm run build
+      - run: npm run verify
       - run: npm audit --omit=dev --audit-level=high

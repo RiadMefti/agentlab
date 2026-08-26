@@ -113,11 +113,3 @@ export const providerCapabilitySchema = z
   });
 
 export type ProviderCapability = z.infer<typeof providerCapabilitySchema>;
-
-export const providersResponseSchema = z
-  .object({
-    providers: z.array(providerCapabilitySchema)
-  })
-  .strict();
-
-export type ProvidersResponse = z.infer<typeof providersResponseSchema>;

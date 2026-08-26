@@ -3,7 +3,7 @@
   "version": "0.1.10",
   "private": true,
   "type": "module",
-  "description": "One captain for all your coding agents. Direct the work, follow every session, and jump in at any time.",
+  "description": "One captain for all your coding agents, composed in one fast local terminal UI.",
   "author": "Riad Mefti",
   "copyright": "Copyright © 2026 Riad Mefti",
   "repository": {
@@ -14,135 +14,45 @@
     "url": "https://github.com/RiadMefti/agent-orchestrator/issues"
   },
   "homepage": "https://github.com/RiadMefti/agent-orchestrator#readme",
-  "desktopName": "dev.agentorchestrator.desktop",
-  "main": "apps/desktop/dist/main.js",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "engines": {
+    "bun": ">=1.4.0",
     "node": ">=24"
   },
   "scripts": {
-    "build": "npm run clean && npm run build --workspace @orchestrator/contracts && npm run build --workspace @orchestrator/web && npm run build --workspace @orchestrator/server && npm run build --workspace @orchestrator/desktop",
+    "build": "npm run clean && npm run build --workspace @orchestrator/contracts && npm run build --workspace @orchestrator/runtime && npm run build --workspace @orchestrator/tui",
+    "build:packages": "tsc --build packages/contracts packages/runtime --pretty false",
     "clean": "node scripts/clean-build.mjs",
-    "dev": "npm run build --workspace @orchestrator/contracts && concurrently --kill-others-on-fail --names server,web \"npm run dev --workspace @orchestrator/server\" \"npm run dev --workspace @orchestrator/web\"",
-    "desktop": "npm run build && electron .",
-    "desktop:open": "electron .",
-    "desktop:package": "npm run desktop:package:linux",
-    "desktop:package:dir": "npm run build && electron-builder --linux dir",
-    "desktop:package:linux": "npm run build && electron-builder --linux AppImage --x64 --publish never",
-    "desktop:package:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "dev": "npm run build:packages && bun apps/tui/src/main.tsx",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0",
+    "package": "npm run build:packages && bun scripts/build-binary.ts",
     "release:assets:check": "node scripts/check-release-assets.mjs",
     "release:check": "node scripts/check-release.mjs",
     "release:prepare": "node scripts/prepare-release.mjs",
-    "release:sbom": "node scripts/generate-release-sbom.mjs",
-    "start": "npm run start --workspace @orchestrator/server",
-    "test": "vitest run",
-    "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run",
+    "start": "npm run build:packages && bun apps/tui/src/main.tsx",
+    "test": "vitest run && npm run test:bun",
+    "test:bun": "npm run build:packages && bun test ./tests/tui/app.bun.tsx ./tests/tui/embedded-terminal.bun.tsx ./tests/tui/use-workspace.bun.tsx ./tests/runtime/terminal-pty.bun.ts",
+    "test:integration": "AO_RUN_TMUX_INTEGRATION=1 vitest run && AO_RUN_TMUX_INTEGRATION=1 npm run test:bun",
     "test:watch": "vitest",
     "typecheck": "tsc --build --pretty false",
-    "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build"
-  },
-  "dependencies": {
-    "@orchestrator/desktop": "0.1.10"
+    "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build && npm run package"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
-    "@types/jsdom": "^30.0.0",
+    "@types/bun": "^1.3.14",
     "@types/node": "^24.10.0",
-    "concurrently": "^9.2.1",
-    "electron": "^43.4.1",
-    "electron-builder": "^26.15.3",
+    "@types/react": "^19.2.18",
     "eslint": "^9.39.0",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.4",
     "globals": "^16.5.0",
-    "jsdom": "^27.2.0",
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0",
     "vitest": "^4.0.15"
-  },
-  "build": {
-    "appId": "dev.agentorchestrator.desktop",
-    "productName": "Orchestrator",
-    "asar": {
-      "smartUnpack": true
-    },
-    "asarUnpack": [
-      "node_modules/node-pty/**/*"
-    ],
-    "directories": {
-      "buildResources": "build",
-      "output": "release"
-    },
-    "files": [
-      "apps/desktop/dist/**/*.js",
-      "apps/desktop/src/preload.cjs",
-      "apps/desktop/package.json",
-      "apps/server/dist/**/*.js",
-      "apps/server/package.json",
-      "apps/web/dist/**/*",
-      "packages/contracts/dist/**/*.js",
-      "packages/contracts/package.json",
-      "package.json"
-    ],
-    "linux": {
-      "artifactName": "${productName}-linux-x64.${ext}",
-      "category": "Development",
-      "executableName": "agent-orchestrator",
-      "icon": "build/icon.png",
-      "syncDesktopName": true,
-      "target": [
-        "AppImage"
-      ]
-    },
-    "mac": {
-      "artifactName": "${productName}-mac-${arch}.${ext}",
-      "category": "public.app-category.developer-tools",
-      "darkModeSupport": true,
-      "forceCodeSigning": false,
-      "hardenedRuntime": false,
-      "identity": null,
-      "icon": "build/icon.png",
-      "minimumSystemVersion": "12.0",
-      "notarize": false,
-      "strictVerify": false,
-      "target": [
-        "dmg"
-      ]
-    },
-    "dmg": {
-      "backgroundColor": "#ffffff",
-      "contents": [
-        {
-          "x": 140,
-          "y": 190
-        },
-        {
-          "path": "/Applications",
-          "type": "link",
-          "x": 400,
-          "y": 190
-        }
-      ],
-      "iconSize": 96,
-      "sign": false,
-      "window": {
-        "height": 380,
-        "width": 540
-      }
-    },
-    "toolsets": {
-      "appimage": "1.0.3"
-    }
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "node-pty@1.1.0": true
   }
 }

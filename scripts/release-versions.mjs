@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
@@ -26,6 +27,8 @@ const WORKSPACE_PATTERN = /^([A-Za-z0-9._-]+)\/\*$/;
  * @property {JsonObject} packageLock
  * @property {string} packageLockPath
  * @property {string} root
+ * @property {string} versionSourcePath
+ * @property {string} versionSourceVersion
  */
 
 /**
@@ -132,7 +135,10 @@ export async function loadReleaseState(rootPath) {
   for (const workspaceRoot of readWorkspaceRoots(rootManifestJson)) {
     const workspaceDirectory = join(root, workspaceRoot);
     const entries = (await readdir(workspaceDirectory, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
+      .filter(
+        (entry) =>
+          entry.isDirectory() && existsSync(join(workspaceDirectory, entry.name, "package.json"))
+      )
       .sort((left, right) => left.name.localeCompare(right.name));
 
     for (const entry of entries) {
@@ -143,11 +149,21 @@ export async function loadReleaseState(rootPath) {
   }
 
   const packageLockPath = join(root, "package-lock.json");
+  const versionSourcePath = join(root, "apps", "tui", "src", "version.ts");
+  const versionSource = await readFile(versionSourcePath, "utf8");
+  const versionMatch = /^export const appVersion = "([0-9]+\.[0-9]+\.[0-9]+)";\n$/u.exec(
+    versionSource
+  );
+  if (!versionMatch?.[1]) {
+    throw new Error(`${versionSourcePath} must contain only the canonical appVersion export.`);
+  }
   return {
     manifests,
     packageLock: await readJsonObject(packageLockPath),
     packageLockPath,
-    root
+    root,
+    versionSourcePath,
+    versionSourceVersion: versionMatch[1]
   };
 }
 
@@ -228,6 +244,11 @@ function collectVersionErrors(state) {
     parseStableVersion(rootManifest.version);
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (state.versionSourceVersion !== rootManifest.version) {
+    errors.push(
+      `apps/tui/src/version.ts has version ${state.versionSourceVersion}; expected ${rootManifest.version}.`
+    );
   }
 
   /** @type {Map<string, PackageManifest>} */
@@ -370,20 +391,20 @@ function setInternalDependencyVersions(json, internalNames, version) {
 }
 
 /**
- * @param {Array<{json: JsonObject, path: string}>} files
+ * @param {Array<{content: string, path: string}>} files
  */
-async function writeJsonAtomically(files) {
+async function writeFilesAtomically(files) {
   const suffix = `.release-${String(process.pid)}-${randomUUID()}.tmp`;
-  const pending = files.map(({ json, path }) => ({
+  const pending = files.map(({ content, path }) => ({
     path,
     temporaryPath: `${path}${suffix}`,
-    json
+    content
   }));
 
   try {
     await Promise.all(
-      pending.map(({ json, temporaryPath }) =>
-        writeFile(temporaryPath, `${JSON.stringify(json, null, 2)}\n`, {
+      pending.map(({ content, temporaryPath }) =>
+        writeFile(temporaryPath, content, {
           encoding: "utf8",
           flag: "wx"
         })
@@ -436,10 +457,20 @@ export async function prepareRelease(rootPath, version) {
   }
 
   const files = [
-    ...state.manifests.map((manifest) => ({ json: manifest.json, path: manifest.path })),
-    { json: state.packageLock, path: state.packageLockPath }
+    ...state.manifests.map((manifest) => ({
+      content: `${JSON.stringify(manifest.json, null, 2)}\n`,
+      path: manifest.path
+    })),
+    {
+      content: `${JSON.stringify(state.packageLock, null, 2)}\n`,
+      path: state.packageLockPath
+    },
+    {
+      content: `export const appVersion = "${version}";\n`,
+      path: state.versionSourcePath
+    }
   ];
-  await writeJsonAtomically(files);
+  await writeFilesAtomically(files);
   await checkRelease(state.root, `v${version}`);
   return files.map(({ path }) => path);
 }

@@ -1,7 +1,6 @@
 import eslint from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
-import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -12,8 +11,6 @@ export default tseslint.config(
       "**/.test-types/**",
       "**/coverage/**",
       "node_modules/**",
-      "apps/web/vite.config.js",
-      "apps/web/vite.config.d.ts",
       "eslint.config.js"
     ]
   },
@@ -24,7 +21,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["apps/desktop/src/*.cjs", "scripts/*.mjs"],
+          allowDefaultProject: ["scripts/*.mjs"],
           defaultProject: "tsconfig.base.json"
         },
         tsconfigRootDir: import.meta.dirname
@@ -32,43 +29,33 @@ export default tseslint.config(
     }
   },
   {
-    files: ["apps/web/**/*.{ts,tsx}"],
-    languageOptions: { globals: globals.browser },
+    files: ["apps/tui/**/*.{ts,tsx}"],
+    languageOptions: { globals: { ...globals.node, Bun: "readonly" } },
     plugins: {
-      "react-hooks": reactHooks,
-      "react-refresh": reactRefresh
+      "react-hooks": reactHooks
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }]
+      ...reactHooks.configs.recommended.rules
     }
   },
   {
-    files: [
-      "apps/desktop/**/*.{cjs,ts}",
-      "apps/server/**/*.ts",
-      "packages/**/*.ts",
-      "scripts/*.mjs",
-      "*.config.{js,ts}"
-    ],
-    languageOptions: { globals: globals.node }
+    files: ["packages/**/*.ts", "scripts/*.{mjs,ts}", "*.config.{js,ts}"],
+    languageOptions: { globals: { ...globals.node, Bun: "readonly" } }
   },
   {
-    files: ["apps/desktop/src/preload.cjs"],
-    rules: {
-      "@typescript-eslint/no-require-imports": "off"
-    }
-  },
-  {
-    files: ["apps/server/src/domain/**/*.ts"],
+    files: ["packages/runtime/src/domain/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["**/application/**", "**/http/**", "**/infrastructure/**"],
+              group: ["**/application/**", "**/infrastructure/**"],
               message: "Domain modules must not depend on application or infrastructure code."
+            },
+            {
+              group: ["react", "react/*", "@opentui/*", "@orchestrator/tui"],
+              message: "Domain modules must remain independent of presentation frameworks."
             }
           ]
         }
@@ -76,15 +63,19 @@ export default tseslint.config(
     }
   },
   {
-    files: ["apps/server/src/application/**/*.ts"],
+    files: ["packages/runtime/src/application/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["**/http/**", "**/infrastructure/**"],
+              group: ["**/infrastructure/**"],
               message: "Application modules must depend on ports, not concrete infrastructure."
+            },
+            {
+              group: ["react", "react/*", "@opentui/*", "@orchestrator/tui"],
+              message: "Application modules must remain independent of presentation frameworks."
             }
           ]
         }
@@ -92,10 +83,11 @@ export default tseslint.config(
     }
   },
   {
-    files: ["**/*.test.{ts,tsx}"],
+    files: ["**/*.test.{ts,tsx}", "**/*.bun.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-unsafe-assignment": "off",
-      "@typescript-eslint/no-unsafe-argument": "off"
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/unbound-method": "off"
     }
   }
 );

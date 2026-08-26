@@ -2,85 +2,89 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, readFile, readdir, stat } from "node:fs/promises";
+import { open, readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { discoverAnthropicSdkVersionInBinary } from "./binary-prebundle-scan.mjs";
 import { stableVersionFromTag } from "./release-versions.mjs";
 
-const MINIMUM_BINARY_SIZE = 50 * 1024 * 1024;
+const MINIMUM_BINARY_SIZE = 20 * 1024 * 1024;
 const CHECKSUM_FILE = "SHA256SUMS";
-const LINUX_APP_IMAGE = "Orchestrator-linux-x64.AppImage";
-const LINUX_UPDATE_METADATA = "latest-linux.yml";
+const RUNTIME_PROPERTY = {
+  name: "agent-orchestrator:component:distribution",
+  value: "embedded-runtime"
+};
+const BUNDLED_PROPERTY = {
+  name: "agent-orchestrator:component:distribution",
+  value: "bundled"
+};
+const PREBUNDLED_PROPERTY = {
+  name: "agent-orchestrator:component:distribution",
+  value: "prebundled"
+};
+const PREBUNDLE_PROVENANCE_PROPERTY_NAME = "agent-orchestrator:component:provenance";
+const PREBUNDLE_PROVENANCE_METHODS = new Set([
+  "anthropic-stainless-runtime-marker",
+  "bun-module-marker"
+]);
+const TARGET_PROPERTY_NAME = "agent-orchestrator:binary:target";
+const NATIVE_PACKAGE_BY_TARGET = {
+  "linux-x64": "@opentui/core-linux-x64",
+  "mac-arm64": "@opentui/core-darwin-arm64"
+};
+const OPEN_TUI_NATIVE_PACKAGES = new Set([
+  "@opentui/core-darwin-arm64",
+  "@opentui/core-darwin-x64",
+  "@opentui/core-linux-arm64",
+  "@opentui/core-linux-arm64-musl",
+  "@opentui/core-linux-x64",
+  "@opentui/core-linux-x64-musl",
+  "@opentui/core-win32-arm64",
+  "@opentui/core-win32-x64"
+]);
 
 /** @typedef {Record<string, unknown>} JsonObject */
 
-/**
- * @param {unknown} value
- * @returns {value is JsonObject}
- */
+/** @param {unknown} value @returns {value is JsonObject} */
 function isJsonObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * @param {string} path
- */
-async function verifyAppImage(path) {
+/** @param {string} path @param {"linux-x64" | "mac-arm64"} target */
+async function verifyBinary(path, target) {
   const handle = await open(path, "r");
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile() || metadata.size < MINIMUM_BINARY_SIZE) {
-      throw new Error(`${path} is too small to be a packaged Electron AppImage.`);
+      throw new Error(`${path} is too small to contain the compiled terminal application.`);
     }
 
-    const header = Buffer.alloc(11);
+    const header = Buffer.alloc(24);
     const { bytesRead } = await handle.read(header, 0, header.length, 0);
-    const elfMagic = Buffer.from([0x7f, 0x45, 0x4c, 0x46]);
-    const appImageMagic = Buffer.from([0x41, 0x49, 0x02]);
-    if (
-      bytesRead !== header.length ||
-      !header.subarray(0, elfMagic.length).equals(elfMagic) ||
-      !header.subarray(8, 11).equals(appImageMagic)
-    ) {
-      throw new Error(`${path} does not have a valid type-2 AppImage header.`);
+    if (bytesRead !== header.length) throw new Error(`${path} has a truncated executable header.`);
+
+    if (target === "linux-x64") {
+      const valid =
+        header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) &&
+        header[4] === 2 &&
+        header[5] === 1 &&
+        header.readUInt16LE(18) === 0x3e;
+      if (!valid) throw new Error(`${path} is not a 64-bit x86 Linux ELF executable.`);
+      return;
     }
+
+    const valid =
+      header.subarray(0, 4).equals(Buffer.from([0xcf, 0xfa, 0xed, 0xfe])) &&
+      header.readUInt32LE(4) === 0x0100000c;
+    if (!valid) throw new Error(`${path} is not a 64-bit Apple silicon Mach-O executable.`);
   } finally {
     await handle.close();
   }
 }
 
-/**
- * @param {string} path
- */
-async function verifyDmg(path) {
-  const handle = await open(path, "r");
-  try {
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size < MINIMUM_BINARY_SIZE) {
-      throw new Error(`${path} is too small to be a packaged Electron disk image.`);
-    }
-
-    const trailer = Buffer.alloc(512);
-    const { bytesRead } = await handle.read(
-      trailer,
-      0,
-      trailer.length,
-      metadata.size - trailer.length
-    );
-    if (bytesRead !== trailer.length || trailer.subarray(0, 4).toString("ascii") !== "koly") {
-      throw new Error(`${path} does not have a valid UDIF disk-image trailer.`);
-    }
-  } finally {
-    await handle.close();
-  }
-}
-
-/**
- * @param {string} path
- * @param {string} version
- */
-async function verifySbom(path, version) {
+/** @param {string} path @param {string} version @param {"linux-x64" | "mac-arm64"} target */
+async function verifySbom(path, version, target) {
   /** @type {unknown} */
   let value;
   try {
@@ -95,88 +99,233 @@ async function verifySbom(path, version) {
   if (!isJsonObject(value.metadata) || !isJsonObject(value.metadata.component)) {
     throw new Error(`${path} is missing metadata.component.`);
   }
-  if (
-    value.metadata.component.name !== "agent-orchestrator" ||
-    value.metadata.component.version !== version
-  ) {
+  const application = value.metadata.component;
+  if (application.name !== "agent-orchestrator" || application.version !== version) {
     throw new Error(`${path} component identity does not match agent-orchestrator@${version}.`);
   }
-  if (!Array.isArray(value.components) || value.components.length === 0) {
-    throw new Error(`${path} must describe the packaged production dependencies.`);
+  if (typeof application["bom-ref"] !== "string") {
+    throw new Error(`${path} application component is missing its bom-ref.`);
   }
-  /** @type {unknown} */
-  let electron;
-  for (const component of /** @type {unknown[]} */ (value.components)) {
-    if (isJsonObject(component) && component.name === "electron") electron = component;
+  const applicationRef = application["bom-ref"];
+  const validTarget =
+    Array.isArray(application.properties) &&
+    application.properties.some(
+      (property) =>
+        isJsonObject(property) &&
+        property.name === TARGET_PROPERTY_NAME &&
+        property.value === target
+    );
+  if (!validTarget) throw new Error(`${path} does not identify the ${target} binary graph.`);
+  if (!Array.isArray(value.components) || !Array.isArray(value.dependencies)) {
+    throw new Error(`${path} must describe production components and their dependency graph.`);
   }
+
+  const components = /** @type {unknown[]} */ (value.components);
+  if (components.some((component) => isJsonObject(component) && component.name === "electron")) {
+    throw new Error(`${path} must not describe the removed Electron runtime.`);
+  }
+  const bun = components.find((component) => isJsonObject(component) && component.name === "bun");
+  const validRuntimeProperty =
+    isJsonObject(bun) &&
+    Array.isArray(bun.properties) &&
+    bun.properties.some(
+      (property) =>
+        isJsonObject(property) &&
+        property.name === RUNTIME_PROPERTY.name &&
+        property.value === RUNTIME_PROPERTY.value
+    );
   if (
-    !isJsonObject(electron) ||
-    electron.type !== "framework" ||
-    electron.scope !== "required" ||
-    typeof electron.version !== "string" ||
-    electron["bom-ref"] !== `electron@${electron.version}` ||
-    electron.purl !== `pkg:npm/electron@${electron.version}`
+    !isJsonObject(bun) ||
+    bun.type !== "framework" ||
+    bun.scope !== "required" ||
+    typeof bun.version !== "string" ||
+    bun["bom-ref"] !== `bun@${bun.version}` ||
+    bun.purl !== `pkg:github/oven-sh/bun@${bun.version}` ||
+    !validRuntimeProperty
   ) {
-    throw new Error(`${path} must describe the shipped Electron runtime.`);
+    throw new Error(`${path} must describe Bun as the embedded runtime.`);
   }
-  const applicationReference = value.metadata.component["bom-ref"];
-  /** @type {unknown} */
-  let applicationDependency;
-  if (Array.isArray(value.dependencies)) {
-    for (const dependency of /** @type {unknown[]} */ (value.dependencies)) {
-      if (isJsonObject(dependency) && dependency.ref === applicationReference) {
-        applicationDependency = dependency;
-      }
+
+  const bundled = /** @type {JsonObject[]} */ (
+    components.filter((component) => isJsonObject(component) && component.name !== "bun")
+  );
+  if (
+    bundled.length === 0 ||
+    bundled.some(
+      (component) =>
+        typeof component["bom-ref"] !== "string" ||
+        component.type !== "library" ||
+        typeof component.name !== "string" ||
+        typeof component.version !== "string" ||
+        component.scope !== "required" ||
+        typeof component.purl !== "string" ||
+        (!hasComponentProperty(component, BUNDLED_PROPERTY) &&
+          !hasComponentProperty(component, PREBUNDLED_PROPERTY)) ||
+        (hasComponentProperty(component, PREBUNDLED_PROPERTY) && !hasPrebundleEvidence(component))
+    )
+  ) {
+    throw new Error(`${path} contains a component without valid Bun bundle provenance.`);
+  }
+
+  const expectedNativePackage = NATIVE_PACKAGE_BY_TARGET[target];
+  /** @type {string[]} */
+  const nativePackages = [];
+  for (const component of bundled) {
+    if (typeof component.name === "string" && OPEN_TUI_NATIVE_PACKAGES.has(component.name)) {
+      nativePackages.push(component.name);
     }
   }
+  if (nativePackages.length !== 1 || nativePackages[0] !== expectedNativePackage) {
+    throw new Error(`${path} does not contain exactly the native package for ${target}.`);
+  }
+
+  const applicationDependency = /** @type {unknown[]} */ (value.dependencies).find(
+    (dependency) => isJsonObject(dependency) && dependency.ref === applicationRef
+  );
   if (
-    typeof applicationReference !== "string" ||
     !isJsonObject(applicationDependency) ||
     !Array.isArray(applicationDependency.dependsOn) ||
-    !applicationDependency.dependsOn.includes(electron["bom-ref"])
+    !applicationDependency.dependsOn.includes(bun["bom-ref"])
   ) {
-    throw new Error(`${path} must link the shipped Electron runtime to the application.`);
+    throw new Error(`${path} must link the embedded Bun runtime to the application.`);
   }
-}
 
-/**
- * @param {string} path
- * @param {string} appImagePath
- * @param {string} version
- */
-async function verifyLinuxUpdateMetadata(path, appImagePath, version) {
-  const source = await readFile(path, "utf8");
-  const match =
-    /^version: ([0-9]+\.[0-9]+\.[0-9]+)\nfiles:\n {2}- url: Orchestrator-linux-x64\.AppImage\n {4}sha512: ([A-Za-z0-9+/]{86}==)\n {4}size: ([0-9]+)\n {4}blockMapSize: ([0-9]+)\npath: Orchestrator-linux-x64\.AppImage\nsha512: ([A-Za-z0-9+/]{86}==)\nreleaseDate: '([^'\n]+)'\n$/u.exec(
-      source
-    );
-  if (!match) throw new Error(`${path} is not canonical AppImage updater metadata.`);
+  /** @type {Set<string>} */
+  const componentRefs = new Set();
+  for (const component of components) {
+    if (isJsonObject(component) && typeof component["bom-ref"] === "string") {
+      componentRefs.add(component["bom-ref"]);
+    }
+  }
+  if (componentRefs.size !== components.length) {
+    throw new Error(`${path} contains missing or duplicate component references.`);
+  }
+  const knownRefs = new Set([applicationRef, ...componentRefs]);
+  /** @type {Map<string, string[]>} */
+  const graph = new Map();
+  for (const dependency of /** @type {unknown[]} */ (value.dependencies)) {
+    if (
+      !isJsonObject(dependency) ||
+      typeof dependency.ref !== "string" ||
+      !Array.isArray(dependency.dependsOn) ||
+      graph.has(dependency.ref) ||
+      !knownRefs.has(dependency.ref)
+    ) {
+      throw new Error(`${path} contains an invalid dependency graph.`);
+    }
+    /** @type {string[]} */
+    const dependencyRefs = [];
+    for (const ref of /** @type {unknown[]} */ (dependency.dependsOn)) {
+      if (typeof ref !== "string" || !knownRefs.has(ref)) {
+        throw new Error(`${path} contains an invalid dependency graph.`);
+      }
+      dependencyRefs.push(ref);
+    }
+    if (new Set(dependencyRefs).size !== dependencyRefs.length) {
+      throw new Error(`${path} contains an invalid dependency graph.`);
+    }
+    graph.set(dependency.ref, dependencyRefs);
+  }
+  if (graph.size !== knownRefs.size) {
+    throw new Error(`${path} does not describe every component in its dependency graph.`);
+  }
+  /** @type {Set<string>} */
+  const reached = new Set();
+  const pending = [applicationRef];
+  while (pending.length > 0) {
+    const ref = pending.pop();
+    if (typeof ref !== "string" || reached.has(ref)) continue;
+    reached.add(ref);
+    for (const dependency of graph.get(ref) ?? []) pending.push(dependency);
+  }
+  if (knownRefs.size !== reached.size) {
+    throw new Error(`${path} contains components disconnected from the application.`);
+  }
 
-  const [, metadataVersion, fileDigest, sizeSource, blockMapSizeSource, rootDigest, releaseDate] =
-    match;
-  const size = Number(sizeSource);
-  const blockMapSize = Number(blockMapSizeSource);
-
-  const appImage = await stat(appImagePath);
-  const digest = await sha512(appImagePath);
+  const anthropicComponents = bundled.filter((component) => component.name === "@anthropic-ai/sdk");
+  const claudeComponents = bundled.filter(
+    (component) => component.name === "@anthropic-ai/claude-agent-sdk"
+  );
+  const anthropic = anthropicComponents[0];
+  const claude = claudeComponents[0];
   if (
-    metadataVersion !== version ||
-    fileDigest !== digest ||
-    rootDigest !== digest ||
-    size !== appImage.size ||
-    !Number.isSafeInteger(size) ||
-    !Number.isSafeInteger(blockMapSize) ||
-    blockMapSize <= 0 ||
-    releaseDate === undefined ||
-    !Number.isFinite(Date.parse(releaseDate))
+    anthropicComponents.length !== 1 ||
+    claudeComponents.length !== 1 ||
+    !isJsonObject(anthropic) ||
+    !isJsonObject(claude) ||
+    typeof anthropic.version !== "string" ||
+    typeof anthropic["bom-ref"] !== "string" ||
+    typeof claude["bom-ref"] !== "string" ||
+    !hasComponentProperty(anthropic, {
+      name: PREBUNDLE_PROVENANCE_PROPERTY_NAME,
+      value: "anthropic-stainless-runtime-marker"
+    }) ||
+    !graph.get(claude["bom-ref"])?.includes(anthropic["bom-ref"])
   ) {
-    throw new Error(`${path} does not match the packaged AppImage for version ${version}.`);
+    throw new Error(`${path} does not inventory Claude's embedded Anthropic SDK.`);
   }
+  return { anthropicSdkVersion: anthropic.version };
+}
+
+/** @param {JsonObject} component @param {{name: string, value: string}} expected */
+function hasComponentProperty(component, expected) {
+  if (!Array.isArray(component.properties)) return false;
+  return /** @type {unknown[]} */ (component.properties).some(
+    (property) =>
+      isJsonObject(property) && property.name === expected.name && property.value === expected.value
+  );
+}
+
+/** @param {JsonObject} component */
+function hasPrebundleEvidence(component) {
+  if (!Array.isArray(component.properties)) return false;
+  const provenance = /** @type {unknown[]} */ (component.properties)
+    .filter(
+      (property) => isJsonObject(property) && property.name === PREBUNDLE_PROVENANCE_PROPERTY_NAME
+    )
+    .map((property) => (isJsonObject(property) ? property.value : undefined));
+  if (
+    provenance.length === 0 ||
+    provenance.some(
+      (method) => typeof method !== "string" || !PREBUNDLE_PROVENANCE_METHODS.has(method)
+    )
+  ) {
+    return false;
+  }
+  if (!isJsonObject(component.evidence) || !Array.isArray(component.evidence.occurrences)) {
+    return false;
+  }
+  const occurrences = /** @type {unknown[]} */ (component.evidence.occurrences);
+  return (
+    occurrences.length > 0 &&
+    occurrences.every(
+      (occurrence) =>
+        isJsonObject(occurrence) &&
+        typeof occurrence.location === "string" &&
+        occurrence.location.length > 0 &&
+        occurrence.location.length <= 4_096
+    )
+  );
 }
 
 /**
- * @param {string} path
+ * @param {string} binaryPath
+ * @param {string} sbomPath
+ * @param {string} version
+ * @param {"linux-x64" | "mac-arm64"} target
  */
+async function verifyTargetAssets(binaryPath, sbomPath, version, target) {
+  await verifyBinary(binaryPath, target);
+  const { anthropicSdkVersion } = await verifySbom(sbomPath, version, target);
+  const binarySdkVersion = await discoverAnthropicSdkVersionInBinary(binaryPath);
+  if (binarySdkVersion !== anthropicSdkVersion) {
+    throw new Error(
+      `${binaryPath} embeds Anthropic SDK ${binarySdkVersion}, but ${sbomPath} inventories ${anthropicSdkVersion}.`
+    );
+  }
+}
+
+/** @param {string} path */
 async function sha256(path) {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(path)) {
@@ -186,32 +335,15 @@ async function sha256(path) {
   return hash.digest("hex");
 }
 
-/**
- * @param {string} path
- */
-async function sha512(path) {
-  const hash = createHash("sha512");
-  for await (const chunk of createReadStream(path)) {
-    if (!Buffer.isBuffer(chunk)) throw new Error(`Could not hash binary file ${path}.`);
-    hash.update(chunk);
-  }
-  return hash.digest("base64");
-}
-
-/**
- * @param {string} path
- * @param {string} directory
- * @param {string[]} assetNames
- */
+/** @param {string} path @param {string} directory @param {string[]} assetNames */
 async function verifyChecksums(path, directory, assetNames) {
   const source = await readFile(path, "utf8");
   if (Buffer.byteLength(source, "utf8") > 8192 || !source.endsWith("\n")) {
     throw new Error(`${path} is not a canonical checksum manifest.`);
   }
 
-  const lines = source.slice(0, -1).split("\n");
   const checksums = new Map();
-  for (const line of lines) {
+  for (const line of source.slice(0, -1).split("\n")) {
     const match = /^([0-9a-f]{64}) {2}([A-Za-z0-9._-]+)$/.exec(line);
     if (!match || checksums.has(match[2])) {
       throw new Error(`${path} contains an invalid or duplicate checksum entry.`);
@@ -226,7 +358,6 @@ async function verifyChecksums(path, directory, assetNames) {
   ) {
     throw new Error(`${path} does not describe the exact release asset set.`);
   }
-
   await Promise.all(
     assetNames.map(async (name) => {
       if ((await sha256(join(directory, name))) !== checksums.get(name)) {
@@ -245,12 +376,11 @@ async function verifyChecksums(path, directory, assetNames) {
 export async function checkReleaseAssets(tag, directoryPath, includeChecksums = false) {
   const version = stableVersionFromTag(tag);
   const directory = resolve(directoryPath);
-  const assetNames = [
-    `Orchestrator-${version}.cdx.json`,
-    LINUX_APP_IMAGE,
-    "Orchestrator-mac-arm64.dmg",
-    LINUX_UPDATE_METADATA
-  ].sort();
+  const linuxName = `agent-orchestrator-v${version}-linux-x64`;
+  const macName = `agent-orchestrator-v${version}-mac-arm64`;
+  const linuxSbomName = `${linuxName}.cdx.json`;
+  const macSbomName = `${macName}.cdx.json`;
+  const assetNames = [linuxName, linuxSbomName, macName, macSbomName].sort();
   const expectedNames = includeChecksums ? [...assetNames, CHECKSUM_FILE].sort() : assetNames;
   const entries = await readdir(directory, { withFileTypes: true });
   const actualNames = entries.map((entry) => entry.name).sort();
@@ -266,14 +396,13 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
   }
 
   await Promise.all([
-    verifyAppImage(join(directory, LINUX_APP_IMAGE)),
-    verifyDmg(join(directory, "Orchestrator-mac-arm64.dmg")),
-    verifySbom(join(directory, `Orchestrator-${version}.cdx.json`), version),
-    verifyLinuxUpdateMetadata(
-      join(directory, LINUX_UPDATE_METADATA),
-      join(directory, LINUX_APP_IMAGE),
-      version
-    )
+    verifyTargetAssets(
+      join(directory, linuxName),
+      join(directory, linuxSbomName),
+      version,
+      "linux-x64"
+    ),
+    verifyTargetAssets(join(directory, macName), join(directory, macSbomName), version, "mac-arm64")
   ]);
   if (includeChecksums) {
     await verifyChecksums(join(directory, CHECKSUM_FILE), directory, assetNames);
@@ -284,7 +413,6 @@ export async function checkReleaseAssets(tag, directoryPath, includeChecksums = 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const [tag, directory, option, ...extraArguments] = process.argv.slice(2);
   const usage = "Usage: npm run release:assets:check -- vMAJOR.MINOR.PATCH DIRECTORY [--published]";
-
   try {
     if (
       !tag ||

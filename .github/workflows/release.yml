@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  BUN_VERSION: "1.4.0"
   NODE_VERSION: "24"
 
 jobs:
@@ -33,8 +34,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y tmux
+      - name: Install terminal runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y tmux
+          npm install --global "bun@${BUN_VERSION}"
       - name: Install locked dependencies
         run: npm ci
       - name: Validate tag and release metadata
@@ -62,25 +66,12 @@ jobs:
         run: npm run verify
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
-      - name: Generate the production SBOM
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run release:sbom -- \
-            "Orchestrator-${{ steps.metadata.outputs.version }}.cdx.json"
-      - name: Upload the SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: release-sbom
-          path: Orchestrator-${{ steps.metadata.outputs.version }}.cdx.json
-          if-no-files-found: error
-          retention-days: 7
 
   linux:
     name: Linux x64
     needs: validate
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,50 +82,32 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Install packaging and smoke-test dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y tmux xvfb
+      - name: Install Bun
+        run: npm install --global "bun@${BUN_VERSION}"
       - name: Install locked dependencies
         run: npm ci
-      - name: Build the AppImage
-        run: npm run desktop:package:linux
-      - name: Verify and smoke-test the AppImage
-        shell: bash
-        run: |
-          set -euo pipefail
-          asset="release/Orchestrator-linux-x64.AppImage"
-          test -s "$asset"
-          file "$asset" | grep -F "x86-64"
-          smoke_workspace="$(mktemp -d)"
-          smoke_log="$RUNNER_TEMP/orchestrator-linux-smoke.log"
-          set +e
-          AO_WORKSPACE="$smoke_workspace" \
-            APPIMAGE_EXTRACT_AND_RUN=1 \
-            timeout --signal=TERM --kill-after=5s 20s \
-            xvfb-run -a "$asset" --disable-gpu > "$smoke_log" 2>&1
-          smoke_status=$?
-          set -e
-          cat "$smoke_log"
-          if [[ "$smoke_status" -ne 124 ]]; then
-            echo "The packaged app exited unexpectedly with status $smoke_status." >&2
-            exit 1
-          fi
-          grep -F "Orchestrator desktop ready" "$smoke_log"
-      - name: Upload the Linux artifact
+      - name: Build and smoke-test the executable
+        run: npm run package
+      - name: Verify the executable architecture
+        run:
+          file release/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64 | grep -F
+          "x86-64"
+      - name: Upload the Linux executable and target-specific SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-linux-x64
           path: |
-            release/Orchestrator-linux-x64.AppImage
-            release/latest-linux.yml
+            release/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64
+            release/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64.cdx.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
 
   macos:
-    name: macOS Apple silicon (unsigned)
+    name: macOS Apple silicon
     needs: validate
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Check out the tagged source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,63 +118,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Verify the native runner architecture
-        shell: bash
+      - name: Verify the runner architecture
         run: test "$(uname -m)" = "arm64"
+      - name: Install Bun
+        run: npm install --global "bun@${BUN_VERSION}"
       - name: Install locked dependencies
         run: npm ci
-      - name: Build desktop sources
-        run: npm run build
-      - name: Build the unsigned DMG
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: ./node_modules/.bin/electron-builder --mac dmg --publish never --arm64
-      - name: Verify the untrusted app and DMG
-        shell: bash
-        run: |
-          set -euo pipefail
-          assert_no_valid_signature() {
-            local bundle="$1"
-            local signature_output
-            if signature_output="$(codesign --verify --deep --strict --verbose=4 "$bundle" 2>&1)"; then
-              printf '%s\n' "$signature_output"
-              echo "The app unexpectedly passed strict code-signature verification." >&2
-              exit 1
-            fi
-            printf '%s\n' "$signature_output"
-          }
-
-          dmg_path="release/Orchestrator-mac-arm64.dmg"
-          app_count="$(find release -type d -name 'Orchestrator.app' | wc -l | tr -d ' ')"
-          app_path="$(find release -type d -name 'Orchestrator.app' -print -quit)"
-          if [[ "$app_count" != "1" || -z "$app_path" || ! -s "$dmg_path" ]]; then
-            echo "Expected exactly one app bundle and one non-empty DMG." >&2
-            exit 1
-          fi
-
-          executable="$app_path/Contents/MacOS/Orchestrator"
-          test "$(lipo -archs "$executable")" = "arm64"
-          assert_no_valid_signature "$app_path"
-          hdiutil verify "$dmg_path"
-
-          mount_directory="$(mktemp -d)"
-          cleanup_mount() {
-            hdiutil detach "$mount_directory" -quiet >/dev/null 2>&1 || true
-            rmdir "$mount_directory" >/dev/null 2>&1 || true
-          }
-          trap cleanup_mount EXIT
-          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_directory"
-          mounted_app="$mount_directory/Orchestrator.app"
-          test -d "$mounted_app"
-          test "$(lipo -archs "$mounted_app/Contents/MacOS/Orchestrator")" = "arm64"
-          assert_no_valid_signature "$mounted_app"
-          cleanup_mount
-          trap - EXIT
-      - name: Upload the macOS artifact
+      - name: Build and smoke-test the executable
+        run: npm run package
+      - name: Verify the executable architecture
+        run:
+          file release/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64 | grep -F
+          "arm64"
+      - name: Upload the macOS executable and target-specific SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos-arm64
-          path: release/Orchestrator-mac-arm64.dmg
+          path: |
+            release/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64
+            release/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64.cdx.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
@@ -237,7 +172,7 @@ jobs:
         run: |
           set -euo pipefail
           cd release-assets
-          sha256sum Orchestrator-* latest-linux.yml > SHA256SUMS
+          sha256sum agent-orchestrator-* > SHA256SUMS
           sha256sum --check SHA256SUMS
           cd ..
           node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" release-assets --published
@@ -265,16 +200,29 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
-            release-assets/Orchestrator-*
-            release-assets/latest-linux.yml
-      - name: Attest the production SBOM
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64.cdx.json
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64.cdx.json
+            release-assets/SHA256SUMS
+      - name: Attest the Linux bundle SBOM
         if: steps.existing.outputs.state != 'published'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: |
-            release-assets/Orchestrator-linux-x64.AppImage
-            release-assets/Orchestrator-mac-arm64.dmg
-          sbom-path: release-assets/Orchestrator-${{ needs.validate.outputs.version }}.cdx.json
+          subject-path:
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-linux-x64
+          sbom-path:
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version
+            }}-linux-x64.cdx.json
+      - name: Attest the macOS bundle SBOM
+        if: steps.existing.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path:
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64
+          sbom-path:
+            release-assets/agent-orchestrator-v${{ needs.validate.outputs.version
+            }}-mac-arm64.cdx.json
       - name: Replace an incomplete draft
         if: steps.existing.outputs.state == 'draft'
         env:
@@ -287,14 +235,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_notice=$'### macOS installation\n\nThe macOS DMG is intentionally distributed without a valid Apple Developer signature or notarization. After the first blocked launch, open **System Settings → Privacy & Security** and choose **Open Anyway**.'
+          release_notice=$'Requires tmux. Download the executable for your platform, run `chmod +x agent-orchestrator-*`, and place it on your PATH. The macOS executable is not notarized; after verifying its checksum and attestation, run `xattr -d com.apple.quarantine agent-orchestrator-v${{ needs.validate.outputs.version }}-mac-arm64` if Gatekeeper blocks it.'
           gh release create "$GITHUB_REF_NAME" \
             release-assets/* \
             --draft \
             --fail-on-no-commits \
             --generate-notes \
             --notes "$release_notice" \
-            --title "Orchestrator ${{ needs.validate.outputs.version }}" \
+            --title "Agent Orchestrator ${{ needs.validate.outputs.version }}" \
             --verify-tag
       - name: Verify draft assets against local digests
         if: steps.existing.outputs.state != 'published'
@@ -306,21 +254,12 @@ jobs:
           release_json="$RUNNER_TEMP/draft-release.json"
           gh release view "$GITHUB_REF_NAME" --json isDraft,assets > "$release_json"
           jq -e '.isDraft == true' "$release_json" >/dev/null
-
           local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
           remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
-          if [[ "$local_names" != "$remote_names" ]]; then
-            echo "GitHub draft assets do not match the validated local set." >&2
-            diff <(printf '%s\n' "$local_names") <(printf '%s\n' "$remote_names") || true
-            exit 1
-          fi
-
+          test "$local_names" = "$remote_names"
           while read -r digest filename; do
             remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
-            if [[ "$remote_digest" != "sha256:$digest" ]]; then
-              echo "Digest mismatch for $filename." >&2
-              exit 1
-            fi
+            test "$remote_digest" = "sha256:$digest"
           done < <(cd release-assets && sha256sum *)
       - name: Publish the release
         if: steps.existing.outputs.state != 'published'
@@ -337,37 +276,12 @@ jobs:
           release_json="$RUNNER_TEMP/published-release.json"
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" > "$release_json"
           jq -e '.draft == false and .prerelease == false' "$release_json" >/dev/null
-
-          local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
-          remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
-          if [[ "$local_names" != "$remote_names" ]]; then
-            echo "Published GitHub assets do not match the validated local set." >&2
-            exit 1
-          fi
-
           if [[ "$EXISTING_RELEASE_STATE" == "published" ]]; then
             download_directory="$RUNNER_TEMP/published-release-assets"
             mkdir -p "$download_directory"
             gh release download "$GITHUB_REF_NAME" --dir "$download_directory"
-            downloaded_names="$(find "$download_directory" -maxdepth 1 -type f -printf '%f\n' | sort)"
-            if [[ "$downloaded_names" != "$remote_names" ]]; then
-              echo "Downloaded immutable assets do not match GitHub's release metadata." >&2
-              exit 1
-            fi
-            node scripts/check-release-assets.mjs \
-              "$GITHUB_REF_NAME" \
-              "$download_directory" \
-              --published
-
-            while read -r digest filename; do
-              remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
-              if [[ "$remote_digest" != "sha256:$digest" ]]; then
-                echo "Immutable release digest mismatch for $filename." >&2
-                exit 1
-              fi
-            done < <(cd "$download_directory" && sha256sum *)
-
-            for asset in "$download_directory"/Orchestrator-* "$download_directory"/latest-linux.yml; do
+            node scripts/check-release-assets.mjs "$GITHUB_REF_NAME" "$download_directory" --published
+            for asset in "$download_directory"/agent-orchestrator-* "$download_directory"/SHA256SUMS; do
               gh attestation verify "$asset" \
                 --repo "$GITHUB_REPOSITORY" \
                 --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
@@ -376,11 +290,11 @@ jobs:
                 --deny-self-hosted-runners
             done
           else
+            local_names="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+            remote_names="$(jq -r '.assets[].name' "$release_json" | sort)"
+            test "$local_names" = "$remote_names"
             while read -r digest filename; do
               remote_digest="$(jq -r --arg name "$filename" '.assets[] | select(.name == $name) | .digest // empty' "$release_json")"
-              if [[ "$remote_digest" != "sha256:$digest" ]]; then
-                echo "Published digest mismatch for $filename." >&2
-                exit 1
-              fi
+              test "$remote_digest" = "sha256:$digest"
             done < <(cd release-assets && sha256sum *)
           fi

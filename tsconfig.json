@@ -2,9 +2,8 @@
   "files": [],
   "references": [
     { "path": "./packages/contracts" },
-    { "path": "./apps/server" },
-    { "path": "./apps/web" },
-    { "path": "./apps/desktop" },
+    { "path": "./packages/runtime" },
+    { "path": "./apps/tui" },
     { "path": "./tsconfig.tests.json" }
   ]
 }

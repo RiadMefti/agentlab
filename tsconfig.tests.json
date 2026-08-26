@@ -7,13 +7,18 @@
     "outDir": ".test-types",
     "rootDir": ".",
     "tsBuildInfoFile": ".test-types/.tsbuildinfo",
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals", "bun"]
   },
-  "include": ["tests/**/*.ts", "tests/**/*.tsx", "vitest.config.ts"],
+  "include": [
+    "scripts/**/*.ts",
+    "scripts/**/*.mts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vitest.config.ts"
+  ],
   "references": [
     { "path": "./packages/contracts" },
-    { "path": "./apps/server" },
-    { "path": "./apps/web" },
-    { "path": "./apps/desktop" }
+    { "path": "./packages/runtime" },
+    { "path": "./apps/tui" }
   ]
 }

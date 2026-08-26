@@ -1,48 +1,34 @@
 # Releasing
 
 Stable releases are built from annotated `vMAJOR.MINOR.PATCH` tags already present on `main`. The
-workflow publishes these fixed assets:
+workflow publishes this exact set:
 
-- `Orchestrator-linux-x64.AppImage`
-- `latest-linux.yml`
-- `Orchestrator-mac-arm64.dmg`
-- `Orchestrator-MAJOR.MINOR.PATCH.cdx.json`
+- `agent-orchestrator-vMAJOR.MINOR.PATCH-linux-x64`
+- `agent-orchestrator-vMAJOR.MINOR.PATCH-mac-arm64`
+- `agent-orchestrator-vMAJOR.MINOR.PATCH-linux-x64.cdx.json`
+- `agent-orchestrator-vMAJOR.MINOR.PATCH-mac-arm64.cdx.json`
 - `SHA256SUMS`
 
-The filenames stay stable so the README's `/releases/latest/download/…` links always resolve to the
-newest release.
-
-Packaged apps check GitHub for the latest stable release at launch and once daily. On Linux, a newer
-version reveals a button that downloads the AppImage in the app, validates it against the SHA-512
-digest in `latest-linux.yml`, and then offers to restart into it. Downloads begin only after the
-user clicks. The unsigned macOS build opens the fixed `/releases/latest` page for manual
-replacement.
+The executables are compiled by Bun and include the JavaScript runtime plus the native OpenTUI
+library for their target. Each CycloneDX document combines that executable's Bun metafile with exact
+package/version markers from supported upstream prebundle formats: Bun module provenance comments
+and Claude Agent SDK's bound Stainless runtime identity. A known opaque bundle with a changed or
+missing marker fails packaging instead of silently disappearing from the inventory. The completed
+executable is then scanned in bounded overlapping windows and must contain the same Anthropic SDK
+version linked beneath Claude Agent SDK in the SBOM. The result covers direct bundle inputs and
+verified dependencies already compiled into those inputs while remaining specific to the platform
+binary. The executables do not require a system Bun or Node.js installation. tmux and at least one
+provider CLI remain host dependencies.
 
 ## One-time GitHub setup
 
-Create a GitHub environment named `release` and restrict deployment branches and tags to `v*`. The
-environment protects the final publication job; it does not require Apple credentials or other
-release secrets.
-
-## macOS distribution
-
-The Apple-silicon DMG is intentionally built without our own Apple Developer identity and is not
-notarized. The workflow explicitly disables signing discovery and fails if the packaged app passes
-strict code-signature verification. Electron's upstream bundle may retain invalid signature metadata
-after packaging; that metadata is not a valid signature for Orchestrator.
-
-On first launch, macOS blocks the app because it cannot verify the developer:
-
-1. Try to open `Orchestrator.app` once.
-2. Open **System Settings → Privacy & Security**.
-3. Choose **Open Anyway**, then confirm **Open**.
-
-This creates an exception for Orchestrator. Never disable Gatekeeper globally. A managed Mac may
-prevent the override; in that case the administrator must allow the app.
+Create a GitHub environment named `release` and restrict deployment tags to `v*`. The environment
+protects the write-capable publication job. Building and validation jobs have read-only repository
+permissions and require no signing credentials.
 
 ## Cut a release
 
-Start from a clean, current `main` branch:
+Start from a clean, current `main` branch with Node.js 24, Bun 1.4, and tmux installed:
 
 ```bash
 git switch main
@@ -51,50 +37,57 @@ npm ci
 npm run release:prepare -- 0.2.0
 npm run release:check -- v0.2.0
 npm run verify
+npm audit --omit=dev --audit-level=high
 ```
 
-Review the version-only diff, then commit and let `main` CI pass before creating the tag:
+Review the version-only diff, including the canonical app version source, then commit and let CI
+pass before creating the tag:
 
 ```bash
-git add package.json package-lock.json apps/*/package.json packages/*/package.json
+git add package.json package-lock.json apps/*/package.json packages/*/package.json apps/tui/src/version.ts
 git commit -m "chore: prepare v0.2.0"
 git push origin main
-git tag -a v0.2.0 -m "Orchestrator v0.2.0"
+git tag -a v0.2.0 -m "Agent Orchestrator v0.2.0"
 git push origin v0.2.0
 ```
 
-The tag starts `.github/workflows/release.yml`. It performs the following gates before publication:
+The tag starts `.github/workflows/release.yml`, which:
 
-1. Match the tag against every package and lockfile version, and prove its commit is on `main`.
-2. Run formatting, type checking, linting, tests, the production build, and the production audit.
-3. Build and launch-smoke-test the Linux AppImage on Ubuntu 22.04.
-4. Build a native Apple-silicon DMG on an arm64 macOS runner without release credentials.
-5. Verify each app has no valid code signature, has the expected native architecture, and survives
-   DMG integrity and read-only mount checks.
-6. Validate the exact artifact set, container formats, and AppImage update metadata, then generate
-   checksums, a CycloneDX SBOM, SLSA provenance, and an SBOM attestation.
-7. Upload everything to a draft, compare GitHub's asset digests with the local files, and only then
-   publish it as the latest release.
+1. Matches the tag against every workspace, lockfile entry, and `apps/tui/src/version.ts`, then
+   proves the tagged commit is already on `main`.
+2. Runs formatting, strict type checking, linting, all tests including real tmux/Bun PTY
+   integration, the production build, standalone packaging, and the production dependency audit.
+3. Compiles and smoke-tests a Linux x64 executable on Ubuntu.
+4. Compiles and smoke-tests an Apple-silicon executable on a native arm64 macOS runner.
+5. Validates the exact asset set, minimum sizes, Linux ELF architecture, macOS Mach-O architecture,
+   each target-specific CycloneDX bundle/runtime graph, and opaque binary-to-SBOM version
+   correspondence.
+6. Generates exact SHA-256 checksums plus GitHub build-provenance and SBOM attestations.
+7. Uploads a complete draft, compares GitHub's asset digests with the local files, and only then
+   publishes it as the latest release.
 
 ## Verify a download
 
-Download an artifact and `SHA256SUMS` into the same directory, then run:
+Download the executable and `SHA256SUMS` into the same directory. On Linux:
 
 ```bash
 sha256sum --check SHA256SUMS --ignore-missing
-gh attestation verify Orchestrator-linux-x64.AppImage \
+gh attestation verify agent-orchestrator-v0.2.0-linux-x64 \
   --repo RiadMefti/agent-orchestrator
 ```
 
-On macOS, use `shasum -a 256 -c SHA256SUMS` and replace the artifact name in the attestation
-command. Verify the download before using the **Open Anyway** procedure above.
+On macOS, use `shasum -a 256 -c SHA256SUMS` and verify the macOS filename with the same `gh`
+command. The artifact itself is a command-line executable, not an application bundle; after
+verification, run `chmod +x` and place it on your `PATH`. The macOS executable is not notarized; if
+Gatekeeper blocks the verified download, run
+`xattr -d com.apple.quarantine agent-orchestrator-v0.2.0-mac-arm64`.
 
 ## Failed releases and rollback
 
 - A failed build publishes nothing. Fix the cause and rerun the workflow; an incomplete draft for
-  that exact tag is replaced safely.
-- Re-running a published tag never replaces its binaries. The workflow downloads the immutable
-  assets and re-verifies their exact names, checksums, container formats, and attestations.
-- A published release is immutable. Never move or reuse its tag and never replace its binaries.
-- If a published version is bad, fix forward with a new patch version. Mark the old release clearly
-  in its notes if users should avoid it.
+  that exact tag may be safely replaced.
+- Re-running a published tag never replaces its assets. The workflow downloads the immutable release
+  and revalidates names, checksums, executable formats, and attestations.
+- Never move or reuse a published tag and never replace its binaries.
+- Fix a bad published version forward with a new patch release. Mark the old release clearly if
+  users should avoid it.

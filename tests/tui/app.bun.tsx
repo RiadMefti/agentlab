@@ -1,0 +1,667 @@
+/** @jsxImportSource @opentui/react */
+
+import { useState, type ReactNode } from "react";
+
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { useKeyboard } from "@opentui/react";
+import { testRender } from "@opentui/react/test-utils";
+
+import type { AgentSession, Conversation, ProviderCapability } from "@orchestrator/contracts";
+import {
+  maximumTerminalDimension,
+  type LocalOrchestratorRuntime,
+  type OpenSessionTerminalInput,
+  type OrchestratorCommandPort,
+  type SessionTerminal
+} from "@orchestrator/runtime";
+
+import { App } from "../../apps/tui/src/app.js";
+import {
+  boundTerminalDimensions,
+  TerminalPanel
+} from "../../apps/tui/src/components/terminal-panel.js";
+import { RuntimeContext } from "../../apps/tui/src/runtime-context.js";
+import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
+
+const renderers: { destroy(): void }[] = [];
+
+afterEach(() => {
+  for (const renderer of renderers.splice(0)) renderer.destroy();
+});
+
+describe("terminal workspace", () => {
+  test("renders the three-column workspace and opens its keyboard-first dialog", async () => {
+    const runtime = fakeRuntime();
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 35, width: 120 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+
+    const initial = setup.captureCharFrame();
+    expect(initial).toContain("Projects · 0");
+    expect(initial).toContain("Agents · 0");
+    expect(initial).toContain("Workers · 0");
+
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project"));
+
+    expect(setup.captureCharFrame()).toContain("Folder path");
+    setup.mockInput.pressEscape();
+    await setup.waitForFrame((frame) => !frame.includes("Add project"));
+  });
+
+  test("accepts a project folder from anywhere before configuring its captain", async () => {
+    const runtime = fakeRuntime();
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 35, width: 120 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Folder path"));
+    await setup.mockInput.typeText("/tmp/anywhere/project folder");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    expect(calls(runtime.commands.inspectWorkspace)).toContainEqual([
+      "/tmp/anywhere/project folder"
+    ]);
+    await setup.waitForFrame(
+      (frame) => frame.includes("Project name") && frame.includes("/tmp/anywhere/project folder")
+    );
+  });
+
+  test("asks for space instead of crushing the three-pane layout", async () => {
+    const setup = await testRender(
+      <RuntimeContext value={fakeRuntime()}>
+        <App />
+      </RuntimeContext>,
+      { height: 14, width: 70 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Terminal too small"));
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Resize to at least 90×18");
+    expect(frame).not.toContain("Projects");
+  });
+
+  test("pins the captain, renders workers, and owns exactly one PTY attachment", async () => {
+    const terminal = fakeTerminal();
+    const runtime = fakeRuntime({
+      conversations: [conversation],
+      sessions,
+      terminal
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Captain") && frame.includes("Test Writer"));
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Captain");
+    expect(frame).toContain("Workers · 1");
+    expect(frame).toContain("history");
+
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.mockInput.typeText("hello");
+    await setup.flush();
+    expect(callCount(terminal.write)).toBeGreaterThan(0);
+    expect(callCount(runtime.openTerminal)).toBe(1);
+
+    const writesBeforeControlKey = callCount(terminal.write);
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await allowStateUpdate(setup);
+    expect(callCount(terminal.write)).toBeGreaterThan(writesBeforeControlKey);
+    expect(setup.captureCharFrame()).not.toContain("Add project");
+
+    const writesBeforeFlowControl = callCount(terminal.write);
+    setup.mockInput.pressKey("q", { ctrl: true });
+    await allowStateUpdate(setup);
+    expect(callCount(terminal.write)).toBeGreaterThan(writesBeforeFlowControl);
+    expect(setup.captureCharFrame()).toContain("Ship the terminal port");
+  });
+
+  test("keeps the old frame visible until the selected agent is ready, then swaps atomically", async () => {
+    const captainTerminal = fakeTerminal();
+    const workerTerminal = fakeTerminal();
+    const workerAttachment = deferredValue({
+      history: "worker-only-history\n",
+      terminal: workerTerminal,
+      releaseBufferedOutput: mock(() => undefined)
+    });
+    const base = fakeRuntime({ conversations: [conversation], sessions });
+    const runtime: LocalOrchestratorRuntime = {
+      ...base,
+      openTerminal: mock((input: OpenSessionTerminalInput) =>
+        input.sessionName === sessions[0]?.name
+          ? Promise.resolve({
+              history: "captain-only-history\n",
+              terminal: captainTerminal,
+              releaseBufferedOutput: mock(() => undefined)
+            })
+          : workerAttachment.promise
+      )
+    };
+    let selectAgent: (index: number) => void = () => {
+      throw new Error("Terminal switch harness did not render.");
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <TerminalSwitchHarness
+          onReady={(select) => {
+            selectAgent = select;
+          }}
+        />
+      </RuntimeContext>,
+      { height: 30, width: 100 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("captain-only-history"));
+
+    selectAgent(1);
+    await allowStateUpdate(setup);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 2);
+
+    const pendingFrame = setup.captureCharFrame();
+    expect(pendingFrame).toContain("captain-only-history");
+    expect(pendingFrame).toContain("switching");
+    expect(pendingFrame).not.toContain("worker-only-history");
+
+    workerAttachment.resolve();
+    await setup.waitForFrame((frame) => frame.includes("worker-only-history"));
+
+    expect(setup.captureCharFrame()).not.toContain("captain-only-history");
+    expect(callCount(captainTerminal.close)).toBe(1);
+    expect(callCount(workerTerminal.close)).toBe(0);
+  });
+
+  test("uses the full center pane instead of retaining the terminal's 80-column default", async () => {
+    const runtime = fakeRuntime({ conversations: [conversation], sessions });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 42, width: 220 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    const request = calls(runtime.openTerminal)[0]?.[0] as OpenSessionTerminalInput | undefined;
+    expect(request?.columns).toBeGreaterThan(140);
+    expect(request?.rows).toBeGreaterThan(30);
+  });
+
+  test("does not reattach when polling only refreshes session metadata", async () => {
+    const runtime = fakeRuntime({ conversations: [conversation], sessions });
+    let refreshMetadata: () => void = () => {
+      throw new Error("Metadata harness did not render.");
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <TerminalMetadataHarness
+          onReady={(refresh) => {
+            refreshMetadata = refresh;
+          }}
+        />
+      </RuntimeContext>,
+      { height: 30, width: 120 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    refreshMetadata();
+    await allowStateUpdate(setup);
+
+    expect(callCount(runtime.openTerminal)).toBe(1);
+  });
+
+  test("handles pane shortcuts before forwarding input to the focused agent", async () => {
+    const observed: { readonly meta: boolean; readonly name: string }[] = [];
+    const terminal = fakeTerminal();
+    const runtime = fakeRuntime({ conversations: [conversation], sessions, terminal });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <KeyboardCapture
+          onKey={(key) => {
+            observed.push(key);
+          }}
+        >
+          <App />
+        </KeyboardCapture>
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    setup.mockInput.pressKey("3", { meta: true });
+    await allowStateUpdate(setup);
+    expect(observed).toContainEqual({ meta: true, name: "3" });
+    expect(callCount(terminal.write)).toBe(0);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+
+    expect(callCount(runtime.openTerminal)).toBe(2);
+    setup.mockInput.pressKey("w", { meta: true });
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("New worker"));
+  });
+
+  test("deletes a worker through the conversation identity carried by the session", async () => {
+    const runtime = fakeRuntime({ conversations: [conversation], sessions });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    setup.mockInput.pressKey("3", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressKey("DELETE");
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Delete Test Writer?"));
+    setup.mockInput.pressEnter();
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+
+    expect(calls(runtime.commands.deleteWorker)).toContainEqual([
+      sessions[1]?.conversationId,
+      sessions[1]?.name
+    ]);
+    expect(callCount(runtime.commands.deleteWorker)).toBe(1);
+  });
+
+  test("seeds terminal history before releasing output captured during synchronous attach", async () => {
+    const base = fakeRuntime({ conversations: [conversation], sessions });
+    const terminal = fakeTerminal();
+    const runtime: LocalOrchestratorRuntime = {
+      ...base,
+      openTerminal: mock((input: OpenSessionTerminalInput) => {
+        const outputCapturedDuringAttach = ["newer-live-output\r\n"];
+        return Promise.resolve({
+          history: "older-history-output\n",
+          terminal,
+          releaseBufferedOutput() {
+            for (const data of outputCapturedDuringAttach) input.callbacks.onData(data);
+          }
+        });
+      })
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitForFrame(
+      (frame) => frame.includes("older-history-output") && frame.includes("newer-live-output")
+    );
+
+    const frame = setup.captureCharFrame();
+    expect(frame.indexOf("older-history-output")).toBeLessThan(frame.indexOf("newer-live-output"));
+  });
+
+  test("keeps keyboard-selected conversations and workers visible in long sidebars", async () => {
+    const conversations = Array.from({ length: 24 }, (_, index) => conversationAt(index));
+    const firstConversation = conversations[0];
+    if (firstConversation === undefined) throw new Error("Conversation fixture is empty.");
+    const workers = Array.from({ length: 20 }, (_, index) => workerAt(firstConversation, index));
+    const listedSessions = [captainFor(firstConversation), ...workers];
+    const runtime = fakeRuntime({ conversations, sessions: listedSessions });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 30, width: 120 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Conversation 00"));
+
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    for (let index = 0; index < 15; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await allowStateUpdate(setup);
+    }
+    await setup.waitForFrame((frame) => (frame.match(/Conversation 15/gu) ?? []).length >= 2);
+    expect(setup.captureCharFrame()).not.toContain("Conversation 00");
+
+    // Return to the first conversation, whose fixture owns the long worker list.
+    for (let index = 0; index < 9; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await allowStateUpdate(setup);
+    }
+    setup.mockInput.pressKey("3", { meta: true });
+    await allowStateUpdate(setup);
+    for (let index = 0; index < 13; index += 1) {
+      setup.mockInput.pressArrow("down");
+      await allowStateUpdate(setup);
+    }
+    await setup.waitForFrame((frame) => (frame.match(/Worker 12/gu) ?? []).length >= 2);
+    expect(setup.captureCharFrame()).not.toContain("Worker 00");
+  });
+
+  test("waits for runtime draining before destroying the renderer", async () => {
+    let finishClose: () => void = () => undefined;
+    const closePending = new Promise<void>((resolve) => {
+      finishClose = resolve;
+    });
+    const base = fakeRuntime({ conversations: [conversation], sessions });
+    const runtime: LocalOrchestratorRuntime = {
+      ...base,
+      close: mock(() => closePending)
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    const destroyRenderer = setup.renderer.destroy.bind(setup.renderer);
+    const destroy = mock(() => undefined);
+    setup.renderer.destroy = destroy;
+    renderers.push({ destroy: destroyRenderer });
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+
+    setup.mockInput.pressKey("q", { meta: true });
+    await allowStateUpdate(setup);
+
+    expect(callCount(runtime.close)).toBe(1);
+    expect(callCount(destroy)).toBe(0);
+    expect(setup.captureCharFrame()).toContain("finishing current operation");
+
+    finishClose();
+    await setup.waitFor(() => callCount(destroy) === 1);
+  });
+
+  test("bounds PTY dimensions at the presentation edge on very wide terminals", () => {
+    expect(boundTerminalDimensions(1_300, 2_000)).toEqual({
+      columns: maximumTerminalDimension,
+      rows: maximumTerminalDimension
+    });
+  });
+});
+
+const conversation: Conversation = {
+  id: "11111111-1111-4111-8111-111111111111",
+  title: "Ship the terminal port",
+  workspacePath: "/work/project",
+  provider: "codex",
+  model: null,
+  reasoning: null,
+  captainSessionName: "ao__11111111-1111-4111-8111-111111111111__captain__codex",
+  createdAt: "2026-08-25T12:00:00.000Z",
+  updatedAt: "2026-08-25T12:00:00.000Z"
+};
+
+const sessions: readonly AgentSession[] = [
+  {
+    name: conversation.captainSessionName,
+    conversationId: conversation.id,
+    role: "captain",
+    provider: "codex",
+    label: "Captain",
+    status: "running",
+    attached: false,
+    startedAt: "2026-08-25T12:00:00.000Z"
+  },
+  {
+    name: "ao__11111111-1111-4111-8111-111111111111__worker__claude__test-writer",
+    conversationId: conversation.id,
+    role: "worker",
+    provider: "claude",
+    label: "Test Writer",
+    status: "running",
+    attached: false,
+    startedAt: "2026-08-25T12:01:00.000Z"
+  }
+];
+
+const providers: readonly ProviderCapability[] = [];
+
+function conversationAt(index: number): Conversation {
+  const suffix = String(index).padStart(12, "0");
+  const id = `00000000-0000-4000-8000-${suffix}`;
+  return {
+    ...conversation,
+    id,
+    title: `Conversation ${String(index).padStart(2, "0")}`,
+    captainSessionName: `ao__${id}__captain__codex`
+  };
+}
+
+function captainFor(owner: Conversation): AgentSession {
+  return {
+    ...sessionFixture(0),
+    name: owner.captainSessionName,
+    conversationId: owner.id
+  };
+}
+
+function workerAt(owner: Conversation, index: number): AgentSession {
+  const worker = String(index).padStart(2, "0");
+  return {
+    ...sessionFixture(1),
+    name: `ao__${owner.id}__worker__claude__worker-${worker}`,
+    conversationId: owner.id,
+    label: `Worker ${worker}`
+  };
+}
+
+function sessionFixture(index: number): AgentSession {
+  const session = sessions[index];
+  if (session === undefined) throw new Error(`Session fixture ${String(index)} is missing.`);
+  return session;
+}
+
+function KeyboardCapture({
+  children,
+  onKey
+}: {
+  readonly children: ReactNode;
+  readonly onKey: (key: { readonly meta: boolean; readonly name: string }) => void;
+}) {
+  useKeyboard(({ meta, name }) => {
+    onKey({ meta, name });
+  });
+  return children;
+}
+
+function TerminalSwitchHarness({
+  onReady
+}: {
+  readonly onReady: (select: (index: number) => void) => void;
+}) {
+  const [index, setIndex] = useState(0);
+  onReady(setIndex);
+  return (
+    <TerminalPanel
+      conversationId={conversation.id}
+      session={sessions[index] ?? null}
+      active
+      onActivate={() => undefined}
+    />
+  );
+}
+
+function TerminalMetadataHarness({ onReady }: { readonly onReady: (refresh: () => void) => void }) {
+  const [revision, setRevision] = useState(0);
+  onReady(() => {
+    setRevision((current) => current + 1);
+  });
+  const captain = sessions[0];
+  if (captain === undefined) throw new Error("Captain fixture is missing.");
+  return (
+    <TerminalPanel
+      conversationId={conversation.id}
+      session={{ ...captain, attached: revision % 2 === 1 }}
+      active
+      onActivate={() => undefined}
+    />
+  );
+}
+
+function fakeRuntime(
+  options: {
+    readonly conversations?: readonly Conversation[];
+    readonly sessions?: readonly AgentSession[];
+    readonly terminal?: SessionTerminal;
+    readonly attachments?: ReadonlyMap<
+      string,
+      { readonly history: string; readonly terminal: SessionTerminal }
+    >;
+  } = {}
+): LocalOrchestratorRuntime {
+  const conversations = options.conversations ?? [];
+  const listedSessions = options.sessions ?? [];
+  const terminal = options.terminal ?? fakeTerminal();
+  const commands: OrchestratorCommandPort = {
+    listConversations: mock(() => deferred(conversations)),
+    inspectWorkspace: mock((workspacePath) =>
+      deferred({
+        workspacePath: String(workspacePath),
+        suggestedName: String(workspacePath).split("/").filter(Boolean).at(-1) ?? "project",
+        providers
+      })
+    ),
+    listProviders: mock(() => deferred(providers)),
+    createConversation: mock(() => deferred(conversation)),
+    deleteConversation: mock(() => deferred(undefined)),
+    listSessions: mock(() => deferred(listedSessions)),
+    createWorker: mock(() => deferred(sessions[1]?.name ?? "")),
+    deleteWorker: mock(() => deferred(undefined)),
+    requireAttachableSession: mock((conversationId, sessionName) =>
+      deferred({
+        conversationId: String(conversationId),
+        sessionName: String(sessionName),
+        workspacePath: "/work/project"
+      })
+    )
+  };
+  return {
+    commands,
+    openTerminal: mock((input: OpenSessionTerminalInput) =>
+      deferred({
+        ...(options.attachments?.get(String(input.sessionName)) ?? {
+          history: "history\n",
+          terminal
+        }),
+        releaseBufferedOutput: mock(() => undefined)
+      })
+    ),
+    close: mock(() => Promise.resolve())
+  };
+}
+
+function fakeTerminal(): SessionTerminal {
+  return {
+    write: mock(() => undefined),
+    resize: mock(() => undefined),
+    close: mock(() => undefined)
+  };
+}
+
+function deferred<T>(value: T): Promise<T> {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(value);
+    }, 0);
+  });
+}
+
+interface DeferredValue<T> {
+  readonly promise: Promise<T>;
+  resolve(): void;
+}
+
+function deferredValue<T>(value: T): DeferredValue<T> {
+  let resolvePromise = (): void => undefined;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = () => {
+      resolve(value);
+    };
+  });
+  return { promise, resolve: resolvePromise };
+}
+
+async function allowStateUpdate(setup: { flush(): Promise<void> }): Promise<void> {
+  allowOpenTuiAsyncUpdates();
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+  await setup.flush();
+}
+
+function callCount(value: unknown): number {
+  return calls(value).length;
+}
+
+function calls(value: unknown): readonly (readonly unknown[])[] {
+  return (value as { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }).mock
+    .calls;
+}

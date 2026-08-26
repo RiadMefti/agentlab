@@ -1,0 +1,17 @@
+{
+  "name": "@orchestrator/tui",
+  "version": "0.1.10",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@opentui/core": "0.5.8",
+    "@opentui/react": "0.5.8",
+    "@orchestrator/contracts": "0.1.10",
+    "@orchestrator/runtime": "0.1.10",
+    "react": "^19.2.1"
+  }
+}

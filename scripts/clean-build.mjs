@@ -5,10 +5,8 @@ import { fileURLToPath } from "node:url";
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const buildDirectories = [
   "packages/contracts/dist",
-  "apps/desktop/dist",
-  "apps/server/dist",
-  "apps/web/dist",
-  "apps/web/dist-types",
+  "packages/runtime/dist",
+  "apps/tui/dist",
   ".test-types"
 ];
 

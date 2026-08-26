@@ -5,18 +5,23 @@ import type {
   ProviderId
 } from "@orchestrator/contracts";
 
-import type { ConversationRepository } from "../../apps/server/src/domain/conversation-repository.js";
+import type { ConversationRepository } from "../../packages/runtime/src/domain/conversation-repository.js";
 import type {
   AgentLauncher,
   ProviderCatalog,
+  ProviderCatalogFactory,
   ResolvedProvider
-} from "../../apps/server/src/domain/agent-launcher.js";
+} from "../../packages/runtime/src/domain/agent-launcher.js";
 import type {
   CreateCaptainSessionInput,
   CreateWorkerSessionInput,
   SessionRuntime
-} from "../../apps/server/src/domain/session-runtime.js";
-import { codexAgentLauncher } from "../../apps/server/src/infrastructure/providers/agent-launchers.js";
+} from "../../packages/runtime/src/domain/session-runtime.js";
+import { codexAgentLauncher } from "../../packages/runtime/src/infrastructure/providers/agent-launchers.js";
+import type {
+  ResolvedWorkspacePath,
+  WorkspacePathResolver
+} from "../../packages/runtime/src/domain/workspace-path-resolver.js";
 
 export const TEST_CONVERSATION_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -33,6 +38,13 @@ export class MemoryConversationRepository implements ConversationRepository {
   public findById(id: string): Promise<Conversation | null> {
     return Promise.resolve(
       this.conversations.find((conversation) => conversation.id === id) ?? null
+    );
+  }
+
+  public findByWorkspacePath(workspacePath: string): Promise<Conversation | null> {
+    return Promise.resolve(
+      this.conversations.find((conversation) => conversation.workspacePath === workspacePath) ??
+        null
     );
   }
 
@@ -93,7 +105,9 @@ export class MemorySessionRuntime implements SessionRuntime {
   }
 }
 
-export class StaticProviderCatalog implements ProviderCatalog {
+export class StaticProviderCatalog implements ProviderCatalog, ProviderCatalogFactory {
+  public readonly workspaces: string[] = [];
+
   public constructor(
     private readonly launchers: ReadonlyMap<ProviderId, AgentLauncher> = new Map([
       ["codex", codexAgentLauncher]
@@ -101,6 +115,11 @@ export class StaticProviderCatalog implements ProviderCatalog {
     private readonly executable = "/opt/bin/codex",
     private readonly capabilities: Partial<Record<ProviderId, ProviderCapability>> = {}
   ) {}
+
+  public forWorkspace(workspace: string): ProviderCatalog {
+    this.workspaces.push(workspace);
+    return this;
+  }
 
   public list(): Promise<readonly ProviderCapability[]> {
     return Promise.resolve(
@@ -119,6 +138,18 @@ export class StaticProviderCatalog implements ProviderCatalog {
         ? null
         : { launcher, capability, executable: this.executable, version: "test 1.0.0" }
     );
+  }
+}
+
+export class StaticWorkspacePathResolver implements WorkspacePathResolver {
+  public readonly inputs: string[] = [];
+
+  public resolve(input: string): Promise<ResolvedWorkspacePath> {
+    this.inputs.push(input);
+    return Promise.resolve({
+      path: input,
+      suggestedName: input.split("/").filter(Boolean).at(-1) ?? input
+    });
   }
 }
 

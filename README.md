@@ -3,140 +3,144 @@
 [![CI](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/ci.yml)
 [![Release](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml/badge.svg)](https://github.com/RiadMefti/agent-orchestrator/actions/workflows/release.yml)
 
-**One captain for all your coding agents.**
+**One captain per project folder, with all your coding agents in one fast local terminal.**
 
-Direct the work from one conversation. Follow every agent the captain creates. Jump into any live
-session whenever you want.
+Agent Orchestrator runs Codex, Claude Code, and OpenCode as their real CLIs. They keep their
+existing authentication, configuration, tools, and context. Each saved project is a named local
+folder with exactly one captain. The captain may coordinate any number of workers, and every live
+session remains directly accessible.
 
-Agent Orchestrator runs each agent as its real CLI, with its existing authentication, configuration,
-tools, and context. The captain coordinates the work while every worker remains directly accessible
-from the same workspace.
+```text
+┌─ PROJECTS ───────┬─ SELECTED AGENT TERMINAL ───────────────┬─ AGENTS ─────────┐
+│ named folders    │ full ANSI/PTY interaction               │ CAPTAIN (pinned) │
+│                  │                                         │ WORKERS           │
+└──────────────────┴─────────────────────────────────────────┴───────────────────┘
+```
 
-## Download
+There is no web server, browser UI, Electron shell, or remote mode. The application is a
+single-process terminal compositor that calls the local application layer directly. tmux owns the
+durable sessions; the UI attaches exactly one PTY to the selected agent.
 
-| Platform              | Build                                                                                                                |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Linux x64             | [AppImage](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-linux-x64.AppImage) |
-| macOS — Apple silicon | [DMG](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/Orchestrator-mac-arm64.dmg)           |
+## Install
 
-[Checksums](https://github.com/RiadMefti/agent-orchestrator/releases/latest/download/SHA256SUMS) and
-GitHub build provenance attestations are attached to every release.
+Download the executable for your platform from the
+[latest GitHub release](https://github.com/RiadMefti/agent-orchestrator/releases/latest):
 
-Packaged builds check GitHub at launch and once daily. A quiet update button appears only when a
-newer stable release exists. On Linux, clicking it downloads the verified AppImage without leaving
-the app; a second click restarts into the update. The unsigned macOS build opens the GitHub release
-for a manual replacement.
+- `agent-orchestrator-vVERSION-linux-x64`
+- `agent-orchestrator-vVERSION-mac-arm64`
 
-> **macOS:** The DMG has no valid Apple Developer signature or notarization. After the first blocked
-> launch, open **System Settings → Privacy & Security** and choose **Open Anyway**. Do not disable
-> Gatekeeper globally.
+Then make it executable and place it on your `PATH`:
 
-## Workflow
+```bash
+chmod +x agent-orchestrator-vVERSION-PLATFORM
+mv agent-orchestrator-vVERSION-PLATFORM ~/.local/bin/orchestrator
+orchestrator
+```
 
-1. Start a conversation and choose Codex, Claude Code, or OpenCode as the captain.
-2. Select the model and thinking level, then give the captain an objective.
-3. The captain delegates work by creating real agent sessions, or you start one directly with the
-   quiet agent action.
-4. Each agent appears automatically as a tab beside the captain.
-5. Switch tabs to read a session, speak directly to that agent, or delete a finished worker.
-6. Captain remains pinned and cannot be deleted.
-7. Return to any saved conversation and continue where the team left off.
+The macOS executable is not notarized. Verify its checksum and GitHub attestation first; if
+Gatekeeper then blocks it, clear the download quarantine with
+`xattr -d com.apple.quarantine agent-orchestrator-vVERSION-mac-arm64`.
+
+Every release also includes `SHA256SUMS`, a target-specific CycloneDX SBOM generated from each
+binary's Bun input graph and verified exact package/version markers in supported upstream
+prebundles. Packaging then proves the compiled executable carries the same opaque dependency
+versions. GitHub build/SBOM attestations bind those documents to the binaries. See
+[Releasing](docs/releasing.md) for verification commands.
 
 ## Requirements
 
-- Linux x64, or macOS 12 or newer on Apple silicon
+- Linux x64 with glibc, or macOS on Apple silicon
 - `tmux`
-- at least one installed and authenticated CLI: `codex`, `claude`, or `opencode`
+- at least one installed and authenticated provider CLI: `codex`, `claude`, or `opencode`
+- a terminal at least 90 columns by 18 rows
 
-On macOS, install tmux with `brew install tmux`. Use your distribution's package manager on Linux.
-Node.js is only required when running or building from source.
+Install tmux with `brew install tmux` on macOS or your distribution's package manager on Linux. Bun
+and Node.js are embedded/not required in release executables.
+
+## Use
+
+1. Run `orchestrator`. Startup never infers a project from the current directory and nothing is
+   selected until you choose it.
+2. Press `Alt+N`, paste any existing folder path, name the project, and choose its captain
+   provider/model/thinking level. Absolute paths, relative paths, spaces, and `~/…` are supported.
+3. Select projects on the left. Each project keeps exactly one captain pinned above its workers.
+4. The captain can create real worker sessions, or press `Alt+W` to start one explicitly. Press
+   `Enter` to focus and interact with the selected exact agent CLI.
+5. Removing a project stops its managed sessions and forgets it in Orchestrator. It never deletes or
+   modifies the project folder.
+
+### Keys
+
+| Key                       | Action                                        |
+| ------------------------- | --------------------------------------------- |
+| `Alt+1`, `Alt+2`, `Alt+3` | Focus projects, terminal, or agents           |
+| `Up`, `Down`, `Enter`     | Navigate a focused sidebar and enter terminal |
+| `Alt+N`                   | Add a project folder                          |
+| `Alt+W`                   | New worker in the selected project            |
+| `Delete`                  | Remove the selected project or worker         |
+| `Alt+C`                   | Copy the terminal selection through OSC 52    |
+| `Alt+Q`                   | Quit the UI                                   |
+
+Control-key input, including `Ctrl+C`, goes to the selected agent when the terminal is focused. The
+Alt shortcuts are reserved for application controls.
 
 ## Run from source
 
-```bash
-npm ci
-AO_WORKSPACE=/absolute/path/to/your/project npm run desktop
-```
-
-Packaged builds open a native workspace picker when `AO_WORKSPACE` is not set.
-
-Build a portable Linux AppImage locally:
-
-```bash
-npm run desktop:package:linux
-chmod +x ./release/Orchestrator-linux-x64.AppImage
-./release/Orchestrator-linux-x64.AppImage
-```
-
-Build an unsigned macOS DMG locally on macOS:
-
-```bash
-npm run desktop:package:mac
-```
-
-See [Releasing](docs/releasing.md) for the versioned GitHub release process.
-
-## Run in a browser
+Source development requires Node.js 24+, Bun 1.4+, and tmux.
 
 ```bash
 npm ci
-AO_WORKSPACE=/absolute/path/to/your/project npm run dev
+npm run dev
 ```
 
-Open `http://127.0.0.1:5173`.
-
-Run the production server build:
+Build and smoke-test the standalone executable for the current platform:
 
 ```bash
-npm run build
-AO_WORKSPACE=/absolute/path/to/your/project npm start
+npm run package
+./release/agent-orchestrator-vVERSION-linux-x64 --help
 ```
-
-Open `http://127.0.0.1:4321`.
 
 ## Configuration
 
-| Variable           | Default                     | Purpose                                            |
-| ------------------ | --------------------------- | -------------------------------------------------- |
-| `AO_WORKSPACE`     | current directory           | Workspace inherited by captain and worker sessions |
-| `AO_PORT`          | `4321`                      | Loopback HTTP and WebSocket port                   |
-| `AO_DATABASE_PATH` | `.data/orchestrator.sqlite` | Local conversation metadata database               |
-| `AO_CODEX_BIN`     | discovered                  | Absolute Codex executable override                 |
-| `AO_CLAUDE_BIN`    | discovered                  | Absolute Claude Code executable override           |
-| `AO_OPENCODE_BIN`  | discovered                  | Absolute OpenCode executable override              |
+| Variable           | Default                                                 | Purpose                         |
+| ------------------ | ------------------------------------------------------- | ------------------------------- |
+| `AO_DATABASE_PATH` | `$XDG_DATA_HOME/agent-orchestrator/orchestrator.sqlite` | Local project metadata database |
+| `AO_CODEX_BIN`     | discovered                                              | Codex executable override       |
+| `AO_CLAUDE_BIN`    | discovered                                              | Claude Code executable override |
+| `AO_OPENCODE_BIN`  | discovered                                              | OpenCode executable override    |
 
-The desktop app selects an available loopback port automatically. Provider credentials remain in
-each CLI's local authentication store.
+Project folders are chosen only inside the application. If the new XDG database does not exist, the
+first terminal launch reuses an existing desktop-era database in place; it never copies or deletes
+that file merely to migrate paths. `AO_DATABASE_PATH` always takes precedence. Provider credentials
+remain in each CLI's own local authentication store.
 
 ## Architecture
 
-- Electron hosts the desktop window and the local application runtime.
-- React and xterm.js provide the conversation and terminal workspace.
-- Fastify serves the local HTTP and WebSocket boundaries on `127.0.0.1`.
-- tmux owns live captain and worker sessions so they survive UI restarts.
-- SQLite stores conversation metadata locally.
-- Provider capability adapters discover selectable models and model-specific thinking levels from
-  the installed CLIs, with local caching and stale fallback.
-- Provider launch definitions start the selected captain with nullable provider defaults or its
-  validated model and thinking selection, plus orchestration instructions.
+- `apps/tui` owns the OpenTUI/React terminal layout and the one selected terminal attachment.
+- `packages/runtime/src/application` owns validated use cases independent of UI and infrastructure.
+- `packages/runtime/src/domain` owns conversation, session, command, and terminal ports.
+- `packages/runtime/src/infrastructure` implements SQLite, provider discovery/launching, tmux, and
+  Bun's native PTY.
+- `packages/contracts` owns provider, conversation, and session schemas shared across local layers.
 
-See [Architecture](docs/architecture.md) and the [decision records](docs/decisions) for the system
-boundaries and design rationale.
+The embedded terminal uses native VT parsing, true color, selection, resize, paste, cursor state,
+and a bounded 20,000-line scrollback. Focused tests enforce multi-megabyte ANSI throughput and the
+one-attachment invariant. See [Architecture](docs/architecture.md) for the complete boundaries.
 
 ## Development
 
 ```bash
 npm run verify
-npm audit
+npm audit --omit=dev
 ```
 
-`verify` checks formatting, strict TypeScript, linting, unit and component tests, real tmux and PTY
-integration, and the production build. See [Contributing](CONTRIBUTING.md) for the engineering
-contract and local setup, and [Releasing](docs/releasing.md) for the versioned release cycle.
+`verify` checks formatting, strict TypeScript, linting, unit/component tests, real tmux and PTY
+integration, the production build, and the standalone executable. See
+[Contributing](CONTRIBUTING.md) for the engineering contract.
 
 ## Security
 
-The application binds to loopback, validates HTTP and WebSocket boundaries, and passes process
-arguments through a tested quoting boundary. Provider credentials are managed by their respective
-CLIs. Published binaries are checksummed, attested, and immutable. See [Security](SECURITY.md) for
-reporting guidance.
+Agent Orchestrator opens no network listener. Managed session identities and all local command input
+are validated before process boundaries; child processes receive argument arrays, and the one tmux
+shell-command boundary uses tested POSIX quoting. Published executables are checksummed, attested,
+and immutable. See [Security](SECURITY.md) for reporting guidance.

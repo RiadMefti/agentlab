@@ -23,12 +23,6 @@ export const agentSessionSchema = z.object({
 
 export type AgentSession = z.infer<typeof agentSessionSchema>;
 
-export const sessionsResponseSchema = z.object({
-  sessions: z.array(agentSessionSchema)
-});
-
-export type SessionsResponse = z.infer<typeof sessionsResponseSchema>;
-
 export const agentPromptSchema = z
   .string()
   .trim()
@@ -54,32 +48,3 @@ export const createWorkerInputSchema = z
   .strict();
 
 export type CreateWorkerInput = z.infer<typeof createWorkerInputSchema>;
-
-export const workerCreatedResponseSchema = z
-  .object({
-    sessionName: z.string().min(1)
-  })
-  .strict();
-
-export type WorkerCreatedResponse = z.infer<typeof workerCreatedResponseSchema>;
-
-export const terminalClientMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("input"), data: z.string().max(64_000) }).strict(),
-  z
-    .object({
-      type: z.literal("resize"),
-      cols: z.number().int().min(2).max(1_000),
-      rows: z.number().int().min(1).max(1_000)
-    })
-    .strict()
-]);
-
-export type TerminalClientMessage = z.infer<typeof terminalClientMessageSchema>;
-
-export const terminalServerMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("data"), data: z.string() }),
-  z.object({ type: z.literal("exit"), exitCode: z.number().int().nullable() }),
-  z.object({ type: z.literal("error"), message: z.string() })
-]);
-
-export type TerminalServerMessage = z.infer<typeof terminalServerMessageSchema>;

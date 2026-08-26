@@ -1,0 +1,24 @@
+{
+  "name": "@orchestrator/runtime",
+  "version": "0.1.10",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/local-runtime.d.ts",
+      "default": "./dist/local-runtime.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --build --pretty false"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.239",
+    "@orchestrator/contracts": "0.1.10",
+    "zod": "^4.1.13"
+  }
+}
