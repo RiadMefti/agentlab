@@ -1,6 +1,6 @@
 {
   "name": "agentlab",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Run Codex, Claude Code, and OpenCode in one local terminal, with one captain per project.",
   "keywords": [
     "ai",
