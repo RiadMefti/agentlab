@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
 
 async function assertSignalCleanup(executable: string): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGABRT", "SIGBUS"] as const) {
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-compiled-signal-"));
+    const stateRoot = await privateSmokeStateDirectory("agentlab-compiled-signal-");
     let output = "";
     const decoder = new TextDecoder();
     const child = Bun.spawn([executable], {
@@ -149,7 +149,7 @@ async function assertSignalCleanup(executable: string): Promise<void> {
 }
 
 async function assertDiagnosticsRedirected(executable: string): Promise<void> {
-  const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-diagnostics-smoke-"));
+  const stateRoot = await privateSmokeStateDirectory("agentlab-diagnostics-smoke-");
   try {
     const child = Bun.spawn([executable], {
       env: { ...process.env, XDG_STATE_HOME: stateRoot },
@@ -186,6 +186,12 @@ async function assertDiagnosticsRedirected(executable: string): Promise<void> {
   } finally {
     await rm(stateRoot, { force: true, recursive: true });
   }
+}
+
+async function privateSmokeStateDirectory(prefix: string): Promise<string> {
+  // macOS exposes its temporary directory through /var, which is a symlink to /private/var.
+  // Canonicalize this test-owned directory instead of weakening the production symlink guard.
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
 }
 
 function formatSmokeDetails(details: {
