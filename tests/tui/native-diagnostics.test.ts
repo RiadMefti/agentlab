@@ -2,16 +2,15 @@ import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type StdioOptions } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  consumeNativeDiagnosticsEnvironment,
+  consumeNativeDiagnosticsInvocation,
   nativeDiagnosticsRetention,
-  nativeDiagnosticsRuntimeArguments,
-  openNativeDiagnosticsLog,
-  writeNativeDiagnostic
+  openNativeDiagnosticsLog
 } from "../../apps/tui/src/bootstrap/native-diagnostics.js";
 
 const temporaryDirectories: string[] = [];
@@ -23,19 +22,38 @@ afterEach(async () => {
 });
 
 describe("native diagnostics bootstrap", () => {
-  it("accepts only a matching generated runtime token at the process boundary", () => {
+  it("scrubs private argv and environment markers from an invalid direct handoff", () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
-    expect(nativeDiagnosticsRuntimeArguments([], { AGENTLAB_TUI_RUNTIME: "1" })).toBeNull();
-    expect(
-      nativeDiagnosticsRuntimeArguments([`--agentlab-tui-runtime=${token}`], {
-        AGENTLAB_TUI_RUNTIME: "different"
-      })
-    ).toBeNull();
-    expect(
-      nativeDiagnosticsRuntimeArguments([`--agentlab-tui-runtime=${token}`, "remaining"], {
-        AGENTLAB_TUI_RUNTIME: token
-      })
-    ).toEqual(["remaining"]);
+    const capability = "not-a-capability";
+    const arguments_ = [
+      "bun",
+      "main.tsx",
+      `--agentlab-tui-runtime=${token}`,
+      `--agentlab-tui-diagnostic-capability=${capability}`,
+      "remaining"
+    ];
+    const environment = {
+      AGENTLAB_DIAGNOSTIC_LOG: "/private/legacy.log",
+      AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: capability,
+      AGENTLAB_TUI_RUNTIME: token,
+      PRESERVED: "yes"
+    };
+
+    const invocation = consumeNativeDiagnosticsInvocation(arguments_, environment);
+
+    expect(invocation.kind).toBe("invalid");
+    expect(invocation.arguments).toEqual(["remaining"]);
+    expect(arguments_).toEqual(["bun", "main.tsx", "remaining"]);
+    expect(environment).toEqual({ PRESERVED: "yes" });
+  });
+
+  it("does not expose a diagnostic writer to direct API callers", () => {
+    const invocation = consumeNativeDiagnosticsInvocation(["bun", "main.tsx", "--version"], {
+      PATH: "/usr/bin"
+    });
+
+    expect(invocation).toEqual({ arguments: ["--version"], kind: "direct" });
+    expect("diagnostics" in invocation).toBe(false);
   });
 
   it("keeps real tmux private-mode and grapheme-capacity diagnostics off the interactive stream", async () => {
@@ -303,20 +321,30 @@ describe("native diagnostics bootstrap", () => {
     ).toBe(true);
   });
 
-  it("finishes cleanly when a renderer externally closes its stderr pipe descriptor", async () => {
+  it("rejects descriptor reuse after activating a genuine pipe-shaped handoff", async () => {
     const state = await temporaryState();
-    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    const replacement = join(state, "replacement.log");
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "b".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
     const script = [
-      'import { closeSync } from "node:fs";',
-      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
-      "consumeNativeDiagnosticsEnvironment(process.env);",
+      'import { closeSync, openSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+      "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
       "closeSync(2);",
-      'process.stdout.write(String(writeNativeDiagnostic("after external close")));'
+      `if (openSync(${JSON.stringify(replacement)}, "w") !== 2) throw new Error("fd 2 was not reused");`,
+      'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("after reuse")));'
     ].join("\n");
     const child = spawn("bun", ["-e", script], {
-      env: { ...process.env, AGENTLAB_DIAGNOSTIC_LOG: log.path },
-      stdio: ["ignore", "pipe", "pipe"]
+      env: {
+        ...process.env,
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: proof,
+        AGENTLAB_TUI_RUNTIME: token
+      },
+      stdio: ["ignore", "pipe", "pipe", "pipe"]
     });
+    writeCapabilityHandoff(child.stdio[3], capability);
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
@@ -326,11 +354,7 @@ describe("native diagnostics bootstrap", () => {
     expect(stdout).toBe("false");
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    expect(() => {
-      log.write(stderr);
-      log.close();
-    }).not.toThrow();
-    expect(existsSync(log.path)).toBe(true);
+    expect(readFileSync(replacement, "utf8")).toBe("");
   });
 
   it("tolerates cleanup and finalization failures after opening the writer", async () => {
@@ -347,76 +371,110 @@ describe("native diagnostics bootstrap", () => {
     expect(existsSync(log.path)).toBe(true);
   });
 
-  it("routes renderer teardown failures through the private diagnostic pipe", async () => {
-    const state = await temporaryState();
-    const environment = { ...process.env, XDG_STATE_HOME: state };
-    const log = openNativeDiagnosticsLog(environment);
-    const script = [
-      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
-      "consumeNativeDiagnosticsEnvironment(process.env);",
-      'process.stdout.write(String(writeNativeDiagnostic("Shutdown failed:\\nclose error")));'
-    ].join("\n");
-    const child = spawn("bun", ["-e", script], {
-      env: { ...environment, AGENTLAB_DIAGNOSTIC_LOG: log.path },
-      stdio: ["ignore", "pipe", "pipe"]
+  it("rejects missing and mismatched capabilities without writing to fd 2", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "c".repeat(64);
+    const missing = await launchDiagnosticInvocation([`--agentlab-tui-runtime=${token}`], {
+      AGENTLAB_TUI_RUNTIME: token
     });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      readStream(child.stdout),
-      readStream(child.stderr),
-      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
-    ]);
-    log.write(stderr);
-    log.close();
+    const mismatched = await launchDiagnosticInvocation(
+      [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${capability}`],
+      {
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: "d".repeat(64),
+        AGENTLAB_TUI_RUNTIME: token
+      }
+    );
 
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe("true");
-    expect(stderr).toBe("[agentlab] Shutdown failed: close error\n");
-    expect(readFileSync(log.path, "utf8")).toContain("[agentlab] Shutdown failed: close error");
+    expect(missing).toMatchObject({ exitCode: 0, kind: "runtime", stderr: "", wrote: false });
+    expect(mismatched).toMatchObject({ exitCode: 0, kind: "invalid", stderr: "", wrote: false });
   });
 
-  it("rejects relative and symlinked renderer log paths", async () => {
-    const state = await temporaryState();
-    const target = join(state, "target.log");
-    const link = join(state, "linked.log");
-    await writeFile(target, "");
-    await symlink(target, link);
-
-    consumeNativeDiagnosticsEnvironment({ AGENTLAB_DIAGNOSTIC_LOG: "relative.log" });
-    expect(writeNativeDiagnostic("relative")).toBe(false);
-    consumeNativeDiagnosticsEnvironment({ AGENTLAB_DIAGNOSTIC_LOG: link });
-    expect(writeNativeDiagnostic("symlink")).toBe(false);
-    expect(readFileSync(target, "utf8")).toBe("");
-  });
-
-  it("consumes bootstrap-only environment and keeps renderer failures on the private pipe", async () => {
-    const state = await temporaryState();
-    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
-    const script = [
-      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
-      "consumeNativeDiagnosticsEnvironment(process.env);",
-      'process.stdout.write(`${process.env.AGENTLAB_DIAGNOSTIC_LOG ?? "gone"}|${process.env.AGENTLAB_TUI_RUNTIME ?? "gone"}|${process.env.PRESERVED ?? "missing"}|${String(writeNativeDiagnostic("owned after scrub"))}`);'
-    ].join("\n");
-    const child = spawn("bun", ["-e", script], {
-      env: {
-        ...process.env,
-        AGENTLAB_DIAGNOSTIC_LOG: log.path,
-        AGENTLAB_TUI_RUNTIME: "runtime-token",
-        PRESERVED: "yes"
+  it("accepts a matching capability inherited through the bootstrap pipe and scrubs it", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "f".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const result = await launchDiagnosticInvocation(
+      [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+      {
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: proof,
+        AGENTLAB_TUI_RUNTIME: token
       },
-      stdio: ["ignore", "pipe", "pipe"]
+      "pipe",
+      capability
+    );
+
+    expect(result).toEqual({
+      exitCode: 0,
+      kind: "runtime",
+      scrubbed: true,
+      stderr: "[agentlab] test diagnostic\n",
+      wrote: true
     });
+  });
+
+  it("rejects arbitrary safe paths and non-pipe stderr descriptors", async () => {
+    const state = await temporaryState();
+    const unrelated = join(state, "unrelated.log");
+    await writeFile(unrelated, "");
+    const arbitraryPath = await launchDiagnosticInvocation([], {
+      AGENTLAB_DIAGNOSTIC_LOG: unrelated
+    });
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "e".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const ordinaryStderr = await launchDiagnosticInvocation(
+      [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+      {
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: proof,
+        AGENTLAB_TUI_RUNTIME: token
+      },
+      "ignore",
+      capability
+    );
+
+    expect(arbitraryPath).toMatchObject({ exitCode: 0, kind: "invalid", stderr: "", wrote: false });
+    expect(ordinaryStderr).toMatchObject({
+      exitCode: 0,
+      kind: "runtime",
+      stderr: "",
+      wrote: false
+    });
+    expect(readFileSync(unrelated, "utf8")).toBe("");
+  });
+
+  it("does not let the real runtime caller write with a forged stale marker", async () => {
+    const state = await temporaryState();
+    const unrelated = join(state, "unrelated.log");
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "1".repeat(64);
+    await writeFile(unrelated, "");
+    const child = spawn(
+      "bun",
+      [
+        resolve("apps/tui/src/main.tsx"),
+        `--agentlab-tui-runtime=${token}`,
+        `--agentlab-tui-diagnostic-capability=${capability}`
+      ],
+      {
+        env: {
+          ...process.env,
+          AGENTLAB_DIAGNOSTIC_LOG: unrelated,
+          AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: capability,
+          AGENTLAB_TUI_RUNTIME: token
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
       new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
     ]);
-    log.write(stderr);
-    log.close();
 
-    expect(exitCode).toBe(0);
-    expect(stdout).toBe("gone|gone|yes|true");
-    expect(stderr).toBe("[agentlab] owned after scrub\n");
-    expect(readFileSync(log.path, "utf8")).toContain("owned after scrub");
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe("");
+    expect(readFileSync(unrelated, "utf8")).toBe("");
   });
 
   it("boots the development entry with renderer stderr isolated and its exit code preserved", async () => {
@@ -495,6 +553,69 @@ async function readFirstLine(stream: NodeJS.ReadableStream | null): Promise<stri
       reject(new Error("Child exited before publishing its log path."));
     });
   });
+}
+
+async function launchDiagnosticInvocation(
+  args: readonly string[],
+  environment: NodeJS.ProcessEnv,
+  stderrMode: "ignore" | "pipe" = "pipe",
+  inheritedCapability?: string
+): Promise<{
+  readonly exitCode: number | null;
+  readonly kind: string;
+  readonly scrubbed: boolean;
+  readonly stderr: string;
+  readonly wrote: boolean;
+}> {
+  const script = [
+    'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+    `const argv = ["bun", "main.tsx", ...${JSON.stringify(args)}];`,
+    "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+    'const scrubbed = !argv.some((argument) => argument.startsWith("--agentlab-tui-")) && process.env.AGENTLAB_TUI_RUNTIME === undefined && process.env.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY === undefined && process.env.AGENTLAB_DIAGNOSTIC_LOG === undefined;',
+    'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("test diagnostic");',
+    "process.stdout.write(JSON.stringify({ kind: invocation.kind, scrubbed, wrote }));"
+  ].join("\n");
+  const stdio: StdioOptions =
+    inheritedCapability === undefined
+      ? ["ignore", "pipe", stderrMode]
+      : ["ignore", "pipe", stderrMode, "pipe"];
+  const child = spawn("bun", ["-e", script], {
+    env: { ...process.env, ...environment },
+    stdio
+  });
+  if (inheritedCapability !== undefined) {
+    writeCapabilityHandoff(child.stdio[3], inheritedCapability);
+  }
+  const [stdout, stderr, exitCode] = await Promise.all([
+    readStream(child.stdout),
+    readStream(child.stderr),
+    new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+  ]);
+  const result = JSON.parse(stdout) as {
+    readonly kind: string;
+    readonly scrubbed: boolean;
+    readonly wrote: boolean;
+  };
+  return {
+    exitCode,
+    kind: result.kind,
+    scrubbed: result.scrubbed,
+    stderr,
+    wrote: result.wrote
+  };
+}
+
+function writeCapabilityHandoff(stream: unknown, capability: string): void {
+  if (typeof stream !== "object" || stream === null || !("end" in stream)) {
+    throw new Error("Missing diagnostic capability handoff pipe.");
+  }
+  const writable = stream as NodeJS.WritableStream;
+  writable.on("error", () => undefined);
+  writable.end(capability);
+}
+
+function diagnosticCapabilityProof(runtimeToken: string, capability: string): string {
+  return createHash("sha256").update(runtimeToken).update("\0").update(capability).digest("hex");
 }
 
 function retainedDiagnosticFiles(state: string): string[] {

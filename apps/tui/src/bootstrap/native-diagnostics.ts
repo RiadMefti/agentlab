@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -21,7 +21,6 @@ import { fileURLToPath } from "node:url";
 import {
   closePrivateDiagnosticDescriptor,
   isSafeAbsolutePath,
-  isSafeOwnedDiagnosticFile,
   openPrivateDiagnosticArtifact,
   preparePrivateDiagnosticDirectory
 } from "./private-diagnostic-files.js";
@@ -33,8 +32,14 @@ const MAX_LOG_BYTES = 2 * 1024 * 1024;
 const MAX_RETAINED_LOG_BYTES = 8 * 1024 * 1024;
 const MAX_RETAINED_LOG_FILES = 8;
 const RUNTIME_MARKER = "AGENTLAB_TUI_RUNTIME";
+const DIAGNOSTIC_CAPABILITY_MARKER = "AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY";
+const LEGACY_DIAGNOSTIC_PATH_MARKER = "AGENTLAB_DIAGNOSTIC_LOG";
 const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
+const DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX = "--agentlab-tui-diagnostic-capability=";
+const DIAGNOSTIC_CAPABILITY_DESCRIPTOR = 3;
+const DIAGNOSTIC_CAPABILITY_BYTES = 32;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const DIAGNOSTIC_CAPABILITY_PATTERN = /^[0-9a-f]{64}$/u;
 const PROCESS_IDENTITY_PATTERN = /^[0-9a-f]{16}$/u;
 const ACTIVE_LOG_PATTERN = new RegExp(
   `^tui-([1-9][0-9]*)-(${PROCESS_IDENTITY_PATTERN.source.slice(1, -1)})-(${UUID_PATTERN.source.slice(1, -1)})\\.active$`,
@@ -44,8 +49,6 @@ const RETAINED_LOG_PATTERN = new RegExp(`^tui-(${UUID_PATTERN.source.slice(1, -1
 const RETENTION_MARKER = Buffer.from(
   `[AgentLab retained the newest diagnostics after ${String(MAX_LOG_BYTES)} bytes]\n`
 );
-let rendererOwnsDiagnosticStderr = false;
-let rendererDiagnosticStderrIdentity: DescriptorIdentity | undefined;
 
 export const nativeDiagnosticsRetention = Object.freeze({
   maxBytes: MAX_RETAINED_LOG_BYTES,
@@ -58,6 +61,21 @@ export interface NativeDiagnosticsLog {
   close(): void;
   write(data: string | Uint8Array): void;
 }
+
+export interface NativeDiagnosticWriter {
+  write(message: string): boolean;
+}
+
+export interface NativeDiagnosticsRuntime {
+  readonly arguments: readonly string[];
+  readonly diagnostics: NativeDiagnosticWriter;
+  readonly kind: "runtime";
+}
+
+export type NativeDiagnosticsInvocation =
+  | { readonly arguments: readonly string[]; readonly kind: "direct" }
+  | { readonly arguments: readonly string[]; readonly kind: "invalid" }
+  | NativeDiagnosticsRuntime;
 
 /** Resolves AgentLab's private, local-first diagnostic log without importing the TUI runtime. */
 export function nativeDiagnosticsLogPath(
@@ -139,48 +157,51 @@ export function openNativeDiagnosticsLog(
   };
 }
 
-export function nativeDiagnosticsRuntimeArguments(
-  args: readonly string[],
+/** Consumes and validates the bootstrap's private renderer handoff in one operation. */
+export function consumeNativeDiagnosticsInvocation(
+  processArguments: string[] = process.argv,
   environment: NodeJS.ProcessEnv = process.env
-): readonly string[] | null {
-  const token = environment[RUNTIME_MARKER];
-  if (
-    token === undefined ||
-    !UUID_PATTERN.test(token) ||
-    args[0] !== `${RUNTIME_ARGUMENT_PREFIX}${token}`
-  ) {
-    return null;
-  }
-  return args.slice(1);
-}
-
-/** Retains the private stderr pipe while removing bootstrap-only values from descendants. */
-export function consumeNativeDiagnosticsEnvironment(
-  environment: NodeJS.ProcessEnv = process.env
-): void {
-  rendererOwnsDiagnosticStderr = isOwnedDiagnosticPath(environment.AGENTLAB_DIAGNOSTIC_LOG);
-  rendererDiagnosticStderrIdentity = rendererOwnsDiagnosticStderr
-    ? descriptorIdentity(2)
+): NativeDiagnosticsInvocation {
+  const rawArguments = processArguments.slice(2);
+  const runtimeArgument = rawArguments[0];
+  const capabilityArgument = rawArguments[1];
+  const runtimeToken = environment[RUNTIME_MARKER];
+  const environmentCapability = environment[DIAGNOSTIC_CAPABILITY_MARKER];
+  const argumentCapability = capabilityArgument?.startsWith(DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX)
+    ? capabilityArgument.slice(DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX.length)
     : undefined;
-  rendererOwnsDiagnosticStderr &&= rendererDiagnosticStderrIdentity !== undefined;
-  delete environment.AGENTLAB_TUI_RUNTIME;
-  delete environment.AGENTLAB_DIAGNOSTIC_LOG;
-}
+  const hasPrivateMarker =
+    runtimeToken !== undefined ||
+    environmentCapability !== undefined ||
+    environment[LEGACY_DIAGNOSTIC_PATH_MARKER] !== undefined ||
+    rawArguments.some(isPrivateRuntimeArgument);
 
-/** Appends renderer-owned failures without ever touching the interactive terminal descriptor. */
-export function writeNativeDiagnostic(message: string): boolean {
-  const line = `[agentlab] ${message.replace(/[\r\n]+/gu, " ")}\n`;
-  const ownsDiagnosticStderr =
-    rendererOwnsDiagnosticStderr &&
-    rendererDiagnosticStderrIdentity !== undefined &&
-    descriptorMatches(2, rendererDiagnosticStderrIdentity);
-  if (!ownsDiagnosticStderr) return false;
-  try {
-    writeAll(2, Buffer.from(line));
-    return true;
-  } catch {
-    return false;
+  scrubPrivateDiagnosticsMarkers(processArguments, environment);
+
+  if (!hasPrivateMarker) return { arguments: rawArguments, kind: "direct" };
+  if (
+    runtimeToken === undefined ||
+    !UUID_PATTERN.test(runtimeToken) ||
+    runtimeArgument !== `${RUNTIME_ARGUMENT_PREFIX}${runtimeToken}`
+  ) {
+    return { arguments: userRuntimeArguments(rawArguments), kind: "invalid" };
   }
+
+  const capabilityMissing = environmentCapability === undefined && argumentCapability === undefined;
+  const capabilityValid =
+    environmentCapability !== undefined &&
+    DIAGNOSTIC_CAPABILITY_PATTERN.test(environmentCapability) &&
+    argumentCapability === environmentCapability &&
+    inheritedCapabilityMatches(runtimeToken, environmentCapability);
+  if (!capabilityMissing && !capabilityValid) {
+    return { arguments: userRuntimeArguments(rawArguments), kind: "invalid" };
+  }
+
+  return {
+    arguments: userRuntimeArguments(rawArguments),
+    diagnostics: createNativeDiagnosticWriter(capabilityValid),
+    kind: "runtime"
+  };
 }
 
 export async function runWithNativeDiagnostics(
@@ -194,18 +215,42 @@ export async function runWithNativeDiagnostics(
     // Diagnostics must fail open: an unsafe or unavailable XDG path cannot block the renderer.
   }
   const runtimeToken = randomUUID();
-  const command = rendererCommand([`${RUNTIME_ARGUMENT_PREFIX}${runtimeToken}`, ...args]);
+  const diagnosticCapability =
+    log === null ? null : randomBytes(DIAGNOSTIC_CAPABILITY_BYTES).toString("hex");
+  const diagnosticCapabilityProof =
+    diagnosticCapability === null
+      ? null
+      : nativeDiagnosticCapabilityProof(runtimeToken, diagnosticCapability);
+  const privateArguments = [
+    `${RUNTIME_ARGUMENT_PREFIX}${runtimeToken}`,
+    ...(diagnosticCapabilityProof === null
+      ? []
+      : [`${DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX}${diagnosticCapabilityProof}`])
+  ];
+  const command = rendererCommand([...privateArguments, ...args]);
   const executable = command[0];
   if (executable === undefined) throw new Error("AgentLab renderer command is empty.");
   const rendererEnvironment = { ...environment };
-  delete rendererEnvironment.AGENTLAB_TUI_RUNTIME;
-  delete rendererEnvironment.AGENTLAB_DIAGNOSTIC_LOG;
+  scrubPrivateDiagnosticsEnvironment(rendererEnvironment);
   rendererEnvironment[RUNTIME_MARKER] = runtimeToken;
-  if (log !== null) rendererEnvironment.AGENTLAB_DIAGNOSTIC_LOG = log.path;
+  if (diagnosticCapabilityProof !== null) {
+    rendererEnvironment[DIAGNOSTIC_CAPABILITY_MARKER] = diagnosticCapabilityProof;
+  }
   const child = spawn(executable, command.slice(1), {
     env: rendererEnvironment,
-    stdio: ["inherit", "inherit", log === null ? "ignore" : "pipe"]
+    stdio: [
+      "inherit",
+      "inherit",
+      log === null ? "ignore" : "pipe",
+      ...(diagnosticCapability === null ? [] : (["pipe"] as const))
+    ]
   });
+  if (diagnosticCapability !== null) {
+    sendInheritedDiagnosticCapability(
+      child.stdio[DIAGNOSTIC_CAPABILITY_DESCRIPTOR],
+      diagnosticCapability
+    );
+  }
   const drain = drainNativeDiagnostics(child.stderr, log);
   const listeners = rendererExitStatusSignals.map((signal) => {
     const listener = (): void => {
@@ -483,8 +528,101 @@ function writeAll(fd: number, buffer: Buffer): void {
   }
 }
 
-function isOwnedDiagnosticPath(value: string | undefined): boolean {
-  return isSafeOwnedDiagnosticFile(value);
+function createNativeDiagnosticWriter(enabled: boolean): NativeDiagnosticWriter {
+  const identity = enabled ? descriptorIdentity(2) : undefined;
+  const expected = identity?.pipeLike === true ? identity : undefined;
+  return Object.freeze({
+    write(message: string): boolean {
+      if (expected === undefined || !descriptorMatches(2, expected)) return false;
+      const line = `[agentlab] ${message.replace(/[\r\n]+/gu, " ")}\n`;
+      try {
+        writeAll(2, Buffer.from(line));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  });
+}
+
+function consumeInheritedDiagnosticCapability(): string | undefined {
+  const buffer = Buffer.alloc(DIAGNOSTIC_CAPABILITY_BYTES * 2 + 1);
+  let offset = 0;
+  try {
+    const metadata = fstatSync(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
+    if (!metadata.isFIFO() && !metadata.isSocket()) return undefined;
+    while (offset < buffer.byteLength) {
+      const count = readSync(
+        DIAGNOSTIC_CAPABILITY_DESCRIPTOR,
+        buffer,
+        offset,
+        buffer.byteLength - offset,
+        null
+      );
+      if (count === 0) break;
+      offset += count;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    closePrivateDiagnosticDescriptor(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
+  }
+  if (offset !== DIAGNOSTIC_CAPABILITY_BYTES * 2) return undefined;
+  const capability = buffer.subarray(0, offset).toString("utf8");
+  return DIAGNOSTIC_CAPABILITY_PATTERN.test(capability) ? capability : undefined;
+}
+
+function inheritedCapabilityMatches(runtimeToken: string, expectedProof: string): boolean {
+  const capability = consumeInheritedDiagnosticCapability();
+  return (
+    capability !== undefined &&
+    nativeDiagnosticCapabilityProof(runtimeToken, capability) === expectedProof
+  );
+}
+
+function nativeDiagnosticCapabilityProof(runtimeToken: string, capability: string): string {
+  return createHash("sha256").update(runtimeToken).update("\0").update(capability).digest("hex");
+}
+
+function sendInheritedDiagnosticCapability(
+  stream: NodeJS.ReadableStream | NodeJS.WritableStream | null | undefined,
+  capability: string
+): void {
+  if (stream === null || stream === undefined || !("end" in stream)) return;
+  stream.on("error", () => {
+    // A renderer that exits before consuming the handoff must preserve its real exit status.
+  });
+  stream.end(capability);
+}
+
+function isPrivateRuntimeArgument(argument: string): boolean {
+  return (
+    argument.startsWith(RUNTIME_ARGUMENT_PREFIX) ||
+    argument.startsWith(DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX)
+  );
+}
+
+function userRuntimeArguments(arguments_: readonly string[]): readonly string[] {
+  return arguments_.filter((argument) => !isPrivateRuntimeArgument(argument));
+}
+
+function scrubPrivateDiagnosticsMarkers(
+  processArguments: string[],
+  environment: NodeJS.ProcessEnv
+): void {
+  for (let index = processArguments.length - 1; index >= 2; index -= 1) {
+    const argument = processArguments[index];
+    if (argument !== undefined && isPrivateRuntimeArgument(argument)) {
+      processArguments.splice(index, 1);
+    }
+  }
+  scrubPrivateDiagnosticsEnvironment(environment);
+}
+
+function scrubPrivateDiagnosticsEnvironment(environment: NodeJS.ProcessEnv): void {
+  delete environment.AGENTLAB_TUI_RUNTIME;
+  delete environment.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY;
+  delete environment.AGENTLAB_DIAGNOSTIC_LOG;
 }
 
 interface DescriptorIdentity {
@@ -492,6 +630,7 @@ interface DescriptorIdentity {
   readonly inode: number;
   readonly mode: number;
   readonly rawDevice: number;
+  readonly pipeLike: boolean;
 }
 
 function descriptorIdentity(fd: number): DescriptorIdentity | undefined {
@@ -501,7 +640,8 @@ function descriptorIdentity(fd: number): DescriptorIdentity | undefined {
       device: metadata.dev,
       inode: metadata.ino,
       mode: metadata.mode,
-      rawDevice: metadata.rdev
+      rawDevice: metadata.rdev,
+      pipeLike: metadata.isFIFO() || metadata.isSocket()
     };
   } catch {
     return undefined;
@@ -514,6 +654,7 @@ function descriptorMatches(fd: number, expected: DescriptorIdentity): boolean {
     current?.device === expected.device &&
     current.inode === expected.inode &&
     current.mode === expected.mode &&
-    current.rawDevice === expected.rawDevice
+    current.rawDevice === expected.rawDevice &&
+    current.pipeLike === expected.pipeLike
   );
 }

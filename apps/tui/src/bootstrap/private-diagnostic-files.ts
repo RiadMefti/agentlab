@@ -8,7 +8,7 @@ import {
   openSync,
   unlinkSync
 } from "node:fs";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 export interface PrivateDiagnosticDirectory {
   readonly fd: number;
@@ -59,7 +59,7 @@ export function preparePrivateDiagnosticDirectory(
   }
 }
 
-/** Opens one exclusive regular artifact and removes it on every post-open setup failure. */
+/** Opens one exclusive regular artifact and removes it only after its identity is established. */
 export function openPrivateDiagnosticArtifact(
   activePath: string,
   directory: string,
@@ -105,25 +105,11 @@ export function isSafeAbsolutePath(value: string | undefined): value is string {
   return value !== undefined && isAbsolute(value) && !hasControlCharacter(value);
 }
 
-export function isSafeOwnedDiagnosticFile(value: string | undefined): boolean {
-  if (!isSafeAbsolutePath(value)) return false;
-  try {
-    assertSafeDirectoryPath(dirname(value));
-    const metadata = lstatSync(value);
-    return metadata.isFile() && !metadata.isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 function unlinkFailedArtifact(path: string, expected: FileIdentity | undefined): void {
+  if (expected === undefined) return;
   try {
     const metadata = lstatSync(path);
-    if (
-      metadata.isFile() &&
-      !metadata.isSymbolicLink() &&
-      (expected === undefined || sameFile(metadata, expected))
-    ) {
+    if (metadata.isFile() && !metadata.isSymbolicLink() && sameFile(metadata, expected)) {
       unlinkSync(path);
     }
   } catch {

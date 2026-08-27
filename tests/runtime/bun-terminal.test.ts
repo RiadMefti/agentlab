@@ -40,6 +40,7 @@ describe("Bun terminal resource helpers", () => {
     expect(
       stringEnvironment({
         AGENTLAB_DIAGNOSTIC_LOG: "/private/tui.log",
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: "opaque-capability",
         AGENTLAB_TUI_RUNTIME: "single-use-token",
         PATH: "/usr/bin"
       })

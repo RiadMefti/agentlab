@@ -1,19 +1,21 @@
 import { assertSupportedTerminalRuntime, helpText, parseCliArguments } from "./cli.js";
 import {
-  consumeNativeDiagnosticsEnvironment,
-  nativeDiagnosticsRuntimeArguments,
+  consumeNativeDiagnosticsInvocation,
   runWithNativeDiagnostics,
-  writeNativeDiagnostic
+  type NativeDiagnosticsRuntime
 } from "./bootstrap/native-diagnostics.js";
 import { appVersion } from "./version.js";
 
-let rendererOwnsScreen = false;
+let rendererRuntime: NativeDiagnosticsRuntime | null = null;
 
 async function main(): Promise<void> {
-  const processArguments = process.argv.slice(2);
-  const runtimeArguments = nativeDiagnosticsRuntimeArguments(processArguments);
-  rendererOwnsScreen = runtimeArguments !== null;
-  const action = parseCliArguments(runtimeArguments ?? processArguments);
+  const invocation = consumeNativeDiagnosticsInvocation();
+  if (invocation.kind === "invalid") {
+    process.exitCode = 1;
+    return;
+  }
+  rendererRuntime = invocation.kind === "runtime" ? invocation : null;
+  const action = parseCliArguments(invocation.arguments);
   if (action.kind === "help") {
     process.stdout.write(helpText);
     return;
@@ -24,18 +26,17 @@ async function main(): Promise<void> {
   }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
-  if (runtimeArguments === null) {
-    process.exitCode = await runWithNativeDiagnostics(processArguments);
+  if (invocation.kind === "direct") {
+    process.exitCode = await runWithNativeDiagnostics(invocation.arguments);
     return;
   }
-  consumeNativeDiagnosticsEnvironment();
   const { runTerminalUi } = await import("./run-terminal-ui.js");
-  await runTerminalUi();
+  await runTerminalUi(invocation.diagnostics);
 }
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : "Unexpected startup failure.";
-  if (rendererOwnsScreen) writeNativeDiagnostic(`Renderer failure: ${message}`);
+  if (rendererRuntime !== null) rendererRuntime.diagnostics.write(`Renderer failure: ${message}`);
   else process.stderr.write(`agentlab: ${message}\n`);
   process.exitCode = 1;
 });

@@ -3,7 +3,7 @@ import { createRoot } from "@opentui/react";
 import { createLocalAgentLab, loadLocalConfig } from "@agentlab/runtime";
 
 import { App } from "./app.js";
-import { writeNativeDiagnostic } from "./bootstrap/native-diagnostics.js";
+import type { NativeDiagnosticWriter } from "./bootstrap/native-diagnostics.js";
 import { installSignalExitStatusHandlers } from "./bootstrap/signal-exit.js";
 import {
   createTerminalSuspendHandlers,
@@ -12,7 +12,7 @@ import {
 import { RuntimeContext } from "./runtime-context.js";
 import { palette } from "./theme.js";
 
-export async function runTerminalUi(): Promise<void> {
+export async function runTerminalUi(diagnostics: NativeDiagnosticWriter): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("AgentLab must run in an interactive terminal.");
   }
@@ -42,7 +42,7 @@ export async function runTerminalUi(): Promise<void> {
       useThread: true,
       onDestroy: () => {
         void closeRuntime().catch((error: unknown) => {
-          writeNativeDiagnostic(`Shutdown failed: ${String(error)}`);
+          diagnostics.write(`Shutdown failed: ${String(error)}`);
         });
       }
     });
@@ -51,7 +51,7 @@ export async function runTerminalUi(): Promise<void> {
       activeRenderer,
       () => process.kill(process.pid, "SIGSTOP"),
       (message) => {
-        writeNativeDiagnostic(message);
+        diagnostics.write(message);
       }
     );
     removeSuspendHandlers = (): void => {
