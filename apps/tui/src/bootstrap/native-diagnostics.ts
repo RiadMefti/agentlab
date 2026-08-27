@@ -1,13 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   constants,
   fstatSync,
   ftruncateSync,
   lstatSync,
-  mkdirSync,
   openSync,
   readFileSync,
   readSync,
@@ -17,9 +15,16 @@ import {
   writeSync
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  closePrivateDiagnosticDescriptor,
+  isSafeAbsolutePath,
+  isSafeOwnedDiagnosticFile,
+  openPrivateDiagnosticArtifact,
+  preparePrivateDiagnosticDirectory
+} from "./private-diagnostic-files.js";
 import { exitCodeForSignal, rendererExitStatusSignals } from "./signal-exit.js";
 
 const LOG_DIRECTORY_MODE = 0o700;
@@ -83,23 +88,23 @@ export function openNativeDiagnosticsLog(
   const runId = randomUUID();
   const retainedPath = nativeDiagnosticsLogPath(environment, runId);
   const directory = dirname(retainedPath);
-  mkdirSync(directory, { mode: LOG_DIRECTORY_MODE, recursive: true });
-  const directoryMetadata = lstatSync(directory);
-  if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()) {
-    throw new Error(`Refusing unsafe AgentLab diagnostic directory: ${directory}`);
+  const preparedDirectory = preparePrivateDiagnosticDirectory(directory, LOG_DIRECTORY_MODE);
+  let activePath: string;
+  let fd: number;
+  try {
+    retainNativeDiagnostics(directory);
+    const identity = currentProcessIdentity();
+    if (identity === null) throw new Error("Cannot establish diagnostic writer identity.");
+    activePath = resolve(directory, `tui-${String(process.pid)}-${identity}-${runId}.active`);
+    fd = openPrivateDiagnosticArtifact(
+      activePath,
+      directory,
+      preparedDirectory.identity,
+      LOG_FILE_MODE
+    );
+  } finally {
+    closePrivateDiagnosticDescriptor(preparedDirectory.fd);
   }
-  chmodSync(directory, LOG_DIRECTORY_MODE);
-  retainNativeDiagnostics(directory);
-  const identity = currentProcessIdentity();
-  if (identity === null) throw new Error("Cannot establish diagnostic writer identity.");
-  const activePath = resolve(directory, `tui-${String(process.pid)}-${identity}-${runId}.active`);
-  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
-  const fd = openSync(
-    activePath,
-    constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | noFollow,
-    LOG_FILE_MODE
-  );
-  chmodSync(activePath, LOG_FILE_MODE);
   let closed = false;
   let publishedPath = activePath;
 
@@ -478,18 +483,8 @@ function writeAll(fd: number, buffer: Buffer): void {
   }
 }
 
-function isSafeAbsolutePath(value: string | undefined): value is string {
-  return value !== undefined && isAbsolute(value) && !hasControlCharacter(value);
-}
-
 function isOwnedDiagnosticPath(value: string | undefined): boolean {
-  if (!isSafeAbsolutePath(value)) return false;
-  try {
-    const metadata = lstatSync(value);
-    return metadata.isFile() && !metadata.isSymbolicLink();
-  } catch {
-    return false;
-  }
+  return isSafeOwnedDiagnosticFile(value);
 }
 
 interface DescriptorIdentity {
@@ -521,11 +516,4 @@ function descriptorMatches(fd: number, expected: DescriptorIdentity): boolean {
     current.mode === expected.mode &&
     current.rawDevice === expected.rawDevice
   );
-}
-
-function hasControlCharacter(value: string): boolean {
-  return Array.from(value).some((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 0x1f || codePoint === 0x7f;
-  });
 }

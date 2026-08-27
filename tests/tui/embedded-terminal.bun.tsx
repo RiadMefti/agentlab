@@ -511,6 +511,58 @@ describe("embedded agent terminal", () => {
     expect(received).toEqual(["\x1b[<35;3;2M"]);
   });
 
+  test("retains UI hover bookkeeping while forwarding one split-offset 1003 child hover", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let sidebarDowns = 0;
+    let sidebarOuts = 0;
+    let sidebarOvers = 0;
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 3, width: 30 }}>
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 20 }}
+        />
+        <box
+          onMouseDown={() => (sidebarDowns += 1)}
+          onMouseOut={() => (sidebarOuts += 1)}
+          onMouseOver={() => (sidebarOvers += 1)}
+          style={{ height: 3, width: 10 }}
+        />
+      </box>,
+      { height: 3, width: 30 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("\x1b[?1003;1006h");
+    await setup.flush();
+    const splitRenderer = setup.renderer as unknown as {
+      _splitHeight: number;
+      capturedRenderable?: unknown;
+      renderOffset: number;
+    };
+    splitRenderer._splitHeight = 3;
+    splitRenderer.renderOffset = 2;
+
+    await setup.mockMouse.moveTo(25, 3);
+    await setup.mockMouse.moveTo(2, 3);
+    await setup.flush();
+
+    expect(sidebarOvers).toBe(1);
+    expect(sidebarOuts).toBe(1);
+    expect(received).toEqual(["\x1b[<35;3;2M"]);
+    expect(splitRenderer.capturedRenderable).toBeUndefined();
+
+    await setup.mockMouse.click(25, 3);
+    await setup.flush();
+    expect(sidebarDowns).toBe(1);
+    expect(received).toEqual(["\x1b[<35;3;2M"]);
+    expect(splitRenderer.capturedRenderable).toBeUndefined();
+  });
+
   test("uses normal click focus semantics across tracked terminals", async () => {
     const first = createRef<EmbeddedTerminalRenderable>();
     const second = createRef<EmbeddedTerminalRenderable>();

@@ -246,6 +246,25 @@ describe("native diagnostics bootstrap", () => {
     await chmod(unreadable, 0o600);
   });
 
+  it("rejects a symlinked XDG state ancestor without writing into its target", async () => {
+    const state = await temporaryState();
+    const target = join(state, "redirect-target");
+    const linkedState = join(state, "linked-state");
+    await mkdir(target);
+    await symlink(target, linkedState);
+
+    expect(() => openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: linkedState })).toThrow(
+      /Refusing unsafe AgentLab diagnostic directory/u
+    );
+    expect(existsSync(join(target, "agentlab"))).toBe(false);
+
+    const result = await launchDevelopmentEntry(linkedState);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("terminal UI exited unexpectedly");
+    expect(result.stderr).not.toContain("diagnostics:");
+    expect(existsSync(join(target, "agentlab"))).toBe(false);
+  });
+
   it("preserves an active writer owned by another bootstrap process", async () => {
     const state = await temporaryState();
     const childScript = [
