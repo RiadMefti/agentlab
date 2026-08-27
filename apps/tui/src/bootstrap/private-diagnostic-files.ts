@@ -15,7 +15,12 @@ export interface PrivateDiagnosticDirectory {
   readonly identity: FileIdentity;
 }
 
-interface FileIdentity {
+export interface PrivateDiagnosticArtifact {
+  readonly fd: number;
+  readonly identity: FileIdentity;
+}
+
+export interface FileIdentity {
   readonly device: number;
   readonly inode: number;
 }
@@ -65,7 +70,7 @@ export function openPrivateDiagnosticArtifact(
   directory: string,
   directoryIdentity: PrivateDiagnosticDirectory["identity"],
   mode: number
-): number {
+): PrivateDiagnosticArtifact {
   const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
   let fd: number | null = null;
   let identity: FileIdentity | undefined;
@@ -83,7 +88,7 @@ export function openPrivateDiagnosticArtifact(
     if (!fstatSync(fd).isFile()) throw unsafeFileError(activePath);
     assertSafeDirectoryPath(directory, directoryIdentity);
     assertOwnedRegularFile(activePath, identity);
-    return fd;
+    return { fd, identity };
   } catch (error: unknown) {
     if (fd !== null) {
       closePrivateDiagnosticDescriptor(fd);
@@ -105,13 +110,19 @@ export function isSafeAbsolutePath(value: string | undefined): value is string {
   return value !== undefined && isAbsolute(value) && !hasControlCharacter(value);
 }
 
+export function privateDiagnosticArtifactMatches(path: string, expected: FileIdentity): boolean {
+  try {
+    const metadata = lstatSync(path);
+    return metadata.isFile() && !metadata.isSymbolicLink() && sameFile(metadata, expected);
+  } catch {
+    return false;
+  }
+}
+
 function unlinkFailedArtifact(path: string, expected: FileIdentity | undefined): void {
   if (expected === undefined) return;
   try {
-    const metadata = lstatSync(path);
-    if (metadata.isFile() && !metadata.isSymbolicLink() && sameFile(metadata, expected)) {
-      unlinkSync(path);
-    }
+    if (privateDiagnosticArtifactMatches(path, expected)) unlinkSync(path);
   } catch {
     // The artifact may already be gone or its path may no longer identify the opened file.
   }

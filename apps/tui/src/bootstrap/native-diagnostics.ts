@@ -22,6 +22,7 @@ import {
   closePrivateDiagnosticDescriptor,
   isSafeAbsolutePath,
   openPrivateDiagnosticArtifact,
+  privateDiagnosticArtifactMatches,
   preparePrivateDiagnosticDirectory
 } from "./private-diagnostic-files.js";
 import { exitCodeForSignal, rendererExitStatusSignals } from "./signal-exit.js";
@@ -108,13 +109,13 @@ export function openNativeDiagnosticsLog(
   const directory = dirname(retainedPath);
   const preparedDirectory = preparePrivateDiagnosticDirectory(directory, LOG_DIRECTORY_MODE);
   let activePath: string;
-  let fd: number;
+  let artifact: ReturnType<typeof openPrivateDiagnosticArtifact>;
   try {
     retainNativeDiagnostics(directory);
     const identity = currentProcessIdentity();
     if (identity === null) throw new Error("Cannot establish diagnostic writer identity.");
     activePath = resolve(directory, `tui-${String(process.pid)}-${identity}-${runId}.active`);
-    fd = openPrivateDiagnosticArtifact(
+    artifact = openPrivateDiagnosticArtifact(
       activePath,
       directory,
       preparedDirectory.identity,
@@ -123,6 +124,7 @@ export function openNativeDiagnosticsLog(
   } finally {
     closePrivateDiagnosticDescriptor(preparedDirectory.fd);
   }
+  const { fd, identity: artifactIdentity } = artifact;
   let closed = false;
   let publishedPath = activePath;
 
@@ -141,12 +143,11 @@ export function openNativeDiagnosticsLog(
     close() {
       if (closed) return;
       closed = true;
+      if (!closeNativeDiagnosticsLogDescriptor(fd)) return;
+      if (!privateDiagnosticArtifactMatches(activePath, artifactIdentity)) return;
       try {
-        closeSync(fd);
-      } catch {
-        // An externally closed sink must not replace the renderer's real exit status.
-      }
-      try {
+        // Node/Bun lack renameat-by-descriptor. This check prevents known replacements from moving,
+        // while a same-user swap between this lstat and rename remains an unavoidable TOCTOU.
         renameSync(activePath, retainedPath);
         publishedPath = retainedPath;
       } catch {
@@ -188,18 +189,21 @@ export function consumeNativeDiagnosticsInvocation(
   }
 
   const capabilityMissing = environmentCapability === undefined && argumentCapability === undefined;
-  const capabilityValid =
+  // Equality across caller-controlled argv/env binds the two invocation representations only.
+  // Diagnostics authorization additionally requires the inherited secret and its descriptor class.
+  const diagnosticsAuthorization =
     environmentCapability !== undefined &&
     DIAGNOSTIC_CAPABILITY_PATTERN.test(environmentCapability) &&
-    argumentCapability === environmentCapability &&
-    inheritedCapabilityMatches(runtimeToken, environmentCapability);
-  if (!capabilityMissing && !capabilityValid) {
+    argumentCapability === environmentCapability
+      ? consumeNativeDiagnosticsAuthorization(runtimeToken, environmentCapability)
+      : undefined;
+  if (!capabilityMissing && diagnosticsAuthorization === undefined) {
     return { arguments: userRuntimeArguments(rawArguments), kind: "invalid" };
   }
 
   return {
     arguments: userRuntimeArguments(rawArguments),
-    diagnostics: createNativeDiagnosticWriter(capabilityValid),
+    diagnostics: createNativeDiagnosticWriter(diagnosticsAuthorization),
     kind: "runtime"
   };
 }
@@ -528,9 +532,26 @@ function writeAll(fd: number, buffer: Buffer): void {
   }
 }
 
-function createNativeDiagnosticWriter(enabled: boolean): NativeDiagnosticWriter {
-  const identity = enabled ? descriptorIdentity(2) : undefined;
-  const expected = identity?.pipeLike === true ? identity : undefined;
+function closeNativeDiagnosticsLogDescriptor(fd: number): boolean {
+  try {
+    closeSync(fd);
+    return true;
+  } catch {
+    // An externally closed or unclosable sink must leave its active pathname recoverable.
+    return false;
+  }
+}
+
+interface NativeDiagnosticsAuthorization {
+  readonly descriptorClass: AnonymousPipeDescriptorClass;
+}
+
+function createNativeDiagnosticWriter(
+  authorization: NativeDiagnosticsAuthorization | undefined
+): NativeDiagnosticWriter {
+  const identity = authorization === undefined ? undefined : descriptorIdentity(2);
+  const expected =
+    identity?.descriptorClass === authorization?.descriptorClass ? identity : undefined;
   return Object.freeze({
     write(message: string): boolean {
       if (expected === undefined || !descriptorMatches(2, expected)) return false;
@@ -545,12 +566,19 @@ function createNativeDiagnosticWriter(enabled: boolean): NativeDiagnosticWriter 
   });
 }
 
-function consumeInheritedDiagnosticCapability(): string | undefined {
+interface InheritedDiagnosticCapability {
+  readonly descriptorClass: AnonymousPipeDescriptorClass;
+  readonly value: string;
+}
+
+function consumeInheritedDiagnosticCapability(): InheritedDiagnosticCapability | undefined {
   const buffer = Buffer.alloc(DIAGNOSTIC_CAPABILITY_BYTES * 2 + 1);
   let offset = 0;
+  let descriptorClass: AnonymousPipeDescriptorClass | undefined;
   try {
     const metadata = fstatSync(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
-    if (!metadata.isFIFO() && !metadata.isSocket()) return undefined;
+    descriptorClass = anonymousPipeDescriptorClass(metadata);
+    if (descriptorClass === undefined) return undefined;
     while (offset < buffer.byteLength) {
       const count = readSync(
         DIAGNOSTIC_CAPABILITY_DESCRIPTOR,
@@ -569,15 +597,20 @@ function consumeInheritedDiagnosticCapability(): string | undefined {
   }
   if (offset !== DIAGNOSTIC_CAPABILITY_BYTES * 2) return undefined;
   const capability = buffer.subarray(0, offset).toString("utf8");
-  return DIAGNOSTIC_CAPABILITY_PATTERN.test(capability) ? capability : undefined;
+  return DIAGNOSTIC_CAPABILITY_PATTERN.test(capability)
+    ? { descriptorClass, value: capability }
+    : undefined;
 }
 
-function inheritedCapabilityMatches(runtimeToken: string, expectedProof: string): boolean {
-  const capability = consumeInheritedDiagnosticCapability();
-  return (
-    capability !== undefined &&
-    nativeDiagnosticCapabilityProof(runtimeToken, capability) === expectedProof
-  );
+function consumeNativeDiagnosticsAuthorization(
+  runtimeToken: string,
+  expectedProof: string
+): NativeDiagnosticsAuthorization | undefined {
+  const inherited = consumeInheritedDiagnosticCapability();
+  return inherited !== undefined &&
+    nativeDiagnosticCapabilityProof(runtimeToken, inherited.value) === expectedProof
+    ? { descriptorClass: inherited.descriptorClass }
+    : undefined;
 }
 
 function nativeDiagnosticCapabilityProof(runtimeToken: string, capability: string): string {
@@ -625,27 +658,40 @@ function scrubPrivateDiagnosticsEnvironment(environment: NodeJS.ProcessEnv): voi
   delete environment.AGENTLAB_DIAGNOSTIC_LOG;
 }
 
+type AnonymousPipeDescriptorClass = "fifo" | "socket";
+
 interface DescriptorIdentity {
+  readonly descriptorClass: AnonymousPipeDescriptorClass;
   readonly device: number;
   readonly inode: number;
   readonly mode: number;
   readonly rawDevice: number;
-  readonly pipeLike: boolean;
 }
 
 function descriptorIdentity(fd: number): DescriptorIdentity | undefined {
   try {
     const metadata = fstatSync(fd);
+    const descriptorClass = anonymousPipeDescriptorClass(metadata);
+    if (descriptorClass === undefined) return undefined;
     return {
+      descriptorClass,
       device: metadata.dev,
       inode: metadata.ino,
       mode: metadata.mode,
-      rawDevice: metadata.rdev,
-      pipeLike: metadata.isFIFO() || metadata.isSocket()
+      rawDevice: metadata.rdev
     };
   } catch {
     return undefined;
   }
+}
+
+function anonymousPipeDescriptorClass(metadata: {
+  isFIFO(): boolean;
+  isSocket(): boolean;
+}): AnonymousPipeDescriptorClass | undefined {
+  if (metadata.isSocket() && !metadata.isFIFO()) return "socket";
+  if (metadata.isFIFO() && !metadata.isSocket()) return "fifo";
+  return undefined;
 }
 
 function descriptorMatches(fd: number, expected: DescriptorIdentity): boolean {
@@ -653,8 +699,8 @@ function descriptorMatches(fd: number, expected: DescriptorIdentity): boolean {
   return (
     current?.device === expected.device &&
     current.inode === expected.inode &&
+    current.descriptorClass === expected.descriptorClass &&
     current.mode === expected.mode &&
-    current.rawDevice === expected.rawDevice &&
-    current.pipeLike === expected.pipeLike
+    current.rawDevice === expected.rawDevice
   );
 }

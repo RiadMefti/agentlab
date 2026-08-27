@@ -1,9 +1,19 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  statSync
+} from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawn, type StdioOptions } from "node:child_process";
+import { spawn, spawnSync, type StdioOptions } from "node:child_process";
 import { createHash } from "node:crypto";
+import { isatty } from "node:tty";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -357,6 +367,73 @@ describe("native diagnostics bootstrap", () => {
     expect(readFileSync(replacement, "utf8")).toBe("");
   });
 
+  it("rejects a closed fd 2 after activating diagnostics", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "2".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const script = [
+      'import { closeSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+      "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "closeSync(2);",
+      'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("after close")));'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: diagnosticsEnvironment(token, proof),
+      stdio: ["ignore", "pipe", "pipe", "pipe"]
+    });
+    writeCapabilityHandoff(child.stdio[3], capability);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+
+    expect({ exitCode, stderr, stdout }).toEqual({ exitCode: 0, stderr: "", stdout: "false" });
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "rejects a different pipe after fd 2 is reused",
+    async () => {
+      const state = await temporaryState();
+      const fifo = join(state, "different.pipe");
+      expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+      const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+      const token = "123e4567-e89b-42d3-a456-426614174000";
+      const capability = "3".repeat(64);
+      const proof = diagnosticCapabilityProof(token, capability);
+      const script = [
+        'import { closeSync, constants, openSync } from "node:fs";',
+        'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+        `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+        "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+        "closeSync(2);",
+        `if (openSync(${JSON.stringify(fifo)}, constants.O_WRONLY | constants.O_NONBLOCK) !== 2) throw new Error("fd 2 was not reused");`,
+        'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("different pipe")));'
+      ].join("\n");
+      const child = spawn("bun", ["-e", script], {
+        env: diagnosticsEnvironment(token, proof),
+        stdio: ["ignore", "pipe", "pipe", "pipe"]
+      });
+      writeCapabilityHandoff(child.stdio[3], capability);
+      try {
+        const [stdout, stderr, exitCode] = await Promise.all([
+          readStream(child.stdout),
+          readStream(child.stderr),
+          new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+        ]);
+        expect({ exitCode, stderr, stdout }).toEqual({
+          exitCode: 0,
+          stderr: "",
+          stdout: "false"
+        });
+      } finally {
+        closeSync(reader);
+      }
+    }
+  );
+
   it("tolerates cleanup and finalization failures after opening the writer", async () => {
     const state = await temporaryState();
     const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
@@ -384,9 +461,22 @@ describe("native diagnostics bootstrap", () => {
         AGENTLAB_TUI_RUNTIME: token
       }
     );
+    const capabilityOnlyInArgumentsAndEnvironment = await launchDiagnosticInvocation(
+      [
+        `--agentlab-tui-runtime=${token}`,
+        `--agentlab-tui-diagnostic-capability=${diagnosticCapabilityProof(token, capability)}`
+      ],
+      diagnosticsEnvironment(token, diagnosticCapabilityProof(token, capability))
+    );
 
     expect(missing).toMatchObject({ exitCode: 0, kind: "runtime", stderr: "", wrote: false });
     expect(mismatched).toMatchObject({ exitCode: 0, kind: "invalid", stderr: "", wrote: false });
+    expect(capabilityOnlyInArgumentsAndEnvironment).toMatchObject({
+      exitCode: 0,
+      kind: "invalid",
+      stderr: "",
+      wrote: false
+    });
   });
 
   it("accepts a matching capability inherited through the bootstrap pipe and scrubs it", async () => {
@@ -408,6 +498,52 @@ describe("native diagnostics bootstrap", () => {
       kind: "runtime",
       scrubbed: true,
       stderr: "[agentlab] test diagnostic\n",
+      wrote: true
+    });
+  });
+
+  it("consumes authorization once and keeps every marker out of a descendant", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "4".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const descendantScript =
+      'process.stdout.write(JSON.stringify({argv:process.argv.filter((value)=>value.includes("agentlab-tui")),cap:process.env.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY,runtime:process.env.AGENTLAB_TUI_RUNTIME,path:process.env.AGENTLAB_DIAGNOSTIC_LOG}))';
+    const script = [
+      'import { spawnSync } from "node:child_process";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+      "const first = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "const second = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      `const descendant = spawnSync(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { encoding: "utf8", env: process.env });`,
+      'const wrote = first.kind === "runtime" && first.diagnostics.write("one-shot writer");',
+      'process.stdout.write(JSON.stringify({ descendant: descendant.stdout, second: second.kind, secondWriter: "diagnostics" in second, wrote }));'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: {
+        ...diagnosticsEnvironment(token, proof),
+        AGENTLAB_DIAGNOSTIC_LOG: "/private/legacy.log"
+      },
+      stdio: ["ignore", "pipe", "pipe", "pipe"]
+    });
+    writeCapabilityHandoff(child.stdio[3], capability);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+    const result = JSON.parse(stdout) as {
+      descendant: string;
+      second: string;
+      secondWriter: boolean;
+      wrote: boolean;
+    };
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("[agentlab] one-shot writer\n");
+    expect(result).toEqual({
+      descendant: '{"argv":[]}',
+      second: "direct",
+      secondWriter: false,
       wrote: true
     });
   });
@@ -441,6 +577,49 @@ describe("native diagnostics bootstrap", () => {
     });
     expect(readFileSync(unrelated, "utf8")).toBe("");
   });
+
+  it("rejects a regular-file fd 2 even with a genuine inherited capability", async () => {
+    const state = await temporaryState();
+    const path = join(state, "regular-stderr.log");
+    const fd = openSync(path, constants.O_CREAT | constants.O_RDWR, 0o600);
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "5".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    try {
+      const result = await launchDiagnosticInvocation(
+        [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+        diagnosticsEnvironment(token, proof),
+        fd,
+        capability
+      );
+      expect(result).toMatchObject({ exitCode: 0, kind: "runtime", stderr: "", wrote: false });
+      expect(readFileSync(path, "utf8")).toBe("");
+    } finally {
+      closeSync(fd);
+    }
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "rejects a TTY fd 2 even with a genuine inherited capability",
+    async () => {
+      const fd = openSync("/dev/ptmx", constants.O_RDWR | constants.O_NOCTTY);
+      const token = "123e4567-e89b-42d3-a456-426614174000";
+      const capability = "6".repeat(64);
+      const proof = diagnosticCapabilityProof(token, capability);
+      try {
+        expect(isatty(fd)).toBe(true);
+        const result = await launchDiagnosticInvocation(
+          [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+          diagnosticsEnvironment(token, proof),
+          fd,
+          capability
+        );
+        expect(result).toMatchObject({ exitCode: 0, kind: "runtime", stderr: "", wrote: false });
+      } finally {
+        closeSync(fd);
+      }
+    }
+  );
 
   it("does not let the real runtime caller write with a forged stale marker", async () => {
     const state = await temporaryState();
@@ -558,7 +737,7 @@ async function readFirstLine(stream: NodeJS.ReadableStream | null): Promise<stri
 async function launchDiagnosticInvocation(
   args: readonly string[],
   environment: NodeJS.ProcessEnv,
-  stderrMode: "ignore" | "pipe" = "pipe",
+  stderrMode: "ignore" | "pipe" | number = "pipe",
   inheritedCapability?: string
 ): Promise<{
   readonly exitCode: number | null;
@@ -616,6 +795,14 @@ function writeCapabilityHandoff(stream: unknown, capability: string): void {
 
 function diagnosticCapabilityProof(runtimeToken: string, capability: string): string {
   return createHash("sha256").update(runtimeToken).update("\0").update(capability).digest("hex");
+}
+
+function diagnosticsEnvironment(runtimeToken: string, capabilityProof: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: capabilityProof,
+    AGENTLAB_TUI_RUNTIME: runtimeToken
+  };
 }
 
 function retainedDiagnosticFiles(state: string): string[] {
