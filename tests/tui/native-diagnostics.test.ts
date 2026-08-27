@@ -533,21 +533,25 @@ describe("native diagnostics bootstrap", () => {
       'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
       "const startedAt = Date.now();",
+      "const connectedBefore = process.connected;",
       "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
       "let fd3Closed = false; try { fstatSync(3); } catch { fd3Closed = true; }",
       'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("silent ipc");',
-      "process.stdout.write(JSON.stringify({ elapsed: Date.now() - startedAt, fd3Closed, kind: invocation.kind, wrote }));"
+      "process.stdout.write(JSON.stringify({ connectedAfter: process.connected, connectedBefore, elapsed: Date.now() - startedAt, fd3Closed, kind: invocation.kind, wrote }));"
     ].join("\n");
     const child = spawn("bun", ["-e", script], {
       env: diagnosticsEnvironment(token, proof),
       stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
+    expect(child.connected).toBe(true);
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
       new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
     ]);
     const result = JSON.parse(stdout) as {
+      connectedAfter: boolean;
+      connectedBefore: boolean;
       elapsed: number;
       fd3Closed: boolean;
       kind: string;
@@ -556,7 +560,13 @@ describe("native diagnostics bootstrap", () => {
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
-    expect(result).toMatchObject({ fd3Closed: true, kind: "invalid", wrote: false });
+    expect(result).toMatchObject({
+      connectedAfter: false,
+      connectedBefore: true,
+      fd3Closed: true,
+      kind: "invalid",
+      wrote: false
+    });
     expect(result.elapsed).toBeGreaterThanOrEqual(75);
     expect(result.elapsed).toBeLessThan(400);
   });
@@ -794,6 +804,29 @@ describe("native diagnostics bootstrap", () => {
     expect(diagnostics).toContain("must run in an interactive terminal");
   });
 
+  it("authorizes a deliberately slow renderer through the genuine bootstrap handshake", async () => {
+    const state = await temporaryState();
+    const fixture = resolve("tests/fixtures/delayed-native-diagnostics-bootstrap.bun.ts");
+    const child = spawn("bun", [fixture], {
+      env: { ...process.env, XDG_STATE_HOME: state },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+    const retained = retainedDiagnosticFiles(state);
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe("true");
+    expect(stderr).toBe("");
+    expect(retained).toHaveLength(1);
+    expect(readFileSync(retained[0] ?? "missing", "utf8")).toContain(
+      "[agentlab] delayed genuine bootstrap"
+    );
+  });
+
   it.each(["symlinked logs directory", "unwritable state root", "state root file"])(
     "launches with fd2 contained when diagnostics cannot open: %s",
     async (failure) => {
@@ -902,9 +935,36 @@ async function launchDiagnosticInvocation(
 }
 
 function sendCapabilityHandoff(child: ReturnType<typeof spawn>, capability: string): void {
-  child.send({ capability, type: "agentlab-native-diagnostics" }, (): void => {
+  let timeout: NodeJS.Timeout;
+  const disconnect = (): void => {
     if (child.connected) child.disconnect();
-  });
+  };
+  const finish = (): void => {
+    clearTimeout(timeout);
+    child.off("disconnect", finish);
+    child.off("exit", finish);
+    child.off("message", onMessage);
+  };
+  const onMessage = (message: unknown): void => {
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("type" in message) ||
+      message.type !== "agentlab-native-diagnostics-ready"
+    ) {
+      return;
+    }
+    child.off("message", onMessage);
+    clearTimeout(timeout);
+    timeout = setTimeout(disconnect, 200);
+    child.send({ capability, type: "agentlab-native-diagnostics" }, (error: Error | null): void => {
+      if (error !== null) disconnect();
+    });
+  };
+  child.on("message", onMessage);
+  child.once("disconnect", finish);
+  child.once("exit", finish);
+  timeout = setTimeout(disconnect, 1_000);
 }
 
 function diagnosticCapabilityProof(runtimeToken: string, capability: string): string {

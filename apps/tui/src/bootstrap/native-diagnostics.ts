@@ -41,6 +41,8 @@ const DIAGNOSTIC_CAPABILITY_DESCRIPTOR = 3;
 const DIAGNOSTIC_CAPABILITY_BYTES = 32;
 const DIAGNOSTIC_CAPABILITY_TIMEOUT_MS = 100;
 const DIAGNOSTIC_CAPABILITY_MESSAGE = "agentlab-native-diagnostics";
+const DIAGNOSTIC_CAPABILITY_READY_MESSAGE = "agentlab-native-diagnostics-ready";
+const DIAGNOSTIC_CAPABILITY_READY_TIMEOUT_MS = 1_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DIAGNOSTIC_CAPABILITY_PATTERN = /^[0-9a-f]{64}$/u;
 const PROCESS_IDENTITY_PATTERN = /^[0-9a-f]{16}$/u;
@@ -632,6 +634,17 @@ function receiveInheritedDiagnosticCapability(): Promise<string | undefined> {
       finish();
     }, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
     process.once("message", onMessage);
+    try {
+      if (typeof process.send !== "function") {
+        finish();
+        return;
+      }
+      process.send({ type: DIAGNOSTIC_CAPABILITY_READY_MESSAGE }, (error: Error | null) => {
+        if (error !== null) finish();
+      });
+    } catch {
+      finish();
+    }
   });
 }
 
@@ -666,6 +679,7 @@ function sendInheritedDiagnosticCapability(
   child: ReturnType<typeof spawn>,
   capability: string
 ): void {
+  let timeout: NodeJS.Timeout;
   const disconnect = (): void => {
     try {
       if (child.connected) child.disconnect();
@@ -673,17 +687,39 @@ function sendInheritedDiagnosticCapability(
       // A renderer may exit before the bootstrap finishes closing its private handoff.
     }
   };
-  const timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
-  try {
-    child.send({ capability, type: DIAGNOSTIC_CAPABILITY_MESSAGE }, (error: Error | null): void => {
-      clearTimeout(timeout);
-      disconnect();
-      void error;
-    });
-  } catch {
+  const finish = (): void => {
     clearTimeout(timeout);
-    disconnect();
-  }
+    child.off("disconnect", finish);
+    child.off("exit", finish);
+    child.off("message", onMessage);
+  };
+  const onMessage = (message: unknown): void => {
+    if (
+      typeof message !== "object" ||
+      message === null ||
+      !("type" in message) ||
+      message.type !== DIAGNOSTIC_CAPABILITY_READY_MESSAGE
+    ) {
+      return;
+    }
+    child.off("message", onMessage);
+    clearTimeout(timeout);
+    timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS * 2);
+    try {
+      child.send(
+        { capability, type: DIAGNOSTIC_CAPABILITY_MESSAGE },
+        (error: Error | null): void => {
+          if (error !== null) disconnect();
+        }
+      );
+    } catch {
+      disconnect();
+    }
+  };
+  child.on("message", onMessage);
+  child.once("disconnect", finish);
+  child.once("exit", finish);
+  timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_READY_TIMEOUT_MS);
 }
 
 function isPrivateRuntimeArgument(argument: string): boolean {
