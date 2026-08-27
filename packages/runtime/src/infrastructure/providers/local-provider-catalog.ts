@@ -25,6 +25,9 @@ const VERSION_BUFFER_BYTES = 32 * 1024;
 const OUTER_TIMEOUT_ALLOWANCE_MS = 250;
 const LOCATOR_TIMEOUT_MS = BINARY_LOCATOR_MAXIMUM_DURATION_MS + OUTER_TIMEOUT_ALLOWANCE_MS;
 const DISCOVERY_OUTCOME_TIMEOUT_MS = 8_000;
+// Aggregate provider-availability budget for responsive project creation. This intentionally
+// preempts the sum of every candidate-local maximum; those inner deadlines bound each attempt.
+const CATALOG_OUTCOME_TIMEOUT_MS = 12_000;
 const MAX_PROVIDER_CANDIDATES = 8;
 const PROCESS_CLEANUP_ALLOWANCE_MS = 3_000;
 
@@ -166,25 +169,12 @@ export class LocalProviderCatalog implements ProviderCatalog {
     if (launcher === undefined) throw new Error(`Unknown provider: ${id}`);
     try {
       return await withTimeout(this.discoverWithinCatalog(id), {
-        timeoutMs: this.options.catalogTimeoutMs ?? this.catalogOutcomeTimeoutMs(),
+        timeoutMs: this.options.catalogTimeoutMs ?? CATALOG_OUTCOME_TIMEOUT_MS,
         message: `${launcher.label} provider catalog timed out.`
       });
     } catch (error: unknown) {
       return unavailableProbe(launcher, errorReason(error, "Provider catalog timed out."));
     }
-  }
-
-  /** Bounds the complete sequential worst case without preempting any nested default deadline. */
-  private catalogOutcomeTimeoutMs(): number {
-    const locatorTimeoutMs = this.options.locatorTimeoutMs ?? LOCATOR_TIMEOUT_MS;
-    const versionTimeoutMs = this.options.versionTimeoutMs ?? VERSION_TIMEOUT_MS;
-    const discoveryTimeoutMs = this.options.discoveryTimeoutMs ?? DISCOVERY_OUTCOME_TIMEOUT_MS;
-    const maxCandidates = this.options.maxCandidates ?? MAX_PROVIDER_CANDIDATES;
-    return (
-      locatorTimeoutMs +
-      maxCandidates * (versionTimeoutMs + PROCESS_CLEANUP_ALLOWANCE_MS + discoveryTimeoutMs) +
-      OUTER_TIMEOUT_ALLOWANCE_MS
-    );
   }
 
   private async discoverWithinCatalog(id: ProviderId): Promise<ProviderProbe> {

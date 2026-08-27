@@ -114,6 +114,37 @@ describe("LocalProviderCatalog", () => {
     ]);
   });
 
+  it("caps aggregate candidate discovery at the project-creation UX deadline", async () => {
+    vi.useFakeTimers();
+    const stalledDiscovery = discovery(() => new Promise(() => undefined));
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [stalledDiscovery],
+      locator(["/opt/codex-one", "/opt/codex-two"]),
+      versionRunner(),
+      { workspace: "/work/project" }
+    );
+    const startedAt = Date.now();
+    let settled = false;
+    const listed = catalog.list().then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(11_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Codex provider catalog timed out."
+      })
+    ]);
+    expect(Date.now() - startedAt).toBe(12_000);
+  });
+
   it("uses the catalog ceiling when a fake version runner ignores its command timeout", async () => {
     const stalledRunner: CommandRunner = {
       run: () => new Promise<RunResult>(() => undefined)
