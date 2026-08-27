@@ -550,15 +550,15 @@ function closeNativeDiagnosticsLogDescriptor(fd: number): boolean {
 }
 
 interface NativeDiagnosticsAuthorization {
-  readonly descriptorClass: AnonymousPipeDescriptorClass;
+  readonly authorized: true;
 }
 
 function createNativeDiagnosticWriter(
   authorization: NativeDiagnosticsAuthorization | undefined
 ): NativeDiagnosticWriter {
-  const identity = authorization === undefined ? undefined : descriptorIdentity(2);
-  const expected =
-    identity?.descriptorClass === authorization?.descriptorClass ? identity : undefined;
+  // Stdio pipes and IPC channels may use different kernel primitives on different platforms.
+  // Authorization proves fd 3 independently; fd 2 still has to be an identity-stable pipe here.
+  const expected = authorization === undefined ? undefined : descriptorIdentity(2);
   return Object.freeze({
     write(message: string): boolean {
       if (expected === undefined || !descriptorMatches(2, expected)) return false;
@@ -574,7 +574,6 @@ function createNativeDiagnosticWriter(
 }
 
 interface InheritedDiagnosticCapability {
-  readonly descriptorClass: AnonymousPipeDescriptorClass;
   readonly value: string;
 }
 
@@ -588,7 +587,7 @@ async function consumeInheritedDiagnosticCapability(): Promise<
     if (descriptorClass === undefined) return undefined;
     if (!process.connected) return undefined;
     const capability = await receiveNativeDiagnosticCapability(processDiagnosticIpc());
-    return capability === undefined ? undefined : { descriptorClass, value: capability };
+    return capability === undefined ? undefined : { value: capability };
   } catch {
     return undefined;
   } finally {
@@ -603,7 +602,7 @@ async function consumeNativeDiagnosticsAuthorization(
   const inherited = await consumeInheritedDiagnosticCapability();
   return inherited !== undefined &&
     nativeDiagnosticCapabilityProof(runtimeToken, inherited.value) === expectedProof
-    ? { descriptorClass: inherited.descriptorClass }
+    ? { authorized: true }
     : undefined;
 }
 
