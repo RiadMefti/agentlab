@@ -32,33 +32,28 @@ afterEach(async () => {
 });
 
 describe("native diagnostics bootstrap", () => {
-  it("scrubs private argv and environment markers from an invalid direct handoff", () => {
+  it("scrubs private argv and environment markers from an invalid direct handoff", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
     const capability = "not-a-capability";
-    const arguments_ = [
-      "bun",
-      "main.tsx",
-      `--agentlab-tui-runtime=${token}`,
-      `--agentlab-tui-diagnostic-capability=${capability}`,
-      "remaining"
-    ];
-    const environment = {
-      AGENTLAB_DIAGNOSTIC_LOG: "/private/legacy.log",
-      AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: capability,
-      AGENTLAB_TUI_RUNTIME: token,
-      PRESERVED: "yes"
-    };
+    const result = await launchDiagnosticInvocation(
+      [
+        `--agentlab-tui-runtime=${token}`,
+        `--agentlab-tui-diagnostic-capability=${capability}`,
+        "remaining"
+      ],
+      {
+        AGENTLAB_DIAGNOSTIC_LOG: "/private/legacy.log",
+        AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: capability,
+        AGENTLAB_TUI_RUNTIME: token,
+        PRESERVED: "yes"
+      }
+    );
 
-    const invocation = consumeNativeDiagnosticsInvocation(arguments_, environment);
-
-    expect(invocation.kind).toBe("invalid");
-    expect(invocation.arguments).toEqual(["remaining"]);
-    expect(arguments_).toEqual(["bun", "main.tsx", "remaining"]);
-    expect(environment).toEqual({ PRESERVED: "yes" });
+    expect(result).toMatchObject({ exitCode: 0, kind: "invalid", scrubbed: true, wrote: false });
   });
 
-  it("does not expose a diagnostic writer to direct API callers", () => {
-    const invocation = consumeNativeDiagnosticsInvocation(["bun", "main.tsx", "--version"], {
+  it("does not expose a diagnostic writer to direct API callers", async () => {
+    const invocation = await consumeNativeDiagnosticsInvocation(["bun", "main.tsx", "--version"], {
       PATH: "/usr/bin"
     });
 
@@ -341,7 +336,7 @@ describe("native diagnostics bootstrap", () => {
       'import { closeSync, openSync } from "node:fs";',
       'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
-      "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
       "closeSync(2);",
       `if (openSync(${JSON.stringify(replacement)}, "w") !== 2) throw new Error("fd 2 was not reused");`,
       'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("after reuse")));'
@@ -352,9 +347,9 @@ describe("native diagnostics bootstrap", () => {
         AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY: proof,
         AGENTLAB_TUI_RUNTIME: token
       },
-      stdio: ["ignore", "pipe", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
-    writeCapabilityHandoff(child.stdio[3], capability);
+    sendCapabilityHandoff(child, capability);
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
@@ -375,15 +370,15 @@ describe("native diagnostics bootstrap", () => {
       'import { closeSync } from "node:fs";',
       'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
-      "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
       "closeSync(2);",
       'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("after close")));'
     ].join("\n");
     const child = spawn("bun", ["-e", script], {
       env: diagnosticsEnvironment(token, proof),
-      stdio: ["ignore", "pipe", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
-    writeCapabilityHandoff(child.stdio[3], capability);
+    sendCapabilityHandoff(child, capability);
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
@@ -407,16 +402,16 @@ describe("native diagnostics bootstrap", () => {
         'import { closeSync, constants, openSync } from "node:fs";',
         'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
         `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
-        "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+        "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
         "closeSync(2);",
         `if (openSync(${JSON.stringify(fifo)}, constants.O_WRONLY | constants.O_NONBLOCK) !== 2) throw new Error("fd 2 was not reused");`,
         'process.stdout.write(String(invocation.kind === "runtime" && invocation.diagnostics.write("different pipe")));'
       ].join("\n");
       const child = spawn("bun", ["-e", script], {
         env: diagnosticsEnvironment(token, proof),
-        stdio: ["ignore", "pipe", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe", "ipc"]
       });
-      writeCapabilityHandoff(child.stdio[3], capability);
+      sendCapabilityHandoff(child, capability);
       try {
         const [stdout, stderr, exitCode] = await Promise.all([
           readStream(child.stdout),
@@ -479,6 +474,128 @@ describe("native diagnostics bootstrap", () => {
     });
   });
 
+  it("closes a silent forged fd 3 without blocking or authorizing diagnostics", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "7".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const script = [
+      'import { fstatSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+      "const startedAt = Date.now();",
+      "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "let fd3Closed = false; try { fstatSync(3); } catch { fd3Closed = true; }",
+      'const scrubbed = !argv.some((argument) => argument.startsWith("--agentlab-tui-")) && process.env.AGENTLAB_TUI_RUNTIME === undefined && process.env.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY === undefined;',
+      'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("silent fd3");',
+      "process.stdout.write(JSON.stringify({ elapsed: Date.now() - startedAt, fd3Closed, kind: invocation.kind, scrubbed, wrote }));"
+    ].join("\n");
+    const startedAt = Date.now();
+    const child = spawn("bun", ["-e", script], {
+      env: diagnosticsEnvironment(token, proof),
+      stdio: ["ignore", "pipe", "pipe", "pipe"]
+    });
+    const silentWriter = child.stdio[3];
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        readStream(child.stdout),
+        readStream(child.stderr),
+        new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+      ]);
+      const result = JSON.parse(stdout) as {
+        elapsed: number;
+        fd3Closed: boolean;
+        kind: string;
+        scrubbed: boolean;
+        wrote: boolean;
+      };
+
+      expect(exitCode).toBe(0);
+      expect(stderr).toBe("");
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      expect(result).toMatchObject({
+        fd3Closed: true,
+        kind: "invalid",
+        scrubbed: true,
+        wrote: false
+      });
+      expect(result.elapsed).toBeLessThan(250);
+    } finally {
+      silentWriter?.destroy();
+    }
+  });
+
+  it("times out and closes a genuine but silent fd 3 IPC channel", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "a".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const script = [
+      'import { fstatSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
+      "const startedAt = Date.now();",
+      "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "let fd3Closed = false; try { fstatSync(3); } catch { fd3Closed = true; }",
+      'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("silent ipc");',
+      "process.stdout.write(JSON.stringify({ elapsed: Date.now() - startedAt, fd3Closed, kind: invocation.kind, wrote }));"
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: diagnosticsEnvironment(token, proof),
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+    const result = JSON.parse(stdout) as {
+      elapsed: number;
+      fd3Closed: boolean;
+      kind: string;
+      wrote: boolean;
+    };
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+    expect(result).toMatchObject({ fd3Closed: true, kind: "invalid", wrote: false });
+    expect(result.elapsed).toBeGreaterThanOrEqual(75);
+    expect(result.elapsed).toBeLessThan(400);
+  });
+
+  it("closes a genuine fd 3 handoff even when argv and environment proofs mismatch", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "8".repeat(64);
+    const argumentProof = diagnosticCapabilityProof(token, capability);
+    const environmentProof = "9".repeat(64);
+    const script = [
+      'import { fstatSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${argumentProof}"];`,
+      "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "let fd3Closed = false; try { fstatSync(3); } catch { fd3Closed = true; }",
+      "const scrubbed = argv.length === 2 && process.env.AGENTLAB_TUI_RUNTIME === undefined && process.env.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY === undefined;",
+      'process.stdout.write(JSON.stringify({ fd3Closed, hasWriter: "diagnostics" in invocation, kind: invocation.kind, scrubbed }));'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: diagnosticsEnvironment(token, environmentProof),
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    sendCapabilityHandoff(child, capability);
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe("");
+    expect(JSON.parse(stdout)).toEqual({
+      fd3Closed: true,
+      hasWriter: false,
+      kind: "invalid",
+      scrubbed: true
+    });
+  });
+
   it("accepts a matching capability inherited through the bootstrap pipe and scrubs it", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
     const capability = "f".repeat(64);
@@ -512,8 +629,8 @@ describe("native diagnostics bootstrap", () => {
       'import { spawnSync } from "node:child_process";',
       'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
-      "const first = consumeNativeDiagnosticsInvocation(argv, process.env);",
-      "const second = consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "const first = await consumeNativeDiagnosticsInvocation(argv, process.env);",
+      "const second = await consumeNativeDiagnosticsInvocation(argv, process.env);",
       `const descendant = spawnSync(process.execPath, ["-e", ${JSON.stringify(descendantScript)}], { encoding: "utf8", env: process.env });`,
       'const wrote = first.kind === "runtime" && first.diagnostics.write("one-shot writer");',
       'process.stdout.write(JSON.stringify({ descendant: descendant.stdout, second: second.kind, secondWriter: "diagnostics" in second, wrote }));'
@@ -523,9 +640,9 @@ describe("native diagnostics bootstrap", () => {
         ...diagnosticsEnvironment(token, proof),
         AGENTLAB_DIAGNOSTIC_LOG: "/private/legacy.log"
       },
-      stdio: ["ignore", "pipe", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
-    writeCapabilityHandoff(child.stdio[3], capability);
+    sendCapabilityHandoff(child, capability);
     const [stdout, stderr, exitCode] = await Promise.all([
       readStream(child.stdout),
       readStream(child.stderr),
@@ -749,7 +866,7 @@ async function launchDiagnosticInvocation(
   const script = [
     'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
     `const argv = ["bun", "main.tsx", ...${JSON.stringify(args)}];`,
-    "const invocation = consumeNativeDiagnosticsInvocation(argv, process.env);",
+    "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
     'const scrubbed = !argv.some((argument) => argument.startsWith("--agentlab-tui-")) && process.env.AGENTLAB_TUI_RUNTIME === undefined && process.env.AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY === undefined && process.env.AGENTLAB_DIAGNOSTIC_LOG === undefined;',
     'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("test diagnostic");',
     "process.stdout.write(JSON.stringify({ kind: invocation.kind, scrubbed, wrote }));"
@@ -757,13 +874,13 @@ async function launchDiagnosticInvocation(
   const stdio: StdioOptions =
     inheritedCapability === undefined
       ? ["ignore", "pipe", stderrMode]
-      : ["ignore", "pipe", stderrMode, "pipe"];
+      : ["ignore", "pipe", stderrMode, "ipc"];
   const child = spawn("bun", ["-e", script], {
     env: { ...process.env, ...environment },
     stdio
   });
   if (inheritedCapability !== undefined) {
-    writeCapabilityHandoff(child.stdio[3], inheritedCapability);
+    sendCapabilityHandoff(child, inheritedCapability);
   }
   const [stdout, stderr, exitCode] = await Promise.all([
     readStream(child.stdout),
@@ -784,13 +901,10 @@ async function launchDiagnosticInvocation(
   };
 }
 
-function writeCapabilityHandoff(stream: unknown, capability: string): void {
-  if (typeof stream !== "object" || stream === null || !("end" in stream)) {
-    throw new Error("Missing diagnostic capability handoff pipe.");
-  }
-  const writable = stream as NodeJS.WritableStream;
-  writable.on("error", () => undefined);
-  writable.end(capability);
+function sendCapabilityHandoff(child: ReturnType<typeof spawn>, capability: string): void {
+  child.send({ capability, type: "agentlab-native-diagnostics" }, (): void => {
+    if (child.connected) child.disconnect();
+  });
 }
 
 function diagnosticCapabilityProof(runtimeToken: string, capability: string): string {

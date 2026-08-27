@@ -39,6 +39,8 @@ const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
 const DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX = "--agentlab-tui-diagnostic-capability=";
 const DIAGNOSTIC_CAPABILITY_DESCRIPTOR = 3;
 const DIAGNOSTIC_CAPABILITY_BYTES = 32;
+const DIAGNOSTIC_CAPABILITY_TIMEOUT_MS = 100;
+const DIAGNOSTIC_CAPABILITY_MESSAGE = "agentlab-native-diagnostics";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DIAGNOSTIC_CAPABILITY_PATTERN = /^[0-9a-f]{64}$/u;
 const PROCESS_IDENTITY_PATTERN = /^[0-9a-f]{16}$/u;
@@ -159,10 +161,10 @@ export function openNativeDiagnosticsLog(
 }
 
 /** Consumes and validates the bootstrap's private renderer handoff in one operation. */
-export function consumeNativeDiagnosticsInvocation(
+export async function consumeNativeDiagnosticsInvocation(
   processArguments: string[] = process.argv,
   environment: NodeJS.ProcessEnv = process.env
-): NativeDiagnosticsInvocation {
+): Promise<NativeDiagnosticsInvocation> {
   const rawArguments = processArguments.slice(2);
   const runtimeArgument = rawArguments[0];
   const capabilityArgument = rawArguments[1];
@@ -185,6 +187,7 @@ export function consumeNativeDiagnosticsInvocation(
     !UUID_PATTERN.test(runtimeToken) ||
     runtimeArgument !== `${RUNTIME_ARGUMENT_PREFIX}${runtimeToken}`
   ) {
+    await closeInheritedDiagnosticCapability();
     return { arguments: userRuntimeArguments(rawArguments), kind: "invalid" };
   }
 
@@ -197,13 +200,16 @@ export function consumeNativeDiagnosticsInvocation(
     argumentCapability === environmentCapability
       ? consumeNativeDiagnosticsAuthorization(runtimeToken, environmentCapability)
       : undefined;
-  if (!capabilityMissing && diagnosticsAuthorization === undefined) {
+  const resolvedAuthorization = await diagnosticsAuthorization;
+  if (!capabilityMissing && resolvedAuthorization === undefined) {
+    await closeInheritedDiagnosticCapability();
     return { arguments: userRuntimeArguments(rawArguments), kind: "invalid" };
   }
+  if (capabilityMissing) await closeInheritedDiagnosticCapability();
 
   return {
     arguments: userRuntimeArguments(rawArguments),
-    diagnostics: createNativeDiagnosticWriter(diagnosticsAuthorization),
+    diagnostics: createNativeDiagnosticWriter(resolvedAuthorization),
     kind: "runtime"
   };
 }
@@ -246,14 +252,11 @@ export async function runWithNativeDiagnostics(
       "inherit",
       "inherit",
       log === null ? "ignore" : "pipe",
-      ...(diagnosticCapability === null ? [] : (["pipe"] as const))
+      ...(diagnosticCapability === null ? [] : (["ipc"] as const))
     ]
   });
   if (diagnosticCapability !== null) {
-    sendInheritedDiagnosticCapability(
-      child.stdio[DIAGNOSTIC_CAPABILITY_DESCRIPTOR],
-      diagnosticCapability
-    );
+    sendInheritedDiagnosticCapability(child, diagnosticCapability);
   }
   const drain = drainNativeDiagnostics(child.stderr, log);
   const listeners = rendererExitStatusSignals.map((signal) => {
@@ -571,46 +574,88 @@ interface InheritedDiagnosticCapability {
   readonly value: string;
 }
 
-function consumeInheritedDiagnosticCapability(): InheritedDiagnosticCapability | undefined {
-  const buffer = Buffer.alloc(DIAGNOSTIC_CAPABILITY_BYTES * 2 + 1);
-  let offset = 0;
+async function consumeInheritedDiagnosticCapability(): Promise<
+  InheritedDiagnosticCapability | undefined
+> {
   let descriptorClass: AnonymousPipeDescriptorClass | undefined;
   try {
     const metadata = fstatSync(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
     descriptorClass = anonymousPipeDescriptorClass(metadata);
     if (descriptorClass === undefined) return undefined;
-    while (offset < buffer.byteLength) {
-      const count = readSync(
-        DIAGNOSTIC_CAPABILITY_DESCRIPTOR,
-        buffer,
-        offset,
-        buffer.byteLength - offset,
-        null
-      );
-      if (count === 0) break;
-      offset += count;
-    }
+    if (!process.connected) return undefined;
+    const capability = await receiveInheritedDiagnosticCapability();
+    return capability === undefined ? undefined : { descriptorClass, value: capability };
   } catch {
     return undefined;
   } finally {
-    closePrivateDiagnosticDescriptor(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
+    await closeInheritedDiagnosticCapability();
   }
-  if (offset !== DIAGNOSTIC_CAPABILITY_BYTES * 2) return undefined;
-  const capability = buffer.subarray(0, offset).toString("utf8");
-  return DIAGNOSTIC_CAPABILITY_PATTERN.test(capability)
-    ? { descriptorClass, value: capability }
-    : undefined;
 }
 
-function consumeNativeDiagnosticsAuthorization(
+async function consumeNativeDiagnosticsAuthorization(
   runtimeToken: string,
   expectedProof: string
-): NativeDiagnosticsAuthorization | undefined {
-  const inherited = consumeInheritedDiagnosticCapability();
+): Promise<NativeDiagnosticsAuthorization | undefined> {
+  const inherited = await consumeInheritedDiagnosticCapability();
   return inherited !== undefined &&
     nativeDiagnosticCapabilityProof(runtimeToken, inherited.value) === expectedProof
     ? { descriptorClass: inherited.descriptorClass }
     : undefined;
+}
+
+function receiveInheritedDiagnosticCapability(): Promise<string | undefined> {
+  return new Promise((resolveCapability) => {
+    let settled = false;
+    const finish = (capability?: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      process.off("message", onMessage);
+      resolveCapability(capability);
+    };
+    const onMessage = (message: unknown): void => {
+      if (
+        typeof message !== "object" ||
+        message === null ||
+        !("type" in message) ||
+        message.type !== DIAGNOSTIC_CAPABILITY_MESSAGE ||
+        !("capability" in message) ||
+        typeof message.capability !== "string" ||
+        !DIAGNOSTIC_CAPABILITY_PATTERN.test(message.capability)
+      ) {
+        finish();
+        return;
+      }
+      finish(message.capability);
+    };
+    const timeout = setTimeout(() => {
+      finish();
+    }, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
+    process.once("message", onMessage);
+  });
+}
+
+async function closeInheritedDiagnosticCapability(): Promise<void> {
+  if (process.connected) {
+    await new Promise<void>((resolveClose) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        process.off("disconnect", finish);
+        resolveClose();
+      };
+      const timeout = setTimeout(finish, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
+      process.once("disconnect", finish);
+      try {
+        process.disconnect();
+      } catch {
+        finish();
+      }
+    });
+  }
+  closePrivateDiagnosticDescriptor(DIAGNOSTIC_CAPABILITY_DESCRIPTOR);
 }
 
 function nativeDiagnosticCapabilityProof(runtimeToken: string, capability: string): string {
@@ -618,14 +663,27 @@ function nativeDiagnosticCapabilityProof(runtimeToken: string, capability: strin
 }
 
 function sendInheritedDiagnosticCapability(
-  stream: NodeJS.ReadableStream | NodeJS.WritableStream | null | undefined,
+  child: ReturnType<typeof spawn>,
   capability: string
 ): void {
-  if (stream === null || stream === undefined || !("end" in stream)) return;
-  stream.on("error", () => {
-    // A renderer that exits before consuming the handoff must preserve its real exit status.
-  });
-  stream.end(capability);
+  const disconnect = (): void => {
+    try {
+      if (child.connected) child.disconnect();
+    } catch {
+      // A renderer may exit before the bootstrap finishes closing its private handoff.
+    }
+  };
+  const timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
+  try {
+    child.send({ capability, type: DIAGNOSTIC_CAPABILITY_MESSAGE }, (error: Error | null): void => {
+      clearTimeout(timeout);
+      disconnect();
+      void error;
+    });
+  } catch {
+    clearTimeout(timeout);
+    disconnect();
+  }
 }
 
 function isPrivateRuntimeArgument(argument: string): boolean {

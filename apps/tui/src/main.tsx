@@ -9,7 +9,7 @@ import { appVersion } from "./version.js";
 let rendererRuntime: NativeDiagnosticsRuntime | null = null;
 
 async function main(): Promise<void> {
-  const invocation = consumeNativeDiagnosticsInvocation();
+  const invocation = await consumeNativeDiagnosticsInvocation();
   if (invocation.kind === "invalid") {
     process.exitCode = 1;
     return;
