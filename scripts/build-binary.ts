@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -97,6 +97,7 @@ async function main(): Promise<void> {
   if (!help.includes("agentlab")) {
     throw new Error("Packaged binary help smoke test failed.");
   }
+  await assertDiagnosticsRedirected(artifactPath);
 
   if (process.platform === "linux") {
     await assertFailure(
@@ -107,6 +108,29 @@ async function main(): Promise<void> {
     );
   }
   process.stdout.write(`Packaged ${artifactPath} and ${sbomPath}\n`);
+}
+
+async function assertDiagnosticsRedirected(executable: string): Promise<void> {
+  const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-diagnostics-smoke-"));
+  try {
+    const child = Bun.spawn([executable], {
+      env: { ...process.env, XDG_STATE_HOME: stateRoot },
+      stderr: "pipe",
+      stdout: "ignore"
+    });
+    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const log = await readFile(resolve(stateRoot, "agentlab", "logs", "tui.log"), "utf8");
+    if (
+      exitCode === 0 ||
+      !stderr.includes("diagnostics:") ||
+      stderr.includes("must run in an interactive terminal") ||
+      !log.includes("must run in an interactive terminal")
+    ) {
+      throw new Error("Packaged binary did not isolate renderer diagnostics from stderr.");
+    }
+  } finally {
+    await rm(stateRoot, { force: true, recursive: true });
+  }
 }
 
 async function assertOutput(

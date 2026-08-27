@@ -7,6 +7,7 @@ import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtim
 import "../terminal/embedded-terminal.js";
 import type { EmbeddedTerminalRenderable } from "../terminal/embedded-terminal.js";
 import { paintTerminalDefaults } from "../terminal/terminal-appearance.js";
+import { TerminalIngestionPump } from "../terminal/terminal-ingestion-pump.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
 
@@ -89,6 +90,26 @@ export function TerminalPanel({
     const dimensions = dimensionsRef.current;
     if (dimensions === null) return;
     let current = true;
+    let ownedTerminal: SessionTerminal | null = null;
+    let exitReported = false;
+    const pump = new TerminalIngestionPump({
+      write(data) {
+        if (current) terminalRef.current?.write(data);
+      },
+      invalidate() {
+        if (current) terminalRef.current?.invalidate();
+      },
+      onOverrun() {
+        if (!current) return;
+        current = false;
+        ownedTerminal?.close();
+        if (attachmentRef.current === ownedTerminal) attachmentRef.current = null;
+        setConnection("closed");
+        setError(
+          "Terminal output outran the renderer; switch away and back to reconnect from tmux."
+        );
+      }
+    });
     setConnection("connecting");
     setError(null);
 
@@ -100,11 +121,12 @@ export function TerminalPanel({
         rows: dimensions.rows,
         callbacks: {
           onData(data) {
-            if (current) terminalRef.current?.write(data);
+            if (current) pump.enqueue(data);
           },
           onExit(exitCode) {
-            if (!current) return;
-            terminalRef.current?.write(`\r\n[session client exited ${String(exitCode)}]\r\n`);
+            if (!current || exitReported) return;
+            exitReported = true;
+            pump.enqueue(`\r\n[session client exited ${String(exitCode)}]\r\n`);
             setConnection("closed");
           }
         }
@@ -114,9 +136,8 @@ export function TerminalPanel({
           terminal.close();
           return;
         }
+        ownedTerminal = terminal;
         attachmentRef.current = terminal;
-        terminalRef.current?.write(RESET_TERMINAL);
-        if (history !== "") terminalRef.current?.write(normalizeHistory(history));
         const latest = dimensionsRef.current;
         if (
           latest !== null &&
@@ -124,8 +145,19 @@ export function TerminalPanel({
         ) {
           terminal.resize(latest.columns, latest.rows);
         }
-        setDisplayedKey(terminalTargetKeyFromParts(targetConversationId, sessionName));
-        setConnection("connected");
+        if (!pump.enqueue(RESET_TERMINAL)) return;
+        if (history !== "" && !pump.enqueue(normalizeHistory(history))) return;
+        if (
+          !pump.finishHistory(() => {
+            if (!current) return;
+            setDisplayedKey(terminalTargetKeyFromParts(targetConversationId, sessionName));
+            setConnection(exitReported ? "closed" : "connected");
+          })
+        ) {
+          return;
+        }
+        // The pump boundary, rather than runtime buffering, now owns history-before-live order.
+        // Releasing here puts all captured and future PTY bytes under the same explicit limit.
         releaseBufferedOutput();
       })
       .catch((cause: unknown) => {
@@ -137,10 +169,11 @@ export function TerminalPanel({
 
     return () => {
       current = false;
+      pump.cancel();
       renderedTerminal?.clearLocalSelection();
       renderedTerminal?.blur();
-      attachmentRef.current?.close();
-      attachmentRef.current = null;
+      ownedTerminal?.close();
+      if (attachmentRef.current === ownedTerminal) attachmentRef.current = null;
     };
   }, [layoutReady, runtime, sessionName, targetConversationId]);
 

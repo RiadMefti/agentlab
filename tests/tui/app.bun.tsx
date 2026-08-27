@@ -21,6 +21,7 @@ import {
   TerminalPanel
 } from "../../apps/tui/src/components/terminal-panel.js";
 import { RuntimeContext } from "../../apps/tui/src/runtime-context.js";
+import { maximumQueuedTerminalBytes } from "../../apps/tui/src/terminal/terminal-ingestion-pump.js";
 import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
 
 const renderers: { destroy(): void }[] = [];
@@ -530,6 +531,8 @@ describe("terminal workspace", () => {
     expect(pendingFrame).not.toContain("worker-only-history");
 
     workerAttachment.resolve();
+    await allowStateUpdate(setup);
+    await allowStateUpdate(setup);
     await setup.waitForFrame((frame) => frame.includes("worker-only-history"));
 
     expect(setup.captureCharFrame()).not.toContain("captain-only-history");
@@ -692,6 +695,128 @@ describe("terminal workspace", () => {
 
     const frame = setup.captureCharFrame();
     expect(frame.indexOf("older-history-output")).toBeLessThan(frame.indexOf("newer-live-output"));
+  });
+
+  test("switches a clicked sidebar attachment once while history and live output are saturated", async () => {
+    const captainTerminal = fakeTerminal();
+    const workerTerminal = fakeTerminal();
+    let captainInput: OpenSessionTerminalInput | null = null;
+    let workerInput: OpenSessionTerminalInput | null = null;
+    const base = fakeRuntime({ conversations: [conversation], sessions });
+    const historyLine = "seed 👩🏽‍💻 界 é 0123456789abcdefghijklmnopqrstuvwxyz\n";
+    const runtime: LocalAgentLabRuntime = {
+      ...base,
+      openTerminal: mock((input: OpenSessionTerminalInput) => {
+        if (input.sessionName === sessions[0]?.name) {
+          captainInput = input;
+          return Promise.resolve({
+            history: historyLine.repeat(4_096),
+            terminal: captainTerminal,
+            releaseBufferedOutput: mock(() => undefined)
+          });
+        }
+        workerInput = input;
+        return Promise.resolve({
+          history: "worker-ready\n",
+          terminal: workerTerminal,
+          releaseBufferedOutput: mock(() => undefined)
+        });
+      })
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await waitForApp(setup, () => callCount(runtime.openTerminal) === 1, 500);
+    await allowStateUpdate(setup);
+
+    setup.resize(140, 40);
+    await setup.flush();
+    const liveChunk = "\x1b[36mlive 👩🏽‍💻 界 é\x1b[0m\r\n".repeat(256);
+    const selectedCaptainInput = captainInput as OpenSessionTerminalInput | null;
+    if (selectedCaptainInput === null)
+      throw new Error("Captain attachment input was not captured.");
+    for (let index = 0; index < 256; index += 1) {
+      selectedCaptainInput.callbacks.onData(liveChunk);
+    }
+
+    const frame = setup.captureCharFrame();
+    const lines = frame.split("\n");
+    const workerRow = lines.findIndex((line, index) => index > 2 && line.includes("Test Writer"));
+    const workerColumn = lines[workerRow]?.lastIndexOf("Test Writer") ?? -1;
+    expect(workerRow).toBeGreaterThan(2);
+    expect(workerColumn).toBeGreaterThan(0);
+    const startedAt = performance.now();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await setup.mockMouse.click(workerColumn + 2, workerRow);
+    await waitForApp(setup, () => callCount(runtime.openTerminal) === 2, 500);
+
+    expect(performance.now() - startedAt).toBeLessThan(500);
+    expect(callCount(runtime.openTerminal)).toBe(2);
+    expect(callCount(captainTerminal.close)).toBe(1);
+    expect(callCount(captainTerminal.resize)).toBeGreaterThan(0);
+    const staleCaptainInput = captainInput as OpenSessionTerminalInput | null;
+    staleCaptainInput?.callbacks.onData("stale-captain-row\r\n");
+    staleCaptainInput?.callbacks.onExit(9);
+    await waitForApp(setup, () => setup.captureCharFrame().includes("worker-ready"), 500);
+    expect(setup.captureCharFrame()).not.toContain("stale-captain-row");
+
+    const selectedWorkerInput = workerInput as OpenSessionTerminalInput | null;
+    if (selectedWorkerInput === null) throw new Error("Worker attachment input was not captured.");
+    selectedWorkerInput.callbacks.onExit(7);
+    selectedWorkerInput.callbacks.onExit(7);
+    await waitForApp(
+      setup,
+      () => setup.captureCharFrame().includes("session client exited 7"),
+      500
+    );
+    expect(setup.captureCharFrame().split("session client exited 7")).toHaveLength(2);
+  });
+
+  test("stops an overrun attachment visibly without dropping an arbitrary terminal tail", async () => {
+    const terminal = fakeTerminal();
+    let attachmentInput: OpenSessionTerminalInput | null = null;
+    const base = fakeRuntime({ conversations: [conversation], sessions, terminal });
+    const runtime: LocalAgentLabRuntime = {
+      ...base,
+      openTerminal: mock((input: OpenSessionTerminalInput) => {
+        attachmentInput = input;
+        return Promise.resolve({
+          history: "ready\n",
+          terminal,
+          releaseBufferedOutput: mock(() => undefined)
+        });
+      })
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await waitForApp(setup, () => setup.captureCharFrame().includes("ready"), 500);
+
+    const selectedInput = attachmentInput as OpenSessionTerminalInput | null;
+    if (selectedInput === null) throw new Error("Attachment input was not captured.");
+    selectedInput.callbacks.onData("x".repeat(maximumQueuedTerminalBytes + 1));
+    await waitForApp(setup, () => setup.captureCharFrame().includes("outran the renderer"), 500);
+
+    expect(callCount(terminal.close)).toBe(1);
+    expect(setup.captureCharFrame()).toContain("reconnect");
   });
 
   test("keeps keyboard-selected conversations and workers visible in long sidebars", async () => {
@@ -1046,6 +1171,19 @@ async function allowStateUpdate(setup: { flush(): Promise<void> }): Promise<void
     setTimeout(resolve, 0);
   });
   await setup.flush();
+}
+
+async function waitForApp(
+  setup: { flush(): Promise<void> },
+  predicate: () => boolean,
+  deadlineMilliseconds: number
+): Promise<void> {
+  const deadline = performance.now() + deadlineMilliseconds;
+  while (!predicate()) {
+    if (performance.now() >= deadline)
+      throw new Error("Timed out waiting for responsive app state.");
+    await allowStateUpdate(setup);
+  }
 }
 
 function callCount(value: unknown): number {

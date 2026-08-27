@@ -1,8 +1,14 @@
 import { assertSupportedTerminalRuntime, helpText, parseCliArguments } from "./cli.js";
+import {
+  nativeDiagnosticsRuntimeArguments,
+  runWithNativeDiagnostics
+} from "./bootstrap/native-diagnostics.js";
 import { appVersion } from "./version.js";
 
 async function main(): Promise<void> {
-  const action = parseCliArguments(process.argv.slice(2));
+  const processArguments = process.argv.slice(2);
+  const runtimeArguments = nativeDiagnosticsRuntimeArguments(processArguments);
+  const action = parseCliArguments(runtimeArguments ?? processArguments);
   if (action.kind === "help") {
     process.stdout.write(helpText);
     return;
@@ -13,6 +19,10 @@ async function main(): Promise<void> {
   }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
+  if (runtimeArguments === null) {
+    process.exitCode = await runWithNativeDiagnostics(processArguments);
+    return;
+  }
   const { runTerminalUi } = await import("./run-terminal-ui.js");
   await runTerminalUi();
 }
