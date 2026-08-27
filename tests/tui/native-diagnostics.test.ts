@@ -6,6 +6,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  readSync,
   statSync
 } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -621,6 +622,36 @@ describe("native diagnostics bootstrap", () => {
       wrote: true
     });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "accepts an authenticated FIFO stderr independently of its IPC descriptor class",
+    async () => {
+      const state = await temporaryState();
+      const fifo = join(state, "diagnostics.pipe");
+      expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+      const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+      const writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+      const token = "123e4567-e89b-42d3-a456-426614174000";
+      const capability = "7".repeat(64);
+      const proof = diagnosticCapabilityProof(token, capability);
+      try {
+        const result = await launchDiagnosticInvocation(
+          [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+          diagnosticsEnvironment(token, proof),
+          writer,
+          capability
+        );
+        const output = Buffer.alloc(256);
+        const bytesRead = readSync(reader, output);
+
+        expect(result).toMatchObject({ exitCode: 0, kind: "runtime", wrote: true });
+        expect(output.subarray(0, bytesRead).toString("utf8")).toBe("[agentlab] test diagnostic\n");
+      } finally {
+        closeSync(writer);
+        closeSync(reader);
+      }
+    }
+  );
 
   it("authorizes concurrent renderers without false protocol rejection", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
