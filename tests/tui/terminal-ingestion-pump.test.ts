@@ -118,6 +118,33 @@ describe("TerminalIngestionPump", () => {
     expect(onOverrun).toHaveBeenCalledWith(6);
     expect(write).not.toHaveBeenCalled();
   });
+
+  it("drains real-scheduler output above the old timer-clamped throughput ceiling", async () => {
+    const input = new Uint8Array(4 * 1024 * 1024);
+    for (let index = 0; index < input.byteLength; index += 1) input[index] = index % 251;
+    const writes: Uint8Array[] = [];
+    let timerObserved = false;
+    const pump = new TerminalIngestionPump({
+      invalidate: vi.fn(),
+      onOverrun: vi.fn(),
+      write: (data) => writes.push(data)
+    });
+    const startedAt = performance.now();
+    const timer = setTimeout(() => {
+      timerObserved = true;
+    }, 0);
+    pump.enqueue(input);
+    await new Promise<void>((resolveSeeded) => {
+      pump.finishHistory(resolveSeeded);
+    });
+    clearTimeout(timer);
+    const elapsedMilliseconds = performance.now() - startedAt;
+    const mebibytesPerSecond = input.byteLength / 1024 / 1024 / (elapsedMilliseconds / 1_000);
+
+    expect(join(writes)).toEqual(input);
+    expect(timerObserved).toBe(true);
+    expect(mebibytesPerSecond).toBeGreaterThan(15);
+  });
 });
 
 function manualScheduler() {

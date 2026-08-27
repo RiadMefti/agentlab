@@ -65,14 +65,31 @@ export function terminalChildMouseInputEnabled(
 /** Compatibility shell around OpenTUI 0.5.8's native VT implementation. */
 export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderable {
   readonly #appearance = new TerminalDefaultAppearance();
-  readonly #childMouseInput: boolean;
+  #childMouseInput: boolean;
   #onActivate: (() => void) | undefined;
   #forceLocalDrag = false;
   #sessionConnected: boolean;
 
   public constructor(ctx: RenderContext, options: AgentTerminalOptions) {
-    const { childMouseInput, onActivate, sessionConnected, ...openTuiOptions } = options;
+    const runtimeOptions = options as AgentTerminalOptions &
+      Pick<EmbeddedTerminalOptions, "renderAfter" | "renderBefore">;
+    const {
+      childMouseInput,
+      onActivate,
+      renderAfter,
+      renderBefore,
+      sessionConnected,
+      ...openTuiOptions
+    } = runtimeOptions;
+    // Render hooks invalidate OpenTUI's native VT on every frame. Keep the type-level omission
+    // enforceable when options arrive through untyped JavaScript or a React prop spread.
+    void renderAfter;
+    void renderBefore;
     super(ctx, openTuiOptions);
+    Object.defineProperties(this, {
+      renderAfter: ignoredRenderHookProperty,
+      renderBefore: ignoredRenderHookProperty
+    });
     this.#childMouseInput = childMouseInput ?? true;
     this.#onActivate = onActivate;
     this.#sessionConnected = sessionConnected ?? true;
@@ -147,10 +164,19 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     // OpenTUI's embeddedTerminalEncodeMouse is the sole authority. Its zero-byte result preserves
     // local selection/scrolling; non-empty output is forwarded byte-exactly to the child.
     super.processMouseEvent(event);
+    if (event.type !== "scroll" && event.defaultPrevented) this.clearLocalSelection();
     if (event.type === "up" && event.button === 0) {
       this.#forceLocalDrag = false;
       this.clearCollapsedSelection();
     }
+  }
+
+  public get childMouseInput(): boolean {
+    return this.#childMouseInput;
+  }
+
+  public set childMouseInput(value: boolean) {
+    this.#childMouseInput = value;
   }
 
   public get sessionConnected(): boolean {
@@ -227,6 +253,13 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     return this.ctx;
   }
 }
+
+const ignoredRenderHookProperty: PropertyDescriptor = {
+  configurable: false,
+  enumerable: false,
+  get: () => undefined,
+  set: () => undefined
+};
 
 declare module "@opentui/react" {
   interface OpenTUIComponents {

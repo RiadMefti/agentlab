@@ -1,5 +1,6 @@
 import { assertSupportedTerminalRuntime, helpText, parseCliArguments } from "./cli.js";
 import {
+  consumeNativeDiagnosticsEnvironment,
   nativeDiagnosticsRuntimeArguments,
   runWithNativeDiagnostics,
   writeNativeDiagnostic
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
     process.exitCode = await runWithNativeDiagnostics(processArguments);
     return;
   }
+  consumeNativeDiagnosticsEnvironment();
   const { runTerminalUi } = await import("./run-terminal-ui.js");
   await runTerminalUi();
 }

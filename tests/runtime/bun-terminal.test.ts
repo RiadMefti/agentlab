@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appendPendingOutput,
   closePtyResources,
+  stringEnvironment,
   type PendingTerminalOutput
 } from "../../packages/runtime/src/infrastructure/terminal/bun-terminal.js";
 
@@ -33,5 +34,15 @@ describe("Bun terminal resource helpers", () => {
       closePtyResources(process, terminal);
     }).toThrow("already exited");
     expect(terminal.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("never passes bootstrap diagnostics capabilities into spawned tmux clients", () => {
+    expect(
+      stringEnvironment({
+        AGENTLAB_DIAGNOSTIC_LOG: "/private/tui.log",
+        AGENTLAB_TUI_RUNTIME: "single-use-token",
+        PATH: "/usr/bin"
+      })
+    ).toEqual({ PATH: "/usr/bin" });
   });
 });

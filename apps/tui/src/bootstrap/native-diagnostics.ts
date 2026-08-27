@@ -10,21 +10,21 @@ import {
   mkdirSync,
   openSync,
   readSync,
-  renameSync,
-  rmSync,
   writeSync
 } from "node:fs";
-import { constants as osConstants, homedir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { exitCodeForSignal, rendererExitStatusSignals } from "./signal-exit.js";
 
 const LOG_DIRECTORY_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
-const LOG_CHECK_INTERVAL_MS = 1_000;
 const RUNTIME_MARKER = "AGENTLAB_TUI_RUNTIME";
 const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+let ownedDiagnosticPath: string | undefined;
 
 export interface NativeDiagnosticsLog {
   readonly fd: number;
@@ -33,17 +33,21 @@ export interface NativeDiagnosticsLog {
 }
 
 /** Resolves AgentLab's private, local-first diagnostic log without importing the TUI runtime. */
-export function nativeDiagnosticsLogPath(environment: NodeJS.ProcessEnv = process.env): string {
+export function nativeDiagnosticsLogPath(
+  environment: NodeJS.ProcessEnv = process.env,
+  runId?: string
+): string {
   const configured = environment.XDG_STATE_HOME;
   const configuredHome = environment.HOME;
-  const stateRoot = isSafeAbsoluteDirectory(configured)
+  const stateRoot = isSafeAbsolutePath(configured)
     ? configured
-    : resolve(
-        isSafeAbsoluteDirectory(configuredHome) ? configuredHome : homedir(),
-        ".local",
-        "state"
-      );
-  return resolve(stateRoot, "agentlab", "logs", "tui.log");
+    : resolve(isSafeAbsolutePath(configuredHome) ? configuredHome : homedir(), ".local", "state");
+  return resolve(
+    stateRoot,
+    "agentlab",
+    "logs",
+    runId === undefined ? "tui.log" : `tui-${runId}.log`
+  );
 }
 
 /**
@@ -54,7 +58,7 @@ export function nativeDiagnosticsLogPath(environment: NodeJS.ProcessEnv = proces
 export function openNativeDiagnosticsLog(
   environment: NodeJS.ProcessEnv = process.env
 ): NativeDiagnosticsLog {
-  const path = nativeDiagnosticsLogPath(environment);
+  const path = nativeDiagnosticsLogPath(environment, randomUUID());
   const directory = dirname(path);
   mkdirSync(directory, { mode: LOG_DIRECTORY_MODE, recursive: true });
   const directoryMetadata = lstatSync(directory);
@@ -62,8 +66,6 @@ export function openNativeDiagnosticsLog(
     throw new Error(`Refusing unsafe AgentLab diagnostic directory: ${directory}`);
   }
   chmodSync(directory, LOG_DIRECTORY_MODE);
-  rotateExistingLog(path);
-
   const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
   const fd = openSync(
     path,
@@ -72,10 +74,6 @@ export function openNativeDiagnosticsLog(
   );
   chmodSync(path, LOG_FILE_MODE);
   let closed = false;
-  const monitor = setInterval(() => {
-    boundActiveLog(fd);
-  }, LOG_CHECK_INTERVAL_MS);
-  monitor.unref();
 
   return {
     fd,
@@ -83,7 +81,8 @@ export function openNativeDiagnosticsLog(
     close() {
       if (closed) return;
       closed = true;
-      clearInterval(monitor);
+      // The bootstrap closes this only after its renderer exits. Bounding here cannot race the
+      // writer, and the per-run filename prevents another renderer from sharing the descriptor.
       boundActiveLog(fd);
       closeSync(fd);
     }
@@ -105,13 +104,20 @@ export function nativeDiagnosticsRuntimeArguments(
   return args.slice(1);
 }
 
-/** Appends renderer-owned failures without ever touching the interactive terminal descriptor. */
-export function writeNativeDiagnostic(
-  message: string,
+/** Retains renderer diagnostics privately while removing bootstrap-only values from descendants. */
+export function consumeNativeDiagnosticsEnvironment(
   environment: NodeJS.ProcessEnv = process.env
-): boolean {
+): void {
   const path = environment.AGENTLAB_DIAGNOSTIC_LOG;
-  if (!isSafeAbsoluteDirectory(path)) return false;
+  ownedDiagnosticPath = isSafeAbsolutePath(path) ? path : undefined;
+  delete environment.AGENTLAB_TUI_RUNTIME;
+  delete environment.AGENTLAB_DIAGNOSTIC_LOG;
+}
+
+/** Appends renderer-owned failures without ever touching the interactive terminal descriptor. */
+export function writeNativeDiagnostic(message: string, environment?: NodeJS.ProcessEnv): boolean {
+  const path = environment?.AGENTLAB_DIAGNOSTIC_LOG ?? ownedDiagnosticPath;
+  if (!isSafeAbsolutePath(path)) return false;
   const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
   let fd: number | null = null;
   try {
@@ -136,21 +142,26 @@ export async function runWithNativeDiagnostics(
   args: readonly string[],
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<number> {
-  const log = openNativeDiagnosticsLog(environment);
+  let log: NativeDiagnosticsLog | null = null;
+  try {
+    log = openNativeDiagnosticsLog(environment);
+  } catch {
+    // Diagnostics must fail open: an unsafe or unavailable XDG path cannot block the renderer.
+  }
   const runtimeToken = randomUUID();
   const command = rendererCommand([`${RUNTIME_ARGUMENT_PREFIX}${runtimeToken}`, ...args]);
   const executable = command[0];
   if (executable === undefined) throw new Error("AgentLab renderer command is empty.");
+  const rendererEnvironment = { ...environment };
+  delete rendererEnvironment.AGENTLAB_TUI_RUNTIME;
+  delete rendererEnvironment.AGENTLAB_DIAGNOSTIC_LOG;
+  rendererEnvironment[RUNTIME_MARKER] = runtimeToken;
+  if (log !== null) rendererEnvironment.AGENTLAB_DIAGNOSTIC_LOG = log.path;
   const child = spawn(executable, command.slice(1), {
-    env: {
-      ...environment,
-      [RUNTIME_MARKER]: runtimeToken,
-      AGENTLAB_DIAGNOSTIC_LOG: log.path
-    },
-    stdio: ["inherit", "inherit", log.fd]
+    env: rendererEnvironment,
+    stdio: ["inherit", "inherit", log?.fd ?? "ignore"]
   });
-  const signals = ["SIGHUP", "SIGINT", "SIGTERM", "SIGQUIT"] as const;
-  const listeners = signals.map((signal) => {
+  const listeners = rendererExitStatusSignals.map((signal) => {
     const listener = (): void => {
       try {
         child.kill(signal);
@@ -167,16 +178,17 @@ export async function runWithNativeDiagnostics(
       child.once("error", reject);
       child.once("exit", (code, signal) => {
         if (code !== null) resolvePromise(code);
-        else resolvePromise(signal === null ? 1 : 128 + osConstants.signals[signal]);
+        else resolvePromise(signal === null ? 1 : exitCodeForSignal(signal));
       });
     });
     if (exitCode !== 0) {
-      process.stderr.write(`agentlab: terminal UI exited unexpectedly; diagnostics: ${log.path}\n`);
+      const diagnostics = log === null ? "" : `; diagnostics: ${log.path}`;
+      process.stderr.write(`agentlab: terminal UI exited unexpectedly${diagnostics}\n`);
     }
     return exitCode;
   } finally {
     for (const { listener, signal } of listeners) process.off(signal, listener);
-    log.close();
+    log?.close();
   }
 }
 
@@ -187,46 +199,6 @@ function rendererCommand(args: readonly string[]): string[] {
     return [process.execPath, entry, ...args];
   }
   return [process.execPath, ...args];
-}
-
-function rotateExistingLog(path: string): void {
-  try {
-    const metadata = lstatSync(path);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error(`Refusing unsafe AgentLab diagnostic log path: ${path}`);
-    }
-    if (metadata.size < MAX_LOG_BYTES) return;
-    const rotatedPath = `${path}.1`;
-    rmSync(rotatedPath, { force: true });
-    renameSync(path, rotatedPath);
-    chmodSync(rotatedPath, LOG_FILE_MODE);
-    if (lstatSync(rotatedPath).size > MAX_LOG_BYTES) {
-      const rotated = openSync(rotatedPath, constants.O_RDWR);
-      try {
-        const size = fstatSync(rotated).size;
-        const tail = Buffer.allocUnsafe(MAX_LOG_BYTES);
-        let bytesRead = 0;
-        while (bytesRead < tail.byteLength) {
-          const count = readSync(
-            rotated,
-            tail,
-            bytesRead,
-            tail.byteLength - bytesRead,
-            size - tail.byteLength + bytesRead
-          );
-          if (count === 0) break;
-          bytesRead += count;
-        }
-        writeSync(rotated, tail, 0, bytesRead, 0);
-        ftruncateSync(rotated, bytesRead);
-      } finally {
-        closeSync(rotated);
-      }
-    }
-  } catch (error: unknown) {
-    if (isMissingFileError(error)) return;
-    throw error;
-  }
 }
 
 function boundActiveLog(fd: number): void {
@@ -257,13 +229,7 @@ function boundActiveLog(fd: number): void {
   }
 }
 
-function isMissingFileError(error: unknown): boolean {
-  return (
-    error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
-}
-
-function isSafeAbsoluteDirectory(value: string | undefined): value is string {
+function isSafeAbsolutePath(value: string | undefined): value is string {
   return value !== undefined && isAbsolute(value) && !hasControlCharacter(value);
 }
 

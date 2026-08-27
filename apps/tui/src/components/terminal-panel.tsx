@@ -23,12 +23,32 @@ interface TerminalTarget {
   readonly session: AgentSession;
 }
 
+interface MountedTerminalWriter {
+  readonly invalidate: () => void;
+  readonly write: (data: Uint8Array) => void;
+}
+
 const RESET_TERMINAL = "\x1bc";
 
 export function boundTerminalDimensions(columns: number, rows: number): Dimensions {
   return {
     columns: Math.min(columns, maximumTerminalDimension),
     rows: Math.min(rows, maximumTerminalDimension)
+  };
+}
+
+/** Keeps deferred attachment work bound to the VT mounted when the effect was created. */
+export function mountedTerminalWriter(
+  terminal: Pick<EmbeddedTerminalRenderable, "invalidate" | "isDestroyed" | "write"> | null,
+  isCurrent: () => boolean
+): MountedTerminalWriter {
+  return {
+    invalidate() {
+      if (isCurrent() && terminal !== null && !terminal.isDestroyed) terminal.invalidate();
+    },
+    write(data) {
+      if (isCurrent() && terminal !== null && !terminal.isDestroyed) terminal.write(data);
+    }
   };
 }
 
@@ -48,8 +68,8 @@ export function TerminalPanel({
   const terminalRef = useRef<EmbeddedTerminalRenderable>(null);
   const attachmentRef = useRef<SessionTerminal | null>(null);
   const dimensionsRef = useRef<Dimensions | null>(null);
-  const layoutReadyRef = useRef(false);
-  const [layoutReady, setLayoutReady] = useState(false);
+  const [layoutDimensions, setLayoutDimensions] = useState<Dimensions | null>(null);
+  const layoutReady = layoutDimensions !== null;
   const requestedTarget = useMemo<TerminalTarget | null>(
     () =>
       conversationId !== null && session?.conversationId === conversationId
@@ -75,11 +95,8 @@ export function TerminalPanel({
     const previous = dimensionsRef.current;
     if (previous?.columns === bounded.columns && previous.rows === bounded.rows) return;
     dimensionsRef.current = bounded;
+    setLayoutDimensions(bounded);
     attachmentRef.current?.resize(bounded.columns, bounded.rows);
-    if (!layoutReadyRef.current) {
-      layoutReadyRef.current = true;
-      setLayoutReady(true);
-    }
   }, []);
 
   useEffect(() => {
@@ -94,13 +111,11 @@ export function TerminalPanel({
     let current = true;
     let ownedTerminal: SessionTerminal | null = null;
     let exitReported = false;
+    const renderedTerminal = terminalRef.current;
+    const writer = mountedTerminalWriter(renderedTerminal, () => current);
     const pump = new TerminalIngestionPump({
-      write(data) {
-        if (current) terminalRef.current?.write(data);
-      },
-      invalidate() {
-        if (current) terminalRef.current?.invalidate();
-      },
+      write: writer.write,
+      invalidate: writer.invalidate,
       onOverrun() {
         if (!current) return;
         current = false;
@@ -177,8 +192,6 @@ export function TerminalPanel({
         setConnection("closed");
         setError(cause instanceof Error ? cause.message : "Unable to attach terminal.");
       });
-    const renderedTerminal = terminalRef.current;
-
     return () => {
       current = false;
       pump.cancel();
@@ -251,6 +264,8 @@ export function TerminalPanel({
         key={requestedKey ?? "no-terminal-session"}
         ref={terminalRef}
         maxScrollback={terminalScrollbackBytes}
+        cols={layoutDimensions?.columns ?? 1}
+        rows={layoutDimensions?.rows ?? 1}
         childMouseInput={terminalChildMouseInputEnabled()}
         onActivate={onActivate}
         sessionConnected={connection === "connected" && !switching}

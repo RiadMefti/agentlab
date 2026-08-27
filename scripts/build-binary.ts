@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { appVersion } from "../apps/tui/src/version.js";
+import { exitCodeForSignal } from "../apps/tui/src/bootstrap/signal-exit.js";
 import { assertBinarySbomCorrespondence } from "./binary-sbom-correspondence.js";
 import { generateBinarySbom, type BinarySbomTarget } from "./generate-release-sbom.js";
 
@@ -98,6 +99,7 @@ async function main(): Promise<void> {
     throw new Error("Packaged binary help smoke test failed.");
   }
   await assertDiagnosticsRedirected(artifactPath);
+  await assertSignalCleanup(artifactPath);
 
   if (process.platform === "linux") {
     await assertFailure(
@@ -110,6 +112,42 @@ async function main(): Promise<void> {
   process.stdout.write(`Packaged ${artifactPath} and ${sbomPath}\n`);
 }
 
+async function assertSignalCleanup(executable: string): Promise<void> {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
+    const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-compiled-signal-"));
+    let output = "";
+    const decoder = new TextDecoder();
+    const child = Bun.spawn([executable], {
+      env: { ...process.env, XDG_STATE_HOME: stateRoot },
+      terminal: {
+        cols: 100,
+        rows: 30,
+        name: "xterm-256color",
+        data: (_terminal, data) => {
+          output += decoder.decode(data, { stream: true });
+        }
+      }
+    });
+    try {
+      await waitFor(() => output.includes("\x1b[?1049h"));
+      child.kill(signal);
+      const exitCode = await child.exited;
+      if (
+        exitCode !== exitCodeForSignal(signal) ||
+        !output.includes("\x1b[?1006l") ||
+        !output.includes("\x1b[?1049l")
+      ) {
+        throw new Error(
+          `Packaged binary failed ${signal} cleanup/status smoke test (exit ${String(exitCode)}).`
+        );
+      }
+    } finally {
+      if (!child.killed) child.kill();
+      await rm(stateRoot, { force: true, recursive: true });
+    }
+  }
+}
+
 async function assertDiagnosticsRedirected(executable: string): Promise<void> {
   const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-diagnostics-smoke-"));
   try {
@@ -119,10 +157,11 @@ async function assertDiagnosticsRedirected(executable: string): Promise<void> {
       stdout: "ignore"
     });
     const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    const log = await readFile(resolve(stateRoot, "agentlab", "logs", "tui.log"), "utf8");
+    const diagnosticPath = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
+    const log = diagnosticPath === undefined ? "" : await readFile(diagnosticPath, "utf8");
     if (
       exitCode === 0 ||
-      !stderr.includes("diagnostics:") ||
+      diagnosticPath === undefined ||
       stderr.includes("must run in an interactive terminal") ||
       !log.includes("must run in an interactive terminal")
     ) {
@@ -171,6 +210,14 @@ async function assertFailure(
   const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   if (exitCode === 0 || !stderr.includes(expectedError)) {
     throw new Error(`Packaged binary did not reject the unsupported runtime: ${stderr.trim()}`);
+  }
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for packaged terminal startup.");
+    await Bun.sleep(20);
   }
 }
 

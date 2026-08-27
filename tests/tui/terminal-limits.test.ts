@@ -23,6 +23,10 @@ describe("terminal retention units", () => {
     expect(architecture).toContain("16 MiB scrollback byte budget");
     expect(architecture).toMatch(/20,000-line\s+history limit/u);
     expect(panel).toContain("maxScrollback={terminalScrollbackBytes}");
+    expect(panel).toContain("cols={layoutDimensions?.columns ?? 1}");
+    expect(panel).toContain("rows={layoutDimensions?.rows ?? 1}");
+    expect(panel).not.toContain("renderAfter=");
+    expect(panel).not.toContain("renderBefore=");
     expect(`${readme}\n${architecture}`).not.toContain("20,000-line scrollback");
   });
 });

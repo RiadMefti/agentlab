@@ -142,9 +142,9 @@ function concatenate(chunks: readonly Uint8Array[], byteCount: number): Uint8Arr
 }
 
 function scheduleMacrotask(callback: () => void): () => void {
-  const timer = setTimeout(callback, 0);
+  const timer = setImmediate(callback);
   return () => {
-    clearTimeout(timer);
+    clearImmediate(timer);
   };
 }
 

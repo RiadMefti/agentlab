@@ -1,5 +1,5 @@
 import { readFileSync, statSync, writeSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -7,8 +7,8 @@ import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  consumeNativeDiagnosticsEnvironment,
   nativeDiagnosticsRuntimeArguments,
-  nativeDiagnosticsLogPath,
   openNativeDiagnosticsLog,
   writeNativeDiagnostic
 } from "../../apps/tui/src/bootstrap/native-diagnostics.js";
@@ -53,32 +53,56 @@ describe("native diagnostics bootstrap", () => {
     expect(stdout).toBe("AGENTLAB_FRAME\n");
     expect(stdout).not.toContain("7727");
     expect(stdout).not.toContain("increaseCapacity");
-    const diagnostics = readFileSync(nativeDiagnosticsLogPath(environment), "utf8");
+    const diagnostics = readFileSync(log.path, "utf8");
     expect(diagnostics).toContain("unimplemented mode: 7727");
     expect(diagnostics).toContain("adjusting page capacity");
-    expect(statSync(nativeDiagnosticsLogPath(environment)).mode & 0o777).toBe(0o600);
+    expect(statSync(log.path).mode & 0o777).toBe(0o600);
   });
 
-  it("uses the XDG state root and rotates a bounded private log", async () => {
+  it("uses a per-run XDG path and bounds the newest tail only after its writer exits", async () => {
     const state = await temporaryState();
     const environment = { ...process.env, XDG_STATE_HOME: state };
-    const first = openNativeDiagnosticsLog(environment);
+    const log = openNativeDiagnosticsLog(environment);
     const oversized = Buffer.alloc(2 * 1024 * 1024 + 128, 0x78);
     oversized.write("LATEST_CRASH_OUTPUT", oversized.byteLength - 32, "utf8");
     let offset = 0;
     while (offset < oversized.byteLength) {
-      offset += writeSync(first.fd, oversized, offset, oversized.byteLength - offset);
+      offset += writeSync(log.fd, oversized, offset, oversized.byteLength - offset);
     }
-    first.close();
+    expect(statSync(log.path).size).toBeGreaterThan(2 * 1024 * 1024);
+    expect(readFileSync(log.path, "utf8")).not.toContain("retained the newest diagnostics");
+    log.close();
 
-    const second = openNativeDiagnosticsLog(environment);
-    second.close();
-    const path = nativeDiagnosticsLogPath(environment);
-    expect(path).toBe(join(state, "agentlab", "logs", "tui.log"));
-    expect(statSync(`${path}.1`).size).toBeLessThanOrEqual(2 * 1024 * 1024);
-    expect(readFileSync(`${path}.1`, "utf8")).toContain("LATEST_CRASH_OUTPUT");
-    expect(readFileSync(`${path}.1`, "utf8")).toContain("retained the newest diagnostics");
+    expect(log.path).toMatch(/\/agentlab\/logs\/tui-[0-9a-f-]+\.log$/u);
+    expect(statSync(log.path).size).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(readFileSync(log.path, "utf8")).toContain("LATEST_CRASH_OUTPUT");
+    expect(readFileSync(log.path, "utf8")).toContain("retained the newest diagnostics");
     expect(statSync(join(state, "agentlab", "logs")).mode & 0o777).toBe(0o700);
+  });
+
+  it("does not truncate while a concurrent renderer still owns the log", async () => {
+    const state = await temporaryState();
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        "const fs=require('node:fs');let n=0;const b=Buffer.alloc(65536,120);const t=setInterval(()=>{fs.writeSync(2,b);if(++n===36)clearInterval(t)},2)"
+      ],
+      { stdio: ["ignore", "ignore", log.fd] }
+    );
+    await waitFor(() => statSync(log.path).size > 2 * 1024 * 1024);
+    const activeSize = statSync(log.path).size;
+    await new Promise<void>((resolveExit) =>
+      child.once("exit", () => {
+        resolveExit();
+      })
+    );
+
+    expect(statSync(log.path).size).toBeGreaterThanOrEqual(activeSize);
+    expect(readFileSync(log.path, "utf8")).not.toContain("retained the newest diagnostics");
+    log.close();
+    expect(statSync(log.path).size).toBeLessThanOrEqual(2 * 1024 * 1024);
   });
 
   it("routes renderer teardown failures directly to the private diagnostic file", async () => {
@@ -91,9 +115,37 @@ describe("native diagnostics bootstrap", () => {
     expect(writeNativeDiagnostic("not configured", {})).toBe(false);
     log.close();
 
-    expect(readFileSync(nativeDiagnosticsLogPath(environment), "utf8")).toContain(
-      "[agentlab] Shutdown failed: close error"
+    expect(readFileSync(log.path, "utf8")).toContain("[agentlab] Shutdown failed: close error");
+  });
+
+  it("rejects relative and symlinked renderer log paths", async () => {
+    const state = await temporaryState();
+    const target = join(state, "target.log");
+    const link = join(state, "linked.log");
+    await writeFile(target, "");
+    await symlink(target, link);
+
+    expect(writeNativeDiagnostic("relative", { AGENTLAB_DIAGNOSTIC_LOG: "relative.log" })).toBe(
+      false
     );
+    expect(writeNativeDiagnostic("symlink", { AGENTLAB_DIAGNOSTIC_LOG: link })).toBe(false);
+    expect(readFileSync(target, "utf8")).toBe("");
+  });
+
+  it("consumes bootstrap-only environment without losing the owned diagnostics sink", async () => {
+    const state = await temporaryState();
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    const environment: NodeJS.ProcessEnv = {
+      AGENTLAB_DIAGNOSTIC_LOG: log.path,
+      AGENTLAB_TUI_RUNTIME: "runtime-token",
+      PRESERVED: "yes"
+    };
+
+    consumeNativeDiagnosticsEnvironment(environment);
+    expect(environment).toEqual({ PRESERVED: "yes" });
+    expect(writeNativeDiagnostic("owned after scrub")).toBe(true);
+    log.close();
+    expect(readFileSync(log.path, "utf8")).toContain("owned after scrub");
   });
 
   it("boots the development entry with renderer stderr isolated and its exit code preserved", async () => {
@@ -107,7 +159,8 @@ describe("native diagnostics bootstrap", () => {
       readStream(child.stderr),
       new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
     ]);
-    const diagnostics = readFileSync(nativeDiagnosticsLogPath({ XDG_STATE_HOME: state }), "utf8");
+    const diagnosticPath = diagnosticsPathFrom(stderr);
+    const diagnostics = readFileSync(diagnosticPath, "utf8");
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe("");
@@ -115,6 +168,33 @@ describe("native diagnostics bootstrap", () => {
     expect(stderr).not.toContain("must run in an interactive terminal");
     expect(diagnostics).toContain("must run in an interactive terminal");
   });
+
+  it.each(["symlinked logs directory", "unwritable state root", "state root file"])(
+    "launches with fd2 contained when diagnostics cannot open: %s",
+    async (failure) => {
+      const state = await temporaryState();
+      let xdgState = state;
+      if (failure === "symlinked logs directory") {
+        await mkdir(join(state, "agentlab"));
+        await symlink(state, join(state, "agentlab", "logs"));
+      } else if (failure === "unwritable state root") {
+        await chmod(state, 0o500);
+      } else {
+        const file = join(state, "state-file");
+        await writeFile(file, "not a directory");
+        xdgState = file;
+      }
+
+      const result = await launchDevelopmentEntry(xdgState);
+      if (failure === "unwritable state root") await chmod(state, 0o700);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("terminal UI exited unexpectedly");
+      expect(result.stderr).not.toContain("diagnostics:");
+      expect(result.stderr).not.toMatch(/EACCES|ENOTDIR|Refusing unsafe/u);
+    }
+  );
 });
 
 async function temporaryState(): Promise<string> {
@@ -128,4 +208,32 @@ async function readStream(stream: NodeJS.ReadableStream | null): Promise<string>
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function launchDevelopmentEntry(state: string) {
+  const child = spawn("bun", [resolve("apps/tui/src/main.tsx")], {
+    env: { ...process.env, XDG_STATE_HOME: state },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    readStream(child.stdout),
+    readStream(child.stderr),
+    new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+  ]);
+  return { exitCode, stderr, stdout };
+}
+
+function diagnosticsPathFrom(stderr: string): string {
+  const path = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
+  if (path === undefined) throw new Error(`Missing diagnostics path in: ${stderr}`);
+  return path;
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (!predicate()) {
+    if (Date.now() > deadline)
+      throw new Error("Timed out waiting for concurrent diagnostic write.");
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
+  }
 }

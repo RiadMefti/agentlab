@@ -18,10 +18,14 @@ import {
 import { App } from "../../apps/tui/src/app.js";
 import {
   boundTerminalDimensions,
+  mountedTerminalWriter,
   TerminalPanel
 } from "../../apps/tui/src/components/terminal-panel.js";
 import { RuntimeContext } from "../../apps/tui/src/runtime-context.js";
-import { maximumQueuedTerminalBytes } from "../../apps/tui/src/terminal/terminal-ingestion-pump.js";
+import {
+  maximumQueuedTerminalBytes,
+  TerminalIngestionPump
+} from "../../apps/tui/src/terminal/terminal-ingestion-pump.js";
 import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
 
 const renderers: { destroy(): void }[] = [];
@@ -31,6 +35,46 @@ afterEach(() => {
 });
 
 describe("terminal workspace", () => {
+  test("keeps an old deferred drain on its captured VT across a keyed remount", () => {
+    const oldWrites: string[] = [];
+    const newWrites: string[] = [];
+    const oldTerminal = {
+      invalidate: mock(() => undefined),
+      isDestroyed: false,
+      write: mock((data: Uint8Array) => oldWrites.push(new TextDecoder().decode(data)))
+    };
+    const newTerminal = {
+      invalidate: mock(() => undefined),
+      isDestroyed: false,
+      write: mock((data: Uint8Array) => newWrites.push(new TextDecoder().decode(data)))
+    };
+    let mountedTerminal = oldTerminal;
+    let scheduled: (() => void) | null = null;
+    const writer = mountedTerminalWriter(mountedTerminal, () => true);
+    const pump = new TerminalIngestionPump({
+      invalidate: writer.invalidate,
+      onOverrun: mock(() => undefined),
+      schedule(callback) {
+        scheduled = callback;
+        return () => undefined;
+      },
+      write: writer.write
+    });
+    pump.enqueue("old-session-row");
+
+    mountedTerminal = newTerminal;
+    (scheduled as (() => void) | null)?.();
+
+    expect(oldWrites).toEqual(["old-session-row"]);
+    expect(newWrites).toEqual([]);
+    expect(mountedTerminal).toBe(newTerminal);
+
+    oldTerminal.isDestroyed = true;
+    const destroyedWriter = mountedTerminalWriter(oldTerminal, () => true);
+    destroyedWriter.write(new TextEncoder().encode("too-late"));
+    expect(oldWrites).toEqual(["old-session-row"]);
+  });
+
   test("renders the three-column workspace and opens its keyboard-first dialog", async () => {
     const runtime = fakeRuntime();
     const setup = await testRender(

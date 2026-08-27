@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/react */
 
-import { createRef } from "react";
+import { createRef, useState } from "react";
 
 import { parseKeypress, type KeyEvent } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
@@ -218,6 +218,8 @@ describe("embedded agent terminal", () => {
     await setup.flush();
     expect(received.join("")).toContain("\x1b[<0;2;2M");
     expect(received.join("")).toContain("\x1b[<32;5;2M");
+    expect(terminal.current?.getSelectedText()).toBe("");
+    expect(setup.captureCharFrame().split("\n")[0]).toContain("select this text");
 
     received.length = 0;
     await setup.mockMouse.drag(0, 0, 6, 0, 0, { modifiers: { shift: true } });
@@ -253,6 +255,7 @@ describe("embedded agent terminal", () => {
     allowOpenTuiAsyncUpdates();
     renderers.push(setup.renderer);
     terminal.current?.write("\x1b[?1002;1006h");
+    await setup.flush();
 
     await setup.mockMouse.pressDown(1, 1, 0, { modifiers: { shift: true } });
     await setup.mockMouse.moveTo(15, 1);
@@ -261,7 +264,47 @@ describe("embedded agent terminal", () => {
     await setup.mockMouse.click(1, 1);
     await setup.flush();
 
-    expect(received.join("")).toBe("\x1b[<0;2;2m");
+    expect(received.join("")).toBe("\x1b[<0;2;2M\x1b[<0;2;2m");
+  });
+
+  test("applies childMouseInput prop updates instead of creating a dead own property", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let setChildMouseInput: (enabled: boolean) => void = () => undefined;
+    const Harness = () => {
+      const [enabled, setEnabled] = useState(true);
+      setChildMouseInput = setEnabled;
+      return (
+        <agent-terminal
+          ref={terminal}
+          childMouseInput={enabled}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 20 }}
+        />
+      );
+    };
+    const setup = await testRender(<Harness />, { height: 3, width: 20 });
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("select this row\x1b[?1002;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.click(1, 0);
+    await setup.flush();
+    expect(received.join("")).toContain("\x1b[<0;2;1M");
+    received.length = 0;
+    setChildMouseInput(false);
+    allowOpenTuiAsyncUpdates();
+    await new Promise<void>((resolveUpdate) => setTimeout(resolveUpdate, 0));
+    await setup.flush();
+    expect(terminal.current?.childMouseInput).toBe(false);
+    await setup.mockMouse.drag(0, 0, 6, 0);
+    await setup.flush();
+
+    expect(received.join("")).toBe("");
+    expect(terminal.current?.getSelectedText()).not.toBe("");
   });
 
   test("keeps an unfocused terminal focused after starting a local Shift selection", async () => {
@@ -459,6 +502,26 @@ describe("embedded agent terminal", () => {
     expect(sizes).toContainEqual([40, 10]);
   });
 
+  test("uses numeric mount geometry with the production string layout style", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        cols={37}
+        rows={9}
+        style={{ flexGrow: 1, height: "auto", minHeight: 1, width: "100%" }}
+      />,
+      { height: 10, width: 60 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+
+    expect(terminal.current?.screen()).toMatchObject({ columns: 37, rows: 9 });
+    expect(terminal.current?.screen()).not.toMatchObject({ columns: 80, rows: 24 });
+    await setup.flush();
+    expect(terminal.current?.screen()).toMatchObject({ columns: 60, rows: 10 });
+  });
+
   test("matches the workspace surface while preserving explicit ANSI backgrounds", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const setup = await testRender(
@@ -482,8 +545,17 @@ describe("embedded agent terminal", () => {
 
   test("does not full-invalidate or rescan appearance on unchanged renderer frames", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
+    let leakedHookCalls = 0;
+    const untypedHooks = {
+      renderAfter: () => {
+        leakedHookCalls += 1;
+      },
+      renderBefore: () => {
+        leakedHookCalls += 1;
+      }
+    };
     const setup = await testRender(
-      <agent-terminal ref={terminal} style={{ width: 20, height: 3 }} />,
+      <agent-terminal {...untypedHooks} ref={terminal} style={{ width: 20, height: 3 }} />,
       { height: 3, width: 20 }
     );
     allowOpenTuiAsyncUpdates();
@@ -515,6 +587,7 @@ describe("embedded agent terminal", () => {
 
     expect(renderedTerminal.renderBefore).toBeUndefined();
     expect(renderedTerminal.renderAfter).toBeUndefined();
+    expect(leakedHookCalls).toBe(0);
     expect(invalidations).toBe(0);
     expect(renderedTerminal.appearanceApplicationCount).toBe(appearanceApplications);
     const defaultSpan = setup
