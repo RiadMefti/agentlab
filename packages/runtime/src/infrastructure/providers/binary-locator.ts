@@ -10,8 +10,13 @@ import type { CommandRunner } from "../process/command-runner.js";
 import { withTimeout } from "../../domain/promise-timeout.js";
 
 const FILESYSTEM_PROBE_TIMEOUT_MS = 1_000;
+const PATH_LOOKUP_TIMEOUT_MS = 2_000;
 const MAX_FILESYSTEM_CANDIDATES = 32;
 const MAX_MISE_INSTALL_ENTRIES = 4_096;
+
+/** Sequential default budget: PATH lookup, mise readdir, then parallel executable access. */
+export const BINARY_LOCATOR_MAXIMUM_DURATION_MS =
+  PATH_LOOKUP_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS;
 
 export interface BinaryLocatorFilesystem {
   access(path: string, mode?: number): Promise<void>;
@@ -50,7 +55,7 @@ export class BinaryLocator {
 
     try {
       const { stdout } = await this.runner.run("which", [provider], {
-        timeoutMs: 2_000
+        timeoutMs: PATH_LOOKUP_TIMEOUT_MS
       });
       const discovered = stdout.trim();
       if (discovered !== "") candidates.push(discovered);

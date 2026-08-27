@@ -55,6 +55,40 @@ describe("workspace refresh coordination", () => {
     expect(current(latest).selectedProject?.id).toBe(firstConversation.id);
   });
 
+  test("does not resurrect an optimistic project after successful deletion", async () => {
+    let listAttempt = 0;
+    const deleteConversation = mock(() => Promise.resolve());
+    const runtime = fakeRuntime({
+      listConversations: mock(() => {
+        listAttempt += 1;
+        return listAttempt === 2
+          ? Promise.reject(new Error("post-create refresh failed"))
+          : Promise.resolve([]);
+      }),
+      deleteConversation
+    });
+    let latest: WorkspaceState | null = null;
+    const setup = await renderWorkspace(runtime, (workspace) => {
+      latest = workspace;
+    });
+    await setup.waitFor(() => !current(latest).loading);
+
+    await applyStateUpdate(setup, () => {
+      current(latest).insertProject(firstConversation);
+    });
+    await current(latest).refreshProjects();
+    await applyStateUpdate(setup, () => undefined);
+    expect(current(latest).error).toBe("post-create refresh failed");
+    expect(current(latest).projects).toContainEqual(firstConversation);
+
+    await current(latest).deleteProject(firstConversation.id);
+    await applyStateUpdate(setup, () => undefined);
+
+    expect(calls(deleteConversation)).toEqual([[firstConversation.id]]);
+    expect(current(latest).selectedProject).toBeNull();
+    expect(current(latest).projects).toEqual([]);
+  });
+
   test("keeps provider failures visible after unrelated refreshes succeed", async () => {
     const providers = deferred<readonly ProviderCapability[]>();
     const runtime = fakeRuntime({
@@ -318,6 +352,11 @@ function deferred<T>(): Deferred<T> {
 function current(state: WorkspaceState | null): WorkspaceState {
   if (state === null) throw new Error("Workspace state has not rendered.");
   return state;
+}
+
+function calls(value: unknown): readonly (readonly unknown[])[] {
+  return (value as { readonly mock: { readonly calls: readonly (readonly unknown[])[] } }).mock
+    .calls;
 }
 
 async function applyStateUpdate(

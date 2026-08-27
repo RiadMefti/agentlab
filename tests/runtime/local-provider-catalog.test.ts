@@ -27,6 +27,7 @@ import {
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
@@ -64,7 +65,33 @@ function versionRunner(version = "codex-cli 1.2.3") {
 }
 
 describe("LocalProviderCatalog", () => {
-  it("reports a bounded unavailable result when executable discovery never resolves", async () => {
+  it("allows default executable discovery to finish legitimately after two seconds", async () => {
+    vi.useFakeTimers();
+    const delayedLocator: ProviderBinaryLocator = {
+      candidates: () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve(["/opt/codex"]);
+          }, 2_100);
+        })
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      delayedLocator,
+      versionRunner(),
+      { workspace: "/work/project" }
+    );
+
+    const listed = catalog.list();
+    await vi.advanceTimersByTimeAsync(2_100);
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({ id: "codex", available: true, source: "live" })
+    ]);
+  });
+
+  it("reports a bounded unavailable result when default executable discovery never resolves", async () => {
+    vi.useFakeTimers();
     const stalledLocator: ProviderBinaryLocator = {
       candidates: () => new Promise<readonly string[]>(() => undefined)
     };
@@ -73,10 +100,12 @@ describe("LocalProviderCatalog", () => {
       [discovery()],
       stalledLocator,
       versionRunner(),
-      { workspace: "/work/project", locatorTimeoutMs: 10, catalogTimeoutMs: 50 }
+      { workspace: "/work/project" }
     );
 
-    await expect(catalog.list()).resolves.toEqual([
+    const listed = catalog.list();
+    await vi.advanceTimersByTimeAsync(4_250);
+    await expect(listed).resolves.toEqual([
       expect.objectContaining({
         available: false,
         source: "unavailable",

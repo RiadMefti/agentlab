@@ -24,6 +24,7 @@ export interface WorkspaceState {
   selectProject(id: string): void;
   selectSession(name: string): void;
   insertProject(project: Conversation): void;
+  deleteProject(id: string): Promise<void>;
   refreshProjects(): Promise<void>;
   refreshSessions(): Promise<void>;
 }
@@ -195,6 +196,14 @@ export function useWorkspace(): WorkspaceState {
         setConversationId(project.id);
         setConversationError(null);
       },
+      async deleteProject(id: string) {
+        await runtime.commands.deleteConversation(id);
+        conversationRequest.current += 1;
+        locallyInserted.current.delete(id);
+        setConversations((current) => current.filter((project) => project.id !== id));
+        setConversationId((current) => (current === id ? null : current));
+        await refreshConversations();
+      },
       refreshProjects: refreshConversations,
       refreshSessions
     }),
@@ -206,6 +215,7 @@ export function useWorkspace(): WorkspaceState {
       selectedSession,
       loading,
       error,
+      runtime,
       refreshConversations,
       refreshSessions
     ]

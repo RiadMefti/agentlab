@@ -17,7 +17,6 @@ const semanticPhysicalKeys: Readonly<Record<string, string>> = {
   home: "Home",
   insert: "Insert",
   left: "ArrowLeft",
-  linefeed: "Enter",
   pagedown: "PageDown",
   pageup: "PageUp",
   return: "Enter",
@@ -36,6 +35,7 @@ const mouseControlPattern = new RegExp(
   "gu"
 );
 const incompleteControlPattern = new RegExp(`${escapeCharacter}(?:\\[[?!\\d;]*)?$`, "u");
+const MAX_INCOMPLETE_CONTROL_BYTES = 64;
 
 interface OpenTuiTerminalInternals {
   readonly handle: unknown;
@@ -79,7 +79,8 @@ export class TerminalMouseProtocolState {
         else this.#trackingModes.delete(mode);
       }
     }
-    this.#tail = incompleteControlPattern.exec(input)?.[0] ?? "";
+    const tail = incompleteControlPattern.exec(input)?.[0] ?? "";
+    this.#tail = tail.length <= MAX_INCOMPLETE_CONTROL_BYTES ? tail : "";
     return !wasEnabled && this.enabled;
   }
 
@@ -105,14 +106,21 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   }
 
   public override encodeKey(key: KeyEvent): Uint8Array {
-    const physical = semanticPhysicalKeys[key.name.toLowerCase()];
+    const legacyLinefeed = key.name.toLowerCase() === "linefeed";
+    const physical = legacyLinefeed ? "KeyJ" : semanticPhysicalKeys[key.name.toLowerCase()];
     const duplicateLegacyAlt = key.meta && key.option;
-    if ((physical === undefined || key.code === physical) && !duplicateLegacyAlt) {
+    if (
+      (physical === undefined || key.code === physical) &&
+      !duplicateLegacyAlt &&
+      !legacyLinefeed
+    ) {
       return super.encodeKey(key);
     }
     const prototype: object | null = Reflect.getPrototypeOf(key);
     const normalized = Object.assign(Object.create(prototype) as KeyEvent, key, {
       code: physical ?? key.code,
+      ctrl: legacyLinefeed ? true : key.ctrl,
+      name: legacyLinefeed ? "j" : key.name,
       // The legacy parser exposes terminal Alt as both `meta` and `option`. The native encoder
       // treats those as distinct Super and Alt bits, so retain only the terminal Option/Alt bit.
       meta: duplicateLegacyAlt ? false : key.meta
@@ -126,13 +134,8 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   }
 
   public override processMouseEvent(event: MouseEvent): void {
-    if (
-      this.#mouseProtocol.enabled &&
-      event.type === "down" &&
-      event.button === 0 &&
-      event.modifiers.shift
-    ) {
-      this.#forceLocalDrag = true;
+    if (event.type === "down" && event.button === 0) {
+      this.#forceLocalDrag = event.modifiers.shift;
     }
     const forceLocal = event.modifiers.shift || this.#forceLocalDrag;
     if (this.#mouseProtocol.enabled && forceLocal) {

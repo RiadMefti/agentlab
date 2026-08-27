@@ -81,6 +81,52 @@ describe("terminal workspace", () => {
     );
   });
 
+  test("creates with trimmed canonical provider-default input", async () => {
+    const createConversation = mock(() => deferred(conversation));
+    const runtime = fakeRuntime({
+      commandOverrides: {
+        prepareWorkspace: mock(() =>
+          Promise.resolve({
+            workspacePath: "/canonical/project",
+            suggestedName: "  Canonical title  "
+          })
+        ),
+        discoverWorkspaceProviders: mock(() => Promise.resolve(availableProviders)),
+        createConversation
+      }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Choose the project folder"));
+    await setup.mockInput.typeText("/requested/project");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Codex: ready"));
+    setup.mockInput.pressEnter({ ctrl: true });
+    await setup.waitFor(() => callCount(createConversation) === 1);
+
+    expect(calls(createConversation)[0]).toEqual([
+      {
+        title: "Canonical title",
+        workspacePath: "/canonical/project",
+        provider: "codex",
+        model: null,
+        reasoning: null,
+        prompt: null
+      }
+    ]);
+  });
+
   test("allows a replacement inspection while the edited-path request is still pending", async () => {
     const first = deferredRequest<{ workspacePath: string; suggestedName: string }>();
     const second = deferredRequest<{ workspacePath: string; suggestedName: string }>();
@@ -408,6 +454,8 @@ describe("terminal workspace", () => {
     await allowStateUpdate(setup);
     await setup.waitForFrame((frame) => frame.includes("Captain") && frame.includes("Test Writer"));
     await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("history"));
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Captain");

@@ -190,8 +190,7 @@ export function App() {
 
   const removeProject = (project: Conversation): void => {
     runMutation(async () => {
-      await runtime.commands.deleteConversation(project.id);
-      await workspace.refreshProjects();
+      await workspace.deleteProject(project.id);
       setModal(null);
     });
   };

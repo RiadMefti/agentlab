@@ -129,8 +129,9 @@ describe("embedded agent terminal", () => {
     expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[57352u", true)))).toBe("\x1b[A");
     expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[97;5u", true)))).toBe("\x01");
     expect(decode(terminal.current?.encodeKey(parsedKey("\x01")))).toBe("\x01");
+    expect(Array.from(terminal.current?.encodeKey(parsedKey("\n")) ?? [])).toEqual([10]);
+    expect(Array.from(terminal.current?.encodeKey(parsedKey("\r")) ?? [])).toEqual([13]);
     expect(decode(terminal.current?.encodeKey(parsedKey("é")))).toBe("é");
-    expect(decode(terminal.current?.encodeKey(parsedKey("\r")))).toBe("\r");
 
     terminal.current?.write("\x1b[?2004h");
     await setup.mockInput.pasteBracketedText("one\ntwo");
@@ -152,6 +153,17 @@ describe("embedded agent terminal", () => {
     expect(state.enabled).toBe(false);
     state.observe("\x1b[?1000h\x1bc");
     expect(state.enabled).toBe(false);
+  });
+
+  test("discards oversized incomplete mouse controls without consuming later valid controls", () => {
+    const state = new TerminalMouseProtocolState();
+    state.observe(`\x1b[?${"1".repeat(65)}`);
+    state.observe("000h");
+    expect(state.enabled).toBe(false);
+
+    state.observe("\x1b[?1000");
+    state.observe("h");
+    expect(state.enabled).toBe(true);
   });
 
   test("arbitrates local selection, clicks, child mouse reporting, and Shift drag", async () => {
@@ -202,6 +214,36 @@ describe("embedded agent terminal", () => {
     await setup.flush();
     expect(received.join("")).toBe("");
     expect(terminal.current?.getSelectedText()).not.toBe("");
+  });
+
+  test("forwards the first normal child click after a Shift drag releases on a sibling", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 5, width: 20 }}>
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 5, width: 10 }}
+        />
+        <box style={{ height: 5, width: 10 }} />
+      </box>,
+      { height: 5, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("\x1b[?1002;1006h");
+
+    await setup.mockMouse.pressDown(1, 1, 0, { modifiers: { shift: true } });
+    await setup.mockMouse.moveTo(15, 1);
+    await setup.mockMouse.release(15, 1);
+    received.length = 0;
+    await setup.mockMouse.click(1, 1);
+    await setup.flush();
+
+    expect(received.join("")).toBe("\x1b[<0;2;2m");
   });
 
   test("routes wheel to local scrollback unless child tracking owns it, with Shift override", async () => {
