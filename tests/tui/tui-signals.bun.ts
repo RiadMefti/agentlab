@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
@@ -28,7 +29,8 @@ describe("terminal UI process signals", () => {
       try {
         await waitFor(() => output.includes("\x1b[?1049h"));
         const rendererPid = await childProcessId(child.pid);
-        child.kill(signal);
+        const signalNumber = osConstants.signals[signal];
+        child.kill(signalNumber);
 
         expect(await child.exited).toBe(exitCodeForSignal(signal));
         expect(output).toContain("\x1b[?1006l");

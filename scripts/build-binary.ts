@@ -1,5 +1,5 @@
-import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { constants as osConstants, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { appVersion } from "../apps/tui/src/version.js";
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
 
 async function assertSignalCleanup(executable: string): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGABRT", "SIGBUS"] as const) {
-    const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-compiled-signal-"));
+    const stateRoot = await privateSmokeStateDirectory("agentlab-compiled-signal-");
     let output = "";
     const decoder = new TextDecoder();
     const child = Bun.spawn([executable], {
@@ -130,15 +130,21 @@ async function assertSignalCleanup(executable: string): Promise<void> {
     });
     try {
       await waitFor(() => output.includes("\x1b[?1049h"));
-      child.kill(signal);
+      const signalNumber = osConstants.signals[signal];
+      child.kill(signalNumber);
       const exitCode = await child.exited;
-      if (
-        exitCode !== exitCodeForSignal(signal) ||
-        !output.includes("\x1b[?1006l") ||
-        !output.includes("\x1b[?1049l")
-      ) {
+      const expectedExitCode = exitCodeForSignal(signal);
+      const disabledMouse = output.includes("\x1b[?1006l");
+      const leftAlternateScreen = output.includes("\x1b[?1049l");
+      if (exitCode !== expectedExitCode || !disabledMouse || !leftAlternateScreen) {
         throw new Error(
-          `Packaged binary failed ${signal} cleanup/status smoke test (exit ${String(exitCode)}).`
+          `Packaged binary failed ${signal} cleanup/status smoke test: ${JSON.stringify({
+            disabledMouse,
+            exitCode,
+            expectedExitCode,
+            leftAlternateScreen,
+            signalNumber
+          })}`
         );
       }
     } finally {
@@ -149,7 +155,7 @@ async function assertSignalCleanup(executable: string): Promise<void> {
 }
 
 async function assertDiagnosticsRedirected(executable: string): Promise<void> {
-  const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-diagnostics-smoke-"));
+  const stateRoot = await privateSmokeStateDirectory("agentlab-diagnostics-smoke-");
   try {
     const child = Bun.spawn([executable], {
       env: { ...process.env, XDG_STATE_HOME: stateRoot },
@@ -158,18 +164,68 @@ async function assertDiagnosticsRedirected(executable: string): Promise<void> {
     });
     const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
     const diagnosticPath = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
-    const log = diagnosticPath === undefined ? "" : await readFile(diagnosticPath, "utf8");
+    let log = "";
+    let logReadError: unknown;
+    if (diagnosticPath !== undefined) {
+      try {
+        log = await readFile(diagnosticPath, "utf8");
+      } catch (error: unknown) {
+        logReadError = error;
+      }
+    }
     if (
       exitCode === 0 ||
       diagnosticPath === undefined ||
       stderr.includes("must run in an interactive terminal") ||
       !log.includes("must run in an interactive terminal")
     ) {
-      throw new Error("Packaged binary did not isolate renderer diagnostics from stderr.");
+      throw new Error(
+        `Packaged binary did not isolate renderer diagnostics from stderr: ${formatSmokeDetails({
+          diagnosticPath,
+          exitCode,
+          log,
+          logReadError,
+          stderr
+        })}`
+      );
     }
   } finally {
     await rm(stateRoot, { force: true, recursive: true });
   }
+}
+
+async function privateSmokeStateDirectory(prefix: string): Promise<string> {
+  // macOS exposes its temporary directory through /var, which is a symlink to /private/var.
+  // Canonicalize this test-owned directory instead of weakening the production symlink guard.
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
+}
+
+function formatSmokeDetails(details: {
+  readonly diagnosticPath: string | undefined;
+  readonly exitCode: number;
+  readonly log: string;
+  readonly logReadError: unknown;
+  readonly stderr: string;
+}): string {
+  const limit = 2_000;
+  const bounded = (value: string): string =>
+    value.length <= limit ? value : `${value.slice(0, limit)}...[truncated]`;
+  return JSON.stringify({
+    exitCode: details.exitCode,
+    diagnosticPath: details.diagnosticPath ?? null,
+    stderr: bounded(details.stderr),
+    log: bounded(details.log),
+    logReadError:
+      details.logReadError === undefined
+        ? null
+        : bounded(
+            details.logReadError instanceof Error
+              ? details.logReadError.message
+              : typeof details.logReadError === "string"
+                ? details.logReadError
+                : "A non-Error value was thrown while reading the diagnostics log."
+          )
+  });
 }
 
 async function assertOutput(
