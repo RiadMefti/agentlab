@@ -39,7 +39,7 @@ describe("agent launchers", () => {
       "--sandbox",
       "workspace-write",
       "--ask-for-approval",
-      "on-request",
+      "never",
       "-C",
       "/work/project",
       "-c",
@@ -70,6 +70,7 @@ describe("agent launchers", () => {
   it("builds Claude arguments with effort and a named session", () => {
     const command = claudeAgentLauncher.buildCaptainCommand(input);
     expect(command.args).toContain("--ax-screen-reader");
+    expect(command.args).toContain("--dangerously-skip-permissions");
     expect(command.args).toContain("--effort");
     expect(command.args).toContain("high");
     expect(command.args).toContain("captain-11111111");
@@ -82,6 +83,7 @@ describe("agent launchers", () => {
     const command = opencodeAgentLauncher.buildCaptainCommand({ ...input, reasoning: null });
     expect(command.args).toEqual([
       "/work/project",
+      "--auto",
       "--agent=ao-captain-11111111-1111-4111-8111-111111111111",
       "--model=custom/model",
       "--prompt=Implement the task"
@@ -126,7 +128,9 @@ describe("agent launchers", () => {
 
       expect(captain.args.at(-1)).toBe(`--prompt=${userPrompt}`);
       expect(worker.args.at(-1)).toBe(`--prompt=${userPrompt}`);
-      expect(captain.args).not.toContain(userPrompt);
+      expect(captain.args.filter((argument) => argument === userPrompt)).toHaveLength(
+        userPrompt === "--auto" ? 1 : 0
+      );
       expect(worker.args).not.toContain(userPrompt);
     }
   });
@@ -212,9 +216,11 @@ describe("agent launchers", () => {
       "--",
       "Implement the task"
     ]);
+    expect(claude.args).not.toContain("--dangerously-skip-permissions");
 
     const opencode = opencodeAgentLauncher.buildWorkerCommand(workerInput);
     expect(opencode.args).toEqual(["/work/project", "--prompt=Implement the task"]);
+    expect(opencode.args).not.toContain("--auto");
   });
 
   it("terminates worker options before a dash-prefixed Codex task", () => {
