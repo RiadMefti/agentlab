@@ -108,10 +108,13 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   public override encodeKey(key: KeyEvent): Uint8Array {
     const legacyLinefeed = key.name.toLowerCase() === "linefeed";
     const physical = legacyLinefeed ? "KeyJ" : semanticPhysicalKeys[key.name.toLowerCase()];
-    const duplicateLegacyAlt = key.meta && key.option;
+    const legacyAlt =
+      key.source === "raw" && key.meta && !key.option && key.sequence.startsWith(escapeCharacter);
+    const duplicateAlt = key.meta && key.option;
     if (
       (physical === undefined || key.code === physical) &&
-      !duplicateLegacyAlt &&
+      !legacyAlt &&
+      !duplicateAlt &&
       !legacyLinefeed
     ) {
       return super.encodeKey(key);
@@ -121,9 +124,10 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
       code: physical ?? key.code,
       ctrl: legacyLinefeed ? true : key.ctrl,
       name: legacyLinefeed ? "j" : key.name,
-      // The legacy parser exposes terminal Alt as both `meta` and `option`. The native encoder
-      // treats those as distinct Super and Alt bits, so retain only the terminal Option/Alt bit.
-      meta: duplicateLegacyAlt ? false : key.meta
+      // Raw ESC-prefixed Alt arrives as `meta`, while Kitty also sets `option`. The native
+      // encoder treats `meta` as Super, so retain only the terminal Option/Alt bit.
+      meta: legacyAlt || duplicateAlt ? false : key.meta,
+      option: legacyAlt ? true : key.option
     });
     return super.encodeKey(normalized);
   }
@@ -139,7 +143,6 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     }
     const forceLocal = event.modifiers.shift || this.#forceLocalDrag;
     if (this.#mouseProtocol.enabled && forceLocal) {
-      if (event.type === "down" && event.button === 0) this.focus();
       if (event.type === "scroll") {
         this.scrollLocally(event);
         return;
@@ -147,6 +150,7 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
       // Continue renderer-owned selection and bubble activation without entering
       // OpenTUI's independent child mouse forwarding path.
       this.parent?.processMouseEvent(event);
+      if (event.type === "down" && event.button === 0) this.focus();
       if (event.type === "up" || event.type === "drag-end") {
         this.#forceLocalDrag = false;
         this.clearCollapsedSelection();

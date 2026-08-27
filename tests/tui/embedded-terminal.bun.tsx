@@ -109,6 +109,32 @@ describe("embedded agent terminal", () => {
     expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[A")))).toBe("\x1bOA");
   });
 
+  test("encodes raw ESC-prefixed Alt as terminal Alt", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 20, height: 5 }} />,
+      { height: 5, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+
+    const cases = [
+      ["\x1bb", [27, 98]],
+      ["\x1bf", [27, 102]],
+      ["\x1b\x7f", [27, 127]],
+      ["\x1b\r", [27, 13]],
+      ["\x1b\x02", [27, 2]]
+    ] as const;
+    for (const [input, output] of cases) {
+      expect(Array.from(terminal.current?.encodeKey(parsedKey(input)) ?? [])).toEqual([...output]);
+    }
+
+    terminal.current?.write("\x1b[>1u");
+    expect(Array.from(terminal.current?.encodeKey(parsedKey("\x1b\r")) ?? [])).toEqual([
+      27, 91, 49, 51, 59, 51, 117
+    ]);
+  });
+
   test("preserves Kitty semantics, Ctrl, UTF-8, Enter, and bracketed paste", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const received: string[] = [];
@@ -132,6 +158,27 @@ describe("embedded agent terminal", () => {
     expect(Array.from(terminal.current?.encodeKey(parsedKey("\n")) ?? [])).toEqual([10]);
     expect(Array.from(terminal.current?.encodeKey(parsedKey("\r")) ?? [])).toEqual([13]);
     expect(decode(terminal.current?.encodeKey(parsedKey("é")))).toBe("é");
+
+    const kittyAltCases = [
+      ["\x1b[98;3u", [27, 98]],
+      ["\x1b[102;3u", [27, 102]],
+      ["\x1b[127;3u", [27, 127]],
+      ["\x1b[13;3u", [27, 13]],
+      ["\x1b[98;7u", [27, 2]]
+    ] as const;
+    for (const [input, output] of kittyAltCases) {
+      expect(Array.from(terminal.current?.encodeKey(parsedKey(input, true)) ?? [])).toEqual([
+        ...output
+      ]);
+    }
+
+    terminal.current?.write("\x1b[>1u");
+    expect(Array.from(terminal.current?.encodeKey(parsedKey("\x1b[13;3u", true)) ?? [])).toEqual([
+      27, 91, 49, 51, 59, 51, 117
+    ]);
+    expect(Array.from(terminal.current?.encodeKey(parsedKey("\x1b[13;9u", true)) ?? [])).toEqual([
+      27, 91, 49, 51, 59, 57, 117
+    ]);
 
     terminal.current?.write("\x1b[?2004h");
     await setup.mockInput.pasteBracketedText("one\ntwo");
@@ -244,6 +291,42 @@ describe("embedded agent terminal", () => {
     await setup.flush();
 
     expect(received.join("")).toBe("\x1b[<0;2;2m");
+  });
+
+  test("keeps an unfocused terminal focused after starting a local Shift selection", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const sibling = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <box
+        onMouseDown={() => sibling.current?.focus()}
+        style={{ flexDirection: "column", height: 5, width: 20 }}
+      >
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 20 }}
+        />
+        <agent-terminal ref={sibling} style={{ height: 2, width: 20 }} />
+      </box>,
+      { height: 5, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("select this text\x1b[?1002;1006h");
+    sibling.current?.focus();
+    await setup.flush();
+    expect(terminal.current?.focused).toBe(false);
+
+    await setup.mockMouse.drag(0, 0, 6, 0, 0, { modifiers: { shift: true } });
+    await setup.flush();
+
+    expect(terminal.current?.focused).toBe(true);
+    expect(sibling.current?.focused).toBe(false);
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+    expect(received.join("")).toBe("");
   });
 
   test("routes wheel to local scrollback unless child tracking owns it, with Shift override", async () => {
