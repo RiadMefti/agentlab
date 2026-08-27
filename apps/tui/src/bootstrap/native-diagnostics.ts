@@ -25,6 +25,11 @@ import {
   privateDiagnosticArtifactMatches,
   preparePrivateDiagnosticDirectory
 } from "./private-diagnostic-files.js";
+import {
+  receiveNativeDiagnosticCapability,
+  sendNativeDiagnosticCapability,
+  type NativeDiagnosticIpc
+} from "./native-diagnostic-handoff.js";
 import { exitCodeForSignal, rendererExitStatusSignals } from "./signal-exit.js";
 
 const LOG_DIRECTORY_MODE = 0o700;
@@ -39,10 +44,7 @@ const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
 const DIAGNOSTIC_CAPABILITY_ARGUMENT_PREFIX = "--agentlab-tui-diagnostic-capability=";
 const DIAGNOSTIC_CAPABILITY_DESCRIPTOR = 3;
 const DIAGNOSTIC_CAPABILITY_BYTES = 32;
-const DIAGNOSTIC_CAPABILITY_TIMEOUT_MS = 100;
-const DIAGNOSTIC_CAPABILITY_MESSAGE = "agentlab-native-diagnostics";
-const DIAGNOSTIC_CAPABILITY_READY_MESSAGE = "agentlab-native-diagnostics-ready";
-const DIAGNOSTIC_CAPABILITY_READY_TIMEOUT_MS = 1_000;
+const DIAGNOSTIC_CAPABILITY_CLOSE_TIMEOUT_MS = 100;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const DIAGNOSTIC_CAPABILITY_PATTERN = /^[0-9a-f]{64}$/u;
 const PROCESS_IDENTITY_PATTERN = /^[0-9a-f]{16}$/u;
@@ -585,7 +587,7 @@ async function consumeInheritedDiagnosticCapability(): Promise<
     descriptorClass = anonymousPipeDescriptorClass(metadata);
     if (descriptorClass === undefined) return undefined;
     if (!process.connected) return undefined;
-    const capability = await receiveInheritedDiagnosticCapability();
+    const capability = await receiveNativeDiagnosticCapability(processDiagnosticIpc());
     return capability === undefined ? undefined : { descriptorClass, value: capability };
   } catch {
     return undefined;
@@ -605,49 +607,6 @@ async function consumeNativeDiagnosticsAuthorization(
     : undefined;
 }
 
-function receiveInheritedDiagnosticCapability(): Promise<string | undefined> {
-  return new Promise((resolveCapability) => {
-    let settled = false;
-    const finish = (capability?: string): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      process.off("message", onMessage);
-      resolveCapability(capability);
-    };
-    const onMessage = (message: unknown): void => {
-      if (
-        typeof message !== "object" ||
-        message === null ||
-        !("type" in message) ||
-        message.type !== DIAGNOSTIC_CAPABILITY_MESSAGE ||
-        !("capability" in message) ||
-        typeof message.capability !== "string" ||
-        !DIAGNOSTIC_CAPABILITY_PATTERN.test(message.capability)
-      ) {
-        finish();
-        return;
-      }
-      finish(message.capability);
-    };
-    const timeout = setTimeout(() => {
-      finish();
-    }, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
-    process.once("message", onMessage);
-    try {
-      if (typeof process.send !== "function") {
-        finish();
-        return;
-      }
-      process.send({ type: DIAGNOSTIC_CAPABILITY_READY_MESSAGE }, (error: Error | null) => {
-        if (error !== null) finish();
-      });
-    } catch {
-      finish();
-    }
-  });
-}
-
 async function closeInheritedDiagnosticCapability(): Promise<void> {
   if (process.connected) {
     await new Promise<void>((resolveClose) => {
@@ -659,7 +618,7 @@ async function closeInheritedDiagnosticCapability(): Promise<void> {
         process.off("disconnect", finish);
         resolveClose();
       };
-      const timeout = setTimeout(finish, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS);
+      const timeout = setTimeout(finish, DIAGNOSTIC_CAPABILITY_CLOSE_TIMEOUT_MS);
       process.once("disconnect", finish);
       try {
         process.disconnect();
@@ -679,47 +638,49 @@ function sendInheritedDiagnosticCapability(
   child: ReturnType<typeof spawn>,
   capability: string
 ): void {
-  let timeout: NodeJS.Timeout;
-  const disconnect = (): void => {
-    try {
-      if (child.connected) child.disconnect();
-    } catch {
-      // A renderer may exit before the bootstrap finishes closing its private handoff.
+  sendNativeDiagnosticCapability(childDiagnosticIpc(child), capability);
+}
+
+function processDiagnosticIpc(): NativeDiagnosticIpc {
+  return {
+    get connected() {
+      return process.connected;
+    },
+    disconnect: () => {
+      process.disconnect();
+    },
+    offDisconnect: (listener) => process.off("disconnect", listener),
+    offExit: () => undefined,
+    offMessage: (listener) => process.off("message", listener),
+    onDisconnect: (listener) => process.once("disconnect", listener),
+    onExit: () => undefined,
+    onMessage: (listener) => process.on("message", listener),
+    send: (message, callback) => {
+      if (typeof process.send !== "function") {
+        callback(new Error("Diagnostic IPC is unavailable."));
+        return;
+      }
+      process.send(message, callback);
     }
   };
-  const finish = (): void => {
-    clearTimeout(timeout);
-    child.off("disconnect", finish);
-    child.off("exit", finish);
-    child.off("message", onMessage);
+}
+
+function childDiagnosticIpc(child: ReturnType<typeof spawn>): NativeDiagnosticIpc {
+  return {
+    get connected() {
+      return child.connected;
+    },
+    disconnect: () => {
+      child.disconnect();
+    },
+    offDisconnect: (listener) => child.off("disconnect", listener),
+    offExit: (listener) => child.off("exit", listener),
+    offMessage: (listener) => child.off("message", listener),
+    onDisconnect: (listener) => child.once("disconnect", listener),
+    onExit: (listener) => child.once("exit", listener),
+    onMessage: (listener) => child.on("message", listener),
+    send: (message, callback) => child.send(message, callback)
   };
-  const onMessage = (message: unknown): void => {
-    if (
-      typeof message !== "object" ||
-      message === null ||
-      !("type" in message) ||
-      message.type !== DIAGNOSTIC_CAPABILITY_READY_MESSAGE
-    ) {
-      return;
-    }
-    child.off("message", onMessage);
-    clearTimeout(timeout);
-    timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_TIMEOUT_MS * 2);
-    try {
-      child.send(
-        { capability, type: DIAGNOSTIC_CAPABILITY_MESSAGE },
-        (error: Error | null): void => {
-          if (error !== null) disconnect();
-        }
-      );
-    } catch {
-      disconnect();
-    }
-  };
-  child.on("message", onMessage);
-  child.once("disconnect", finish);
-  child.once("exit", finish);
-  timeout = setTimeout(disconnect, DIAGNOSTIC_CAPABILITY_READY_TIMEOUT_MS);
 }
 
 function isPrivateRuntimeArgument(argument: string): boolean {

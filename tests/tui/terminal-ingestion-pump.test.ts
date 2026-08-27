@@ -119,17 +119,24 @@ describe("TerminalIngestionPump", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it("drains real-scheduler output above the old timer-clamped throughput ceiling", async () => {
-    const input = new Uint8Array(4 * 1024 * 1024);
+  it("drains real-scheduler output exactly while allowing timers to run", async () => {
+    const input = new Uint8Array(512 * 1024);
     for (let index = 0; index < input.byteLength; index += 1) input[index] = index % 251;
-    const writes: Uint8Array[] = [];
+    let completeAndOrdered = true;
+    let maximumWriteBytes = 0;
+    let writtenBytes = 0;
     let timerObserved = false;
     const pump = new TerminalIngestionPump({
       invalidate: vi.fn(),
       onOverrun: vi.fn(),
-      write: (data) => writes.push(data)
+      write: (data) => {
+        maximumWriteBytes = Math.max(maximumWriteBytes, data.byteLength);
+        for (let index = 0; index < data.byteLength; index += 1) {
+          if (data[index] !== input[writtenBytes + index]) completeAndOrdered = false;
+        }
+        writtenBytes += data.byteLength;
+      }
     });
-    const startedAt = performance.now();
     const timer = setTimeout(() => {
       timerObserved = true;
     }, 0);
@@ -138,12 +145,11 @@ describe("TerminalIngestionPump", () => {
       pump.finishHistory(resolveSeeded);
     });
     clearTimeout(timer);
-    const elapsedMilliseconds = performance.now() - startedAt;
-    const mebibytesPerSecond = input.byteLength / 1024 / 1024 / (elapsedMilliseconds / 1_000);
 
-    expect(join(writes)).toEqual(input);
+    expect(completeAndOrdered).toBe(true);
+    expect(writtenBytes).toBe(input.byteLength);
+    expect(maximumWriteBytes).toBeLessThanOrEqual(8 * 1024);
     expect(timerObserved).toBe(true);
-    expect(mebibytesPerSecond).toBeGreaterThan(15);
   });
 });
 

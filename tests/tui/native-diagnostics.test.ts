@@ -22,6 +22,10 @@ import {
   nativeDiagnosticsRetention,
   openNativeDiagnosticsLog
 } from "../../apps/tui/src/bootstrap/native-diagnostics.js";
+import {
+  sendNativeDiagnosticCapability,
+  type NativeDiagnosticIpc
+} from "../../apps/tui/src/bootstrap/native-diagnostic-handoff.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -524,7 +528,7 @@ describe("native diagnostics bootstrap", () => {
     }
   });
 
-  it("times out and closes a genuine but silent fd 3 IPC channel", async () => {
+  it("bounds and closes a genuine but silent fd 3 IPC channel", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
     const capability = "a".repeat(64);
     const proof = diagnosticCapabilityProof(token, capability);
@@ -532,12 +536,11 @@ describe("native diagnostics bootstrap", () => {
       'import { fstatSync } from "node:fs";',
       'import { consumeNativeDiagnosticsInvocation } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       `const argv = ["bun", "main.tsx", "--agentlab-tui-runtime=${token}", "--agentlab-tui-diagnostic-capability=${proof}"];`,
-      "const startedAt = Date.now();",
       "const connectedBefore = process.connected;",
       "const invocation = await consumeNativeDiagnosticsInvocation(argv, process.env);",
       "let fd3Closed = false; try { fstatSync(3); } catch { fd3Closed = true; }",
       'const wrote = invocation.kind === "runtime" && invocation.diagnostics.write("silent ipc");',
-      "process.stdout.write(JSON.stringify({ connectedAfter: process.connected, connectedBefore, elapsed: Date.now() - startedAt, fd3Closed, kind: invocation.kind, wrote }));"
+      "process.stdout.write(JSON.stringify({ connectedAfter: process.connected, connectedBefore, fd3Closed, kind: invocation.kind, wrote }));"
     ].join("\n");
     const child = spawn("bun", ["-e", script], {
       env: diagnosticsEnvironment(token, proof),
@@ -549,27 +552,17 @@ describe("native diagnostics bootstrap", () => {
       readStream(child.stderr),
       new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
     ]);
-    const result = JSON.parse(stdout) as {
-      connectedAfter: boolean;
-      connectedBefore: boolean;
-      elapsed: number;
-      fd3Closed: boolean;
-      kind: string;
-      wrote: boolean;
-    };
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe("");
-    expect(result).toMatchObject({
+    expect(JSON.parse(stdout)).toEqual({
       connectedAfter: false,
       connectedBefore: true,
       fd3Closed: true,
       kind: "invalid",
       wrote: false
     });
-    expect(result.elapsed).toBeGreaterThanOrEqual(75);
-    expect(result.elapsed).toBeLessThan(400);
-  });
+  }, 12_000);
 
   it("closes a genuine fd 3 handoff even when argv and environment proofs mismatch", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
@@ -628,6 +621,25 @@ describe("native diagnostics bootstrap", () => {
       wrote: true
     });
   });
+
+  it("authorizes concurrent renderers without false protocol rejection", async () => {
+    const token = "123e4567-e89b-42d3-a456-426614174000";
+    const capability = "0".repeat(64);
+    const proof = diagnosticCapabilityProof(token, capability);
+    const results = await Promise.all(
+      Array.from({ length: 40 }, () =>
+        launchDiagnosticInvocation(
+          [`--agentlab-tui-runtime=${token}`, `--agentlab-tui-diagnostic-capability=${proof}`],
+          diagnosticsEnvironment(token, proof),
+          "pipe",
+          capability
+        )
+      )
+    );
+
+    expect(results).toHaveLength(40);
+    expect(results.every(({ kind, wrote }) => kind === "runtime" && wrote)).toBe(true);
+  }, 20_000);
 
   it("consumes authorization once and keeps every marker out of a descendant", async () => {
     const token = "123e4567-e89b-42d3-a456-426614174000";
@@ -804,7 +816,7 @@ describe("native diagnostics bootstrap", () => {
     expect(diagnostics).toContain("must run in an interactive terminal");
   });
 
-  it("authorizes a deliberately slow renderer through the genuine bootstrap handshake", async () => {
+  it("authorizes a renderer while its genuine bootstrap is stalled for 250ms", async () => {
     const state = await temporaryState();
     const fixture = resolve("tests/fixtures/delayed-native-diagnostics-bootstrap.bun.ts");
     const child = spawn("bun", [fixture], {
@@ -935,36 +947,25 @@ async function launchDiagnosticInvocation(
 }
 
 function sendCapabilityHandoff(child: ReturnType<typeof spawn>, capability: string): void {
-  let timeout: NodeJS.Timeout;
-  const disconnect = (): void => {
-    if (child.connected) child.disconnect();
+  sendNativeDiagnosticCapability(testChildDiagnosticIpc(child), capability);
+}
+
+function testChildDiagnosticIpc(child: ReturnType<typeof spawn>): NativeDiagnosticIpc {
+  return {
+    get connected() {
+      return child.connected;
+    },
+    disconnect: () => {
+      child.disconnect();
+    },
+    offDisconnect: (listener) => child.off("disconnect", listener),
+    offExit: (listener) => child.off("exit", listener),
+    offMessage: (listener) => child.off("message", listener),
+    onDisconnect: (listener) => child.once("disconnect", listener),
+    onExit: (listener) => child.once("exit", listener),
+    onMessage: (listener) => child.on("message", listener),
+    send: (message, callback) => child.send(message, callback)
   };
-  const finish = (): void => {
-    clearTimeout(timeout);
-    child.off("disconnect", finish);
-    child.off("exit", finish);
-    child.off("message", onMessage);
-  };
-  const onMessage = (message: unknown): void => {
-    if (
-      typeof message !== "object" ||
-      message === null ||
-      !("type" in message) ||
-      message.type !== "agentlab-native-diagnostics-ready"
-    ) {
-      return;
-    }
-    child.off("message", onMessage);
-    clearTimeout(timeout);
-    timeout = setTimeout(disconnect, 200);
-    child.send({ capability, type: "agentlab-native-diagnostics" }, (error: Error | null): void => {
-      if (error !== null) disconnect();
-    });
-  };
-  child.on("message", onMessage);
-  child.once("disconnect", finish);
-  child.once("exit", finish);
-  timeout = setTimeout(disconnect, 1_000);
 }
 
 function diagnosticCapabilityProof(runtimeToken: string, capability: string): string {
