@@ -3,6 +3,7 @@ import { createRoot } from "@opentui/react";
 import { createLocalAgentLab, loadLocalConfig } from "@agentlab/runtime";
 
 import { App } from "./app.js";
+import { writeNativeDiagnostic } from "./bootstrap/native-diagnostics.js";
 import { RuntimeContext } from "./runtime-context.js";
 import { palette } from "./theme.js";
 
@@ -23,6 +24,7 @@ export async function runTerminalUi(): Promise<void> {
     const renderer = await createCliRenderer({
       backgroundColor: palette.background,
       clearOnShutdown: true,
+      exitSignals: ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"],
       exitOnCtrlC: false,
       maxFps: 60,
       targetFps: 30,
@@ -33,7 +35,7 @@ export async function runTerminalUi(): Promise<void> {
       useThread: true,
       onDestroy: () => {
         void closeRuntime().catch((error: unknown) => {
-          process.stderr.write(`Shutdown failed: ${String(error)}\n`);
+          writeNativeDiagnostic(`Shutdown failed: ${String(error)}`);
         });
       }
     });

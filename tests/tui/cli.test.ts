@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assertSupportedTerminalRuntime, parseCliArguments } from "../../apps/tui/src/cli.js";
+import {
+  assertSupportedTerminalRuntime,
+  helpText,
+  parseCliArguments
+} from "../../apps/tui/src/cli.js";
 
 describe("terminal CLI", () => {
   it("always opens the project chooser when no arguments are supplied", () => {
@@ -14,6 +18,11 @@ describe("terminal CLI", () => {
   it("recognizes informational flags without requiring a TTY", () => {
     expect(parseCliArguments(["--help"])).toEqual({ kind: "help" });
     expect(parseCliArguments(["-v"])).toEqual({ kind: "version" });
+  });
+
+  it("documents the child-mouse emergency kill switch", () => {
+    expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
+    expect(helpText).toContain("keep mouse input local");
   });
 
   it("rejects unknown flags and ambiguous arguments", () => {

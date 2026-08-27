@@ -105,6 +105,33 @@ export function nativeDiagnosticsRuntimeArguments(
   return args.slice(1);
 }
 
+/** Appends renderer-owned failures without ever touching the interactive terminal descriptor. */
+export function writeNativeDiagnostic(
+  message: string,
+  environment: NodeJS.ProcessEnv = process.env
+): boolean {
+  const path = environment.AGENTLAB_DIAGNOSTIC_LOG;
+  if (!isSafeAbsoluteDirectory(path)) return false;
+  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, constants.O_APPEND | constants.O_WRONLY | noFollow);
+    if (!fstatSync(fd).isFile()) return false;
+    writeSync(fd, `[agentlab] ${message.replace(/[\r\n]+/gu, " ")}\n`);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Diagnostics must never become a second renderer failure.
+      }
+    }
+  }
+}
+
 export async function runWithNativeDiagnostics(
   args: readonly string[],
   environment: NodeJS.ProcessEnv = process.env

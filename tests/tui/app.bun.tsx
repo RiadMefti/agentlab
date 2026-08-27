@@ -483,13 +483,13 @@ describe("terminal workspace", () => {
     expect(setup.captureCharFrame()).toContain("Ship the terminal port");
   });
 
-  test("keeps the old frame visible until the selected agent is ready, then swaps atomically", async () => {
+  test("mounts a fresh VT immediately when switching attachments", async () => {
     const captainTerminal = fakeTerminal();
     const workerTerminal = fakeTerminal();
     const workerAttachment = deferredValue({
       history: "worker-only-history\n",
       terminal: workerTerminal,
-      releaseBufferedOutput: mock(() => undefined)
+      releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
     });
     const base = fakeRuntime({ conversations: [conversation], sessions });
     const runtime: LocalAgentLabRuntime = {
@@ -499,7 +499,7 @@ describe("terminal workspace", () => {
           ? Promise.resolve({
               history: "captain-only-history\n",
               terminal: captainTerminal,
-              releaseBufferedOutput: mock(() => undefined)
+              releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
             })
           : workerAttachment.promise
       )
@@ -526,7 +526,7 @@ describe("terminal workspace", () => {
     await setup.waitFor(() => callCount(runtime.openTerminal) === 2);
 
     const pendingFrame = setup.captureCharFrame();
-    expect(pendingFrame).toContain("captain-only-history");
+    expect(pendingFrame).not.toContain("captain-only-history");
     expect(pendingFrame).toContain("switching");
     expect(pendingFrame).not.toContain("worker-only-history");
 
@@ -672,6 +672,7 @@ describe("terminal workspace", () => {
           terminal,
           releaseBufferedOutput() {
             for (const data of outputCapturedDuringAttach) input.callbacks.onData(data);
+            return { bufferedBytes: 0, overrun: false };
           }
         });
       })
@@ -712,14 +713,14 @@ describe("terminal workspace", () => {
           return Promise.resolve({
             history: historyLine.repeat(4_096),
             terminal: captainTerminal,
-            releaseBufferedOutput: mock(() => undefined)
+            releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
           });
         }
         workerInput = input;
         return Promise.resolve({
           history: "worker-ready\n",
           terminal: workerTerminal,
-          releaseBufferedOutput: mock(() => undefined)
+          releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
         });
       })
     };
@@ -792,7 +793,7 @@ describe("terminal workspace", () => {
         return Promise.resolve({
           history: "ready\n",
           terminal,
-          releaseBufferedOutput: mock(() => undefined)
+          releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
         });
       })
     };
@@ -817,6 +818,42 @@ describe("terminal workspace", () => {
 
     expect(callCount(terminal.close)).toBe(1);
     expect(setup.captureCharFrame()).toContain("reconnect");
+  });
+
+  test("recovers visibly when ordered attach output exceeds its pre-release cap", async () => {
+    const terminal = fakeTerminal();
+    const base = fakeRuntime({ conversations: [conversation], sessions, terminal });
+    const runtime: LocalAgentLabRuntime = {
+      ...base,
+      openTerminal: mock(() =>
+        Promise.resolve({
+          history: "history-that-must-not-partially-render\n",
+          terminal,
+          releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: true }))
+        })
+      )
+    };
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 36, width: 130 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Ship the terminal port"));
+    setup.mockInput.pressKey("1", { meta: true });
+    await allowStateUpdate(setup);
+    setup.mockInput.pressArrow("down");
+    await waitForApp(setup, () => callCount(runtime.openTerminal) === 1, 500);
+    await waitForApp(setup, () => callCount(terminal.close) === 1, 500);
+    await allowStateUpdate(setup);
+
+    expect(callCount(terminal.close)).toBe(1);
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Terminal attach output exceeded");
+    expect(frame).toContain("resync from tmux");
+    expect(frame).not.toContain("history-that-must-not-partially-render");
   });
 
   test("keeps keyboard-selected conversations and workers visible in long sidebars", async () => {
@@ -1105,7 +1142,7 @@ function fakeRuntime(
           history: "history\n",
           terminal
         }),
-        releaseBufferedOutput: mock(() => undefined)
+        releaseBufferedOutput: mock(() => ({ bufferedBytes: 0, overrun: false }))
       })
     ),
     close: mock(() => Promise.resolve())

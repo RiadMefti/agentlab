@@ -6,12 +6,12 @@ import { parseKeypress, type KeyEvent } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { sessionHistoryLimit } from "@agentlab/contracts";
+import { terminalScrollbackBytes } from "@agentlab/contracts";
 
 import "../../apps/tui/src/terminal/embedded-terminal.js";
 import {
   EmbeddedTerminalRenderable,
-  TerminalMouseProtocolState
+  terminalChildMouseInputEnabled
 } from "../../apps/tui/src/terminal/embedded-terminal.js";
 import { palette } from "../../apps/tui/src/theme.js";
 import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
@@ -185,33 +185,6 @@ describe("embedded agent terminal", () => {
     expect(received.join("")).toContain("\x1b[200~one\ntwo\x1b[201~");
   });
 
-  test("tracks split and combined DEC mouse mode changes", () => {
-    const state = new TerminalMouseProtocolState();
-    state.observe("\x1b[?1002;10");
-    expect(state.enabled).toBe(false);
-    state.observe("06h");
-    expect(state.enabled).toBe(true);
-    state.observe("\x1b[?1002l");
-    expect(state.enabled).toBe(false);
-    state.observe("\x1b[?1000h\x1b[?1003h\x1b[?1000l");
-    expect(state.enabled).toBe(true);
-    state.observe("\x1b[?1003l");
-    expect(state.enabled).toBe(false);
-    state.observe("\x1b[?1000h\x1bc");
-    expect(state.enabled).toBe(false);
-  });
-
-  test("discards oversized incomplete mouse controls without consuming later valid controls", () => {
-    const state = new TerminalMouseProtocolState();
-    state.observe(`\x1b[?${"1".repeat(65)}`);
-    state.observe("000h");
-    expect(state.enabled).toBe(false);
-
-    state.observe("\x1b[?1000");
-    state.observe("h");
-    expect(state.enabled).toBe(true);
-  });
-
   test("arbitrates local selection, clicks, child mouse reporting, and Shift drag", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const received: string[] = [];
@@ -245,7 +218,6 @@ describe("embedded agent terminal", () => {
     await setup.flush();
     expect(received.join("")).toContain("\x1b[<0;2;2M");
     expect(received.join("")).toContain("\x1b[<32;5;2M");
-    expect(terminal.current?.getSelectedText()).toBe("");
 
     received.length = 0;
     await setup.mockMouse.drag(0, 0, 6, 0, 0, { modifiers: { shift: true } });
@@ -366,6 +338,44 @@ describe("embedded agent terminal", () => {
     await setup.flush();
     expect(received.join("")).toBe("");
     expect(terminal.current?.screen().text).not.toBe(beforeShiftScroll);
+  });
+
+  test("disables only child mouse forwarding with the production kill switch", async () => {
+    expect(terminalChildMouseInputEnabled({ AGENTLAB_DISABLE_MOUSE: "1" })).toBe(false);
+    expect(terminalChildMouseInputEnabled({ AGENTLAB_DISABLE_MOUSE: "0" })).toBe(true);
+
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let sidebarClicks = 0;
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 5, width: 30 }}>
+        <agent-terminal
+          ref={terminal}
+          childMouseInput={false}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 5, width: 20 }}
+        />
+        <box onMouseDown={() => (sidebarClicks += 1)} style={{ height: 5, width: 10 }} />
+      </box>,
+      { height: 5, width: 30 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("select me\x1b[?1002;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.drag(0, 0, 6, 0);
+    await setup.flush();
+    expect(received.join("")).toBe("");
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+
+    await setup.mockMouse.click(25, 1);
+    await setup.flush();
+
+    expect(received.join("")).toBe("");
+    expect(sidebarClicks).toBe(1);
   });
 
   test("shows the child cursor only while focused and clears stale selection on blur", async () => {
@@ -593,7 +603,7 @@ describe("embedded agent terminal", () => {
     const setup = await testRender(
       <agent-terminal
         ref={terminal}
-        maxScrollback={sessionHistoryLimit}
+        maxScrollback={terminalScrollbackBytes}
         style={{ height: 40, width: 120 }}
       />,
       { height: 40, width: 120 }

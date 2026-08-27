@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Disposable, PseudoTerminal } from "../domain/terminal.js";
 
 export const maximumTerminalDimension = 1_000;
+export const maximumOrderedTerminalOutputBytes = 1024 * 1024;
 
 const terminalColumnsSchema = z.number().int().min(2).max(maximumTerminalDimension);
 const terminalRowsSchema = z.number().int().min(1).max(maximumTerminalDimension);
@@ -32,33 +33,68 @@ type BufferedTerminalEvent =
   | { readonly kind: "data"; readonly data: string }
   | { readonly kind: "exit"; readonly exitCode: number };
 
+export interface BufferedTerminalRelease {
+  readonly bufferedBytes: number;
+  readonly overrun: boolean;
+}
+
 /** Holds live PTY events until presentation has seeded the older tmux history. */
 export class OrderedSessionTerminalCallbacks implements SessionTerminalCallbacks {
   readonly #callbacks: SessionTerminalCallbacks;
   readonly #events: BufferedTerminalEvent[] = [];
+  readonly #maximumBytes: number;
+  #bufferedBytes = 0;
+  #overrunBytes = 0;
+  #overrun = false;
   #released = false;
 
-  public constructor(callbacks: SessionTerminalCallbacks) {
+  public constructor(
+    callbacks: SessionTerminalCallbacks,
+    maximumBytes = maximumOrderedTerminalOutputBytes
+  ) {
+    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+      throw new RangeError("Ordered terminal output limit must be a positive integer.");
+    }
     this.#callbacks = callbacks;
+    this.#maximumBytes = maximumBytes;
   }
 
   public readonly onData = (data: string): void => {
-    if (this.#released) this.#callbacks.onData(data);
-    else this.#events.push({ kind: "data", data });
+    if (this.#released) {
+      this.#callbacks.onData(data);
+      return;
+    }
+    if (this.#overrun) return;
+    const bytes = Buffer.byteLength(data);
+    if (bytes > this.#maximumBytes - this.#bufferedBytes) {
+      // Never replay a partial escape stream. Presentation closes this ephemeral client and
+      // reattaches from durable tmux history when release reports the recoverable overrun.
+      this.#overrun = true;
+      this.#overrunBytes = this.#bufferedBytes + bytes;
+      this.#events.splice(0);
+      this.#bufferedBytes = 0;
+      return;
+    }
+    this.#bufferedBytes += bytes;
+    this.#events.push({ kind: "data", data });
   };
 
   public readonly onExit = (exitCode: number): void => {
     if (this.#released) this.#callbacks.onExit(exitCode);
-    else this.#events.push({ kind: "exit", exitCode });
+    else if (!this.#overrun) this.#events.push({ kind: "exit", exitCode });
   };
 
-  public release(): void {
-    if (this.#released) return;
+  public release(): BufferedTerminalRelease {
+    if (this.#released) return { bufferedBytes: 0, overrun: this.#overrun };
     this.#released = true;
+    const bufferedBytes = this.#bufferedBytes;
+    this.#bufferedBytes = 0;
+    if (this.#overrun) return { bufferedBytes: this.#overrunBytes, overrun: true };
     for (const event of this.#events.splice(0)) {
       if (event.kind === "data") this.#callbacks.onData(event.data);
       else this.#callbacks.onExit(event.exitCode);
     }
+    return { bufferedBytes, overrun: false };
   }
 }
 

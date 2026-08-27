@@ -161,9 +161,44 @@ describe("OrderedSessionTerminalCallbacks", () => {
     callbacks.onData("live-two");
     callbacks.onExit(7);
     rendered.push("history");
-    callbacks.release();
+    const release = callbacks.release();
     callbacks.onData("after-release");
 
+    expect(release).toEqual({ bufferedBytes: 16, overrun: false });
     expect(rendered).toEqual(["history", "live-one", "live-two", "exit:7", "after-release"]);
+  });
+
+  it("counts UTF-8 bytes and rejects the whole buffered stream on overrun", () => {
+    const rendered: string[] = [];
+    const callbacks = new OrderedSessionTerminalCallbacks(
+      {
+        onData: (data) => rendered.push(data),
+        onExit: (exitCode) => rendered.push(`exit:${String(exitCode)}`)
+      },
+      8
+    );
+
+    callbacks.onData("a界");
+    callbacks.onData("🙂");
+    callbacks.onData("overflow");
+    callbacks.onExit(9);
+
+    expect(callbacks.release()).toEqual({ bufferedBytes: 16, overrun: true });
+    expect(rendered).toEqual([]);
+  });
+
+  it("validates its byte cap and releases only once", () => {
+    expect(
+      () =>
+        new OrderedSessionTerminalCallbacks({ onData: () => undefined, onExit: () => undefined }, 0)
+    ).toThrow("positive integer");
+
+    const callbacks = new OrderedSessionTerminalCallbacks({
+      onData: () => undefined,
+      onExit: () => undefined
+    });
+    callbacks.onData("one");
+    expect(callbacks.release()).toEqual({ bufferedBytes: 3, overrun: false });
+    expect(callbacks.release()).toEqual({ bufferedBytes: 0, overrun: false });
   });
 });

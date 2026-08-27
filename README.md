@@ -132,8 +132,10 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `packages/contracts` owns provider, conversation, and session schemas shared across local layers.
 
 The embedded terminal uses native VT parsing, true color, selection, resize, paste, cursor state,
-and a bounded 20,000-line scrollback. Focused tests enforce multi-megabyte ANSI throughput and the
-one-attachment invariant. See [Architecture](docs/architecture.md) for the complete boundaries.
+and a 16 MiB scrollback byte budget. Tmux separately retains up to 20,000 history lines; the number
+of lines held by the embedded terminal varies with encoded content. Focused tests enforce
+multi-megabyte ANSI throughput and the one-attachment invariant. See
+[Architecture](docs/architecture.md) for the complete boundaries.
 
 ## Development
 

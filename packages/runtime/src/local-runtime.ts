@@ -6,6 +6,7 @@ import {
   OrderedSessionTerminalCallbacks,
   SessionTerminalOwner,
   parseTerminalDimensions,
+  type BufferedTerminalRelease,
   type SessionTerminal,
   type SessionTerminalCallbacks
 } from "./application/session-terminal.js";
@@ -49,7 +50,7 @@ export interface LocalAgentLabRuntime {
   openTerminal(input: OpenSessionTerminalInput): Promise<{
     readonly history: string;
     readonly terminal: SessionTerminal;
-    readonly releaseBufferedOutput: () => void;
+    readonly releaseBufferedOutput: () => BufferedTerminalRelease;
   }>;
   close(): Promise<void>;
 }
@@ -110,7 +111,7 @@ export function createLocalAgentLab(options: LocalAgentLabOptions): LocalAgentLa
           history,
           terminal,
           releaseBufferedOutput() {
-            orderedCallbacks.release();
+            return orderedCallbacks.release();
           }
         };
       });

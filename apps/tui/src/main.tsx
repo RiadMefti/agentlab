@@ -1,13 +1,17 @@
 import { assertSupportedTerminalRuntime, helpText, parseCliArguments } from "./cli.js";
 import {
   nativeDiagnosticsRuntimeArguments,
-  runWithNativeDiagnostics
+  runWithNativeDiagnostics,
+  writeNativeDiagnostic
 } from "./bootstrap/native-diagnostics.js";
 import { appVersion } from "./version.js";
+
+let rendererOwnsScreen = false;
 
 async function main(): Promise<void> {
   const processArguments = process.argv.slice(2);
   const runtimeArguments = nativeDiagnosticsRuntimeArguments(processArguments);
+  rendererOwnsScreen = runtimeArguments !== null;
   const action = parseCliArguments(runtimeArguments ?? processArguments);
   if (action.kind === "help") {
     process.stdout.write(helpText);
@@ -29,6 +33,7 @@ async function main(): Promise<void> {
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : "Unexpected startup failure.";
-  process.stderr.write(`agentlab: ${message}\n`);
+  if (rendererOwnsScreen) writeNativeDiagnostic(`Renderer failure: ${message}`);
+  else process.stderr.write(`agentlab: ${message}\n`);
   process.exitCode = 1;
 });

@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   nativeDiagnosticsRuntimeArguments,
   nativeDiagnosticsLogPath,
-  openNativeDiagnosticsLog
+  openNativeDiagnosticsLog,
+  writeNativeDiagnostic
 } from "../../apps/tui/src/bootstrap/native-diagnostics.js";
 
 const temporaryDirectories: string[] = [];
@@ -78,6 +79,21 @@ describe("native diagnostics bootstrap", () => {
     expect(readFileSync(`${path}.1`, "utf8")).toContain("LATEST_CRASH_OUTPUT");
     expect(readFileSync(`${path}.1`, "utf8")).toContain("retained the newest diagnostics");
     expect(statSync(join(state, "agentlab", "logs")).mode & 0o777).toBe(0o700);
+  });
+
+  it("routes renderer teardown failures directly to the private diagnostic file", async () => {
+    const state = await temporaryState();
+    const environment = { ...process.env, XDG_STATE_HOME: state };
+    const log = openNativeDiagnosticsLog(environment);
+    const rendererEnvironment = { ...environment, AGENTLAB_DIAGNOSTIC_LOG: log.path };
+
+    expect(writeNativeDiagnostic("Shutdown failed:\nclose error", rendererEnvironment)).toBe(true);
+    expect(writeNativeDiagnostic("not configured", {})).toBe(false);
+    log.close();
+
+    expect(readFileSync(nativeDiagnosticsLogPath(environment), "utf8")).toContain(
+      "[agentlab] Shutdown failed: close error"
+    );
   });
 
   it("boots the development entry with renderer stderr isolated and its exit code preserved", async () => {

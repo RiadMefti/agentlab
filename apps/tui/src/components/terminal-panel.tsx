@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
+import { terminalScrollbackBytes, type AgentSession } from "@agentlab/contracts";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtime";
 
 import "../terminal/embedded-terminal.js";
-import type { EmbeddedTerminalRenderable } from "../terminal/embedded-terminal.js";
+import {
+  terminalChildMouseInputEnabled,
+  type EmbeddedTerminalRenderable
+} from "../terminal/embedded-terminal.js";
 import { TerminalIngestionPump } from "../terminal/terminal-ingestion-pump.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
@@ -157,7 +160,17 @@ export function TerminalPanel({
         }
         // The pump boundary, rather than runtime buffering, now owns history-before-live order.
         // Releasing here puts all captured and future PTY bytes under the same explicit limit.
-        releaseBufferedOutput();
+        const release = releaseBufferedOutput();
+        if (release.overrun) {
+          pump.cancel();
+          current = false;
+          terminal.close();
+          if (attachmentRef.current === terminal) attachmentRef.current = null;
+          setConnection("closed");
+          setError(
+            "Terminal attach output exceeded its safe buffer; switch away and back to resync from tmux."
+          );
+        }
       })
       .catch((cause: unknown) => {
         if (!current) return;
@@ -235,8 +248,11 @@ export function TerminalPanel({
         </text>
       </box>
       <agent-terminal
+        key={requestedKey ?? "no-terminal-session"}
         ref={terminalRef}
-        maxScrollback={sessionHistoryLimit}
+        maxScrollback={terminalScrollbackBytes}
+        childMouseInput={terminalChildMouseInputEnabled()}
+        onActivate={onActivate}
         sessionConnected={connection === "connected" && !switching}
         selectable
         onData={(data) => {

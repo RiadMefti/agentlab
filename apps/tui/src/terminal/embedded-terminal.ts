@@ -32,13 +32,6 @@ const semanticPhysicalKeys: Readonly<Record<string, string>> = {
 };
 
 const escapeCharacter = String.fromCharCode(27);
-const mouseControlPattern = new RegExp(
-  `${escapeCharacter}c|${escapeCharacter}\\[!p|${escapeCharacter}\\[\\?([\\d;]*)([hl])`,
-  "gu"
-);
-const incompleteControlPattern = new RegExp(`${escapeCharacter}(?:\\[[?!\\d;]*)?$`, "u");
-const MAX_INCOMPLETE_CONTROL_BYTES = 64;
-
 interface OpenTuiTerminalInternals {
   readonly handle: unknown;
   readonly lib: {
@@ -47,7 +40,6 @@ interface OpenTuiTerminalInternals {
 }
 
 interface OpenTuiRendererSelectionContext {
-  readonly _lastPointerModifiers?: { readonly shift?: boolean };
   clearSelection(): void;
   getSelection(): {
     readonly anchor: { readonly x: number; readonly y: number };
@@ -59,55 +51,34 @@ export interface AgentTerminalOptions extends Omit<
   EmbeddedTerminalOptions,
   "renderBefore" | "renderAfter"
 > {
+  readonly childMouseInput?: boolean;
+  readonly onActivate?: () => void;
   readonly sessionConnected?: boolean;
 }
 
-/** Tracks only DEC mouse modes; the native VT remains authoritative for encoding. */
-export class TerminalMouseProtocolState {
-  readonly #trackingModes = new Set<number>();
-  #tail = "";
-
-  public observe(data: string | Uint8Array): boolean {
-    const wasEnabled = this.enabled;
-    const text = typeof data === "string" ? data : new TextDecoder().decode(data);
-    const input = this.#tail + text;
-    for (const match of input.matchAll(mouseControlPattern)) {
-      if (match[0] === "\x1bc" || match[0] === "\x1b[!p") {
-        this.#trackingModes.clear();
-        continue;
-      }
-      const enabled = match[2] === "h";
-      for (const value of (match[1] ?? "").split(";")) {
-        const mode = Number(value);
-        if (mode !== 1000 && mode !== 1002 && mode !== 1003) continue;
-        if (enabled) this.#trackingModes.add(mode);
-        else this.#trackingModes.delete(mode);
-      }
-    }
-    const tail = incompleteControlPattern.exec(input)?.[0] ?? "";
-    this.#tail = tail.length <= MAX_INCOMPLETE_CONTROL_BYTES ? tail : "";
-    return !wasEnabled && this.enabled;
-  }
-
-  public get enabled(): boolean {
-    return this.#trackingModes.size > 0;
-  }
+export function terminalChildMouseInputEnabled(
+  environment: NodeJS.ProcessEnv = process.env
+): boolean {
+  return environment.AGENTLAB_DISABLE_MOUSE !== "1";
 }
 
 /** Compatibility shell around OpenTUI 0.5.8's native VT implementation. */
 export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderable {
   readonly #appearance = new TerminalDefaultAppearance();
-  readonly #mouseProtocol = new TerminalMouseProtocolState();
+  readonly #childMouseInput: boolean;
+  #onActivate: (() => void) | undefined;
   #forceLocalDrag = false;
   #sessionConnected: boolean;
 
   public constructor(ctx: RenderContext, options: AgentTerminalOptions) {
-    super(ctx, options);
-    this.#sessionConnected = options.sessionConnected ?? true;
+    const { childMouseInput, onActivate, sessionConnected, ...openTuiOptions } = options;
+    super(ctx, openTuiOptions);
+    this.#childMouseInput = childMouseInput ?? true;
+    this.#onActivate = onActivate;
+    this.#sessionConnected = sessionConnected ?? true;
   }
 
   public override write(data: string | Uint8Array): void {
-    if (this.#mouseProtocol.observe(data)) this.clearLocalSelection();
     this.#appearance.markChanged();
     super.write(data);
   }
@@ -151,24 +122,19 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     return super.encodeKey(normalized);
   }
 
-  public override shouldStartSelection(x: number, y: number): boolean {
-    if (!super.shouldStartSelection(x, y)) return false;
-    return !this.#mouseProtocol.enabled || this.pointerHasShift();
-  }
-
   public override processMouseEvent(event: MouseEvent): void {
     if (event.type === "down" && event.button === 0) {
       this.#forceLocalDrag = event.modifiers.shift;
+      this.#onActivate?.();
     }
     const forceLocal = event.modifiers.shift || this.#forceLocalDrag;
-    if (this.#mouseProtocol.enabled && forceLocal) {
+    if (forceLocal || !this.#childMouseInput) {
       if (event.type === "scroll") {
         this.scrollLocally(event);
         return;
       }
-      // Continue renderer-owned selection and bubble activation without entering
-      // OpenTUI's independent child mouse forwarding path.
-      this.parent?.processMouseEvent(event);
+      // Selection begins in the renderer before dispatch. Skipping OpenTUI's handler is the exact
+      // Shift bypass: no child bytes and no manual re-entry into parent/capture bookkeeping.
       if (event.type === "down" && event.button === 0) this.focus();
       if (event.type === "up" || event.type === "drag-end") {
         this.#forceLocalDrag = false;
@@ -177,9 +143,9 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
       return;
     }
 
-    if (event.type === "scroll" && !this.#mouseProtocol.enabled) {
-      this.#appearance.markChanged();
-    }
+    if (event.type === "scroll") this.#appearance.markChanged();
+    // OpenTUI's embeddedTerminalEncodeMouse is the sole authority. Its zero-byte result preserves
+    // local selection/scrolling; non-empty output is forwarded byte-exactly to the child.
     super.processMouseEvent(event);
     if (event.type === "up" && event.button === 0) {
       this.#forceLocalDrag = false;
@@ -195,6 +161,14 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     if (this.#sessionConnected === value) return;
     this.#sessionConnected = value;
     if (!value) this.blur();
+  }
+
+  public get onActivate(): (() => void) | undefined {
+    return this.#onActivate;
+  }
+
+  public set onActivate(value: (() => void) | undefined) {
+    this.#onActivate = value;
   }
 
   public override focus(): void {
@@ -225,10 +199,6 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   ): void {
     super.renderSelf(buffer);
     this.#appearance.apply(buffer);
-  }
-
-  private pointerHasShift(): boolean {
-    return this.selectionContext()._lastPointerModifiers?.shift === true;
   }
 
   private clearCollapsedSelection(): void {
