@@ -87,6 +87,43 @@ describe("ConversationService", () => {
     expect(providers.workspaces).toContain("/work/another-project");
   });
 
+  it("prepares the canonical folder before separately discovering providers", async () => {
+    const { providers, service } = createFixture();
+
+    await expect(service.prepareWorkspace("/work/fast-project")).resolves.toEqual({
+      workspacePath: "/work/fast-project",
+      suggestedName: "fast-project"
+    });
+    expect(providers.workspaces).toEqual([]);
+
+    await expect(service.discoverWorkspaceProviders("/work/fast-project")).resolves.toHaveLength(1);
+    expect(providers.workspaces).toEqual(["/work/fast-project"]);
+  });
+
+  it("authoritatively resolves and checks the folder again when creation starts", async () => {
+    const repository = new MemoryConversationRepository();
+    const workspacePaths = new StaticWorkspacePathResolver();
+    const service = new ConversationService({
+      repository,
+      sessions: new MemorySessionRuntime(),
+      providers: new StaticProviderCatalog(),
+      workspacePaths,
+      createId: () => TEST_CONVERSATION_ID
+    });
+
+    const prepared = await service.prepareWorkspace("/work/revalidated");
+    await service.createConversation({
+      title: prepared.suggestedName,
+      workspacePath: prepared.workspacePath,
+      prompt: null,
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+
+    expect(workspacePaths.inputs).toEqual(["/work/revalidated", "/work/revalidated"]);
+  });
+
   it("creates one captain session and persists its identity", async () => {
     const { repository, sessions, service } = createFixture();
 
@@ -197,6 +234,29 @@ describe("ConversationService", () => {
       })
     ).rejects.toThrow("disk full");
     expect(sessions.killed).toEqual([buildCaptainSessionName(TEST_CONVERSATION_ID, "codex")]);
+  });
+
+  it("keeps persistence failure primary and retains failed tmux compensation diagnostics", async () => {
+    const { repository, sessions, service } = createFixture();
+    const primary = new Error("disk full");
+    const compensation = new Error("tmux kill timed out");
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+    repository.createError = primary;
+    sessions.killErrors.set(name, compensation);
+
+    const failure = await service
+      .createConversation({
+        ...PROJECT_INPUT,
+        prompt: "Task",
+        provider: "codex",
+        model: null,
+        reasoning: "high"
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBe(primary);
+    expect(primary.cause).toBeInstanceOf(AggregateError);
+    expect((primary.cause as AggregateError).errors).toContain(compensation);
   });
 
   it("does not persist when the requested provider is unavailable", async () => {
@@ -441,6 +501,86 @@ describe("ConversationService", () => {
 
     expect(sessions.killed).toEqual([conversation.captainSessionName, worker.name]);
     expect(repository.conversations).toHaveLength(0);
+  });
+
+  it("bounds multi-worker deletion by stopping workers concurrently", async () => {
+    const { sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      ...PROJECT_INPUT,
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    const workerNames = ["review", "tests"].map((label) =>
+      buildWorkerSessionName(TEST_CONVERSATION_ID, "claude", label)
+    );
+    sessions.liveSessions = workerNames.map((name, index) => ({
+      name,
+      conversationId: TEST_CONVERSATION_ID,
+      role: "worker" as const,
+      provider: "claude" as const,
+      label: `Worker ${String(index)}`,
+      status: "running" as const,
+      attached: false,
+      startedAt: "2026-08-21T12:01:00.000Z"
+    }));
+    const originalKill = sessions.kill.bind(sessions);
+    const started: string[] = [];
+    let releaseWorkers: () => void = () => undefined;
+    const workerGate = new Promise<void>((resolve) => {
+      releaseWorkers = resolve;
+    });
+    sessions.kill = async (name) => {
+      if (name === conversation.captainSessionName) return originalKill(name);
+      started.push(name);
+      await workerGate;
+      return originalKill(name);
+    };
+
+    const deletion = service.deleteConversation(conversation.id);
+    await expect.poll(() => started.length).toBe(2);
+    releaseWorkers();
+    await expect(deletion).resolves.toBeUndefined();
+
+    expect(new Set(started)).toEqual(new Set(workerNames));
+  });
+
+  it("retains every concurrent worker cleanup failure", async () => {
+    const { repository, sessions, service } = createFixture();
+    const conversation = await service.createConversation({
+      ...PROJECT_INPUT,
+      prompt: "Coordinate the work",
+      provider: "codex",
+      model: null,
+      reasoning: null
+    });
+    const workerNames = ["review", "tests"].map((label) =>
+      buildWorkerSessionName(TEST_CONVERSATION_ID, "claude", label)
+    );
+    sessions.liveSessions = workerNames.map((name, index) => ({
+      name,
+      conversationId: TEST_CONVERSATION_ID,
+      role: "worker" as const,
+      provider: "claude" as const,
+      label: `Worker ${String(index)}`,
+      status: "running" as const,
+      attached: false,
+      startedAt: "2026-08-21T12:01:00.000Z"
+    }));
+    const failures = workerNames.map((name) => {
+      const error = new Error(`failed to stop ${name}`);
+      sessions.killErrors.set(name, error);
+      return error;
+    });
+
+    const error = await service
+      .deleteConversation(conversation.id)
+      .catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual(failures);
+    expect(repository.conversations).toEqual([conversation]);
   });
 
   it("keeps conversation metadata when session cleanup fails", async () => {

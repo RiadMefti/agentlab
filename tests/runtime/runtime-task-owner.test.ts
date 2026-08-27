@@ -7,6 +7,29 @@ import {
 } from "../../packages/runtime/src/application/runtime-task-owner.js";
 
 describe("RuntimeTaskOwner", () => {
+  it("bounds shutdown when admitted external work never settles", async () => {
+    const tasks = new RuntimeTaskOwner(10);
+    const operation = tasks.run(() => new Promise<void>(() => undefined));
+    void operation;
+
+    await expect(tasks.stopAndDrain()).rejects.toThrow(
+      "Runtime shutdown timed out after 10 milliseconds"
+    );
+  });
+
+  it("does not mistake a drain deadline for cancellation of the admitted task", async () => {
+    let release: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tasks = new RuntimeTaskOwner(5);
+    const operation = tasks.run(() => pending);
+
+    await expect(tasks.stopAndDrain()).rejects.toThrow("Runtime shutdown timed out");
+    release();
+    await expect(operation).resolves.toBeUndefined();
+  });
+
   it("stops admission and drains a worker creation before shutdown can finish", async () => {
     let releaseProvider: () => void = () => undefined;
     const providerResolved = new Promise<void>((resolve) => {
@@ -62,6 +85,9 @@ function commandPort(overrides: Partial<AgentLabCommandPort> = {}): AgentLabComm
   return {
     listConversations: () => Promise.resolve([]),
     inspectWorkspace: () => Promise.reject(new Error("not implemented")),
+    prepareWorkspace: () => Promise.reject(new Error("not implemented")),
+    discoverWorkspaceProviders: () => Promise.reject(new Error("not implemented")),
+    completeFolders: () => Promise.resolve([]),
     listProviders: () => Promise.resolve([]),
     createConversation: () => Promise.reject(new Error("not implemented")),
     deleteConversation: () => Promise.resolve(),

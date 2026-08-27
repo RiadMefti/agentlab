@@ -13,7 +13,10 @@ import type {
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
-import { codexAgentLauncher } from "../../packages/runtime/src/infrastructure/providers/agent-launchers.js";
+import {
+  claudeAgentLauncher,
+  codexAgentLauncher
+} from "../../packages/runtime/src/infrastructure/providers/agent-launchers.js";
 import { parseCodexModels } from "../../packages/runtime/src/infrastructure/providers/codex-capability-discovery.js";
 import {
   LocalProviderCatalog,
@@ -24,6 +27,7 @@ import {
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const root of temporaryRoots.splice(0)) rmSync(root, { force: true, recursive: true });
 });
 
@@ -61,6 +65,149 @@ function versionRunner(version = "codex-cli 1.2.3") {
 }
 
 describe("LocalProviderCatalog", () => {
+  it("allows default executable discovery to finish legitimately after two seconds", async () => {
+    vi.useFakeTimers();
+    const delayedLocator: ProviderBinaryLocator = {
+      candidates: () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve(["/opt/codex"]);
+          }, 2_100);
+        })
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      delayedLocator,
+      versionRunner(),
+      { workspace: "/work/project" }
+    );
+
+    const listed = catalog.list();
+    await vi.advanceTimersByTimeAsync(2_100);
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({ id: "codex", available: true, source: "live" })
+    ]);
+  });
+
+  it("reports a bounded unavailable result when default executable discovery never resolves", async () => {
+    vi.useFakeTimers();
+    const stalledLocator: ProviderBinaryLocator = {
+      candidates: () => new Promise<readonly string[]>(() => undefined)
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      stalledLocator,
+      versionRunner(),
+      { workspace: "/work/project" }
+    );
+
+    const listed = catalog.list();
+    await vi.advanceTimersByTimeAsync(4_250);
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Codex executable discovery timed out."
+      })
+    ]);
+  });
+
+  it("caps aggregate candidate discovery at the project-creation UX deadline", async () => {
+    vi.useFakeTimers();
+    const stalledDiscovery = discovery(() => new Promise(() => undefined));
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [stalledDiscovery],
+      locator(["/opt/codex-one", "/opt/codex-two"]),
+      versionRunner(),
+      { workspace: "/work/project" }
+    );
+    const startedAt = Date.now();
+    let settled = false;
+    const listed = catalog.list().then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await vi.advanceTimersByTimeAsync(11_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Codex provider catalog timed out."
+      })
+    ]);
+    expect(Date.now() - startedAt).toBe(12_000);
+  });
+
+  it("uses the catalog ceiling when a fake version runner ignores its command timeout", async () => {
+    const stalledRunner: CommandRunner = {
+      run: () => new Promise<RunResult>(() => undefined)
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      locator(),
+      stalledRunner,
+      { workspace: "/work/project", versionTimeoutMs: 10, catalogTimeoutMs: 30 }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Codex provider catalog timed out."
+      })
+    ]);
+  });
+
+  it("degrades one stalled provider without hanging catalog aggregation", async () => {
+    const stalledClaude: ProviderCapabilityDiscovery = {
+      id: "claude",
+      discover: () => new Promise(() => undefined)
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher, claudeAgentLauncher],
+      [discovery(), stalledClaude],
+      locator(),
+      versionRunner(),
+      { workspace: "/work/project", discoveryTimeoutMs: 10, catalogTimeoutMs: 100 }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({ id: "codex", available: true, source: "live" }),
+      expect.objectContaining({
+        id: "claude",
+        available: true,
+        source: "fallback",
+        reason: "Model discovery failed: Claude model catalog timed out."
+      })
+    ]);
+  });
+
+  it("caps candidate probing before a large locator result can amplify latency", async () => {
+    const runner: CommandRunner = {
+      run: vi.fn(() => Promise.reject(new Error("bad executable")))
+    };
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      locator(Array.from({ length: 20 }, (_value, index) => `/opt/codex-${String(index)}`)),
+      runner,
+      { workspace: "/work/project", maxCandidates: 3 }
+    );
+
+    await expect(catalog.list()).resolves.toEqual([
+      expect.objectContaining({ available: false, source: "unavailable" })
+    ]);
+    expect(runner.run).toHaveBeenCalledTimes(3);
+  });
+
   it("reports and resolves an installed CLI while caching its exact capabilities", async () => {
     const runner = versionRunner();
     const discoverModels = vi.fn(() => Promise.resolve(discoveredModels()));

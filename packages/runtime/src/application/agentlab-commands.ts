@@ -1,21 +1,28 @@
 import {
   createConversationInputSchema,
   createWorkerInputSchema,
+  folderCompletionInputSchema,
+  folderSuggestionSchema,
   workspacePathInputSchema,
   type AgentSession,
   type Conversation,
+  type FolderSuggestion,
   type ProviderCapability
 } from "@agentlab/contracts";
 import { z } from "zod";
 
 import { parseSessionName } from "../domain/agent-session-name.js";
 import type { ConversationService } from "./conversation-service.js";
-import type { WorkspaceInspection } from "./conversation-service.js";
+import type { WorkspaceInspection, WorkspacePreparation } from "./conversation-service.js";
+import type { FolderCompleter } from "../domain/folder-completer.js";
 
 /** Provider- and transport-neutral command surface exposed to presentation layers. */
 export interface AgentLabCommandPort {
   listConversations(): Promise<readonly Conversation[]>;
   inspectWorkspace(workspacePath: unknown): Promise<WorkspaceInspection>;
+  prepareWorkspace(workspacePath: unknown): Promise<WorkspacePreparation>;
+  discoverWorkspaceProviders(workspacePath: unknown): Promise<readonly ProviderCapability[]>;
+  completeFolders(input: unknown): Promise<readonly FolderSuggestion[]>;
   listProviders(conversationId: unknown): Promise<readonly ProviderCapability[]>;
   createConversation(input: unknown): Promise<Conversation>;
   deleteConversation(conversationId: unknown): Promise<void>;
@@ -44,7 +51,10 @@ const sessionNameSchema = z
 
 /** Validated, transport-independent commands exposed directly to local UIs. */
 export class AgentLabCommands implements AgentLabCommandPort {
-  public constructor(private readonly conversations: ConversationOperations) {}
+  public constructor(
+    private readonly conversations: ConversationOperations,
+    private readonly folders: FolderCompleter
+  ) {}
 
   public listConversations(): Promise<readonly Conversation[]> {
     return this.conversations.listConversations();
@@ -52,6 +62,23 @@ export class AgentLabCommands implements AgentLabCommandPort {
 
   public inspectWorkspace(workspacePath: unknown): Promise<WorkspaceInspection> {
     return this.conversations.inspectWorkspace(workspacePathInputSchema.parse(workspacePath));
+  }
+
+  public prepareWorkspace(workspacePath: unknown): Promise<WorkspacePreparation> {
+    return this.conversations.prepareWorkspace(workspacePathInputSchema.parse(workspacePath));
+  }
+
+  public discoverWorkspaceProviders(
+    workspacePath: unknown
+  ): Promise<readonly ProviderCapability[]> {
+    return this.conversations.discoverWorkspaceProviders(
+      workspacePathInputSchema.parse(workspacePath)
+    );
+  }
+
+  public async completeFolders(input: unknown): Promise<readonly FolderSuggestion[]> {
+    const suggestions = await this.folders.complete(folderCompletionInputSchema.parse(input));
+    return folderSuggestionSchema.array().max(6).parse(suggestions);
   }
 
   public listProviders(conversationId: unknown): Promise<readonly ProviderCapability[]> {

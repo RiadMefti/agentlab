@@ -1,6 +1,7 @@
 import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
 
 import { parseSessionName, sessionLabel } from "../../domain/agent-session-name.js";
+import { preservePrimaryFailure } from "../../domain/compensation.js";
 import { ConflictError } from "../../domain/errors.js";
 import type {
   CreateCaptainSessionInput,
@@ -8,11 +9,14 @@ import type {
   SessionRuntime
 } from "../../domain/session-runtime.js";
 import { type CommandRunner, errorOutput } from "../process/command-runner.js";
+import { withTimeout } from "../../domain/promise-timeout.js";
 import { renderShellCommand } from "./shell-command.js";
 
 // tmux 3.4 escapes control characters in format output, so keep this printable.
 // Managed session names and the remaining numeric fields cannot contain a pipe.
 const FIELD_SEPARATOR = "|";
+const TMUX_COMMAND_TIMEOUT_MS = 3_000;
+const TMUX_CLEANUP_ALLOWANCE_MS = 3_000;
 const SESSION_FORMAT = [
   "#{session_name}",
   "#{session_created}",
@@ -24,7 +28,8 @@ const SESSION_FORMAT = [
 export class TmuxSessionRuntime implements SessionRuntime {
   public constructor(
     private readonly runner: CommandRunner,
-    private readonly socketPath?: string
+    private readonly socketPath?: string,
+    private readonly options: TmuxSessionRuntimeOptions = {}
   ) {}
 
   public async createCaptain(input: CreateCaptainSessionInput): Promise<void> {
@@ -47,9 +52,8 @@ export class TmuxSessionRuntime implements SessionRuntime {
       throw new ConflictError("That session already exists.");
     }
 
-    await this.runner.run(
-      "tmux",
-      this.tmuxArgs([
+    try {
+      await this.runTmux([
         "new-session",
         "-d",
         "-s",
@@ -60,42 +64,37 @@ export class TmuxSessionRuntime implements SessionRuntime {
         "120",
         "-y",
         "40"
-      ])
-    );
-
-    try {
-      await this.runner.run(
-        "tmux",
-        this.tmuxArgs(["set-window-option", "-t", windowTarget(input.name), "remain-on-exit", "on"])
-      );
-      await this.runner.run(
-        "tmux",
-        this.tmuxArgs([
-          "set-window-option",
-          "-t",
-          windowTarget(input.name),
-          "history-limit",
-          String(sessionHistoryLimit)
-        ])
-      );
-      await this.runner.run(
-        "tmux",
-        this.tmuxArgs(["set-option", "-t", input.name, "status", "off"])
-      );
-      await this.runner.run(
-        "tmux",
-        this.tmuxArgs([
-          "respawn-pane",
-          "-k",
-          "-t",
-          windowTarget(input.name),
-          "-c",
-          input.cwd,
-          renderShellCommand(input.command)
-        ])
-      );
+      ]);
+      await this.runTmux([
+        "set-window-option",
+        "-t",
+        windowTarget(input.name),
+        "remain-on-exit",
+        "on"
+      ]);
+      await this.runTmux([
+        "set-window-option",
+        "-t",
+        windowTarget(input.name),
+        "history-limit",
+        String(sessionHistoryLimit)
+      ]);
+      await this.runTmux(["set-option", "-t", input.name, "status", "off"]);
+      await this.runTmux([
+        "respawn-pane",
+        "-k",
+        "-t",
+        windowTarget(input.name),
+        "-c",
+        input.cwd,
+        renderShellCommand(input.command)
+      ]);
     } catch (error: unknown) {
-      await this.kill(input.name).catch(() => undefined);
+      try {
+        await this.kill(input.name);
+      } catch (compensationError: unknown) {
+        throw preservePrimaryFailure(error, compensationError);
+      }
       throw error;
     }
   }
@@ -103,7 +102,7 @@ export class TmuxSessionRuntime implements SessionRuntime {
   public async kill(name: string): Promise<void> {
     assertManagedName(name);
     try {
-      await this.runner.run("tmux", this.tmuxArgs(["kill-session", "-t", exactTarget(name)]));
+      await this.runTmux(["kill-session", "-t", exactTarget(name)]);
     } catch (error: unknown) {
       if (!isMissingSessionError(error)) throw error;
     }
@@ -112,7 +111,7 @@ export class TmuxSessionRuntime implements SessionRuntime {
   public async exists(name: string): Promise<boolean> {
     assertManagedName(name);
     try {
-      await this.runner.run("tmux", this.tmuxArgs(["has-session", "-t", exactTarget(name)]));
+      await this.runTmux(["has-session", "-t", exactTarget(name)]);
       return true;
     } catch (error: unknown) {
       if (isMissingSessionError(error)) return false;
@@ -123,10 +122,7 @@ export class TmuxSessionRuntime implements SessionRuntime {
   public async list(conversationId: string): Promise<readonly AgentSession[]> {
     let stdout: string;
     try {
-      ({ stdout } = await this.runner.run(
-        "tmux",
-        this.tmuxArgs(["list-sessions", "-F", SESSION_FORMAT])
-      ));
+      ({ stdout } = await this.runTmux(["list-sessions", "-F", SESSION_FORMAT]));
     } catch (error: unknown) {
       if (isMissingSessionError(error)) return [];
       throw error;
@@ -143,6 +139,26 @@ export class TmuxSessionRuntime implements SessionRuntime {
   private tmuxArgs(args: readonly string[]): readonly string[] {
     return this.socketPath === undefined ? args : ["-S", this.socketPath, ...args];
   }
+
+  private runTmux(args: readonly string[]) {
+    const commandTimeoutMs = this.options.commandTimeoutMs ?? TMUX_COMMAND_TIMEOUT_MS;
+    return withTimeout(
+      this.runner.run("tmux", this.tmuxArgs(args), {
+        timeoutMs: commandTimeoutMs,
+        cleanupProcessTree: true
+      }),
+      {
+        timeoutMs:
+          commandTimeoutMs + (this.options.cleanupAllowanceMs ?? TMUX_CLEANUP_ALLOWANCE_MS),
+        message: `tmux ${args[0] ?? "command"} did not finish within its cleanup deadline.`
+      }
+    );
+  }
+}
+
+export interface TmuxSessionRuntimeOptions {
+  readonly commandTimeoutMs?: number;
+  readonly cleanupAllowanceMs?: number;
 }
 
 function parseTmuxLine(line: string): AgentSession | null {

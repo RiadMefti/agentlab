@@ -1,12 +1,16 @@
 import type { AgentLabCommandPort } from "./agentlab-commands.js";
+import { withTimeout } from "../domain/promise-timeout.js";
 
 const CLOSED_RUNTIME_MESSAGE = "The agentlab runtime is closing.";
+const DRAIN_TIMEOUT_MS = 30_000;
 
 /** Admission gate and drain barrier for application work owned by one runtime. */
 export class RuntimeTaskOwner {
   readonly #active = new Set<Promise<unknown>>();
   #accepting = true;
   #drain: Promise<void> | null = null;
+
+  public constructor(private readonly drainTimeoutMs: number = DRAIN_TIMEOUT_MS) {}
 
   public run<T>(operation: () => Promise<T>): Promise<T> {
     if (!this.#accepting) return Promise.reject(new Error(CLOSED_RUNTIME_MESSAGE));
@@ -27,7 +31,10 @@ export class RuntimeTaskOwner {
   }
 
   private async drainActiveTasks(): Promise<void> {
-    await Promise.allSettled([...this.#active]);
+    await withTimeout(Promise.allSettled([...this.#active]), {
+      timeoutMs: this.drainTimeoutMs,
+      message: `Runtime shutdown timed out after ${String(this.drainTimeoutMs)} milliseconds while draining active work.`
+    });
   }
 }
 
@@ -39,6 +46,10 @@ export function ownAgentLabCommands(
   return {
     listConversations: () => tasks.run(() => commands.listConversations()),
     inspectWorkspace: (workspacePath) => tasks.run(() => commands.inspectWorkspace(workspacePath)),
+    prepareWorkspace: (workspacePath) => tasks.run(() => commands.prepareWorkspace(workspacePath)),
+    discoverWorkspaceProviders: (workspacePath) =>
+      tasks.run(() => commands.discoverWorkspaceProviders(workspacePath)),
+    completeFolders: (input) => tasks.run(() => commands.completeFolders(input)),
     listProviders: (conversationId) => tasks.run(() => commands.listProviders(conversationId)),
     createConversation: (input) => tasks.run(() => commands.createConversation(input)),
     deleteConversation: (conversationId) =>

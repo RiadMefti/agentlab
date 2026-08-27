@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
-import type { EmbeddedTerminalRenderable } from "@opentui/core";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtime";
 
 import "../terminal/embedded-terminal.js";
+import type { EmbeddedTerminalRenderable } from "../terminal/embedded-terminal.js";
 import { paintTerminalDefaults } from "../terminal/terminal-appearance.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
@@ -80,9 +80,9 @@ export function TerminalPanel({
   }, []);
 
   useEffect(() => {
-    if (active) terminalRef.current?.focus();
+    if (active && connection === "connected" && !switching) terminalRef.current?.focus();
     else terminalRef.current?.blur();
-  }, [active, layoutReady, sessionName]);
+  }, [active, connection, layoutReady, sessionName, switching]);
 
   useEffect(() => {
     if (!layoutReady || targetConversationId === null || sessionName === null) return;
@@ -133,9 +133,12 @@ export function TerminalPanel({
         setConnection("closed");
         setError(cause instanceof Error ? cause.message : "Unable to attach terminal.");
       });
+    const renderedTerminal = terminalRef.current;
 
     return () => {
       current = false;
+      renderedTerminal?.clearLocalSelection();
+      renderedTerminal?.blur();
       attachmentRef.current?.close();
       attachmentRef.current = null;
     };
@@ -202,6 +205,7 @@ export function TerminalPanel({
       <agent-terminal
         ref={terminalRef}
         maxScrollback={sessionHistoryLimit}
+        sessionConnected={connection === "connected" && !switching}
         selectable
         onData={(data) => {
           attachmentRef.current?.write(data);
@@ -222,7 +226,8 @@ export function TerminalPanel({
 }
 
 function normalizeHistory(history: string): string {
-  return `${history.replace(/\r?\n/gu, "\r\n")}\r\n`;
+  const normalized = history.replace(/\r?\n/gu, "\r\n");
+  return normalized.endsWith("\r\n") ? normalized : `${normalized}\r\n`;
 }
 
 function providerLabel(provider: AgentSession["provider"] | undefined): string {

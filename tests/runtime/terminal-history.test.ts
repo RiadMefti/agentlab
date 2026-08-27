@@ -17,15 +17,38 @@ describe("TmuxTerminalHistoryReader", () => {
       run(_executable, args, runOptions): Promise<RunResult> {
         calls.push([...args]);
         options.push(runOptions);
-        return Promise.resolve({ stdout: "old output\n", stderr: "" });
+        return Promise.resolve({
+          stdout: args[0] === "display-message" ? "12\n" : "old output\n",
+          stderr: ""
+        });
       }
     };
     const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
     const reader = new TmuxTerminalHistoryReader(runner);
 
     await expect(reader.read(name)).resolves.toBe("old output\n");
-    expect(calls).toEqual([["capture-pane", "-p", "-e", "-S", "-20000", "-t", `${name}:`]]);
-    expect(options).toEqual([{ maxBufferBytes: 8 * 1024 * 1024, timeoutMs: 2_000 }]);
+    expect(calls).toEqual([
+      ["display-message", "-p", "-t", `${name}:`, "#{history_size}"],
+      ["capture-pane", "-p", "-e", "-J", "-S", "-20000", "-E", "-1", "-t", `${name}:`]
+    ]);
+    expect(options).toEqual([
+      { maxBufferBytes: 1_024, timeoutMs: 2_000 },
+      { maxBufferBytes: 8 * 1024 * 1024, timeoutMs: 2_000 }
+    ]);
+  });
+
+  it("does not capture the visible pane when tmux reports empty history", async () => {
+    const calls: string[][] = [];
+    const runner: CommandRunner = {
+      run(_executable, args): Promise<RunResult> {
+        calls.push([...args]);
+        return Promise.resolve({ stdout: "0\n", stderr: "" });
+      }
+    };
+    const reader = new TmuxTerminalHistoryReader(runner);
+
+    await expect(reader.read("managed-session")).resolves.toBe("");
+    expect(calls).toHaveLength(1);
   });
 
   it("does not prevent a live attachment when history is unavailable", async () => {

@@ -150,13 +150,15 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
           (cleanupError: unknown) => {
             const detail =
               cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup failure.";
+            const cleanupFailure = new Error(`Codex model discovery cleanup failed: ${detail}`, {
+              cause: cleanupError
+            });
             reject(
-              new Error(
-                error === null
-                  ? `Codex model discovery cleanup failed: ${detail}`
-                  : `${error.message} Cleanup failed: ${detail}`,
-                { cause: cleanupError }
-              )
+              error === null
+                ? cleanupFailure
+                : new AggregateError([error, cleanupFailure], error.message, {
+                    cause: cleanupError
+                  })
             );
           }
         );

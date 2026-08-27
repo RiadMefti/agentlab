@@ -169,10 +169,10 @@ export function App() {
   const createProject = (input: CreateConversationInput): void => {
     runMutation(async () => {
       const project = await runtime.commands.createConversation(input);
-      await workspace.refreshProjects();
-      workspace.selectProject(project.id);
+      workspace.insertProject(project);
       setModal(null);
       setPane("terminal");
+      void workspace.refreshProjects();
     });
   };
 
@@ -190,8 +190,7 @@ export function App() {
 
   const removeProject = (project: Conversation): void => {
     runMutation(async () => {
-      await runtime.commands.deleteConversation(project.id);
-      await workspace.refreshProjects();
+      await workspace.deleteProject(project.id);
       setModal(null);
     });
   };
@@ -316,7 +315,9 @@ export function App() {
           pending={pending}
           error={mutationError}
           onCancel={closeModal}
-          onInspect={(path) => runtime.commands.inspectWorkspace(path)}
+          onPrepare={(path) => runtime.commands.prepareWorkspace(path)}
+          onDiscoverProviders={(path) => runtime.commands.discoverWorkspaceProviders(path)}
+          onCompleteFolders={(path) => runtime.commands.completeFolders({ path, limit: 6 })}
           onCreate={createProject}
         />
       ) : null}

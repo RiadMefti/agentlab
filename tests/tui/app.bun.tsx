@@ -50,7 +50,7 @@ describe("terminal workspace", () => {
     setup.mockInput.pressKey("n", { ctrl: true });
     await setup.waitForFrame((frame) => frame.includes("Add project"));
 
-    expect(setup.captureCharFrame()).toContain("Folder path");
+    expect(setup.captureCharFrame()).toContain("Choose the project folder");
     setup.mockInput.pressEscape();
     await setup.waitForFrame((frame) => !frame.includes("Add project"));
   });
@@ -68,16 +68,351 @@ describe("terminal workspace", () => {
     await setup.waitForFrame((frame) => frame.includes("Choose a project"));
 
     setup.mockInput.pressKey("n", { ctrl: true });
-    await setup.waitForFrame((frame) => frame.includes("Folder path"));
+    await setup.waitForFrame((frame) => frame.includes("Choose the project folder"));
     await setup.mockInput.typeText("/tmp/anywhere/project folder");
     await allowStateUpdate(setup);
     setup.mockInput.pressEnter();
     await allowStateUpdate(setup);
-    expect(calls(runtime.commands.inspectWorkspace)).toContainEqual([
+    expect(calls(runtime.commands.prepareWorkspace)).toContainEqual([
       "/tmp/anywhere/project folder"
     ]);
     await setup.waitForFrame(
-      (frame) => frame.includes("Project name") && frame.includes("/tmp/anywhere/project folder")
+      (frame) => frame.includes("Captain") && frame.includes("/tmp/anywhere/project folder")
+    );
+  });
+
+  test("creates with trimmed canonical provider-default input", async () => {
+    const createConversation = mock(() => deferred(conversation));
+    const runtime = fakeRuntime({
+      commandOverrides: {
+        prepareWorkspace: mock(() =>
+          Promise.resolve({
+            workspacePath: "/canonical/project",
+            suggestedName: "  Canonical title  "
+          })
+        ),
+        discoverWorkspaceProviders: mock(() => Promise.resolve(availableProviders)),
+        createConversation
+      }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Choose the project folder"));
+    await setup.mockInput.typeText("/requested/project");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Codex: ready"));
+    setup.mockInput.pressEnter({ ctrl: true });
+    await setup.waitFor(() => callCount(createConversation) === 1);
+
+    expect(calls(createConversation)[0]).toEqual([
+      {
+        title: "Canonical title",
+        workspacePath: "/canonical/project",
+        provider: "codex",
+        model: null,
+        reasoning: null,
+        prompt: null
+      }
+    ]);
+  });
+
+  test("allows a replacement inspection while the edited-path request is still pending", async () => {
+    const first = deferredRequest<{ workspacePath: string; suggestedName: string }>();
+    const second = deferredRequest<{ workspacePath: string; suggestedName: string }>();
+    let preparation = 0;
+    const prepareWorkspace = mock(() => (preparation++ === 0 ? first.promise : second.promise));
+    const runtime = fakeRuntime({ commandOverrides: { prepareWorkspace } });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("/first");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await setup.waitFor(() => callCount(prepareWorkspace) === 1);
+    await setup.mockInput.typeText("-edited");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await setup.waitFor(() => callCount(prepareWorkspace) === 2);
+    second.resolve({ workspacePath: "/first-edited", suggestedName: "first-edited" });
+    await setup.waitForFrame((frame) => frame.includes("first-edited"));
+    first.resolve({ workspacePath: "/stale", suggestedName: "stale" });
+    await allowStateUpdate(setup);
+
+    expect(setup.captureCharFrame()).not.toContain("/stale");
+  });
+
+  test("suppresses stale autocomplete and accepts its highlighted result with the keyboard", async () => {
+    const first = deferredRequest<readonly { value: string; label: string; symlink: boolean }[]>();
+    const second = deferredRequest<readonly { value: string; label: string; symlink: boolean }[]>();
+    let completion = 0;
+    const completeFolders = mock(() => (completion++ === 0 ? first.promise : second.promise));
+    const runtime = fakeRuntime({ commandOverrides: { completeFolders } });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("a");
+    await waitMilliseconds(90);
+    await setup.mockInput.typeText("b");
+    await waitMilliseconds(90);
+    await setup.waitFor(() => callCount(completeFolders) === 2);
+    second.resolve([
+      { value: "about/", label: "about/", symlink: false },
+      { value: "absolute/", label: "absolute/", symlink: false }
+    ]);
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("absolute/"));
+    first.resolve([{ value: "ancient/", label: "ancient/", symlink: false }]);
+    await allowStateUpdate(setup);
+    expect(setup.captureCharFrame()).not.toContain("ancient/");
+
+    setup.mockInput.pressArrow("down");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressTab();
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await setup.waitFor(() => callCount(runtime.commands.prepareWorkspace) === 1);
+    expect(calls(runtime.commands.prepareWorkspace)[0]).toEqual(["absolute/"]);
+  });
+
+  test("degrades visibly when folder completion misses its filesystem deadline", async () => {
+    const slow = deferredRequest<readonly { value: string; label: string; symlink: boolean }[]>();
+    const runtime = fakeRuntime({
+      commandOverrides: { completeFolders: mock(() => slow.promise) }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("/slow-mount");
+    await waitMilliseconds(270);
+    await allowStateUpdate(setup);
+    expect(setup.captureCharFrame()).toContain("Suggestions paused");
+
+    slow.resolve([{ value: "/late/", label: "/late/", symlink: false }]);
+    await allowStateUpdate(setup);
+    expect(setup.captureCharFrame()).not.toContain("/late/");
+  });
+
+  test("accepts a folder suggestion with the mouse and fits both steps at exactly 90x18", async () => {
+    const completeFolders = mock(() =>
+      Promise.resolve([{ value: "mouse folder/", label: "mouse folder/", symlink: false }])
+    );
+    const runtime = fakeRuntime({
+      commandOverrides: {
+        completeFolders,
+        discoverWorkspaceProviders: mock(() => Promise.resolve(availableProviders))
+      }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("m");
+    await waitMilliseconds(90);
+    await setup.waitForFrame((frame) => frame.includes("mouse folder/"));
+    const frame = setup.captureCharFrame();
+    const suggestionRow = frame.split("\n").findIndex((line) => line.includes("mouse folder/"));
+    const suggestionColumn = frame.split("\n")[suggestionRow]?.indexOf("mouse folder/") ?? -1;
+    expect(suggestionRow).toBeGreaterThanOrEqual(0);
+    await setup.mockMouse.click(suggestionColumn + 2, suggestionRow);
+    await allowStateUpdate(setup);
+    expect(setup.captureCharFrame()).toContain("mouse folder/");
+
+    const compactSetup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(compactSetup.renderer);
+    await compactSetup.waitForFrame((next) => next.includes("Choose a project"));
+    compactSetup.mockInput.pressKey("n", { ctrl: true });
+    await compactSetup.waitForFrame((next) => next.includes("Add project · 1/2"));
+    await compactSetup.mockInput.typeText("/compact");
+    await allowStateUpdate(compactSetup);
+    compactSetup.mockInput.pressEnter();
+    await allowStateUpdate(compactSetup);
+    await compactSetup.waitForFrame((next) => next.includes("Captain") && next.includes("change"));
+
+    const compact = compactSetup.captureCharFrame();
+    expect(compact).toContain("Captain runs commands and edits this folder without approval");
+    expect(compact).toContain("prompts. Provider safeguards vary.");
+    expect(compact).toContain("Ctrl+Enter start");
+    expect(compact).not.toContain("Terminal too small");
+  });
+
+  test("shows provider discovery progress and recovers through inline retry", async () => {
+    const discovery = deferredRequest<readonly ProviderCapability[]>();
+    let discoveryAttempt = 0;
+    const discoverWorkspaceProviders = mock(() =>
+      discoveryAttempt++ === 0 ? discovery.promise : Promise.resolve(availableProviders)
+    );
+    const runtime = fakeRuntime({ commandOverrides: { discoverWorkspaceProviders } });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("/providers");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Checking captain providers"));
+    discovery.reject(new Error("provider discovery broke"));
+    await allowStateUpdate(setup);
+    await setup.waitForFrame(
+      (frame) => frame.includes("provider discovery broke") && frame.includes("retry")
+    );
+    const lines = setup.captureCharFrame().split("\n");
+    const row = lines.findIndex((line) => line.includes("provider discovery broke"));
+    const column = lines[row]?.indexOf("provider discovery broke") ?? -1;
+    await setup.mockMouse.click(column + 2, row);
+    await setup.waitForFrame((frame) => frame.includes("Codex: ready"));
+
+    expect(callCount(discoverWorkspaceProviders)).toBe(2);
+  });
+
+  test("retains captain values when changing and revalidating the folder", async () => {
+    let preparation = 0;
+    const prepareWorkspace = mock((path: unknown) =>
+      Promise.resolve({
+        workspacePath: String(path),
+        suggestedName: preparation++ === 0 ? "first-name" : "replacement-default"
+      })
+    );
+    const runtime = fakeRuntime({
+      commandOverrides: {
+        prepareWorkspace,
+        discoverWorkspaceProviders: mock(() => Promise.resolve(availableProviders))
+      }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("/retained");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Codex: ready"));
+    await setup.mockInput.typeText("-custom");
+    await setup.waitForFrame((frame) => frame.includes("first-name-custom"));
+
+    const captainFrame = setup.captureCharFrame().split("\n");
+    const folderRow = captainFrame.findIndex((line) => line.includes("Folder /retained"));
+    const changeColumn = captainFrame[folderRow]?.indexOf("change") ?? -1;
+    await setup.mockMouse.click(changeColumn + 2, folderRow);
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame(
+      (frame) => frame.includes("Codex: ready") && frame.includes("first-name-custom")
+    );
+
+    expect(setup.captureCharFrame()).not.toContain("replacement-default");
+  });
+
+  test("retains failed creation values, deduplicates retry, and honestly locks Starting", async () => {
+    const retry = deferredRequest<Conversation>();
+    let attempt = 0;
+    const createConversation = mock(() =>
+      attempt++ === 0 ? Promise.reject(new Error("captain launch failed")) : retry.promise
+    );
+    const runtime = fakeRuntime({
+      commandOverrides: {
+        discoverWorkspaceProviders: mock(() => Promise.resolve(availableProviders)),
+        createConversation
+      }
+    });
+    const setup = await testRender(
+      <RuntimeContext value={runtime}>
+        <App />
+      </RuntimeContext>,
+      { height: 18, width: 90 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    await setup.waitForFrame((frame) => frame.includes("Choose a project"));
+    setup.mockInput.pressKey("n", { ctrl: true });
+    await setup.waitForFrame((frame) => frame.includes("Add project · 1/2"));
+    await setup.mockInput.typeText("/recoverable");
+    await allowStateUpdate(setup);
+    setup.mockInput.pressEnter();
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("Codex: ready"));
+
+    setup.mockInput.pressEnter({ ctrl: true });
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("captain launch failed"));
+    expect(setup.captureCharFrame()).toContain("/recoverable");
+    expect(setup.captureCharFrame()).toContain("recoverable");
+
+    setup.mockInput.pressEnter({ ctrl: true });
+    setup.mockInput.pressEnter({ ctrl: true });
+    await allowStateUpdate(setup);
+    expect(callCount(createConversation)).toBe(2);
+    expect(setup.captureCharFrame()).toContain("Starting · fields are locked");
+    expect(setup.captureCharFrame()).not.toContain("Esc close");
+    retry.resolve(conversation);
+    await allowStateUpdate(setup);
+    await setup.waitForFrame(
+      (frame) => frame.includes(conversation.title) && !frame.includes("Add project")
     );
   });
 
@@ -119,6 +454,8 @@ describe("terminal workspace", () => {
     await allowStateUpdate(setup);
     await setup.waitForFrame((frame) => frame.includes("Captain") && frame.includes("Test Writer"));
     await setup.waitFor(() => callCount(runtime.openTerminal) === 1);
+    await allowStateUpdate(setup);
+    await setup.waitForFrame((frame) => frame.includes("history"));
 
     const frame = setup.captureCharFrame();
     expect(frame).toContain("Captain");
@@ -483,6 +820,28 @@ const sessions: readonly AgentSession[] = [
 ];
 
 const providers: readonly ProviderCapability[] = [];
+const availableProviders: readonly ProviderCapability[] = [
+  {
+    id: "codex",
+    label: "Codex",
+    available: true,
+    version: "1.0.0",
+    reason: null,
+    source: "live",
+    discoveredAt: "2026-08-25T12:00:00.000Z",
+    defaultModel: "gpt-test",
+    models: [
+      {
+        id: "gpt-test",
+        label: "GPT Test",
+        description: null,
+        defaultReasoning: "high",
+        reasoningOptions: [{ id: "high", label: "High" }]
+      }
+    ],
+    customModelPolicy: "allowed"
+  }
+];
 
 function conversationAt(index: number): Conversation {
   const suffix = String(index).padStart(12, "0");
@@ -575,6 +934,7 @@ function fakeRuntime(
       string,
       { readonly history: string; readonly terminal: SessionTerminal }
     >;
+    readonly commandOverrides?: Partial<AgentLabCommandPort>;
   } = {}
 ): LocalAgentLabRuntime {
   const conversations = options.conversations ?? [];
@@ -589,6 +949,14 @@ function fakeRuntime(
         providers
       })
     ),
+    prepareWorkspace: mock((workspacePath) =>
+      deferred({
+        workspacePath: String(workspacePath),
+        suggestedName: String(workspacePath).split("/").filter(Boolean).at(-1) ?? "project"
+      })
+    ),
+    discoverWorkspaceProviders: mock(() => deferred(providers)),
+    completeFolders: mock(() => deferred([])),
     listProviders: mock(() => deferred(providers)),
     createConversation: mock(() => deferred(conversation)),
     deleteConversation: mock(() => deferred(undefined)),
@@ -601,7 +969,8 @@ function fakeRuntime(
         sessionName: String(sessionName),
         workspacePath: "/work/project"
       })
-    )
+    ),
+    ...options.commandOverrides
   };
   return {
     commands,
@@ -637,6 +1006,28 @@ function deferred<T>(value: T): Promise<T> {
 interface DeferredValue<T> {
   readonly promise: Promise<T>;
   resolve(): void;
+}
+
+interface DeferredRequest<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: Error): void;
+}
+
+function deferredRequest<T>(): DeferredRequest<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitMilliseconds(milliseconds: number): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function deferredValue<T>(value: T): DeferredValue<T> {

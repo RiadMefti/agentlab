@@ -17,9 +17,19 @@ import {
   type ProviderCapabilityDiscovery
 } from "../../domain/provider-capability-discovery.js";
 import type { CommandRunner } from "../process/command-runner.js";
+import { BINARY_LOCATOR_MAXIMUM_DURATION_MS } from "./binary-locator.js";
+import { withTimeout } from "../../domain/promise-timeout.js";
 
 const VERSION_TIMEOUT_MS = 4_000;
 const VERSION_BUFFER_BYTES = 32 * 1024;
+const OUTER_TIMEOUT_ALLOWANCE_MS = 250;
+const LOCATOR_TIMEOUT_MS = BINARY_LOCATOR_MAXIMUM_DURATION_MS + OUTER_TIMEOUT_ALLOWANCE_MS;
+const DISCOVERY_OUTCOME_TIMEOUT_MS = 8_000;
+// Aggregate provider-availability budget for responsive project creation. This intentionally
+// preempts the sum of every candidate-local maximum; those inner deadlines bound each attempt.
+const CATALOG_OUTCOME_TIMEOUT_MS = 12_000;
+const MAX_PROVIDER_CANDIDATES = 8;
+const PROCESS_CLEANUP_ALLOWANCE_MS = 3_000;
 
 export interface ProviderBinaryLocator {
   candidates(provider: ProviderId): Promise<readonly string[]>;
@@ -85,6 +95,10 @@ export interface LocalProviderCatalogOptions {
   readonly workspace: string;
   readonly cacheDurationMs?: number;
   readonly versionTimeoutMs?: number;
+  readonly locatorTimeoutMs?: number;
+  readonly discoveryTimeoutMs?: number;
+  readonly catalogTimeoutMs?: number;
+  readonly maxCandidates?: number;
   readonly now?: () => number;
   readonly cache?: ProviderCapabilityCache;
 }
@@ -153,6 +167,19 @@ export class LocalProviderCatalog implements ProviderCatalog {
   private async discover(id: ProviderId): Promise<ProviderProbe> {
     const launcher = this.#launchers.get(id);
     if (launcher === undefined) throw new Error(`Unknown provider: ${id}`);
+    try {
+      return await withTimeout(this.discoverWithinCatalog(id), {
+        timeoutMs: this.options.catalogTimeoutMs ?? CATALOG_OUTCOME_TIMEOUT_MS,
+        message: `${launcher.label} provider catalog timed out.`
+      });
+    } catch (error: unknown) {
+      return unavailableProbe(launcher, errorReason(error, "Provider catalog timed out."));
+    }
+  }
+
+  private async discoverWithinCatalog(id: ProviderId): Promise<ProviderProbe> {
+    const launcher = this.#launchers.get(id);
+    if (launcher === undefined) throw new Error(`Unknown provider: ${id}`);
     const discovery = this.#discoveries.get(id);
     if (discovery === undefined) {
       return unavailableProbe(launcher, "Capability discovery is not configured.");
@@ -161,8 +188,15 @@ export class LocalProviderCatalog implements ProviderCatalog {
     let reason = "Executable not found.";
     let fallback: ProviderProbe | null = null;
     try {
-      const candidates = await this.locator.candidates(id);
-      for (const executable of candidates) {
+      const candidates = await withTimeout(this.locator.candidates(id), {
+        timeoutMs: this.options.locatorTimeoutMs ?? LOCATOR_TIMEOUT_MS,
+        message: `${launcher.label} executable discovery timed out.`
+      });
+      const maxCandidates = this.options.maxCandidates ?? MAX_PROVIDER_CANDIDATES;
+      if (!Number.isSafeInteger(maxCandidates) || maxCandidates <= 0) {
+        throw new Error("Provider candidate limit must be a positive integer.");
+      }
+      for (const executable of candidates.slice(0, maxCandidates)) {
         let installed: InstalledProvider;
         try {
           installed = await this.probeVersion(executable);
@@ -179,11 +213,17 @@ export class LocalProviderCatalog implements ProviderCatalog {
         );
         try {
           const discovered = discoveredProviderCapabilitySchema.parse(
-            await discovery.discover({
-              executable: installed.executable,
-              version: installed.version,
-              workspace: this.options.workspace
-            })
+            await withTimeout(
+              discovery.discover({
+                executable: installed.executable,
+                version: installed.version,
+                workspace: this.options.workspace
+              }),
+              {
+                timeoutMs: this.options.discoveryTimeoutMs ?? DISCOVERY_OUTCOME_TIMEOUT_MS,
+                message: `${launcher.label} model catalog timed out.`
+              }
+            )
           );
           const capability = providerCapabilitySchema.parse({
             id,
@@ -241,11 +281,18 @@ export class LocalProviderCatalog implements ProviderCatalog {
   }
 
   private async probeVersion(executable: string): Promise<InstalledProvider> {
-    const { stdout, stderr } = await this.runner.run(executable, ["--version"], {
-      timeoutMs: this.options.versionTimeoutMs ?? VERSION_TIMEOUT_MS,
-      maxBufferBytes: VERSION_BUFFER_BYTES,
-      cleanupProcessTree: true
-    });
+    const commandTimeoutMs = this.options.versionTimeoutMs ?? VERSION_TIMEOUT_MS;
+    const { stdout, stderr } = await withTimeout(
+      this.runner.run(executable, ["--version"], {
+        timeoutMs: commandTimeoutMs,
+        maxBufferBytes: VERSION_BUFFER_BYTES,
+        cleanupProcessTree: true
+      }),
+      {
+        timeoutMs: commandTimeoutMs + PROCESS_CLEANUP_ALLOWANCE_MS,
+        message: `Version probe timed out after ${String(commandTimeoutMs)} milliseconds.`
+      }
+    );
     const version = providerVersion(stdout, stderr);
     if (version === null) {
       throw new Error("Version probe returned no version.");

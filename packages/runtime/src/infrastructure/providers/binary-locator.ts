@@ -1,4 +1,5 @@
 import { access, readdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { constants } from "node:fs";
@@ -6,6 +7,26 @@ import { constants } from "node:fs";
 import type { ProviderId } from "@agentlab/contracts";
 
 import type { CommandRunner } from "../process/command-runner.js";
+import { withTimeout } from "../../domain/promise-timeout.js";
+
+const FILESYSTEM_PROBE_TIMEOUT_MS = 1_000;
+const PATH_LOOKUP_TIMEOUT_MS = 2_000;
+const MAX_FILESYSTEM_CANDIDATES = 32;
+const MAX_MISE_INSTALL_ENTRIES = 4_096;
+
+/** Sequential default budget: PATH lookup, mise readdir, then parallel executable access. */
+export const BINARY_LOCATOR_MAXIMUM_DURATION_MS =
+  PATH_LOOKUP_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS;
+
+export interface BinaryLocatorFilesystem {
+  access(path: string, mode?: number): Promise<void>;
+  readdir(path: string, options: { readonly withFileTypes: true }): Promise<Dirent[]>;
+}
+
+export interface BinaryLocatorOptions {
+  readonly filesystemTimeoutMs?: number;
+  readonly filesystem?: BinaryLocatorFilesystem;
+}
 
 const ENVIRONMENT_KEYS: Record<ProviderId, string> = {
   codex: "AGENTLAB_CODEX_BIN",
@@ -18,7 +39,8 @@ export class BinaryLocator {
   public constructor(
     private readonly runner: CommandRunner,
     private readonly environment: NodeJS.ProcessEnv = process.env,
-    private readonly userHome: string = homedir()
+    private readonly userHome: string = homedir(),
+    private readonly options: BinaryLocatorOptions = {}
   ) {}
 
   public async candidates(provider: ProviderId): Promise<readonly string[]> {
@@ -33,7 +55,7 @@ export class BinaryLocator {
 
     try {
       const { stdout } = await this.runner.run("which", [provider], {
-        timeoutMs: 2_000
+        timeoutMs: PATH_LOOKUP_TIMEOUT_MS
       });
       const discovered = stdout.trim();
       if (discovered !== "") candidates.push(discovered);
@@ -43,24 +65,36 @@ export class BinaryLocator {
 
     candidates.push(...(await this.miseCandidates(provider)));
 
-    const usable: string[] = [];
-    for (const candidate of new Set(candidates)) {
-      try {
-        await access(candidate, constants.X_OK);
-        usable.push(candidate);
-      } catch {
-        // A stale shim or configured path is not a usable provider.
-      }
-    }
-    return [...new Set(usable)];
+    const filesystem = this.options.filesystem ?? { access, readdir };
+    const uniqueCandidates = [...new Set(candidates)].slice(0, MAX_FILESYSTEM_CANDIDATES);
+    const checked = await Promise.all(
+      uniqueCandidates.map(async (candidate) => {
+        try {
+          await withTimeout(filesystem.access(candidate, constants.X_OK), {
+            timeoutMs: this.options.filesystemTimeoutMs ?? FILESYSTEM_PROBE_TIMEOUT_MS,
+            message: `Executable probe timed out for ${candidate}.`
+          });
+          return candidate;
+        } catch {
+          // A stale, inaccessible, or stalled path is not a usable provider.
+          return null;
+        }
+      })
+    );
+    return checked.filter((candidate): candidate is string => candidate !== null);
   }
 
   private async miseCandidates(provider: ProviderId): Promise<readonly string[]> {
     const installRoot = join(this.userHome, ".local", "share", "mise", "installs", provider);
 
     try {
-      const entries = await readdir(installRoot, { withFileTypes: true });
+      const filesystem = this.options.filesystem ?? { access, readdir };
+      const entries = await withTimeout(filesystem.readdir(installRoot, { withFileTypes: true }), {
+        timeoutMs: this.options.filesystemTimeoutMs ?? FILESYSTEM_PROBE_TIMEOUT_MS,
+        message: "mise install discovery timed out."
+      });
       return entries
+        .slice(0, MAX_MISE_INSTALL_ENTRIES)
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
         .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))

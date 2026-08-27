@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   CommandRunner,
+  RunOptions,
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import {
@@ -56,6 +57,79 @@ class ExitedServerRunner implements CommandRunner {
 }
 
 describe("TmuxSessionRuntime", () => {
+  it("bounds every tmux call and requests descendant cleanup", async () => {
+    const options: RunOptions[] = [];
+    const runner: CommandRunner = {
+      run(_executable, _args, callOptions = {}): Promise<RunResult> {
+        options.push(callOptions);
+        return Promise.reject(
+          Object.assign(new Error("can't find session"), {
+            stderr: "can't find session"
+          })
+        );
+      }
+    };
+    const runtime = new TmuxSessionRuntime(runner);
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    await expect(runtime.exists(name)).resolves.toBe(false);
+    await expect(runtime.list(TEST_CONVERSATION_ID)).resolves.toEqual([]);
+    await expect(runtime.kill(name)).resolves.toBeUndefined();
+    expect(options).toEqual([
+      { timeoutMs: 3_000, cleanupProcessTree: true },
+      { timeoutMs: 3_000, cleanupProcessTree: true },
+      { timeoutMs: 3_000, cleanupProcessTree: true }
+    ]);
+  });
+
+  it("returns from a never-resolving runner at the cleanup deadline", async () => {
+    const runner: CommandRunner = {
+      run: () => new Promise<RunResult>(() => undefined)
+    };
+    const runtime = new TmuxSessionRuntime(runner, undefined, {
+      commandTimeoutMs: 10,
+      cleanupAllowanceMs: 10
+    });
+
+    await expect(runtime.list(TEST_CONVERSATION_ID)).rejects.toThrow(
+      "tmux list-sessions did not finish within its cleanup deadline"
+    );
+  });
+
+  it("keeps the configuration failure primary when session compensation also fails", async () => {
+    const primary = new Error("remain-on-exit failed");
+    const compensation = new Error("kill-session failed");
+    let call = 0;
+    const runner: CommandRunner = {
+      run(): Promise<RunResult> {
+        call += 1;
+        if (call === 1) {
+          return Promise.reject(
+            Object.assign(new Error("can't find session"), {
+              stderr: "can't find session"
+            })
+          );
+        }
+        if (call === 2) return Promise.resolve({ stdout: "", stderr: "" });
+        return Promise.reject(call === 3 ? primary : compensation);
+      }
+    };
+    const runtime = new TmuxSessionRuntime(runner);
+    const name = buildCaptainSessionName(TEST_CONVERSATION_ID, "codex");
+
+    const failure = await runtime
+      .createCaptain({
+        name,
+        cwd: "/work/project",
+        command: { executable: "codex", args: [] }
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBe(primary);
+    expect(primary.cause).toBeInstanceOf(AggregateError);
+    expect((primary.cause as AggregateError).errors).toContain(compensation);
+  });
+
   it("creates only a strictly named session with safely rendered arguments", async () => {
     const runner = new RecordingRunner();
     const runtime = new TmuxSessionRuntime(runner);

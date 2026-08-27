@@ -23,6 +23,8 @@ export interface WorkspaceState {
   readonly error: string | null;
   selectProject(id: string): void;
   selectSession(name: string): void;
+  insertProject(project: Conversation): void;
+  deleteProject(id: string): Promise<void>;
   refreshProjects(): Promise<void>;
   refreshSessions(): Promise<void>;
 }
@@ -45,6 +47,7 @@ export function useWorkspace(): WorkspaceState {
   const conversationRequest = useRef(0);
   const sessionRequest = useRef(0);
   const providerRequest = useRef(0);
+  const locallyInserted = useRef(new Map<string, Conversation>());
   const selectedProject =
     conversationId === null
       ? null
@@ -72,7 +75,9 @@ export function useWorkspace(): WorkspaceState {
     try {
       const next = await runtime.commands.listConversations();
       if (request !== conversationRequest.current) return;
-      setConversations(next);
+      const returnedIds = new Set(next.map(({ id }) => id));
+      for (const id of returnedIds) locallyInserted.current.delete(id);
+      setConversations([...locallyInserted.current.values(), ...next]);
       setConversationError(null);
     } catch (cause: unknown) {
       if (request === conversationRequest.current) {
@@ -184,6 +189,21 @@ export function useWorkspace(): WorkspaceState {
         if (selectedProject === null) return;
         setSessionNames((current) => ({ ...current, [selectedProject.id]: name }));
       },
+      insertProject(project: Conversation) {
+        conversationRequest.current += 1;
+        locallyInserted.current.set(project.id, project);
+        setConversations((current) => [project, ...current.filter(({ id }) => id !== project.id)]);
+        setConversationId(project.id);
+        setConversationError(null);
+      },
+      async deleteProject(id: string) {
+        await runtime.commands.deleteConversation(id);
+        conversationRequest.current += 1;
+        locallyInserted.current.delete(id);
+        setConversations((current) => current.filter((project) => project.id !== id));
+        setConversationId((current) => (current === id ? null : current));
+        await refreshConversations();
+      },
       refreshProjects: refreshConversations,
       refreshSessions
     }),
@@ -195,6 +215,7 @@ export function useWorkspace(): WorkspaceState {
       selectedSession,
       loading,
       error,
+      runtime,
       refreshConversations,
       refreshSessions
     ]
