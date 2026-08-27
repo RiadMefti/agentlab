@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { sessionHistoryLimit, type AgentSession } from "@agentlab/contracts";
+import { terminalScrollbackBytes, type AgentSession } from "@agentlab/contracts";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtime";
 
 import "../terminal/embedded-terminal.js";
-import type { EmbeddedTerminalRenderable } from "../terminal/embedded-terminal.js";
-import { paintTerminalDefaults } from "../terminal/terminal-appearance.js";
+import {
+  terminalChildMouseInputEnabled,
+  type EmbeddedTerminalRenderable
+} from "../terminal/embedded-terminal.js";
+import { TerminalIngestionPump } from "../terminal/terminal-ingestion-pump.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
 
@@ -20,12 +23,32 @@ interface TerminalTarget {
   readonly session: AgentSession;
 }
 
+interface MountedTerminalWriter {
+  readonly invalidate: () => void;
+  readonly write: (data: Uint8Array) => void;
+}
+
 const RESET_TERMINAL = "\x1bc";
 
 export function boundTerminalDimensions(columns: number, rows: number): Dimensions {
   return {
     columns: Math.min(columns, maximumTerminalDimension),
     rows: Math.min(rows, maximumTerminalDimension)
+  };
+}
+
+/** Keeps deferred attachment work bound to the VT mounted when the effect was created. */
+export function mountedTerminalWriter(
+  terminal: Pick<EmbeddedTerminalRenderable, "invalidate" | "isDestroyed" | "write"> | null,
+  isCurrent: () => boolean
+): MountedTerminalWriter {
+  return {
+    invalidate() {
+      if (isCurrent() && terminal !== null && !terminal.isDestroyed) terminal.invalidate();
+    },
+    write(data) {
+      if (isCurrent() && terminal !== null && !terminal.isDestroyed) terminal.write(data);
+    }
   };
 }
 
@@ -45,8 +68,8 @@ export function TerminalPanel({
   const terminalRef = useRef<EmbeddedTerminalRenderable>(null);
   const attachmentRef = useRef<SessionTerminal | null>(null);
   const dimensionsRef = useRef<Dimensions | null>(null);
-  const layoutReadyRef = useRef(false);
-  const [layoutReady, setLayoutReady] = useState(false);
+  const [layoutDimensions, setLayoutDimensions] = useState<Dimensions | null>(null);
+  const layoutReady = layoutDimensions !== null;
   const requestedTarget = useMemo<TerminalTarget | null>(
     () =>
       conversationId !== null && session?.conversationId === conversationId
@@ -72,11 +95,8 @@ export function TerminalPanel({
     const previous = dimensionsRef.current;
     if (previous?.columns === bounded.columns && previous.rows === bounded.rows) return;
     dimensionsRef.current = bounded;
+    setLayoutDimensions(bounded);
     attachmentRef.current?.resize(bounded.columns, bounded.rows);
-    if (!layoutReadyRef.current) {
-      layoutReadyRef.current = true;
-      setLayoutReady(true);
-    }
   }, []);
 
   useEffect(() => {
@@ -89,6 +109,24 @@ export function TerminalPanel({
     const dimensions = dimensionsRef.current;
     if (dimensions === null) return;
     let current = true;
+    let ownedTerminal: SessionTerminal | null = null;
+    let exitReported = false;
+    const renderedTerminal = terminalRef.current;
+    const writer = mountedTerminalWriter(renderedTerminal, () => current);
+    const pump = new TerminalIngestionPump({
+      write: writer.write,
+      invalidate: writer.invalidate,
+      onOverrun() {
+        if (!current) return;
+        current = false;
+        ownedTerminal?.close();
+        if (attachmentRef.current === ownedTerminal) attachmentRef.current = null;
+        setConnection("closed");
+        setError(
+          "Terminal output outran the renderer; switch away and back to reconnect from tmux."
+        );
+      }
+    });
     setConnection("connecting");
     setError(null);
 
@@ -100,11 +138,12 @@ export function TerminalPanel({
         rows: dimensions.rows,
         callbacks: {
           onData(data) {
-            if (current) terminalRef.current?.write(data);
+            if (current) pump.enqueue(data);
           },
           onExit(exitCode) {
-            if (!current) return;
-            terminalRef.current?.write(`\r\n[session client exited ${String(exitCode)}]\r\n`);
+            if (!current || exitReported) return;
+            exitReported = true;
+            pump.enqueue(`\r\n[session client exited ${String(exitCode)}]\r\n`);
             setConnection("closed");
           }
         }
@@ -114,9 +153,8 @@ export function TerminalPanel({
           terminal.close();
           return;
         }
+        ownedTerminal = terminal;
         attachmentRef.current = terminal;
-        terminalRef.current?.write(RESET_TERMINAL);
-        if (history !== "") terminalRef.current?.write(normalizeHistory(history));
         const latest = dimensionsRef.current;
         if (
           latest !== null &&
@@ -124,23 +162,43 @@ export function TerminalPanel({
         ) {
           terminal.resize(latest.columns, latest.rows);
         }
-        setDisplayedKey(terminalTargetKeyFromParts(targetConversationId, sessionName));
-        setConnection("connected");
-        releaseBufferedOutput();
+        if (!pump.enqueue(RESET_TERMINAL)) return;
+        if (history !== "" && !pump.enqueue(normalizeHistory(history))) return;
+        if (
+          !pump.finishHistory(() => {
+            if (!current) return;
+            setDisplayedKey(terminalTargetKeyFromParts(targetConversationId, sessionName));
+            setConnection(exitReported ? "closed" : "connected");
+          })
+        ) {
+          return;
+        }
+        // The pump boundary, rather than runtime buffering, now owns history-before-live order.
+        // Releasing here puts all captured and future PTY bytes under the same explicit limit.
+        const release = releaseBufferedOutput();
+        if (release.overrun) {
+          pump.cancel();
+          current = false;
+          terminal.close();
+          if (attachmentRef.current === terminal) attachmentRef.current = null;
+          setConnection("closed");
+          setError(
+            "Terminal attach output exceeded its safe buffer; switch away and back to resync from tmux."
+          );
+        }
       })
       .catch((cause: unknown) => {
         if (!current) return;
         setConnection("closed");
         setError(cause instanceof Error ? cause.message : "Unable to attach terminal.");
       });
-    const renderedTerminal = terminalRef.current;
-
     return () => {
       current = false;
+      pump.cancel();
       renderedTerminal?.clearLocalSelection();
       renderedTerminal?.blur();
-      attachmentRef.current?.close();
-      attachmentRef.current = null;
+      ownedTerminal?.close();
+      if (attachmentRef.current === ownedTerminal) attachmentRef.current = null;
     };
   }, [layoutReady, runtime, sessionName, targetConversationId]);
 
@@ -203,15 +261,19 @@ export function TerminalPanel({
         </text>
       </box>
       <agent-terminal
+        key={requestedKey ?? "no-terminal-session"}
         ref={terminalRef}
-        maxScrollback={sessionHistoryLimit}
+        maxScrollback={terminalScrollbackBytes}
+        cols={layoutDimensions?.columns ?? 1}
+        rows={layoutDimensions?.rows ?? 1}
+        childMouseInput={terminalChildMouseInputEnabled()}
+        onActivate={onActivate}
         sessionConnected={connection === "connected" && !switching}
         selectable
         onData={(data) => {
           attachmentRef.current?.write(data);
         }}
         onTerminalResize={onResize}
-        renderAfter={paintTerminalDefaults}
         style={{ flexGrow: 1, height: "auto", minHeight: 1, width: "100%" }}
       />
       {error === null ? null : (

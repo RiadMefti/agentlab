@@ -29,6 +29,7 @@ Environment:
   AGENTLAB_CODEX_BIN       Override the Codex executable
   AGENTLAB_CLAUDE_BIN      Override the Claude executable
   AGENTLAB_OPENCODE_BIN    Override the OpenCode executable
+  AGENTLAB_DISABLE_MOUSE   Set to 1 to keep mouse input local to AgentLab
 
 Keys:
   Alt+1 / Alt+2 / Alt+3        Focus projects / terminal / agents

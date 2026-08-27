@@ -1,12 +1,18 @@
-import { createCliRenderer } from "@opentui/core";
+import { CliRenderEvents, createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { createLocalAgentLab, loadLocalConfig } from "@agentlab/runtime";
 
 import { App } from "./app.js";
+import type { NativeDiagnosticWriter } from "./bootstrap/native-diagnostics.js";
+import { installSignalExitStatusHandlers } from "./bootstrap/signal-exit.js";
+import {
+  createTerminalSuspendHandlers,
+  renderWithTerminalCleanup
+} from "./bootstrap/terminal-suspension.js";
 import { RuntimeContext } from "./runtime-context.js";
 import { palette } from "./theme.js";
 
-export async function runTerminalUi(): Promise<void> {
+export async function runTerminalUi(diagnostics: NativeDiagnosticWriter): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error("AgentLab must run in an interactive terminal.");
   }
@@ -18,9 +24,12 @@ export async function runTerminalUi(): Promise<void> {
     closePromise ??= runtime.close();
     return closePromise;
   };
+  const removeExitStatusHandlers = installSignalExitStatusHandlers();
+  let removeSuspendHandlers: () => void = () => undefined;
+  let renderer: Awaited<ReturnType<typeof createCliRenderer>> | null = null;
 
   try {
-    const renderer = await createCliRenderer({
+    renderer = await createCliRenderer({
       backgroundColor: palette.background,
       clearOnShutdown: true,
       exitOnCtrlC: false,
@@ -33,20 +42,63 @@ export async function runTerminalUi(): Promise<void> {
       useThread: true,
       onDestroy: () => {
         void closeRuntime().catch((error: unknown) => {
-          process.stderr.write(`Shutdown failed: ${String(error)}\n`);
+          diagnostics.write(`Shutdown failed: ${String(error)}`);
         });
       }
     });
-    createRoot(renderer).render(
-      <RuntimeContext value={runtime}>
-        <App />
-      </RuntimeContext>
+    const activeRenderer = renderer;
+    const suspendHandlers = createTerminalSuspendHandlers(
+      activeRenderer,
+      () => process.kill(process.pid, "SIGSTOP"),
+      (message) => {
+        diagnostics.write(message);
+      }
+    );
+    removeSuspendHandlers = (): void => {
+      process.off("SIGTSTP", suspendHandlers.onSuspend);
+      process.off("SIGCONT", suspendHandlers.onContinue);
+    };
+    const removeProcessHandlers = (): void => {
+      removeSuspendHandlers();
+      removeExitStatusHandlers();
+    };
+    process.on("SIGTSTP", suspendHandlers.onSuspend);
+    process.on("SIGCONT", suspendHandlers.onContinue);
+    activeRenderer.once(CliRenderEvents.DESTROY, removeProcessHandlers);
+    renderWithTerminalCleanup(
+      () => {
+        createRoot(activeRenderer).render(
+          <RuntimeContext value={runtime}>
+            <App />
+          </RuntimeContext>
+        );
+      },
+      removeProcessHandlers,
+      () => {
+        activeRenderer.destroy();
+      }
     );
   } catch (error: unknown) {
+    removeSuspendHandlers();
+    removeExitStatusHandlers();
+    const cleanupErrors: unknown[] = [];
+    if (renderer !== null && !renderer.isDestroyed) {
+      try {
+        renderer.destroy();
+      } catch (destroyError: unknown) {
+        cleanupErrors.push(destroyError);
+      }
+    }
     try {
       await closeRuntime();
     } catch (closeError: unknown) {
-      throw new AggregateError([error, closeError], "Startup and runtime cleanup both failed.");
+      cleanupErrors.push(closeError);
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        "Startup and runtime cleanup both failed."
+      );
     }
     throw error;
   }

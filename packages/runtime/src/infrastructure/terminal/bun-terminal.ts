@@ -13,6 +13,11 @@ export interface PendingTerminalOutput {
 }
 
 const EMPTY_PENDING_OUTPUT: PendingTerminalOutput = { chunks: [], bytes: 0 };
+const PRIVATE_TUI_ENVIRONMENT_KEYS = new Set([
+  "AGENTLAB_DIAGNOSTIC_LOG",
+  "AGENTLAB_TUI_DIAGNOSTIC_CAPABILITY",
+  "AGENTLAB_TUI_RUNTIME"
+]);
 
 /** Attaches Bun's native PTY to an exact managed tmux session. */
 export class BunTerminalFactory implements PseudoTerminalFactory {
@@ -182,8 +187,11 @@ function disposable(dispose: () => unknown): Disposable {
   };
 }
 
-function stringEnvironment(environment: NodeJS.ProcessEnv): Record<string, string> {
+export function stringEnvironment(environment: NodeJS.ProcessEnv): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(environment).filter((entry): entry is [string, string] => entry[1] !== undefined)
+    Object.entries(environment).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !PRIVATE_TUI_ENVIRONMENT_KEYS.has(entry[0])
+    )
   );
 }

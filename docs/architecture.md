@@ -60,21 +60,24 @@ UI is closed. The center pane owns exactly one ephemeral PTY client:
 2. The runtime validates the conversation ID, session name, saved folder, and terminal dimensions.
 3. The runtime reads up to 20,000 retained tmux lines, then opens a PTY running
    `tmux attach-session -t =<exact-name>` using an argument array.
-4. Live PTY events are buffered until a fresh native VT parser has replayed the older history, then
-   released in arrival order, so attach output can never appear before its history.
+4. Live PTY events are buffered behind a 1 MiB pre-release cap until a fresh native VT parser has
+   replayed the older history, then released in arrival order. An overrun closes only the ephemeral
+   client and invites a clean reattach from tmux instead of replaying a partial escape stream.
 5. OpenTUI forwards input bytes unchanged, including split UTF-8 and arbitrary control bytes, plus
    resize events, paste, mouse selection, ANSI state, and cursor state.
 6. Changing selection or closing the UI kills only the client PTY. The tmux session stays alive.
 
 The selected panel owns normal attachment replacement; the runtime also tracks every returned
-attachment so process shutdown closes any client the UI has not released yet. The attachment adapter
-bounds output buffered before listeners are registered. The terminal parser also bounds scrollback.
-During replacement, the current terminal frame remains visible until the next attachment has both
-its retained history and buffered live output ready. Reset plus history replay is committed in one
-renderer turn, so selection never exposes an empty intermediate frame. UI polling stores session
-snapshots under their conversation ID, so returning to a project immediately restores its agent list
-and late responses cannot display another conversation's agents. Metadata-only polling changes do
-not reopen the PTY.
+attachment so process shutdown closes any client the UI has not released yet. Pre-listener PTY
+output, ordered pre-release output, the ingestion pump, and terminal scrollback all have explicit
+byte bounds. OpenTUI receives a 16 MiB scrollback byte budget; unlike tmux's separate 20,000-line
+history limit, the number of retained emulator lines varies with their encoded content. During
+replacement, React keys the native terminal by conversation and session, so the new attachment
+cannot inherit the old VT, selection, cursor, or mouse state. History and live output are drained in
+order and one full invalidation follows history seeding. UI polling stores session snapshots under
+their conversation ID, so returning to a project immediately restores its agent list and late
+responses cannot display another conversation's agents. Metadata-only polling changes do not reopen
+the PTY.
 
 Runtime commands share an admission gate. Shutdown stops new work, waits for every admitted mutation
 to settle, and only then closes PTY clients and SQLite. Quitting during provider resolution

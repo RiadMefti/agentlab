@@ -4,6 +4,9 @@ import { providerIdSchema } from "./provider.js";
 
 export const sessionHistoryLimit = 20_000;
 
+/** OpenTUI's embedded-terminal scrollback budget is measured in bytes, not lines. */
+export const terminalScrollbackBytes = 16 * 1024 * 1024;
+
 export const agentRoleSchema = z.enum(["captain", "worker"]);
 export type AgentRole = z.infer<typeof agentRoleSchema>;
 

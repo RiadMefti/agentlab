@@ -3,9 +3,17 @@ import {
   type EmbeddedTerminalOptions,
   type KeyEvent,
   type MouseEvent,
+  type RawMouseEvent,
   type RenderContext
 } from "@opentui/core";
 import { extend } from "@opentui/react";
+
+import { TerminalDefaultAppearance } from "./terminal-appearance.js";
+import {
+  cancelOpenTuiChildMouseOwnership,
+  registerOpenTuiChildMouseBoundary,
+  type OpenTuiChildMouseDispatch
+} from "./open-tui-child-mouse-boundary.js";
 
 const semanticPhysicalKeys: Readonly<Record<string, string>> = {
   backspace: "Backspace",
@@ -30,22 +38,25 @@ const semanticPhysicalKeys: Readonly<Record<string, string>> = {
 };
 
 const escapeCharacter = String.fromCharCode(27);
-const mouseControlPattern = new RegExp(
-  `${escapeCharacter}c|${escapeCharacter}\\[!p|${escapeCharacter}\\[\\?([\\d;]*)([hl])`,
-  "gu"
-);
-const incompleteControlPattern = new RegExp(`${escapeCharacter}(?:\\[[?!\\d;]*)?$`, "u");
-const MAX_INCOMPLETE_CONTROL_BYTES = 64;
-
 interface OpenTuiTerminalInternals {
   readonly handle: unknown;
   readonly lib: {
+    embeddedTerminalEncodeMouse(
+      handle: unknown,
+      mouse: {
+        readonly action: "motion" | "press" | "release";
+        readonly anyButtonPressed: boolean;
+        readonly button?: "five" | "four" | "left" | "middle" | "right" | "seven" | "six";
+        readonly mods: number;
+        readonly x: number;
+        readonly y: number;
+      }
+    ): Uint8Array;
     embeddedTerminalScroll(handle: unknown, rows: number): void;
   };
 }
 
 interface OpenTuiRendererSelectionContext {
-  readonly _lastPointerModifiers?: { readonly shift?: boolean };
   clearSelection(): void;
   getSelection(): {
     readonly anchor: { readonly x: number; readonly y: number };
@@ -53,56 +64,73 @@ interface OpenTuiRendererSelectionContext {
   } | null;
 }
 
-export interface AgentTerminalOptions extends EmbeddedTerminalOptions {
+export interface AgentTerminalOptions extends Omit<
+  EmbeddedTerminalOptions,
+  "renderBefore" | "renderAfter"
+> {
+  readonly childMouseInput?: boolean;
+  readonly onActivate?: () => void;
   readonly sessionConnected?: boolean;
 }
 
-/** Tracks only DEC mouse modes; the native VT remains authoritative for encoding. */
-export class TerminalMouseProtocolState {
-  readonly #trackingModes = new Set<number>();
-  #tail = "";
-
-  public observe(data: string | Uint8Array): boolean {
-    const wasEnabled = this.enabled;
-    const text = typeof data === "string" ? data : new TextDecoder().decode(data);
-    const input = this.#tail + text;
-    for (const match of input.matchAll(mouseControlPattern)) {
-      if (match[0] === "\x1bc" || match[0] === "\x1b[!p") {
-        this.#trackingModes.clear();
-        continue;
-      }
-      const enabled = match[2] === "h";
-      for (const value of (match[1] ?? "").split(";")) {
-        const mode = Number(value);
-        if (mode !== 1000 && mode !== 1002 && mode !== 1003) continue;
-        if (enabled) this.#trackingModes.add(mode);
-        else this.#trackingModes.delete(mode);
-      }
-    }
-    const tail = incompleteControlPattern.exec(input)?.[0] ?? "";
-    this.#tail = tail.length <= MAX_INCOMPLETE_CONTROL_BYTES ? tail : "";
-    return !wasEnabled && this.enabled;
-  }
-
-  public get enabled(): boolean {
-    return this.#trackingModes.size > 0;
-  }
+export function terminalChildMouseInputEnabled(
+  environment: NodeJS.ProcessEnv = process.env
+): boolean {
+  return environment.AGENTLAB_DISABLE_MOUSE !== "1";
 }
 
 /** Compatibility shell around OpenTUI 0.5.8's native VT implementation. */
 export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderable {
-  readonly #mouseProtocol = new TerminalMouseProtocolState();
+  readonly #appearance = new TerminalDefaultAppearance();
+  #childMouseInput: boolean;
+  readonly #disposeChildMouseBoundary: () => void;
+  #onActivate: (() => void) | undefined;
   #forceLocalDrag = false;
+  readonly #preparedChildMouseDispatches: OpenTuiChildMouseDispatch[] = [];
+  #openTuiMouseDispatchDepth = 0;
   #sessionConnected: boolean;
 
   public constructor(ctx: RenderContext, options: AgentTerminalOptions) {
-    super(ctx, options);
-    this.#sessionConnected = options.sessionConnected ?? true;
+    const runtimeOptions = options as AgentTerminalOptions &
+      Pick<EmbeddedTerminalOptions, "renderAfter" | "renderBefore">;
+    const {
+      childMouseInput,
+      onActivate,
+      renderAfter,
+      renderBefore,
+      sessionConnected,
+      ...openTuiOptions
+    } = runtimeOptions;
+    // Render hooks invalidate OpenTUI's native VT on every frame. Keep the type-level omission
+    // enforceable when options arrive through untyped JavaScript or a React prop spread.
+    void renderAfter;
+    void renderBefore;
+    super(ctx, openTuiOptions);
+    Object.defineProperties(this, {
+      renderAfter: ignoredRenderHookProperty,
+      renderBefore: ignoredRenderHookProperty
+    });
+    this.#childMouseInput = childMouseInput ?? true;
+    this.#onActivate = onActivate;
+    this.#sessionConnected = sessionConnected ?? true;
+    this.#disposeChildMouseBoundary = registerOpenTuiChildMouseBoundary(ctx, this);
   }
 
   public override write(data: string | Uint8Array): void {
-    if (this.#mouseProtocol.observe(data)) this.clearLocalSelection();
+    this.#appearance.markChanged();
     super.write(data);
+  }
+
+  public override invalidate(): void {
+    this.#appearance.markChanged();
+    super.invalidate();
+  }
+
+  public override onSelectionChanged(
+    selection: Parameters<OpenTuiEmbeddedTerminalRenderable["onSelectionChanged"]>[0]
+  ): boolean {
+    this.#appearance.markChanged();
+    return super.onSelectionChanged(selection);
   }
 
   public override encodeKey(key: KeyEvent): Uint8Array {
@@ -132,24 +160,41 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     return super.encodeKey(normalized);
   }
 
-  public override shouldStartSelection(x: number, y: number): boolean {
-    if (!super.shouldStartSelection(x, y)) return false;
-    return !this.#mouseProtocol.enabled || this.pointerHasShift();
-  }
-
   public override processMouseEvent(event: MouseEvent): void {
+    if (this.#openTuiMouseDispatchDepth > 0) {
+      if (event.type === "up" || event.type === "drag-end") {
+        this.#forceLocalDrag = false;
+        this.clearCollapsedSelection();
+      }
+      return;
+    }
     if (event.type === "down" && event.button === 0) {
       this.#forceLocalDrag = event.modifiers.shift;
+      this.#onActivate?.();
     }
     const forceLocal = event.modifiers.shift || this.#forceLocalDrag;
-    if (this.#mouseProtocol.enabled && forceLocal) {
+    const preparedDispatch = this.#preparedChildMouseDispatches.at(-1);
+    if (preparedDispatch !== undefined) {
+      if (event.type === "down" && event.button === 0) this.focus();
+      if (event.type === "scroll") this.#appearance.markChanged();
+      if (preparedDispatch.output === undefined) {
+        event.preventDefault();
+        event.stopPropagation();
+      } else {
+        event.preventDefault();
+        event.stopPropagation();
+        this.onData?.(preparedDispatch.output, "input");
+      }
+      if (event.type === "up" && event.button === 0) this.#forceLocalDrag = false;
+      return;
+    }
+    if (forceLocal || !this.#childMouseInput) {
       if (event.type === "scroll") {
         this.scrollLocally(event);
         return;
       }
-      // Continue renderer-owned selection and bubble activation without entering
-      // OpenTUI's independent child mouse forwarding path.
-      this.parent?.processMouseEvent(event);
+      // Selection begins in the renderer before dispatch. Skipping OpenTUI's handler is the exact
+      // Shift bypass: no child bytes and no manual re-entry into parent/capture bookkeeping.
       if (event.type === "down" && event.button === 0) this.focus();
       if (event.type === "up" || event.type === "drag-end") {
         this.#forceLocalDrag = false;
@@ -158,11 +203,62 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
       return;
     }
 
+    if (event.type === "scroll") this.#appearance.markChanged();
+    // A zero-byte native result is intentionally allowed through this normal OpenTUI path so
+    // local selection and scrolling remain available when the child has not enabled tracking.
     super.processMouseEvent(event);
     if (event.type === "up" && event.button === 0) {
       this.#forceLocalDrag = false;
       this.clearCollapsedSelection();
     }
+  }
+
+  public get childMouseInput(): boolean {
+    return this.#childMouseInput;
+  }
+
+  public set childMouseInput(value: boolean) {
+    if (value && !this.#childMouseInput) this.clearLocalSelection();
+    if (!value) cancelOpenTuiChildMouseOwnership(this.ctx, this);
+    this.#childMouseInput = value;
+  }
+
+  public override shouldStartSelection(x: number, y: number): boolean {
+    return this.#preparedChildMouseDispatches.length === 0 && super.shouldStartSelection(x, y);
+  }
+
+  public prepareChildMouseDispatch(
+    event: RawMouseEvent,
+    retainOwnership: boolean
+  ): OpenTuiChildMouseDispatch | null {
+    if (!this.#childMouseInput || event.modifiers.shift || this.#forceLocalDrag) {
+      return null;
+    }
+    const output = this.encodeMouse(event);
+    if (output.byteLength === 0 && !retainOwnership) return null;
+    this.clearLocalSelection();
+    return output.byteLength === 0 ? {} : { output };
+  }
+
+  public beginChildMouseDispatch(dispatch: OpenTuiChildMouseDispatch): void {
+    this.#preparedChildMouseDispatches.push(dispatch);
+  }
+
+  public completeChildMouseDispatch(): void {
+    this.#preparedChildMouseDispatches.pop();
+  }
+
+  public beginOpenTuiMouseDispatch(): void {
+    this.#openTuiMouseDispatchDepth += 1;
+  }
+
+  public completeOpenTuiMouseDispatch(): void {
+    this.#openTuiMouseDispatchDepth = Math.max(0, this.#openTuiMouseDispatchDepth - 1);
+  }
+
+  public endOpenTuiMouseGesture(): void {
+    this.#forceLocalDrag = false;
+    this.clearCollapsedSelection();
   }
 
   public get sessionConnected(): boolean {
@@ -175,11 +271,20 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     if (!value) this.blur();
   }
 
+  public get onActivate(): (() => void) | undefined {
+    return this.#onActivate;
+  }
+
+  public set onActivate(value: (() => void) | undefined) {
+    this.#onActivate = value;
+  }
+
   public override focus(): void {
     if (this.#sessionConnected) super.focus();
   }
 
   public override blur(): void {
+    cancelOpenTuiChildMouseOwnership(this.ctx, this);
     this.#forceLocalDrag = false;
     this.clearLocalSelection();
     super.blur();
@@ -189,8 +294,25 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     if (this.hasSelection()) this.selectionContext().clearSelection();
   }
 
-  private pointerHasShift(): boolean {
-    return this.selectionContext()._lastPointerModifiers?.shift === true;
+  public get appearanceApplicationCount(): number {
+    return this.#appearance.applicationCount;
+  }
+
+  protected override onResize(width: number, height: number): void {
+    this.#appearance.markChanged();
+    super.onResize(width, height);
+  }
+
+  protected override renderSelf(
+    buffer: Parameters<OpenTuiEmbeddedTerminalRenderable["render"]>[0]
+  ): void {
+    super.renderSelf(buffer);
+    this.#appearance.apply(buffer);
+  }
+
+  protected override destroySelf(): void {
+    this.#disposeChildMouseBoundary();
+    super.destroySelf();
   }
 
   private clearCollapsedSelection(): void {
@@ -204,10 +326,29 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     }
   }
 
+  private encodeMouse(event: RawMouseEvent): Uint8Array {
+    const terminal = this as unknown as OpenTuiTerminalInternals;
+    const button = event.type === "move" ? undefined : mouseButton(event);
+    return terminal.lib.embeddedTerminalEncodeMouse(terminal.handle, {
+      action:
+        event.type === "down" || event.type === "scroll"
+          ? "press"
+          : event.type === "up"
+            ? "release"
+            : "motion",
+      anyButtonPressed: event.type === "down" || event.type === "drag",
+      ...(button === undefined ? {} : { button }),
+      mods: mouseModifiers(event.modifiers),
+      x: event.x - this.screenX,
+      y: event.y - this.screenY
+    });
+  }
+
   private scrollLocally(event: MouseEvent): void {
     const direction = event.scroll?.direction;
     if (direction !== "up" && direction !== "down") return;
     const terminal = this as unknown as OpenTuiTerminalInternals;
+    this.#appearance.markChanged();
     terminal.lib.embeddedTerminalScroll(terminal.handle, direction === "up" ? -3 : 3);
     this.requestRender();
     event.preventDefault();
@@ -218,6 +359,31 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     return this.ctx;
   }
 }
+
+function mouseButton(
+  event: RawMouseEvent
+): "five" | "four" | "left" | "middle" | "right" | "seven" | "six" | undefined {
+  if (event.type === "scroll") {
+    if (event.scroll?.direction === "up") return "four";
+    if (event.scroll?.direction === "down") return "five";
+    if (event.scroll?.direction === "left") return "six";
+    if (event.scroll?.direction === "right") return "seven";
+    return undefined;
+  }
+  return { 0: "left", 1: "middle", 2: "right", 4: "four", 5: "five" }[event.button] as
+    "five" | "four" | "left" | "middle" | "right" | undefined;
+}
+
+function mouseModifiers(modifiers: RawMouseEvent["modifiers"]): number {
+  return (modifiers.shift ? 1 : 0) | (modifiers.ctrl ? 2 : 0) | (modifiers.alt ? 4 : 0);
+}
+
+const ignoredRenderHookProperty: PropertyDescriptor = {
+  configurable: false,
+  enumerable: false,
+  get: () => undefined,
+  set: () => undefined
+};
 
 declare module "@opentui/react" {
   interface OpenTUIComponents {
