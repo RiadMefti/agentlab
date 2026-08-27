@@ -136,11 +136,7 @@ async function assertSignalCleanup(executable: string): Promise<void> {
       const expectedExitCode = exitCodeForSignal(signal);
       const disabledMouse = output.includes("\x1b[?1006l");
       const leftAlternateScreen = output.includes("\x1b[?1049l");
-      if (
-        exitCode !== expectedExitCode ||
-        !disabledMouse ||
-        !leftAlternateScreen
-      ) {
+      if (exitCode !== expectedExitCode || !disabledMouse || !leftAlternateScreen) {
         throw new Error(
           `Packaged binary failed ${signal} cleanup/status smoke test: ${JSON.stringify({
             disabledMouse,
