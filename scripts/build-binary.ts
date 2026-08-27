@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { constants as osConstants, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { appVersion } from "../apps/tui/src/version.js";
@@ -130,15 +130,25 @@ async function assertSignalCleanup(executable: string): Promise<void> {
     });
     try {
       await waitFor(() => output.includes("\x1b[?1049h"));
-      child.kill(signal);
+      const signalNumber = osConstants.signals[signal];
+      child.kill(signalNumber);
       const exitCode = await child.exited;
+      const expectedExitCode = exitCodeForSignal(signal);
+      const disabledMouse = output.includes("\x1b[?1006l");
+      const leftAlternateScreen = output.includes("\x1b[?1049l");
       if (
-        exitCode !== exitCodeForSignal(signal) ||
-        !output.includes("\x1b[?1006l") ||
-        !output.includes("\x1b[?1049l")
+        exitCode !== expectedExitCode ||
+        !disabledMouse ||
+        !leftAlternateScreen
       ) {
         throw new Error(
-          `Packaged binary failed ${signal} cleanup/status smoke test (exit ${String(exitCode)}).`
+          `Packaged binary failed ${signal} cleanup/status smoke test: ${JSON.stringify({
+            disabledMouse,
+            exitCode,
+            expectedExitCode,
+            leftAlternateScreen,
+            signalNumber
+          })}`
         );
       }
     } finally {
