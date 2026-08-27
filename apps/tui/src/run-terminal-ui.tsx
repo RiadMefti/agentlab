@@ -1,9 +1,10 @@
-import { createCliRenderer } from "@opentui/core";
+import { CliRenderEvents, createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { createLocalAgentLab, loadLocalConfig } from "@agentlab/runtime";
 
 import { App } from "./app.js";
 import { writeNativeDiagnostic } from "./bootstrap/native-diagnostics.js";
+import { createTerminalSuspendHandlers } from "./bootstrap/terminal-suspension.js";
 import { RuntimeContext } from "./runtime-context.js";
 import { palette } from "./theme.js";
 
@@ -39,6 +40,20 @@ export async function runTerminalUi(): Promise<void> {
         });
       }
     });
+    const suspendHandlers = createTerminalSuspendHandlers(
+      renderer,
+      () => process.kill(process.pid, "SIGSTOP"),
+      (message) => {
+        writeNativeDiagnostic(message);
+      }
+    );
+    const removeSuspendHandlers = (): void => {
+      process.off("SIGTSTP", suspendHandlers.onSuspend);
+      process.off("SIGCONT", suspendHandlers.onContinue);
+    };
+    process.on("SIGTSTP", suspendHandlers.onSuspend);
+    process.on("SIGCONT", suspendHandlers.onContinue);
+    renderer.once(CliRenderEvents.DESTROY, removeSuspendHandlers);
     createRoot(renderer).render(
       <RuntimeContext value={runtime}>
         <App />
