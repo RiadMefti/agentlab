@@ -13,7 +13,6 @@ import {
   EmbeddedTerminalRenderable,
   TerminalMouseProtocolState
 } from "../../apps/tui/src/terminal/embedded-terminal.js";
-import { paintTerminalDefaults } from "../../apps/tui/src/terminal/terminal-appearance.js";
 import { palette } from "../../apps/tui/src/theme.js";
 import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
 
@@ -453,11 +452,7 @@ describe("embedded agent terminal", () => {
   test("matches the workspace surface while preserving explicit ANSI backgrounds", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const setup = await testRender(
-      <agent-terminal
-        ref={terminal}
-        renderAfter={paintTerminalDefaults}
-        style={{ width: 20, height: 3 }}
-      />,
+      <agent-terminal ref={terminal} style={{ width: 20, height: 3 }} />,
       { height: 3, width: 20 }
     );
     allowOpenTuiAsyncUpdates();
@@ -475,14 +470,79 @@ describe("embedded agent terminal", () => {
     expect(palette.terminalBackground).not.toBe("#000000");
   });
 
+  test("does not full-invalidate or rescan appearance on unchanged renderer frames", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 20, height: 3 }} />,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("idle defaults");
+    await setup.flush();
+
+    const renderedTerminal = terminal.current;
+    if (renderedTerminal === null) throw new Error("Embedded terminal did not mount.");
+    const internals = renderedTerminal as unknown as {
+      readonly handle: unknown;
+      readonly lib: { embeddedTerminalInvalidate(handle: unknown): void };
+    };
+    const originalInvalidate = internals.lib.embeddedTerminalInvalidate;
+    let invalidations = 0;
+    internals.lib.embeddedTerminalInvalidate = (handle) => {
+      invalidations += 1;
+      originalInvalidate(handle);
+    };
+    const appearanceApplications = renderedTerminal.appearanceApplicationCount;
+    try {
+      for (let frame = 0; frame < 4; frame += 1) {
+        setup.renderer.requestRender();
+        await setup.flush();
+      }
+    } finally {
+      internals.lib.embeddedTerminalInvalidate = originalInvalidate;
+    }
+
+    expect(renderedTerminal.renderBefore).toBeUndefined();
+    expect(renderedTerminal.renderAfter).toBeUndefined();
+    expect(invalidations).toBe(0);
+    expect(renderedTerminal.appearanceApplicationCount).toBe(appearanceApplications);
+    const defaultSpan = setup
+      .captureSpans()
+      .lines.flatMap(({ spans }) => spans)
+      .find(({ text }) => text.includes("idle defaults"));
+    expect(defaultSpan?.fg.toInts()).toEqual([232, 240, 245, 255]);
+    expect(defaultSpan?.bg.toInts()).toEqual([10, 17, 24, 255]);
+  });
+
+  test("reapplies themed defaults after an explicit post-history full invalidation", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 24, height: 3 }} />,
+      { height: 3, width: 24 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("history \x1b[41mexplicit\x1b[0m");
+    await setup.flush();
+    const applicationsBeforeInvalidation = terminal.current?.appearanceApplicationCount ?? 0;
+
+    terminal.current?.invalidate();
+    await setup.flush();
+
+    expect(terminal.current?.appearanceApplicationCount).toBe(applicationsBeforeInvalidation + 1);
+    const spans = setup.captureSpans().lines.flatMap(({ spans }) => spans);
+    const themed = spans.find(({ text }) => text.includes("history"));
+    const explicit = spans.find(({ text }) => text.includes("explicit"));
+    expect(themed?.fg.toInts()).toEqual([232, 240, 245, 255]);
+    expect(themed?.bg.toInts()).toEqual([10, 17, 24, 255]);
+    expect(explicit?.bg.toInts()).toEqual([204, 102, 102, 255]);
+  });
+
   test("preserves wide Unicode, truecolor, erase, and alternate-screen state", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const setup = await testRender(
-      <agent-terminal
-        ref={terminal}
-        renderAfter={paintTerminalDefaults}
-        style={{ width: 20, height: 4 }}
-      />,
+      <agent-terminal ref={terminal} style={{ width: 20, height: 4 }} />,
       { height: 4, width: 20 }
     );
     allowOpenTuiAsyncUpdates();
@@ -534,7 +594,6 @@ describe("embedded agent terminal", () => {
       <agent-terminal
         ref={terminal}
         maxScrollback={sessionHistoryLimit}
-        renderAfter={paintTerminalDefaults}
         style={{ height: 40, width: 120 }}
       />,
       { height: 40, width: 120 }

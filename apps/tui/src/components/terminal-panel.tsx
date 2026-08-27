@@ -6,7 +6,6 @@ import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtim
 
 import "../terminal/embedded-terminal.js";
 import type { EmbeddedTerminalRenderable } from "../terminal/embedded-terminal.js";
-import { paintTerminalDefaults } from "../terminal/terminal-appearance.js";
 import { TerminalIngestionPump } from "../terminal/terminal-ingestion-pump.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
@@ -244,7 +243,6 @@ export function TerminalPanel({
           attachmentRef.current?.write(data);
         }}
         onTerminalResize={onResize}
-        renderAfter={paintTerminalDefaults}
         style={{ flexGrow: 1, height: "auto", minHeight: 1, width: "100%" }}
       />
       {error === null ? null : (

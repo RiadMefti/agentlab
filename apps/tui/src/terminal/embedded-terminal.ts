@@ -7,6 +7,8 @@ import {
 } from "@opentui/core";
 import { extend } from "@opentui/react";
 
+import { TerminalDefaultAppearance } from "./terminal-appearance.js";
+
 const semanticPhysicalKeys: Readonly<Record<string, string>> = {
   backspace: "Backspace",
   delete: "Delete",
@@ -53,7 +55,10 @@ interface OpenTuiRendererSelectionContext {
   } | null;
 }
 
-export interface AgentTerminalOptions extends EmbeddedTerminalOptions {
+export interface AgentTerminalOptions extends Omit<
+  EmbeddedTerminalOptions,
+  "renderBefore" | "renderAfter"
+> {
   readonly sessionConnected?: boolean;
 }
 
@@ -91,6 +96,7 @@ export class TerminalMouseProtocolState {
 
 /** Compatibility shell around OpenTUI 0.5.8's native VT implementation. */
 export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderable {
+  readonly #appearance = new TerminalDefaultAppearance();
   readonly #mouseProtocol = new TerminalMouseProtocolState();
   #forceLocalDrag = false;
   #sessionConnected: boolean;
@@ -102,7 +108,20 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
 
   public override write(data: string | Uint8Array): void {
     if (this.#mouseProtocol.observe(data)) this.clearLocalSelection();
+    this.#appearance.markChanged();
     super.write(data);
+  }
+
+  public override invalidate(): void {
+    this.#appearance.markChanged();
+    super.invalidate();
+  }
+
+  public override onSelectionChanged(
+    selection: Parameters<OpenTuiEmbeddedTerminalRenderable["onSelectionChanged"]>[0]
+  ): boolean {
+    this.#appearance.markChanged();
+    return super.onSelectionChanged(selection);
   }
 
   public override encodeKey(key: KeyEvent): Uint8Array {
@@ -158,6 +177,9 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
       return;
     }
 
+    if (event.type === "scroll" && !this.#mouseProtocol.enabled) {
+      this.#appearance.markChanged();
+    }
     super.processMouseEvent(event);
     if (event.type === "up" && event.button === 0) {
       this.#forceLocalDrag = false;
@@ -189,6 +211,22 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     if (this.hasSelection()) this.selectionContext().clearSelection();
   }
 
+  public get appearanceApplicationCount(): number {
+    return this.#appearance.applicationCount;
+  }
+
+  protected override onResize(width: number, height: number): void {
+    this.#appearance.markChanged();
+    super.onResize(width, height);
+  }
+
+  protected override renderSelf(
+    buffer: Parameters<OpenTuiEmbeddedTerminalRenderable["render"]>[0]
+  ): void {
+    super.renderSelf(buffer);
+    this.#appearance.apply(buffer);
+  }
+
   private pointerHasShift(): boolean {
     return this.selectionContext()._lastPointerModifiers?.shift === true;
   }
@@ -208,6 +246,7 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
     const direction = event.scroll?.direction;
     if (direction !== "up" && direction !== "down") return;
     const terminal = this as unknown as OpenTuiTerminalInternals;
+    this.#appearance.markChanged();
     terminal.lib.embeddedTerminalScroll(terminal.handle, direction === "up" ? -3 : 3);
     this.requestRender();
     event.preventDefault();

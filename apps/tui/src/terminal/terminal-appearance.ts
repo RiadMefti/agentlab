@@ -5,8 +5,30 @@ import { palette } from "../theme.js";
 const foreground = parseHexColor(palette.text);
 const background = parseHexColor(palette.terminalBackground);
 
+/** Applies terminal defaults once for each native-model change, never once per renderer frame. */
+export class TerminalDefaultAppearance {
+  #changed = true;
+  #applicationCount = 0;
+
+  public markChanged(): void {
+    this.#changed = true;
+  }
+
+  public apply(buffer: OptimizedBuffer): boolean {
+    if (!this.#changed) return false;
+    paintTerminalDefaults(buffer);
+    this.#changed = false;
+    this.#applicationCount += 1;
+    return true;
+  }
+
+  public get applicationCount(): number {
+    return this.#applicationCount;
+  }
+}
+
 /** Replaces OpenTUI's resolved black/white defaults while leaving colored ANSI cells intact. */
-export function paintTerminalDefaults(buffer: OptimizedBuffer): void {
+function paintTerminalDefaults(buffer: OptimizedBuffer): void {
   const colors = buffer.buffers;
   paintMatchingCells(colors.fg, [255, 255, 255], foreground);
   paintMatchingCells(colors.bg, [0, 0, 0], background);
