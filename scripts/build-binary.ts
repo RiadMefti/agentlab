@@ -113,7 +113,7 @@ async function main(): Promise<void> {
 }
 
 async function assertSignalCleanup(executable: string): Promise<void> {
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const) {
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGABRT", "SIGBUS"] as const) {
     const stateRoot = await mkdtemp(join(tmpdir(), "agentlab-compiled-signal-"));
     let output = "";
     const decoder = new TextDecoder();

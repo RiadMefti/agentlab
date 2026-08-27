@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync, writeSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   consumeNativeDiagnosticsEnvironment,
+  nativeDiagnosticsRetention,
   nativeDiagnosticsRuntimeArguments,
   openNativeDiagnosticsLog,
   writeNativeDiagnostic
@@ -103,6 +104,138 @@ describe("native diagnostics bootstrap", () => {
     expect(readFileSync(log.path, "utf8")).not.toContain("retained the newest diagnostics");
     log.close();
     expect(statSync(log.path).size).toBeLessThanOrEqual(2 * 1024 * 1024);
+  });
+
+  it("bounds completed diagnostics across repeated launches", async () => {
+    const state = await temporaryState();
+    const environment = { ...process.env, XDG_STATE_HOME: state };
+    for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 7; launch += 1) {
+      const log = openNativeDiagnosticsLog(environment);
+      writeSync(log.fd, `launch-${String(launch)}\n`);
+      log.close();
+      expect(existsSync(log.path)).toBe(true);
+    }
+
+    const files = retainedDiagnosticFiles(state);
+    expect(files).toHaveLength(nativeDiagnosticsRetention.maxFiles);
+    expect(files.every((path) => lstatSync(path).isFile())).toBe(true);
+  });
+
+  it("enforces the cross-run total-byte budget", async () => {
+    const state = await temporaryState();
+    const environment = { ...process.env, XDG_STATE_HOME: state };
+    const payload = Buffer.alloc(2 * 1024 * 1024, 0x78);
+    for (let launch = 0; launch < 9; launch += 1) {
+      const log = openNativeDiagnosticsLog(environment);
+      writeAll(log.fd, payload);
+      log.close();
+    }
+
+    const files = retainedDiagnosticFiles(state);
+    const totalBytes = files.reduce((total, path) => total + statSync(path).size, 0);
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.length).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFiles);
+    expect(totalBytes).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxBytes);
+  });
+
+  it("never removes the active writer while retaining other launches", async () => {
+    const state = await temporaryState();
+    const environment = { ...process.env, XDG_STATE_HOME: state };
+    const active = openNativeDiagnosticsLog(environment);
+    const activePath = active.path;
+    writeSync(active.fd, "ACTIVE-BEGIN\n");
+
+    for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 5; launch += 1) {
+      const completed = openNativeDiagnosticsLog(environment);
+      writeSync(completed.fd, `completed-${String(launch)}\n`);
+      completed.close();
+    }
+
+    expect(existsSync(activePath)).toBe(true);
+    writeSync(active.fd, "ACTIVE-END\n");
+    active.close();
+    expect(active.path).not.toBe(activePath);
+    expect(readFileSync(active.path, "utf8")).toContain("ACTIVE-BEGIN\nACTIVE-END");
+  });
+
+  it("ignores symlinks and malformed or unreadable entries during retention", async () => {
+    const state = await temporaryState();
+    const directory = join(state, "agentlab", "logs");
+    const target = join(state, "outside.log");
+    const linkedName = "tui-123e4567-e89b-42d3-a456-426614174000.log";
+    const malformed = join(directory, "tui-not-a-run.log");
+    const unreadable = join(directory, "tui-223e4567-e89b-42d3-a456-426614174000.log");
+    const disguisedDirectory = join(directory, "tui-323e4567-e89b-42d3-a456-426614174000.log");
+    await mkdir(directory, { recursive: true });
+    await writeFile(target, "outside");
+    await symlink(target, join(directory, linkedName));
+    await writeFile(malformed, "malformed");
+    await writeFile(unreadable, "unreadable");
+    await chmod(unreadable, 0o000);
+    await mkdir(disguisedDirectory);
+
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    log.close();
+
+    expect(readFileSync(target, "utf8")).toBe("outside");
+    expect(lstatSync(join(directory, linkedName)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(malformed, "utf8")).toBe("malformed");
+    expect(lstatSync(unreadable).isFile()).toBe(true);
+    expect(lstatSync(disguisedDirectory).isDirectory()).toBe(true);
+    await chmod(unreadable, 0o600);
+  });
+
+  it("preserves an active writer owned by another bootstrap process", async () => {
+    const state = await temporaryState();
+    const childScript = [
+      'import { writeSync } from "node:fs";',
+      'import { openNativeDiagnosticsLog } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      "const log = openNativeDiagnosticsLog(process.env);",
+      'writeSync(log.fd, "CHILD-BEGIN\\n");',
+      "process.stdout.write(`${log.path}\\n`);",
+      "setTimeout(() => {",
+      '  writeSync(log.fd, "CHILD-END\\n");',
+      "  log.close();",
+      "}, 400);"
+    ].join("\n");
+    const child = spawn("bun", ["-e", childScript], {
+      env: { ...process.env, XDG_STATE_HOME: state },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const stderrPromise = readStream(child.stderr);
+    const activePath = await readFirstLine(child.stdout);
+
+    for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 4; launch += 1) {
+      const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+      log.close();
+    }
+
+    expect(activePath).toMatch(/\.active$/u);
+    expect(existsSync(activePath)).toBe(true);
+    const exitCode = await new Promise<number | null>((resolveExit) =>
+      child.once("exit", resolveExit)
+    );
+    expect(exitCode).toBe(0);
+    expect(await stderrPromise).toBe("");
+    expect(
+      retainedDiagnosticFiles(state).some((path) =>
+        readFileSync(path, "utf8").includes("CHILD-BEGIN\nCHILD-END")
+      )
+    ).toBe(true);
+  });
+
+  it("tolerates cleanup and finalization failures after opening the writer", async () => {
+    const state = await temporaryState();
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    const directory = join(state, "agentlab", "logs");
+    await chmod(directory, 0o500);
+
+    expect(() => {
+      log.close();
+    }).not.toThrow();
+
+    await chmod(directory, 0o700);
+    expect(existsSync(log.path)).toBe(true);
   });
 
   it("routes renderer teardown failures directly to the private diagnostic file", async () => {
@@ -208,6 +341,36 @@ async function readStream(stream: NodeJS.ReadableStream | null): Promise<string>
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function readFirstLine(stream: NodeJS.ReadableStream | null): Promise<string> {
+  if (stream === null) throw new Error("Missing child stdout.");
+  return await new Promise<string>((resolveLine, reject) => {
+    let buffered = "";
+    stream.on("data", (chunk: Buffer | string) => {
+      buffered += chunk.toString();
+      const newline = buffered.indexOf("\n");
+      if (newline >= 0) resolveLine(buffered.slice(0, newline));
+    });
+    stream.once("error", reject);
+    stream.once("end", () => {
+      reject(new Error("Child exited before publishing its log path."));
+    });
+  });
+}
+
+function retainedDiagnosticFiles(state: string): string[] {
+  const directory = join(state, "agentlab", "logs");
+  return readdirSync(directory)
+    .filter((name) => /^tui-[0-9a-f-]+\.log$/u.test(name))
+    .map((name) => join(directory, name));
+}
+
+function writeAll(fd: number, buffer: Buffer): void {
+  let offset = 0;
+  while (offset < buffer.byteLength) {
+    offset += writeSync(fd, buffer, offset, buffer.byteLength - offset);
+  }
 }
 
 async function launchDevelopmentEntry(state: string) {

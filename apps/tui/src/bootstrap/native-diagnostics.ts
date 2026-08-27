@@ -9,7 +9,10 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readSync,
+  renameSync,
+  unlinkSync,
   writeSync
 } from "node:fs";
 import { homedir } from "node:os";
@@ -21,10 +24,22 @@ import { exitCodeForSignal, rendererExitStatusSignals } from "./signal-exit.js";
 const LOG_DIRECTORY_MODE = 0o700;
 const LOG_FILE_MODE = 0o600;
 const MAX_LOG_BYTES = 2 * 1024 * 1024;
+const MAX_RETAINED_LOG_BYTES = 8 * 1024 * 1024;
+const MAX_RETAINED_LOG_FILES = 8;
 const RUNTIME_MARKER = "AGENTLAB_TUI_RUNTIME";
 const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const ACTIVE_LOG_PATTERN = new RegExp(
+  `^tui-([1-9][0-9]*)-(${UUID_PATTERN.source.slice(1, -1)})\\.active$`,
+  "u"
+);
+const RETAINED_LOG_PATTERN = new RegExp(`^tui-(${UUID_PATTERN.source.slice(1, -1)})\\.log$`, "u");
 let ownedDiagnosticPath: string | undefined;
+
+export const nativeDiagnosticsRetention = Object.freeze({
+  maxBytes: MAX_RETAINED_LOG_BYTES,
+  maxFiles: MAX_RETAINED_LOG_FILES
+});
 
 export interface NativeDiagnosticsLog {
   readonly fd: number;
@@ -58,33 +73,50 @@ export function nativeDiagnosticsLogPath(
 export function openNativeDiagnosticsLog(
   environment: NodeJS.ProcessEnv = process.env
 ): NativeDiagnosticsLog {
-  const path = nativeDiagnosticsLogPath(environment, randomUUID());
-  const directory = dirname(path);
+  const runId = randomUUID();
+  const retainedPath = nativeDiagnosticsLogPath(environment, runId);
+  const directory = dirname(retainedPath);
   mkdirSync(directory, { mode: LOG_DIRECTORY_MODE, recursive: true });
   const directoryMetadata = lstatSync(directory);
   if (!directoryMetadata.isDirectory() || directoryMetadata.isSymbolicLink()) {
     throw new Error(`Refusing unsafe AgentLab diagnostic directory: ${directory}`);
   }
   chmodSync(directory, LOG_DIRECTORY_MODE);
+  retainNativeDiagnostics(directory);
+  const activePath = resolve(directory, `tui-${String(process.pid)}-${runId}.active`);
   const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
   const fd = openSync(
-    path,
-    constants.O_APPEND | constants.O_CREAT | constants.O_RDWR | noFollow,
+    activePath,
+    constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | noFollow,
     LOG_FILE_MODE
   );
-  chmodSync(path, LOG_FILE_MODE);
+  chmodSync(activePath, LOG_FILE_MODE);
   let closed = false;
+  let publishedPath = activePath;
 
   return {
     fd,
-    path,
+    get path() {
+      return publishedPath;
+    },
     close() {
       if (closed) return;
       closed = true;
       // The bootstrap closes this only after its renderer exits. Bounding here cannot race the
       // writer, and the per-run filename prevents another renderer from sharing the descriptor.
       boundActiveLog(fd);
-      closeSync(fd);
+      try {
+        closeSync(fd);
+      } catch {
+        // Closing diagnostics must not replace the renderer's real exit status.
+      }
+      try {
+        renameSync(activePath, retainedPath);
+        publishedPath = retainedPath;
+      } catch {
+        // The active name remains safe from another process's retention pass.
+      }
+      retainNativeDiagnostics(directory, publishedPath);
     }
   };
 }
@@ -181,6 +213,7 @@ export async function runWithNativeDiagnostics(
         else resolvePromise(signal === null ? 1 : exitCodeForSignal(signal));
       });
     });
+    log?.close();
     if (exitCode !== 0) {
       const diagnostics = log === null ? "" : `; diagnostics: ${log.path}`;
       process.stderr.write(`agentlab: terminal UI exited unexpectedly${diagnostics}\n`);
@@ -226,6 +259,91 @@ function boundActiveLog(fd: number): void {
     writeSync(fd, tail.subarray(0, bytesRead));
   } catch {
     // Runtime diagnostics must never compete with or crash the interactive renderer.
+  }
+}
+
+interface RetainedLogCandidate {
+  readonly modifiedAt: number;
+  readonly path: string;
+  readonly size: number;
+}
+
+function retainNativeDiagnostics(directory: string, preservedPath?: string): void {
+  try {
+    finalizeAbandonedLogs(directory);
+    const candidates: RetainedLogCandidate[] = [];
+    for (const name of readdirSync(directory)) {
+      if (!RETAINED_LOG_PATTERN.test(name)) continue;
+      const path = resolve(directory, name);
+      try {
+        const metadata = lstatSync(path);
+        if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
+        candidates.push({ modifiedAt: metadata.mtimeMs, path, size: metadata.size });
+      } catch {
+        // A concurrent process may have finalized or removed the entry.
+      }
+    }
+    candidates.sort((left, right) => {
+      if (left.path === preservedPath) return -1;
+      if (right.path === preservedPath) return 1;
+      return right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path);
+    });
+
+    let retainedBytes = 0;
+    let retainedFiles = 0;
+    for (const candidate of candidates) {
+      const preserve = candidate.path === preservedPath;
+      if (
+        preserve ||
+        (retainedFiles < MAX_RETAINED_LOG_FILES &&
+          retainedBytes + candidate.size <= MAX_RETAINED_LOG_BYTES)
+      ) {
+        retainedBytes += candidate.size;
+        retainedFiles += 1;
+        continue;
+      }
+      try {
+        unlinkSync(candidate.path);
+      } catch {
+        // Retention is advisory and races safely with other bootstrap processes.
+      }
+    }
+  } catch {
+    // Cleanup is diagnostics-only and must never become a TUI launch requirement.
+  }
+}
+
+function finalizeAbandonedLogs(directory: string): void {
+  for (const name of readdirSync(directory)) {
+    const match = ACTIVE_LOG_PATTERN.exec(name);
+    if (match === null) continue;
+    const pid = Number(match[1]);
+    const runId = match[2];
+    if (!Number.isSafeInteger(pid) || pid <= 0 || runId === undefined || processIsAlive(pid)) {
+      continue;
+    }
+    const activePath = resolve(directory, name);
+    const retainedPath = resolve(directory, `tui-${runId}.log`);
+    try {
+      const metadata = lstatSync(activePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
+      renameSync(activePath, retainedPath);
+    } catch {
+      // The owner or another cleanup pass may have moved the file concurrently.
+    }
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ESRCH"
+    );
   }
 }
 
