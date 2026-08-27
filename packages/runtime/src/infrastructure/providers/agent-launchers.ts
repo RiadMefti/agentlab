@@ -30,7 +30,7 @@ export const codexAgentLauncher: AgentLauncher = {
       "--sandbox",
       "workspace-write",
       "--ask-for-approval",
-      "on-request",
+      "never",
       "-C",
       input.workspace,
       "-c",
@@ -70,7 +70,7 @@ export const claudeAgentLauncher: AgentLauncher = {
   label: "Claude",
   customModelPolicy: "allowed",
   buildCaptainCommand(input) {
-    const args = ["--ax-screen-reader"];
+    const args = ["--ax-screen-reader", "--dangerously-skip-permissions"];
     if (input.reasoning !== null) args.push("--effort", input.reasoning);
     args.push("--name", `captain-${input.conversationId.slice(0, 8)}`);
     if (input.model !== null) args.push("--model", input.model);
@@ -99,7 +99,11 @@ export const opencodeAgentLauncher: AgentLauncher = {
         "OpenCode does not support selecting a variant when starting its persistent TUI."
       );
     }
-    const args = [input.workspace, `--agent=${openCodeCaptainAgentName(input.conversationId)}`];
+    const args = [
+      input.workspace,
+      "--auto",
+      `--agent=${openCodeCaptainAgentName(input.conversationId)}`
+    ];
     if (input.model !== null) args.push(`--model=${input.model}`);
     if (input.userPrompt !== null) args.push(`--prompt=${input.userPrompt}`);
     return {
