@@ -2,13 +2,17 @@
 
 import { createRef } from "react";
 
+import { parseKeypress, type KeyEvent } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import type { EmbeddedTerminalRenderable } from "@opentui/core";
 import { sessionHistoryLimit } from "@agentlab/contracts";
 
 import "../../apps/tui/src/terminal/embedded-terminal.js";
+import {
+  EmbeddedTerminalRenderable,
+  TerminalMouseProtocolState
+} from "../../apps/tui/src/terminal/embedded-terminal.js";
 import { paintTerminalDefaults } from "../../apps/tui/src/terminal/terminal-appearance.js";
 import { palette } from "../../apps/tui/src/theme.js";
 import { allowOpenTuiAsyncUpdates } from "./test-renderer.js";
@@ -69,6 +73,236 @@ describe("embedded agent terminal", () => {
     expect(received.join("")).toBe("hello\r");
   });
 
+  test("normalizes legacy navigation and function key codes", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 20, height: 5 }} />,
+      {
+        height: 5,
+        width: 20
+      }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+
+    const cases = [
+      ["\x1b[A", "\x1b[A"],
+      ["\x1b[H", "\x1b[H"],
+      ["\x1b[F", "\x1b[F"],
+      ["\x1b[5~", "\x1b[5~"],
+      ["\x1b[6~", "\x1b[6~"],
+      ["\x1b[3~", "\x1b[3~"],
+      ["\x1bOP", "\x1bOP"],
+      ["\x1b[15~", "\x1b[15~"],
+      ["\x1b[1;2A", "\x1b[1;2A"],
+      ["\x1b[1;3D", "\x1b[1;3D"],
+      ["\x1b[1;6H", "\x1b[1;6H"],
+      ["\x1b[3;5~", "\x1b[3;5~"],
+      ["\x1b[15;3~", "\x1b[15;3~"],
+      ["\x1b[1;5P", "\x1b[1;5P"]
+    ] as const;
+    for (const [input, output] of cases) {
+      expect(decode(terminal.current?.encodeKey(parsedKey(input)))).toBe(output);
+    }
+
+    terminal.current?.write("\x1b[?1h");
+    expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[A")))).toBe("\x1bOA");
+  });
+
+  test("preserves Kitty semantics, Ctrl, UTF-8, Enter, and bracketed paste", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        onData={(data: Uint8Array, source: "input" | "response") => {
+          if (source === "input") received.push(decode(data));
+        }}
+        style={{ width: 20, height: 5 }}
+      />,
+      { height: 5, kittyKeyboard: true, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.focus();
+
+    expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[57352u", true)))).toBe("\x1b[A");
+    expect(decode(terminal.current?.encodeKey(parsedKey("\x1b[97;5u", true)))).toBe("\x01");
+    expect(decode(terminal.current?.encodeKey(parsedKey("\x01")))).toBe("\x01");
+    expect(decode(terminal.current?.encodeKey(parsedKey("é")))).toBe("é");
+    expect(decode(terminal.current?.encodeKey(parsedKey("\r")))).toBe("\r");
+
+    terminal.current?.write("\x1b[?2004h");
+    await setup.mockInput.pasteBracketedText("one\ntwo");
+    await setup.flush();
+    expect(received.join("")).toContain("\x1b[200~one\ntwo\x1b[201~");
+  });
+
+  test("tracks split and combined DEC mouse mode changes", () => {
+    const state = new TerminalMouseProtocolState();
+    state.observe("\x1b[?1002;10");
+    expect(state.enabled).toBe(false);
+    state.observe("06h");
+    expect(state.enabled).toBe(true);
+    state.observe("\x1b[?1002l");
+    expect(state.enabled).toBe(false);
+    state.observe("\x1b[?1000h\x1b[?1003h\x1b[?1000l");
+    expect(state.enabled).toBe(true);
+    state.observe("\x1b[?1003l");
+    expect(state.enabled).toBe(false);
+    state.observe("\x1b[?1000h\x1bc");
+    expect(state.enabled).toBe(false);
+  });
+
+  test("arbitrates local selection, clicks, child mouse reporting, and Shift drag", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        onData={(data: Uint8Array, source: "input" | "response") => {
+          if (source === "input") received.push(decode(data));
+        }}
+        style={{ width: 20, height: 5 }}
+      />,
+      { height: 5, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("select this text");
+    await setup.flush();
+
+    await setup.mockMouse.click(2, 0);
+    await setup.flush();
+    expect(terminal.current?.getSelectedText()).toBe("");
+
+    await setup.mockMouse.drag(0, 0, 5, 0);
+    await setup.flush();
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+    expect(received.join("")).toBe("");
+
+    terminal.current?.write("\x1b[?1002;1006h");
+    received.length = 0;
+    await setup.mockMouse.drag(1, 1, 4, 1);
+    await setup.flush();
+    expect(received.join("")).toContain("\x1b[<0;2;2M");
+    expect(received.join("")).toContain("\x1b[<32;5;2M");
+    expect(terminal.current?.getSelectedText()).toBe("");
+
+    received.length = 0;
+    await setup.mockMouse.drag(0, 0, 6, 0, 0, { modifiers: { shift: true } });
+    await setup.flush();
+    expect(received.join("")).toBe("");
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+
+    terminal.current?.clearLocalSelection();
+    await setup.mockMouse.pressDown(0, 0, 0, { modifiers: { shift: true } });
+    await setup.mockMouse.moveTo(6, 0);
+    await setup.mockMouse.release(6, 0);
+    await setup.flush();
+    expect(received.join("")).toBe("");
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+  });
+
+  test("routes wheel to local scrollback unless child tracking owns it, with Shift override", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        onData={(data: Uint8Array, source: "input" | "response") => {
+          if (source === "input") received.push(decode(data));
+        }}
+        style={{ width: 20, height: 3 }}
+      />,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write(
+      Array.from({ length: 10 }, (_, index) => `line-${String(index)}\r\n`).join("")
+    );
+    await setup.flush();
+    const bottom = terminal.current?.screen().text;
+
+    await setup.mockMouse.scroll(1, 1, "up");
+    await setup.flush();
+    expect(terminal.current?.screen().text).not.toBe(bottom);
+    expect(received.join("")).toBe("");
+
+    terminal.current?.write("\x1b[?1000;1006h");
+    received.length = 0;
+    await setup.mockMouse.scroll(1, 1, "down");
+    await setup.flush();
+    expect(received.join("")).toContain("\x1b[<65;2;2M");
+
+    received.length = 0;
+    const beforeShiftScroll = terminal.current?.screen().text;
+    await setup.mockMouse.scroll(1, 1, "down", { modifiers: { shift: true } });
+    await setup.flush();
+    expect(received.join("")).toBe("");
+    expect(terminal.current?.screen().text).not.toBe(beforeShiftScroll);
+  });
+
+  test("shows the child cursor only while focused and clears stale selection on blur", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const cursorVisibility: boolean[] = [];
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 20, height: 3 }} />,
+      {
+        height: 3,
+        width: 20
+      }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    const setCursorPosition = setup.renderer.setCursorPosition.bind(setup.renderer);
+    setup.renderer.setCursorPosition = (x, y, visible = true) => {
+      cursorVisibility.push(visible);
+      setCursorPosition(x, y, visible);
+    };
+    terminal.current?.write("selectable text");
+    terminal.current?.focus();
+    await setup.flush();
+    expect(cursorVisibility.at(-1)).toBe(true);
+
+    await setup.mockMouse.drag(0, 0, 5, 0);
+    await setup.flush();
+    expect(terminal.current?.getSelectedText()).not.toBe("");
+    terminal.current?.blur();
+    await setup.flush();
+    expect(terminal.current?.getSelectedText()).toBe("");
+    expect(cursorVisibility.at(-1)).toBe(false);
+  });
+
+  test("cannot expose a cursor while its session is disconnected", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const cursorVisibility: boolean[] = [];
+    const setup = await testRender(
+      <agent-terminal ref={terminal} sessionConnected={false} style={{ width: 20, height: 3 }} />,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    const setCursorPosition = setup.renderer.setCursorPosition.bind(setup.renderer);
+    setup.renderer.setCursorPosition = (x, y, visible = true) => {
+      cursorVisibility.push(visible);
+      setCursorPosition(x, y, visible);
+    };
+
+    terminal.current?.write("cursor");
+    terminal.current?.focus();
+    await setup.flush();
+    expect(terminal.current?.focused).toBe(false);
+    expect(cursorVisibility).not.toContain(true);
+
+    if (terminal.current !== null) terminal.current.sessionConnected = true;
+    terminal.current?.focus();
+    await setup.flush();
+    expect(terminal.current?.focused).toBe(true);
+    expect(cursorVisibility.at(-1)).toBe(true);
+  });
+
   test("resizes its terminal grid with its layout", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const sizes: [number, number][] = [];
@@ -116,6 +350,59 @@ describe("embedded agent terminal", () => {
     expect(palette.terminalBackground).not.toBe("#000000");
   });
 
+  test("preserves wide Unicode, truecolor, erase, and alternate-screen state", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        renderAfter={paintTerminalDefaults}
+        style={{ width: 20, height: 4 }}
+      />,
+      { height: 4, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+
+    terminal.current?.write("界🙂\x1b[38;2;12;34;56mcolor\x1b[0m");
+    await setup.flush();
+    expect(terminal.current?.screen().cursor.x).toBe(9);
+    expect(
+      setup
+        .captureSpans()
+        .lines.flatMap(({ spans }) => spans)
+        .find(({ text }) => text.includes("color"))
+        ?.fg.toInts()
+    ).toEqual([12, 34, 56, 255]);
+
+    terminal.current?.write("\r\x1b[2Kmain\x1b[?1049halt\x1b[2J\x1b[Hscreen");
+    await setup.flush();
+    expect(terminal.current?.screen().text).toContain("screen");
+    expect(terminal.current?.screen().text).not.toContain("main");
+    terminal.current?.write("\x1b[?1049l");
+    await setup.flush();
+    expect(terminal.current?.screen().text).toContain("main");
+    expect(terminal.current?.screen().text).not.toContain("screen");
+  });
+
+  test("reflows logical lines across resize", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const setup = await testRender(
+      <agent-terminal ref={terminal} style={{ width: 16, height: 4 }} />,
+      {
+        height: 4,
+        width: 16
+      }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("0123456789abcdefghij");
+    await setup.flush();
+
+    setup.resize(10, 4);
+    await setup.flush();
+    expect(terminal.current?.screen().lines.join("")).toContain("0123456789abcdefghij");
+  });
+
   test("parses sustained ANSI output within the interactive throughput budget", async () => {
     const terminal = createRef<EmbeddedTerminalRenderable>();
     const setup = await testRender(
@@ -152,3 +439,13 @@ describe("embedded agent terminal", () => {
     );
   });
 });
+
+function parsedKey(input: string, kitty = false): KeyEvent {
+  const key = parseKeypress(input, { useKittyKeyboard: kitty });
+  if (key === null) throw new Error(`Could not parse test key ${JSON.stringify(input)}.`);
+  return key as KeyEvent;
+}
+
+function decode(data: Uint8Array | undefined): string {
+  return data === undefined ? "" : new TextDecoder().decode(data);
+}

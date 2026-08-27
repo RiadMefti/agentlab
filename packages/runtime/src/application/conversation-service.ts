@@ -21,6 +21,7 @@ import {
 } from "../domain/agent-session-name.js";
 import type { SessionRuntime } from "../domain/session-runtime.js";
 import type { WorkspacePathResolver } from "../domain/workspace-path-resolver.js";
+import { preservePrimaryFailure } from "../domain/compensation.js";
 import { ConversationLifecycle } from "./conversation-lifecycle.js";
 import { buildSupervisorInstructions } from "./supervisor-prompt.js";
 
@@ -28,6 +29,11 @@ export interface WorkspaceInspection {
   readonly workspacePath: string;
   readonly suggestedName: string;
   readonly providers: readonly ProviderCapability[];
+}
+
+export interface WorkspacePreparation {
+  readonly workspacePath: string;
+  readonly suggestedName: string;
 }
 
 export interface ConversationServiceDependencies {
@@ -63,6 +69,14 @@ export class ConversationService {
   }
 
   public async inspectWorkspace(workspacePath: string): Promise<WorkspaceInspection> {
+    const workspace = await this.prepareWorkspace(workspacePath);
+    return {
+      ...workspace,
+      providers: await this.discoverWorkspaceProviders(workspace.workspacePath)
+    };
+  }
+
+  public async prepareWorkspace(workspacePath: string): Promise<WorkspacePreparation> {
     const workspace = await this.#workspacePaths.resolve(workspacePath);
     const existing = await this.#repository.findByWorkspacePath(workspace.path);
     if (existing !== null) {
@@ -70,9 +84,14 @@ export class ConversationService {
     }
     return {
       workspacePath: workspace.path,
-      suggestedName: workspace.suggestedName,
-      providers: await this.#providers.forWorkspace(workspace.path).list()
+      suggestedName: workspace.suggestedName
     };
+  }
+
+  public discoverWorkspaceProviders(
+    canonicalWorkspacePath: string
+  ): Promise<readonly ProviderCapability[]> {
+    return this.#providers.forWorkspace(canonicalWorkspacePath).list();
   }
 
   public async listProviders(conversationId: string): Promise<readonly ProviderCapability[]> {
@@ -144,7 +163,11 @@ export class ConversationService {
     try {
       await this.#repository.create(conversation);
     } catch (error: unknown) {
-      await this.#sessions.kill(captainSessionName).catch(() => undefined);
+      try {
+        await this.#sessions.kill(captainSessionName);
+      } catch (compensationError: unknown) {
+        throw preservePrimaryFailure(error, compensationError);
+      }
       throw error;
     }
 
@@ -159,14 +182,20 @@ export class ConversationService {
       await this.#sessions.kill(conversation.captainSessionName);
 
       const remainingSessions = await this.#sessions.list(conversationId);
-      for (const session of remainingSessions) {
+      const workerKills = remainingSessions.flatMap((session) => {
         const identity = parseSessionName(session.name);
-        if (
-          session.name !== conversation.captainSessionName &&
+        return session.name !== conversation.captainSessionName &&
           identity?.conversationId === conversationId
-        ) {
-          await this.#sessions.kill(session.name);
-        }
+          ? [this.#sessions.kill(session.name)]
+          : [];
+      });
+      const killResults = await Promise.allSettled(workerKills);
+      const killFailures = killResults.flatMap((result) =>
+        result.status === "rejected" ? [result.reason as unknown] : []
+      );
+      if (killFailures.length === 1) throw killFailures[0];
+      if (killFailures.length > 1) {
+        throw new AggregateError(killFailures, "Multiple worker sessions could not be stopped.");
       }
 
       await this.#repository.delete(conversationId);

@@ -12,6 +12,7 @@ import {
 import type { PseudoTerminalFactory, TerminalHistoryReader } from "./domain/terminal.js";
 import type { ProviderCatalog, ProviderCatalogFactory } from "./domain/agent-launcher.js";
 import { LocalWorkspacePathResolver } from "./infrastructure/filesystem/local-workspace-path-resolver.js";
+import { NodeFolderCompleter } from "./infrastructure/filesystem/node-folder-completer.js";
 import { NodeCommandRunner } from "./infrastructure/process/command-runner.js";
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { agentLaunchers } from "./infrastructure/providers/agent-launchers.js";
@@ -30,7 +31,10 @@ export { maximumTerminalDimension } from "./application/session-terminal.js";
 export type { SessionTerminal, SessionTerminalCallbacks } from "./application/session-terminal.js";
 
 export type { AgentLabCommandPort } from "./application/agentlab-commands.js";
-export type { WorkspaceInspection } from "./application/conversation-service.js";
+export type {
+  WorkspaceInspection,
+  WorkspacePreparation
+} from "./application/conversation-service.js";
 
 export interface OpenSessionTerminalInput {
   readonly conversationId: unknown;
@@ -70,7 +74,7 @@ export function createLocalAgentLab(options: LocalAgentLabOptions): LocalAgentLa
     workspacePaths
   });
   const commandTasks = new RuntimeTaskOwner();
-  const commandHandler = new AgentLabCommands(conversations);
+  const commandHandler = new AgentLabCommands(conversations, new NodeFolderCompleter());
   const commands = ownAgentLabCommands(commandHandler, commandTasks);
   const terminalFactory = options.terminalFactory ?? new BunTerminalFactory();
   const terminalHistory =
@@ -114,17 +118,27 @@ export function createLocalAgentLab(options: LocalAgentLabOptions): LocalAgentLa
     close() {
       if (!lifecycle.beginClose()) return lifecycle.closed;
       return lifecycle.finishClose(async () => {
-        await commandTasks.stopAndDrain();
         const failures: unknown[] = [];
+        let commandsDrained = false;
         try {
-          terminalOwner.closeAll();
+          await commandTasks.stopAndDrain();
+          commandsDrained = true;
         } catch (error: unknown) {
           failures.push(error);
         }
-        try {
-          repository.close();
-        } catch (error: unknown) {
-          failures.push(error);
+        // Admitted commands may still own both resources after a drain deadline. Leaving them
+        // open is safer than racing a live task; normal bounded operations always take this path.
+        if (commandsDrained) {
+          try {
+            terminalOwner.closeAll();
+          } catch (error: unknown) {
+            failures.push(error);
+          }
+          try {
+            repository.close();
+          } catch (error: unknown) {
+            failures.push(error);
+          }
         }
         if (failures.length > 0) {
           throw new AggregateError(failures, "The agentlab runtime could not close cleanly.");

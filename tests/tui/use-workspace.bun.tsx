@@ -35,6 +35,26 @@ describe("workspace refresh coordination", () => {
     expect(listSessions).not.toHaveBeenCalled();
   });
 
+  test("keeps a successfully inserted project selected across a stale background refresh", async () => {
+    const runtime = fakeRuntime({
+      listConversations: mock(() => Promise.resolve([]))
+    });
+    let latest: WorkspaceState | null = null;
+    const setup = await renderWorkspace(runtime, (workspace) => {
+      latest = workspace;
+    });
+    await setup.waitFor(() => !current(latest).loading);
+
+    await applyStateUpdate(setup, () => {
+      current(latest).insertProject(firstConversation);
+    });
+    expect(current(latest).selectedProject?.id).toBe(firstConversation.id);
+    await current(latest).refreshProjects();
+
+    expect(current(latest).projects).toContainEqual(firstConversation);
+    expect(current(latest).selectedProject?.id).toBe(firstConversation.id);
+  });
+
   test("keeps provider failures visible after unrelated refreshes succeed", async () => {
     const providers = deferred<readonly ProviderCapability[]>();
     const runtime = fakeRuntime({
@@ -250,6 +270,9 @@ function fakeRuntime(overrides: Partial<AgentLabCommandPort>): LocalAgentLabRunt
   const commands: AgentLabCommandPort = {
     listConversations: mock(() => Promise.resolve([])),
     inspectWorkspace: mock(() => Promise.reject(new Error("not used"))),
+    prepareWorkspace: mock(() => Promise.reject(new Error("not used"))),
+    discoverWorkspaceProviders: mock(() => Promise.resolve([])),
+    completeFolders: mock(() => Promise.resolve([])),
     listProviders: mock(() => Promise.resolve(providers)),
     createConversation: mock(() => Promise.resolve(firstConversation)),
     deleteConversation: mock(() => Promise.resolve()),

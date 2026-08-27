@@ -132,14 +132,16 @@ export class NodeCommandRunner implements CommandRunner {
         } catch (cleanupError: unknown) {
           const detail =
             cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup failure.";
+          const cleanupFailure = new Error(`Command cleanup failed: ${detail}`, {
+            cause: cleanupError
+          });
           reject(
             withOutput(
-              new Error(
-                outcomeError === null
-                  ? `Command cleanup failed: ${detail}`
-                  : `${outcomeError.message} Cleanup failed: ${detail}`,
-                { cause: cleanupError }
-              ),
+              outcomeError === null
+                ? cleanupFailure
+                : new AggregateError([outcomeError, cleanupFailure], outcomeError.message, {
+                    cause: cleanupError
+                  }),
               stdout,
               stderr
             )

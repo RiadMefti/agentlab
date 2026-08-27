@@ -45,6 +45,21 @@ function temporaryRoot(): string {
 }
 
 describe("BinaryLocator", () => {
+  it("returns after stalled candidate filesystem probes", async () => {
+    const runner: CommandRunner = {
+      run: () => Promise.resolve({ stdout: "/opt/codex\n", stderr: "" })
+    };
+    const locator = new BinaryLocator(runner, {}, "/home/test", {
+      filesystemTimeoutMs: 10,
+      filesystem: {
+        access: () => new Promise<void>(() => undefined),
+        readdir: () => new Promise(() => undefined)
+      }
+    });
+
+    await expect(locator.candidates("codex")).resolves.toEqual([]);
+  });
+
   it("requires configured overrides to be absolute", async () => {
     const locator = new BinaryLocator(unavailableRunner, { AGENTLAB_CODEX_BIN: "relative/codex" });
     await expect(locator.candidates("codex")).rejects.toThrow(/must be an absolute path/u);

@@ -12,6 +12,30 @@ export const workspacePathInputSchema = z
   .max(4_096)
   .refine((path) => !path.includes("\0"), { message: "Folder path cannot contain null bytes." });
 
+export const folderCompletionInputSchema = z
+  .object({
+    path: z
+      .string()
+      .max(4_096)
+      .refine((path) => !path.includes("\0"), {
+        message: "Folder path cannot contain null bytes."
+      }),
+    limit: z.number().int().min(1).max(6).default(6)
+  })
+  .strict();
+
+export type FolderCompletionInput = z.infer<typeof folderCompletionInputSchema>;
+
+export const folderSuggestionSchema = z
+  .object({
+    value: z.string().min(1).max(4_096),
+    label: z.string().min(1).max(4_100),
+    symlink: z.boolean()
+  })
+  .strict();
+
+export type FolderSuggestion = z.infer<typeof folderSuggestionSchema>;
+
 export const conversationSchema = z
   .object({
     id: z.uuid(),

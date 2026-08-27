@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { stat } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -21,6 +22,34 @@ function temporaryRoot(): string {
 }
 
 describe("LocalWorkspacePathResolver", () => {
+  it("returns an actionable bounded failure when path resolution stalls", async () => {
+    const resolver = new LocalWorkspacePathResolver("/work", "/home/test", {
+      timeoutMs: 10,
+      filesystem: {
+        realpath: () => new Promise<string>(() => undefined),
+        stat
+      }
+    });
+
+    await expect(resolver.resolve("project")).rejects.toThrow(
+      "Folder path resolution timed out. Check that the filesystem is responsive."
+    );
+  });
+
+  it("bounds folder metadata lookup after canonicalization succeeds", async () => {
+    const resolver = new LocalWorkspacePathResolver("/work", "/home/test", {
+      timeoutMs: 10,
+      filesystem: {
+        realpath: () => Promise.resolve("/work/project"),
+        stat: () => new Promise(() => undefined)
+      }
+    });
+
+    await expect(resolver.resolve("project")).rejects.toThrow(
+      "Folder metadata lookup timed out. Check that the filesystem is responsive."
+    );
+  });
+
   it("accepts an arbitrary absolute folder and preserves spaces in its canonical path", async () => {
     const root = temporaryRoot();
     const folder = join(root, "projects anywhere", "my app");
