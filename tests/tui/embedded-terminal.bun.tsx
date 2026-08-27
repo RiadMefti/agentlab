@@ -342,6 +342,249 @@ describe("embedded agent terminal", () => {
     expect(terminal.current?.getSelectedText()).toBe("");
   });
 
+  test("retains a child press through drag and release outside the terminal", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let sidebarDrags = 0;
+    let sidebarUps = 0;
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 3, width: 20 }}>
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 10 }}
+        />
+        <box
+          onMouseDrag={() => (sidebarDrags += 1)}
+          onMouseUp={() => (sidebarUps += 1)}
+          style={{ height: 3, width: 10 }}
+        />
+      </box>,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("tracked\x1b[?1002;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.pressDown(1, 1);
+    await setup.mockMouse.moveTo(15, 1);
+    await setup.mockMouse.release(15, 1);
+    await setup.flush();
+
+    expect(received.join("")).toBe("\x1b[<0;2;2M\x1b[<32;10;2M\x1b[<0;10;2m");
+    expect(sidebarDrags).toBe(0);
+    expect(sidebarUps).toBe(0);
+    expect(
+      (setup.renderer as unknown as { capturedRenderable?: unknown }).capturedRenderable
+    ).toBeUndefined();
+  });
+
+  test("does not emit stale child motion after an outside release and re-entry", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 3, width: 20 }}>
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 10 }}
+        />
+        <box style={{ height: 3, width: 10 }} />
+      </box>,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("tracked\x1b[?1002;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.pressDown(1, 1);
+    await setup.mockMouse.moveTo(5, 1);
+    await setup.mockMouse.moveTo(15, 1);
+    await setup.mockMouse.release(15, 1);
+    received.length = 0;
+    await setup.mockMouse.moveTo(2, 1);
+    await setup.flush();
+
+    expect(received.join("")).toBe("");
+  });
+
+  test.each(["blur", "mouse kill switch"] as const)(
+    "cancels child gesture ownership on %s",
+    async (cancellation) => {
+      const terminal = createRef<EmbeddedTerminalRenderable>();
+      const received: string[] = [];
+      const setup = await testRender(
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 20 }}
+        />,
+        { height: 3, width: 20 }
+      );
+      allowOpenTuiAsyncUpdates();
+      renderers.push(setup.renderer);
+      terminal.current?.write("tracked\x1b[?1002;1006h");
+      await setup.flush();
+
+      await setup.mockMouse.pressDown(1, 1);
+      received.length = 0;
+      if (cancellation === "blur") terminal.current?.blur();
+      else if (terminal.current !== null) terminal.current.childMouseInput = false;
+      await setup.mockMouse.release(4, 1);
+      await setup.mockMouse.moveTo(2, 1);
+      await setup.flush();
+
+      expect(received.join("")).toBe("");
+    }
+  );
+
+  test("keeps a UI-captured drag and release out of a tracked terminal", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let uiDragEnds = 0;
+    let uiDrags = 0;
+    let uiUps = 0;
+    const setup = await testRender(
+      <box style={{ flexDirection: "row", height: 3, width: 20 }}>
+        <box
+          onMouseDrag={() => (uiDrags += 1)}
+          onMouseDragEnd={() => (uiDragEnds += 1)}
+          onMouseUp={() => (uiUps += 1)}
+          style={{ height: 3, width: 10 }}
+        />
+        <agent-terminal
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 10 }}
+        />
+      </box>,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("tracked\x1b[?1003;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.pressDown(1, 1);
+    await setup.mockMouse.moveTo(5, 1);
+    await setup.mockMouse.moveTo(15, 1);
+    await setup.mockMouse.release(15, 1);
+    await setup.flush();
+
+    expect(received.join("")).toBe("");
+    expect(uiDrags).toBe(2);
+    expect(uiDragEnds).toBe(1);
+    expect(uiUps).toBe(1);
+  });
+
+  test("encodes one native no-button SGR event for 1003 hover", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        onData={(data: Uint8Array, source: "input" | "response") => {
+          if (source === "input") received.push(decode(data));
+        }}
+        style={{ height: 3, width: 20 }}
+      />,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("\x1b[?1003;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.moveTo(2, 1);
+    await setup.flush();
+
+    expect(received).toEqual(["\x1b[<35;3;2M"]);
+  });
+
+  test("uses normal click focus semantics across tracked terminals", async () => {
+    const first = createRef<EmbeddedTerminalRenderable>();
+    const second = createRef<EmbeddedTerminalRenderable>();
+    const firstReceived: string[] = [];
+    const secondReceived: string[] = [];
+    const setup = await testRender(
+      <box style={{ flexDirection: "column", height: 4, width: 20 }}>
+        <agent-terminal
+          ref={first}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") firstReceived.push(decode(data));
+          }}
+          style={{ height: 2, width: 20 }}
+        />
+        <agent-terminal
+          ref={second}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") secondReceived.push(decode(data));
+          }}
+          style={{ height: 2, width: 20 }}
+        />
+      </box>,
+      { height: 4, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    first.current?.write("\x1b[?1000;1006h");
+    second.current?.write("\x1b[?1000;1006h");
+    first.current?.focus();
+    await setup.flush();
+
+    await setup.mockMouse.click(1, 3);
+    await setup.flush();
+    expect(first.current?.focused).toBe(false);
+    expect(second.current?.focused).toBe(true);
+    expect(secondReceived.join("")).toBe("\x1b[<0;2;2M\x1b[<0;2;2m");
+
+    await setup.mockMouse.click(1, 0);
+    await setup.flush();
+    expect(first.current?.focused).toBe(true);
+    expect(second.current?.focused).toBe(false);
+    expect(firstReceived.join("")).toBe("\x1b[<0;2;1M\x1b[<0;2;1m");
+  });
+
+  test("applies split render offsets once before native child encoding", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    const setup = await testRender(
+      <agent-terminal
+        ref={terminal}
+        onData={(data: Uint8Array, source: "input" | "response") => {
+          if (source === "input") received.push(decode(data));
+        }}
+        style={{ height: 3, width: 20 }}
+      />,
+      { height: 3, width: 20 }
+    );
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("\x1b[?1000;1006h");
+    await setup.flush();
+    const splitRenderer = setup.renderer as unknown as {
+      _splitHeight: number;
+      renderOffset: number;
+    };
+    splitRenderer._splitHeight = 3;
+    splitRenderer.renderOffset = 2;
+
+    await setup.mockMouse.click(1, 3);
+    await setup.flush();
+
+    expect(received.join("")).toBe("\x1b[<0;2;2M\x1b[<0;2;2m");
+  });
+
   test("unregisters child-mouse boundary targets across terminal remounts", async () => {
     let remount: () => void = () => undefined;
     const Harness = () => {
@@ -367,6 +610,51 @@ describe("embedded agent terminal", () => {
 
     setup.renderer.destroy();
     expect(registeredOpenTuiChildMouseBoundaryTargets(setup.renderer)).toBe(0);
+  });
+
+  test("cancels an owned gesture when its terminal is destroyed and remounted", async () => {
+    const terminal = createRef<EmbeddedTerminalRenderable>();
+    const received: string[] = [];
+    let remount: () => void = () => undefined;
+    const Harness = () => {
+      const [generation, setGeneration] = useState(0);
+      remount = () => {
+        setGeneration((value) => value + 1);
+      };
+      return (
+        <agent-terminal
+          key={generation}
+          ref={terminal}
+          onData={(data: Uint8Array, source: "input" | "response") => {
+            if (source === "input") received.push(decode(data));
+          }}
+          style={{ height: 3, width: 20 }}
+        />
+      );
+    };
+    const setup = await testRender(<Harness />, { height: 3, width: 20 });
+    allowOpenTuiAsyncUpdates();
+    renderers.push(setup.renderer);
+    terminal.current?.write("\x1b[?1002;1006h");
+    await setup.flush();
+
+    await setup.mockMouse.pressDown(1, 1);
+    expect(received.join("")).toBe("\x1b[<0;2;2M");
+    remount();
+    allowOpenTuiAsyncUpdates();
+    await new Promise<void>((resolveUpdate) => setTimeout(resolveUpdate, 0));
+    await setup.flush();
+    terminal.current?.write("\x1b[?1002;1006h");
+    received.length = 0;
+
+    await setup.mockMouse.release(1, 1);
+    await setup.flush();
+    expect(received.join("")).toBe("");
+    expect(registeredOpenTuiChildMouseBoundaryTargets(setup.renderer)).toBe(1);
+
+    await setup.mockMouse.click(1, 1);
+    await setup.flush();
+    expect(received.join("")).toBe("\x1b[<0;2;2M\x1b[<0;2;2m");
   });
 
   test("isolates reentrant child dispatch and restores boundary state after handler errors", async () => {

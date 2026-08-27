@@ -9,7 +9,11 @@ import {
 import { extend } from "@opentui/react";
 
 import { TerminalDefaultAppearance } from "./terminal-appearance.js";
-import { registerOpenTuiChildMouseBoundary } from "./open-tui-child-mouse-boundary.js";
+import {
+  cancelOpenTuiChildMouseOwnership,
+  registerOpenTuiChildMouseBoundary,
+  type OpenTuiChildMouseDispatch
+} from "./open-tui-child-mouse-boundary.js";
 
 const semanticPhysicalKeys: Readonly<Record<string, string>> = {
   backspace: "Backspace",
@@ -60,11 +64,6 @@ interface OpenTuiRendererSelectionContext {
   } | null;
 }
 
-interface PreparedChildMouseDispatch {
-  readonly output?: Uint8Array;
-  readonly owned: boolean;
-}
-
 export interface AgentTerminalOptions extends Omit<
   EmbeddedTerminalOptions,
   "renderBefore" | "renderAfter"
@@ -85,10 +84,10 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   readonly #appearance = new TerminalDefaultAppearance();
   #childMouseInput: boolean;
   readonly #disposeChildMouseBoundary: () => void;
-  #childMouseGestureActive = false;
   #onActivate: (() => void) | undefined;
   #forceLocalDrag = false;
-  readonly #preparedChildMouseDispatches: PreparedChildMouseDispatch[] = [];
+  readonly #preparedChildMouseDispatches: OpenTuiChildMouseDispatch[] = [];
+  #openTuiMouseDispatchDepth = 0;
   #sessionConnected: boolean;
 
   public constructor(ctx: RenderContext, options: AgentTerminalOptions) {
@@ -162,16 +161,25 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   }
 
   public override processMouseEvent(event: MouseEvent): void {
+    if (this.#openTuiMouseDispatchDepth > 0) {
+      if (event.type === "up" || event.type === "drag-end") {
+        this.#forceLocalDrag = false;
+        this.clearCollapsedSelection();
+      }
+      return;
+    }
     if (event.type === "down" && event.button === 0) {
       this.#forceLocalDrag = event.modifiers.shift;
       this.#onActivate?.();
     }
     const forceLocal = event.modifiers.shift || this.#forceLocalDrag;
     const preparedDispatch = this.#preparedChildMouseDispatches.at(-1);
-    if (preparedDispatch?.owned === true) {
+    if (preparedDispatch !== undefined) {
+      if (event.type === "down" && event.button === 0) this.focus();
       if (event.type === "scroll") this.#appearance.markChanged();
       if (preparedDispatch.output === undefined) {
-        super.processMouseEvent(event);
+        event.preventDefault();
+        event.stopPropagation();
       } else {
         event.preventDefault();
         event.stopPropagation();
@@ -211,38 +219,46 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
 
   public set childMouseInput(value: boolean) {
     if (value && !this.#childMouseInput) this.clearLocalSelection();
-    if (!value) this.#childMouseGestureActive = false;
+    if (!value) cancelOpenTuiChildMouseOwnership(this.ctx, this);
     this.#childMouseInput = value;
   }
 
   public override shouldStartSelection(x: number, y: number): boolean {
-    return (
-      this.#preparedChildMouseDispatches.at(-1)?.owned !== true && super.shouldStartSelection(x, y)
-    );
+    return this.#preparedChildMouseDispatches.length === 0 && super.shouldStartSelection(x, y);
   }
 
-  public prepareChildMouseDispatch(event: RawMouseEvent): boolean {
-    if (event.type === "down") this.#childMouseGestureActive = false;
+  public prepareChildMouseDispatch(
+    event: RawMouseEvent,
+    retainOwnership: boolean
+  ): OpenTuiChildMouseDispatch | null {
     if (!this.#childMouseInput || event.modifiers.shift || this.#forceLocalDrag) {
-      this.#preparedChildMouseDispatches.push({ owned: false });
-      return false;
+      return null;
     }
     const output = this.encodeMouse(event);
-    const encoded = output.byteLength > 0;
-    const owned = encoded || (this.#childMouseGestureActive && event.type !== "down");
-    if (event.type === "down" && encoded) this.#childMouseGestureActive = true;
-    if (event.type === "up") this.#childMouseGestureActive = false;
-    this.#preparedChildMouseDispatches.push({
-      owned,
-      ...(encoded ? { output } : {})
-    });
-    if (!owned) return false;
+    if (output.byteLength === 0 && !retainOwnership) return null;
     this.clearLocalSelection();
-    return true;
+    return output.byteLength === 0 ? {} : { output };
+  }
+
+  public beginChildMouseDispatch(dispatch: OpenTuiChildMouseDispatch): void {
+    this.#preparedChildMouseDispatches.push(dispatch);
   }
 
   public completeChildMouseDispatch(): void {
     this.#preparedChildMouseDispatches.pop();
+  }
+
+  public beginOpenTuiMouseDispatch(): void {
+    this.#openTuiMouseDispatchDepth += 1;
+  }
+
+  public completeOpenTuiMouseDispatch(): void {
+    this.#openTuiMouseDispatchDepth = Math.max(0, this.#openTuiMouseDispatchDepth - 1);
+  }
+
+  public endOpenTuiMouseGesture(): void {
+    this.#forceLocalDrag = false;
+    this.clearCollapsedSelection();
   }
 
   public get sessionConnected(): boolean {
@@ -268,7 +284,7 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
   }
 
   public override blur(): void {
-    this.#childMouseGestureActive = false;
+    cancelOpenTuiChildMouseOwnership(this.ctx, this);
     this.#forceLocalDrag = false;
     this.clearLocalSelection();
     super.blur();
@@ -312,7 +328,7 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
 
   private encodeMouse(event: RawMouseEvent): Uint8Array {
     const terminal = this as unknown as OpenTuiTerminalInternals;
-    const button = mouseButton(event);
+    const button = event.type === "move" ? undefined : mouseButton(event);
     return terminal.lib.embeddedTerminalEncodeMouse(terminal.handle, {
       action:
         event.type === "down" || event.type === "scroll"
@@ -320,7 +336,7 @@ export class EmbeddedTerminalRenderable extends OpenTuiEmbeddedTerminalRenderabl
           : event.type === "up"
             ? "release"
             : "motion",
-      anyButtonPressed: event.type === "down",
+      anyButtonPressed: event.type === "down" || event.type === "drag",
       ...(button === undefined ? {} : { button }),
       mods: mouseModifiers(event.modifiers),
       x: event.x - this.screenX,

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync, writeSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -44,10 +44,14 @@ describe("native diagnostics bootstrap", () => {
     const log = openNativeDiagnosticsLog(environment);
     const fixture = resolve("tests/fixtures/native-diagnostic-renderer.bun.tsx");
     const child = spawn("bun", [fixture], {
-      stdio: ["ignore", "pipe", log.fd]
+      stdio: ["ignore", "pipe", "pipe"]
     });
-    const stdout = await readStream(child.stdout);
+    const [stdout, stderr] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr)
+    ]);
     const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+    log.write(stderr);
     log.close();
 
     expect(exitCode).toBe(0);
@@ -60,18 +64,15 @@ describe("native diagnostics bootstrap", () => {
     expect(statSync(log.path).mode & 0o777).toBe(0o600);
   });
 
-  it("uses a per-run XDG path and bounds the newest tail only after its writer exits", async () => {
+  it("uses a per-run XDG path and bounds the newest tail while its writer is active", async () => {
     const state = await temporaryState();
     const environment = { ...process.env, XDG_STATE_HOME: state };
     const log = openNativeDiagnosticsLog(environment);
     const oversized = Buffer.alloc(2 * 1024 * 1024 + 128, 0x78);
     oversized.write("LATEST_CRASH_OUTPUT", oversized.byteLength - 32, "utf8");
-    let offset = 0;
-    while (offset < oversized.byteLength) {
-      offset += writeSync(log.fd, oversized, offset, oversized.byteLength - offset);
-    }
-    expect(statSync(log.path).size).toBeGreaterThan(2 * 1024 * 1024);
-    expect(readFileSync(log.path, "utf8")).not.toContain("retained the newest diagnostics");
+    log.write(oversized);
+    expect(statSync(log.path).size).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFileBytes);
+    expect(readFileSync(log.path, "utf8")).toContain("retained the newest diagnostics");
     log.close();
 
     expect(log.path).toMatch(/\/agentlab\/logs\/tui-[0-9a-f-]+\.log$/u);
@@ -81,7 +82,7 @@ describe("native diagnostics bootstrap", () => {
     expect(statSync(join(state, "agentlab", "logs")).mode & 0o777).toBe(0o700);
   });
 
-  it("does not truncate while a concurrent renderer still owns the log", async () => {
+  it("drains a concurrent renderer through a live bounded single-writer pipe", async () => {
     const state = await temporaryState();
     const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
     const child = spawn(
@@ -90,20 +91,25 @@ describe("native diagnostics bootstrap", () => {
         "-e",
         "const fs=require('node:fs');let n=0;const b=Buffer.alloc(65536,120);const t=setInterval(()=>{fs.writeSync(2,b);if(++n===36)clearInterval(t)},2)"
       ],
-      { stdio: ["ignore", "ignore", log.fd] }
+      { stdio: ["ignore", "ignore", "pipe"] }
     );
-    await waitFor(() => statSync(log.path).size > 2 * 1024 * 1024);
-    const activeSize = statSync(log.path).size;
-    await new Promise<void>((resolveExit) =>
-      child.once("exit", () => {
-        resolveExit();
-      })
-    );
+    const stderr = child.stderr;
+    const drain = (async () => {
+      for await (const chunk of stderr) log.write(Buffer.from(chunk));
+    })();
+    await Promise.all([
+      drain,
+      new Promise<void>((resolveExit) =>
+        child.once("exit", () => {
+          resolveExit();
+        })
+      )
+    ]);
 
-    expect(statSync(log.path).size).toBeGreaterThanOrEqual(activeSize);
-    expect(readFileSync(log.path, "utf8")).not.toContain("retained the newest diagnostics");
+    expect(statSync(log.path).size).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFileBytes);
+    expect(readFileSync(log.path, "utf8")).toContain("retained the newest diagnostics");
     log.close();
-    expect(statSync(log.path).size).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(statSync(log.path).size).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFileBytes);
   });
 
   it("bounds completed diagnostics across repeated launches", async () => {
@@ -111,7 +117,7 @@ describe("native diagnostics bootstrap", () => {
     const environment = { ...process.env, XDG_STATE_HOME: state };
     for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 7; launch += 1) {
       const log = openNativeDiagnosticsLog(environment);
-      writeSync(log.fd, `launch-${String(launch)}\n`);
+      log.write(`launch-${String(launch)}\n`);
       log.close();
       expect(existsSync(log.path)).toBe(true);
     }
@@ -127,7 +133,7 @@ describe("native diagnostics bootstrap", () => {
     const payload = Buffer.alloc(2 * 1024 * 1024, 0x78);
     for (let launch = 0; launch < 9; launch += 1) {
       const log = openNativeDiagnosticsLog(environment);
-      writeAll(log.fd, payload);
+      log.write(payload);
       log.close();
     }
 
@@ -143,19 +149,74 @@ describe("native diagnostics bootstrap", () => {
     const environment = { ...process.env, XDG_STATE_HOME: state };
     const active = openNativeDiagnosticsLog(environment);
     const activePath = active.path;
-    writeSync(active.fd, "ACTIVE-BEGIN\n");
+    active.write("ACTIVE-BEGIN\n");
 
     for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 5; launch += 1) {
       const completed = openNativeDiagnosticsLog(environment);
-      writeSync(completed.fd, `completed-${String(launch)}\n`);
+      completed.write(`completed-${String(launch)}\n`);
       completed.close();
     }
 
     expect(existsSync(activePath)).toBe(true);
-    writeSync(active.fd, "ACTIVE-END\n");
+    active.write("ACTIVE-END\n");
     active.close();
     expect(active.path).not.toBe(activePath);
     expect(readFileSync(active.path, "utf8")).toContain("ACTIVE-BEGIN\nACTIVE-END");
+  });
+
+  it("accounts for active artifacts in global file and byte retention", async () => {
+    const state = await temporaryState();
+    const environment = { ...process.env, XDG_STATE_HOME: state };
+    const active = openNativeDiagnosticsLog(environment);
+    active.write(Buffer.alloc(nativeDiagnosticsRetention.maxFileBytes, 0x61));
+
+    for (let launch = 0; launch < nativeDiagnosticsRetention.maxFiles + 3; launch += 1) {
+      const completed = openNativeDiagnosticsLog(environment);
+      completed.write(Buffer.alloc(nativeDiagnosticsRetention.maxFileBytes, 0x62));
+      completed.close();
+    }
+
+    const artifacts = diagnosticArtifacts(state);
+    expect(artifacts).toContain(active.path);
+    expect(artifacts.length).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFiles);
+    expect(artifacts.reduce((total, path) => total + statSync(path).size, 0)).toBeLessThanOrEqual(
+      nativeDiagnosticsRetention.maxBytes
+    );
+    active.close();
+  });
+
+  it("recovers a stale active artifact after PID reuse using process-start identity", async () => {
+    const state = await temporaryState();
+    const directory = join(state, "agentlab", "logs");
+    const runId = "123e4567-e89b-42d3-a456-426614174000";
+    const stale = join(directory, `tui-${String(process.pid)}-0000000000000000-${runId}.active`);
+    await mkdir(directory, { recursive: true });
+    await writeFile(stale, "STALE-PID-REUSE\n");
+
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    log.close();
+
+    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(join(directory, `tui-${runId}.log`), "utf8")).toContain("STALE-PID-REUSE");
+  });
+
+  it("bounds an abandoned oversized active artifact before retaining it", async () => {
+    const state = await temporaryState();
+    const directory = join(state, "agentlab", "logs");
+    const runId = "223e4567-e89b-42d3-a456-426614174000";
+    const abandoned = join(directory, `tui-2147483647-0000000000000000-${runId}.active`);
+    const oversized = Buffer.alloc(nativeDiagnosticsRetention.maxFileBytes + 512, 0x78);
+    oversized.write("ABANDONED-TAIL", oversized.byteLength - 32, "utf8");
+    await mkdir(directory, { recursive: true });
+    await writeFile(abandoned, oversized);
+
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    log.close();
+    const retained = join(directory, `tui-${runId}.log`);
+
+    expect(existsSync(abandoned)).toBe(false);
+    expect(statSync(retained).size).toBeLessThanOrEqual(nativeDiagnosticsRetention.maxFileBytes);
+    expect(readFileSync(retained, "utf8")).toContain("ABANDONED-TAIL");
   });
 
   it("ignores symlinks and malformed or unreadable entries during retention", async () => {
@@ -188,13 +249,12 @@ describe("native diagnostics bootstrap", () => {
   it("preserves an active writer owned by another bootstrap process", async () => {
     const state = await temporaryState();
     const childScript = [
-      'import { writeSync } from "node:fs";',
       'import { openNativeDiagnosticsLog } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
       "const log = openNativeDiagnosticsLog(process.env);",
-      'writeSync(log.fd, "CHILD-BEGIN\\n");',
+      'log.write("CHILD-BEGIN\\n");',
       "process.stdout.write(`${log.path}\\n`);",
       "setTimeout(() => {",
-      '  writeSync(log.fd, "CHILD-END\\n");',
+      '  log.write("CHILD-END\\n");',
       "  log.close();",
       "}, 400);"
     ].join("\n");
@@ -224,6 +284,36 @@ describe("native diagnostics bootstrap", () => {
     ).toBe(true);
   });
 
+  it("finishes cleanly when a renderer externally closes its stderr pipe descriptor", async () => {
+    const state = await temporaryState();
+    const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
+    const script = [
+      'import { closeSync } from "node:fs";',
+      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      "consumeNativeDiagnosticsEnvironment(process.env);",
+      "closeSync(2);",
+      'process.stdout.write(String(writeNativeDiagnostic("after external close")));'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: { ...process.env, AGENTLAB_DIAGNOSTIC_LOG: log.path },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+
+    expect(stdout).toBe("false");
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(() => {
+      log.write(stderr);
+      log.close();
+    }).not.toThrow();
+    expect(existsSync(log.path)).toBe(true);
+  });
+
   it("tolerates cleanup and finalization failures after opening the writer", async () => {
     const state = await temporaryState();
     const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
@@ -238,16 +328,30 @@ describe("native diagnostics bootstrap", () => {
     expect(existsSync(log.path)).toBe(true);
   });
 
-  it("routes renderer teardown failures directly to the private diagnostic file", async () => {
+  it("routes renderer teardown failures through the private diagnostic pipe", async () => {
     const state = await temporaryState();
     const environment = { ...process.env, XDG_STATE_HOME: state };
     const log = openNativeDiagnosticsLog(environment);
-    const rendererEnvironment = { ...environment, AGENTLAB_DIAGNOSTIC_LOG: log.path };
-
-    expect(writeNativeDiagnostic("Shutdown failed:\nclose error", rendererEnvironment)).toBe(true);
-    expect(writeNativeDiagnostic("not configured", {})).toBe(false);
+    const script = [
+      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      "consumeNativeDiagnosticsEnvironment(process.env);",
+      'process.stdout.write(String(writeNativeDiagnostic("Shutdown failed:\\nclose error")));'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: { ...environment, AGENTLAB_DIAGNOSTIC_LOG: log.path },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+    log.write(stderr);
     log.close();
 
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe("true");
+    expect(stderr).toBe("[agentlab] Shutdown failed: close error\n");
     expect(readFileSync(log.path, "utf8")).toContain("[agentlab] Shutdown failed: close error");
   });
 
@@ -258,26 +362,41 @@ describe("native diagnostics bootstrap", () => {
     await writeFile(target, "");
     await symlink(target, link);
 
-    expect(writeNativeDiagnostic("relative", { AGENTLAB_DIAGNOSTIC_LOG: "relative.log" })).toBe(
-      false
-    );
-    expect(writeNativeDiagnostic("symlink", { AGENTLAB_DIAGNOSTIC_LOG: link })).toBe(false);
+    consumeNativeDiagnosticsEnvironment({ AGENTLAB_DIAGNOSTIC_LOG: "relative.log" });
+    expect(writeNativeDiagnostic("relative")).toBe(false);
+    consumeNativeDiagnosticsEnvironment({ AGENTLAB_DIAGNOSTIC_LOG: link });
+    expect(writeNativeDiagnostic("symlink")).toBe(false);
     expect(readFileSync(target, "utf8")).toBe("");
   });
 
-  it("consumes bootstrap-only environment without losing the owned diagnostics sink", async () => {
+  it("consumes bootstrap-only environment and keeps renderer failures on the private pipe", async () => {
     const state = await temporaryState();
     const log = openNativeDiagnosticsLog({ ...process.env, XDG_STATE_HOME: state });
-    const environment: NodeJS.ProcessEnv = {
-      AGENTLAB_DIAGNOSTIC_LOG: log.path,
-      AGENTLAB_TUI_RUNTIME: "runtime-token",
-      PRESERVED: "yes"
-    };
-
-    consumeNativeDiagnosticsEnvironment(environment);
-    expect(environment).toEqual({ PRESERVED: "yes" });
-    expect(writeNativeDiagnostic("owned after scrub")).toBe(true);
+    const script = [
+      'import { consumeNativeDiagnosticsEnvironment, writeNativeDiagnostic } from "./apps/tui/src/bootstrap/native-diagnostics.ts";',
+      "consumeNativeDiagnosticsEnvironment(process.env);",
+      'process.stdout.write(`${process.env.AGENTLAB_DIAGNOSTIC_LOG ?? "gone"}|${process.env.AGENTLAB_TUI_RUNTIME ?? "gone"}|${process.env.PRESERVED ?? "missing"}|${String(writeNativeDiagnostic("owned after scrub"))}`);'
+    ].join("\n");
+    const child = spawn("bun", ["-e", script], {
+      env: {
+        ...process.env,
+        AGENTLAB_DIAGNOSTIC_LOG: log.path,
+        AGENTLAB_TUI_RUNTIME: "runtime-token",
+        PRESERVED: "yes"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      new Promise<number | null>((resolveExit) => child.once("exit", resolveExit))
+    ]);
+    log.write(stderr);
     log.close();
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toBe("gone|gone|yes|true");
+    expect(stderr).toBe("[agentlab] owned after scrub\n");
     expect(readFileSync(log.path, "utf8")).toContain("owned after scrub");
   });
 
@@ -366,11 +485,11 @@ function retainedDiagnosticFiles(state: string): string[] {
     .map((name) => join(directory, name));
 }
 
-function writeAll(fd: number, buffer: Buffer): void {
-  let offset = 0;
-  while (offset < buffer.byteLength) {
-    offset += writeSync(fd, buffer, offset, buffer.byteLength - offset);
-  }
+function diagnosticArtifacts(state: string): string[] {
+  const directory = join(state, "agentlab", "logs");
+  return readdirSync(directory)
+    .filter((name) => /^tui-.+\.(?:active|log)$/u.test(name))
+    .map((name) => join(directory, name));
 }
 
 async function launchDevelopmentEntry(state: string) {
@@ -390,13 +509,4 @@ function diagnosticsPathFrom(stderr: string): string {
   const path = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
   if (path === undefined) throw new Error(`Missing diagnostics path in: ${stderr}`);
   return path;
-}
-
-async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 3_000;
-  while (!predicate()) {
-    if (Date.now() > deadline)
-      throw new Error("Timed out waiting for concurrent diagnostic write.");
-    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
-  }
 }

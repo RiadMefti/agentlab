@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -9,8 +9,9 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readdirSync,
+  readFileSync,
   readSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeSync
@@ -29,22 +30,28 @@ const MAX_RETAINED_LOG_FILES = 8;
 const RUNTIME_MARKER = "AGENTLAB_TUI_RUNTIME";
 const RUNTIME_ARGUMENT_PREFIX = "--agentlab-tui-runtime=";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PROCESS_IDENTITY_PATTERN = /^[0-9a-f]{16}$/u;
 const ACTIVE_LOG_PATTERN = new RegExp(
-  `^tui-([1-9][0-9]*)-(${UUID_PATTERN.source.slice(1, -1)})\\.active$`,
+  `^tui-([1-9][0-9]*)-(${PROCESS_IDENTITY_PATTERN.source.slice(1, -1)})-(${UUID_PATTERN.source.slice(1, -1)})\\.active$`,
   "u"
 );
 const RETAINED_LOG_PATTERN = new RegExp(`^tui-(${UUID_PATTERN.source.slice(1, -1)})\\.log$`, "u");
-let ownedDiagnosticPath: string | undefined;
+const RETENTION_MARKER = Buffer.from(
+  `[AgentLab retained the newest diagnostics after ${String(MAX_LOG_BYTES)} bytes]\n`
+);
+let rendererOwnsDiagnosticStderr = false;
+let rendererDiagnosticStderrIdentity: DescriptorIdentity | undefined;
 
 export const nativeDiagnosticsRetention = Object.freeze({
   maxBytes: MAX_RETAINED_LOG_BYTES,
+  maxFileBytes: MAX_LOG_BYTES,
   maxFiles: MAX_RETAINED_LOG_FILES
 });
 
 export interface NativeDiagnosticsLog {
-  readonly fd: number;
   readonly path: string;
   close(): void;
+  write(data: string | Uint8Array): void;
 }
 
 /** Resolves AgentLab's private, local-first diagnostic log without importing the TUI runtime. */
@@ -66,9 +73,9 @@ export function nativeDiagnosticsLogPath(
 }
 
 /**
- * Opens the file inherited as fd 2 by the renderer process. OpenTUI's native library writes
- * directly to that descriptor, so redirecting at spawn is the compatibility seam until a stable
- * release contains upstream fixes 189f1007 and a7fb4ec7.
+ * Opens the bootstrap-owned sink for a renderer's drained stderr pipe. Native OpenTUI code writes
+ * only to the pipe, so this object is the retained file's sole writer and can bound it live without
+ * truncating underneath native code.
  */
 export function openNativeDiagnosticsLog(
   environment: NodeJS.ProcessEnv = process.env
@@ -83,7 +90,9 @@ export function openNativeDiagnosticsLog(
   }
   chmodSync(directory, LOG_DIRECTORY_MODE);
   retainNativeDiagnostics(directory);
-  const activePath = resolve(directory, `tui-${String(process.pid)}-${runId}.active`);
+  const identity = currentProcessIdentity();
+  if (identity === null) throw new Error("Cannot establish diagnostic writer identity.");
+  const activePath = resolve(directory, `tui-${String(process.pid)}-${identity}-${runId}.active`);
   const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
   const fd = openSync(
     activePath,
@@ -95,26 +104,30 @@ export function openNativeDiagnosticsLog(
   let publishedPath = activePath;
 
   return {
-    fd,
     get path() {
       return publishedPath;
+    },
+    write(data) {
+      if (closed) return;
+      try {
+        appendBounded(fd, typeof data === "string" ? Buffer.from(data) : Buffer.from(data));
+      } catch {
+        // Diagnostics must never become a renderer failure.
+      }
     },
     close() {
       if (closed) return;
       closed = true;
-      // The bootstrap closes this only after its renderer exits. Bounding here cannot race the
-      // writer, and the per-run filename prevents another renderer from sharing the descriptor.
-      boundActiveLog(fd);
       try {
         closeSync(fd);
       } catch {
-        // Closing diagnostics must not replace the renderer's real exit status.
+        // An externally closed sink must not replace the renderer's real exit status.
       }
       try {
         renameSync(activePath, retainedPath);
         publishedPath = retainedPath;
       } catch {
-        // The active name remains safe from another process's retention pass.
+        // The active name remains recoverable by a later retention pass.
       }
       retainNativeDiagnostics(directory, publishedPath);
     }
@@ -136,37 +149,32 @@ export function nativeDiagnosticsRuntimeArguments(
   return args.slice(1);
 }
 
-/** Retains renderer diagnostics privately while removing bootstrap-only values from descendants. */
+/** Retains the private stderr pipe while removing bootstrap-only values from descendants. */
 export function consumeNativeDiagnosticsEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): void {
-  const path = environment.AGENTLAB_DIAGNOSTIC_LOG;
-  ownedDiagnosticPath = isSafeAbsolutePath(path) ? path : undefined;
+  rendererOwnsDiagnosticStderr = isOwnedDiagnosticPath(environment.AGENTLAB_DIAGNOSTIC_LOG);
+  rendererDiagnosticStderrIdentity = rendererOwnsDiagnosticStderr
+    ? descriptorIdentity(2)
+    : undefined;
+  rendererOwnsDiagnosticStderr &&= rendererDiagnosticStderrIdentity !== undefined;
   delete environment.AGENTLAB_TUI_RUNTIME;
   delete environment.AGENTLAB_DIAGNOSTIC_LOG;
 }
 
 /** Appends renderer-owned failures without ever touching the interactive terminal descriptor. */
-export function writeNativeDiagnostic(message: string, environment?: NodeJS.ProcessEnv): boolean {
-  const path = environment?.AGENTLAB_DIAGNOSTIC_LOG ?? ownedDiagnosticPath;
-  if (!isSafeAbsolutePath(path)) return false;
-  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
-  let fd: number | null = null;
+export function writeNativeDiagnostic(message: string): boolean {
+  const line = `[agentlab] ${message.replace(/[\r\n]+/gu, " ")}\n`;
+  const ownsDiagnosticStderr =
+    rendererOwnsDiagnosticStderr &&
+    rendererDiagnosticStderrIdentity !== undefined &&
+    descriptorMatches(2, rendererDiagnosticStderrIdentity);
+  if (!ownsDiagnosticStderr) return false;
   try {
-    fd = openSync(path, constants.O_APPEND | constants.O_WRONLY | noFollow);
-    if (!fstatSync(fd).isFile()) return false;
-    writeSync(fd, `[agentlab] ${message.replace(/[\r\n]+/gu, " ")}\n`);
+    writeAll(2, Buffer.from(line));
     return true;
   } catch {
     return false;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {
-        // Diagnostics must never become a second renderer failure.
-      }
-    }
   }
 }
 
@@ -191,8 +199,9 @@ export async function runWithNativeDiagnostics(
   if (log !== null) rendererEnvironment.AGENTLAB_DIAGNOSTIC_LOG = log.path;
   const child = spawn(executable, command.slice(1), {
     env: rendererEnvironment,
-    stdio: ["inherit", "inherit", log?.fd ?? "ignore"]
+    stdio: ["inherit", "inherit", log === null ? "ignore" : "pipe"]
   });
+  const drain = drainNativeDiagnostics(child.stderr, log);
   const listeners = rendererExitStatusSignals.map((signal) => {
     const listener = (): void => {
       try {
@@ -213,6 +222,7 @@ export async function runWithNativeDiagnostics(
         else resolvePromise(signal === null ? 1 : exitCodeForSignal(signal));
       });
     });
+    await drain;
     log?.close();
     if (exitCode !== 0) {
       const diagnostics = log === null ? "" : `; diagnostics: ${log.path}`;
@@ -221,7 +231,20 @@ export async function runWithNativeDiagnostics(
     return exitCode;
   } finally {
     for (const { listener, signal } of listeners) process.off(signal, listener);
+    await drain;
     log?.close();
+  }
+}
+
+async function drainNativeDiagnostics(
+  stream: NodeJS.ReadableStream | null,
+  log: NativeDiagnosticsLog | null
+): Promise<void> {
+  if (stream === null || log === null) return;
+  try {
+    for await (const chunk of stream) log.write(Buffer.from(chunk));
+  } catch {
+    // A renderer may close or destroy stderr; diagnostics remain fail-open.
   }
 }
 
@@ -234,35 +257,29 @@ function rendererCommand(args: readonly string[]): string[] {
   return [process.execPath, ...args];
 }
 
-function boundActiveLog(fd: number): void {
-  try {
-    const size = fstatSync(fd).size;
-    if (size <= MAX_LOG_BYTES) return;
-    const marker = Buffer.from(
-      `[AgentLab retained the newest diagnostics after ${String(MAX_LOG_BYTES)} bytes]\n`
-    );
-    const tail = Buffer.allocUnsafe(MAX_LOG_BYTES - marker.byteLength);
-    let bytesRead = 0;
-    while (bytesRead < tail.byteLength) {
-      const count = readSync(
-        fd,
-        tail,
-        bytesRead,
-        tail.byteLength - bytesRead,
-        size - tail.byteLength + bytesRead
-      );
-      if (count === 0) break;
-      bytesRead += count;
-    }
-    ftruncateSync(fd, 0);
-    writeSync(fd, marker);
-    writeSync(fd, tail.subarray(0, bytesRead));
-  } catch {
-    // Runtime diagnostics must never compete with or crash the interactive renderer.
+function appendBounded(fd: number, data: Buffer): void {
+  if (data.byteLength === 0) return;
+  const size = fstatSync(fd).size;
+  if (size + data.byteLength <= MAX_LOG_BYTES) {
+    writeAll(fd, data);
+    return;
   }
+
+  const tailBytes = MAX_LOG_BYTES - RETENTION_MARKER.byteLength;
+  const retainedFromData = Math.min(data.byteLength, tailBytes);
+  const retainedFromFile = Math.min(size, tailBytes - retainedFromData);
+  const tail = Buffer.allocUnsafe(retainedFromFile + retainedFromData);
+  if (retainedFromFile > 0) {
+    readAll(fd, tail, 0, retainedFromFile, size - retainedFromFile);
+  }
+  data.copy(tail, retainedFromFile, data.byteLength - retainedFromData);
+  ftruncateSync(fd, 0);
+  writeAll(fd, RETENTION_MARKER);
+  writeAll(fd, tail);
 }
 
 interface RetainedLogCandidate {
+  readonly active: boolean;
   readonly modifiedAt: number;
   readonly path: string;
   readonly size: number;
@@ -273,25 +290,30 @@ function retainNativeDiagnostics(directory: string, preservedPath?: string): voi
     finalizeAbandonedLogs(directory);
     const candidates: RetainedLogCandidate[] = [];
     for (const name of readdirSync(directory)) {
-      if (!RETAINED_LOG_PATTERN.test(name)) continue;
+      const active = ACTIVE_LOG_PATTERN.test(name);
+      if (!active && !RETAINED_LOG_PATTERN.test(name)) continue;
       const path = resolve(directory, name);
       try {
         const metadata = lstatSync(path);
         if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
-        candidates.push({ modifiedAt: metadata.mtimeMs, path, size: metadata.size });
+        candidates.push({ active, modifiedAt: metadata.mtimeMs, path, size: metadata.size });
       } catch {
         // A concurrent process may have finalized or removed the entry.
       }
     }
-    candidates.sort((left, right) => {
-      if (left.path === preservedPath) return -1;
-      if (right.path === preservedPath) return 1;
-      return right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path);
-    });
 
-    let retainedBytes = 0;
-    let retainedFiles = 0;
-    for (const candidate of candidates) {
+    const activeCandidates = candidates.filter(({ active }) => active);
+    const retainedCandidates = candidates
+      .filter(({ active }) => !active)
+      .sort((left, right) => {
+        if (left.path === preservedPath) return -1;
+        if (right.path === preservedPath) return 1;
+        return right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path);
+      });
+    let retainedBytes = activeCandidates.reduce((total, candidate) => total + candidate.size, 0);
+    let retainedFiles = activeCandidates.length;
+
+    for (const candidate of retainedCandidates) {
       const preserve = candidate.path === preservedPath;
       if (
         preserve ||
@@ -318,8 +340,15 @@ function finalizeAbandonedLogs(directory: string): void {
     const match = ACTIVE_LOG_PATTERN.exec(name);
     if (match === null) continue;
     const pid = Number(match[1]);
-    const runId = match[2];
-    if (!Number.isSafeInteger(pid) || pid <= 0 || runId === undefined || processIsAlive(pid)) {
+    const expectedIdentity = match[2];
+    const runId = match[3];
+    if (
+      !Number.isSafeInteger(pid) ||
+      pid <= 0 ||
+      expectedIdentity === undefined ||
+      runId === undefined ||
+      activeOwnerMayBeAlive(pid, expectedIdentity)
+    ) {
       continue;
     }
     const activePath = resolve(directory, name);
@@ -327,6 +356,7 @@ function finalizeAbandonedLogs(directory: string): void {
     try {
       const metadata = lstatSync(activePath);
       if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
+      boundAbandonedLog(activePath);
       renameSync(activePath, retainedPath);
     } catch {
       // The owner or another cleanup pass may have moved the file concurrently.
@@ -334,21 +364,163 @@ function finalizeAbandonedLogs(directory: string): void {
   }
 }
 
-function processIsAlive(pid: number): boolean {
+function boundAbandonedLog(path: string): void {
+  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, constants.O_RDWR | noFollow);
+    if (!fstatSync(fd).isFile()) return;
+    const size = fstatSync(fd).size;
+    if (size <= MAX_LOG_BYTES) return;
+    const tail = Buffer.allocUnsafe(MAX_LOG_BYTES - RETENTION_MARKER.byteLength);
+    readAll(fd, tail, 0, tail.byteLength, size - tail.byteLength);
+    ftruncateSync(fd, 0);
+    writeAll(fd, RETENTION_MARKER);
+    writeAll(fd, tail);
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
+}
+
+type ProcessIdentity =
+  | { readonly kind: "absent" }
+  | { readonly identity: string; readonly kind: "identified" }
+  | { readonly kind: "unknown" };
+
+function activeOwnerMayBeAlive(pid: number, expectedIdentity: string): boolean {
+  const state = processIdentity(pid);
+  return (
+    state.kind === "unknown" || (state.kind === "identified" && state.identity === expectedIdentity)
+  );
+}
+
+function currentProcessIdentity(): string | null {
+  const state = processIdentity(process.pid);
+  return state.kind === "identified" ? state.identity : null;
+}
+
+function processIdentity(pid: number): ProcessIdentity {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
-    return !(
+    if (
       error instanceof Error &&
       "code" in error &&
       (error as NodeJS.ErrnoException).code === "ESRCH"
+    ) {
+      return { kind: "absent" };
+    }
+    return { kind: "unknown" };
+  }
+
+  const source = processIdentitySource(pid);
+  return source === null
+    ? { kind: "unknown" }
+    : {
+        identity: createHash("sha256").update(source).digest("hex").slice(0, 16),
+        kind: "identified"
+      };
+}
+
+function processIdentitySource(pid: number): string | null {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+      const commandEnd = stat.lastIndexOf(") ");
+      if (commandEnd < 0) return null;
+      const fieldsAfterCommand = stat
+        .slice(commandEnd + 2)
+        .trim()
+        .split(/\s+/u);
+      const startTicks = fieldsAfterCommand[19];
+      return startTicks !== undefined && /^[0-9]+$/u.test(startTicks) ? startTicks : null;
+    } catch {
+      return null;
+    }
+  }
+  if (process.platform === "darwin") {
+    const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: "C" },
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const startedAt = result.status === 0 ? result.stdout.trim() : "";
+    return startedAt.length > 0 ? startedAt : null;
+  }
+  return null;
+}
+
+function readAll(
+  fd: number,
+  buffer: Buffer,
+  offset: number,
+  length: number,
+  position: number
+): void {
+  let bytesRead = 0;
+  while (bytesRead < length) {
+    const count = readSync(
+      fd,
+      buffer,
+      offset + bytesRead,
+      length - bytesRead,
+      position + bytesRead
     );
+    if (count === 0) break;
+    bytesRead += count;
+  }
+}
+
+function writeAll(fd: number, buffer: Buffer): void {
+  let offset = 0;
+  while (offset < buffer.byteLength) {
+    offset += writeSync(fd, buffer, offset, buffer.byteLength - offset);
   }
 }
 
 function isSafeAbsolutePath(value: string | undefined): value is string {
   return value !== undefined && isAbsolute(value) && !hasControlCharacter(value);
+}
+
+function isOwnedDiagnosticPath(value: string | undefined): boolean {
+  if (!isSafeAbsolutePath(value)) return false;
+  try {
+    const metadata = lstatSync(value);
+    return metadata.isFile() && !metadata.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+interface DescriptorIdentity {
+  readonly device: number;
+  readonly inode: number;
+  readonly mode: number;
+  readonly rawDevice: number;
+}
+
+function descriptorIdentity(fd: number): DescriptorIdentity | undefined {
+  try {
+    const metadata = fstatSync(fd);
+    return {
+      device: metadata.dev,
+      inode: metadata.ino,
+      mode: metadata.mode,
+      rawDevice: metadata.rdev
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function descriptorMatches(fd: number, expected: DescriptorIdentity): boolean {
+  const current = descriptorIdentity(fd);
+  return (
+    current?.device === expected.device &&
+    current.inode === expected.inode &&
+    current.mode === expected.mode &&
+    current.rawDevice === expected.rawDevice
+  );
 }
 
 function hasControlCharacter(value: string): boolean {
