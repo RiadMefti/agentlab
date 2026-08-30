@@ -23,6 +23,7 @@ import type {
 } from "../domain/factory-documents.js";
 import type { FactoryGateExecutor } from "../domain/factory-gate.js";
 import type { FactoryPolicyEngine } from "../domain/factory-policy.js";
+import { narrowFactoryResourceLimits } from "../domain/factory-process-isolation.js";
 import {
   resolveFactorySkillPlan,
   selectFactorySkills,
@@ -41,8 +42,10 @@ import type {
   FactoryWorkspacePatch
 } from "../domain/factory-workspace.js";
 import type { FactoryControlPlane } from "./factory-control-plane.js";
+import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
 import {
   FactoryEvidencePublisher,
+  type FactoryEvidencePublisherCredentials,
   type PublishedFactoryAgentRun
 } from "./factory-evidence-publisher.js";
 import { renderFactoryPrompt } from "./factory-prompt-renderer.js";
@@ -59,7 +62,12 @@ export interface FactoryExecutionServiceDependencies {
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly evidence: Pick<FactoryEvidenceRepository, "latestEvidence">;
   readonly conversations: Pick<ConversationRepository, "findById">;
-  readonly controlPlane: Pick<FactoryControlPlane, "transition" | "recordEvidenceItems">;
+  readonly controlPlane: Pick<FactoryControlPlane, "transition">;
+  readonly evidenceIngress: FactoryEvidenceIngress;
+  readonly evidenceCredentials: Pick<
+    FactoryEvidencePublisherCredentials,
+    "controlPlane" | "executionObserver" | "gateObserver"
+  >;
   readonly artifacts: FactoryArtifactStore;
   readonly documents: FactoryDocumentCodec;
   readonly policy: FactoryPolicyEngine;
@@ -87,7 +95,12 @@ export class FactoryExecutionService {
 
   public constructor(private readonly dependencies: FactoryExecutionServiceDependencies) {
     this.#publisher = new FactoryEvidencePublisher({
-      controlPlane: dependencies.controlPlane,
+      evidenceIngress: dependencies.evidenceIngress,
+      credentials: {
+        controlPlane: dependencies.evidenceCredentials.controlPlane,
+        executionObserver: dependencies.evidenceCredentials.executionObserver,
+        gateObserver: dependencies.evidenceCredentials.gateObserver
+      },
       artifacts: dependencies.artifacts,
       documents: dependencies.documents,
       now: dependencies.now,
@@ -355,7 +368,11 @@ export class FactoryExecutionService {
       executable: provider.executable,
       providerVersion: provider.version,
       workspace: input.workspace,
-      prompt
+      prompt,
+      resourceLimits: this.dependencies.policy.requirements(
+        input.task.contract.riskTier,
+        "execution"
+      ).resourceLimits
     });
     const published = await this.#publisher.agentRun(input.task, request, output);
     return { output, published };
@@ -396,9 +413,16 @@ export class FactoryExecutionService {
           disposition: "attention"
         };
       }
-      const output = await this.dependencies.gates.execute({ gateId, workspace });
+      const output = await this.dependencies.gates.execute({
+        gateId,
+        workspace,
+        resourceLimits: narrowFactoryResourceLimits(
+          required.resourceLimits,
+          task.contract.budget.maxProcesses
+        )
+      });
       meter.addGate(output);
-      await this.#publisher.gate(task, patch.digest, output);
+      await this.#publisher.gate(task, patch.digest, output, workspace.attempt);
       if (meter.exceeds(task.contract.budget, expectedPatch.changeSet, repairs)) {
         return {
           passed: false,

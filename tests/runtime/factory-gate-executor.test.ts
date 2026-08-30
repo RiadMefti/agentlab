@@ -10,6 +10,7 @@ import type {
   FactoryGateDefinition
 } from "../../packages/runtime/src/domain/factory-gate.js";
 import type { FactoryWorkspace } from "../../packages/runtime/src/domain/factory-workspace.js";
+import type { FactoryProcessIsolator } from "../../packages/runtime/src/domain/factory-process-isolation.js";
 import { BubblewrapFactoryGateSandbox } from "../../packages/runtime/src/infrastructure/process/bubblewrap-factory-gate-sandbox.js";
 import type {
   CommandRunner,
@@ -17,6 +18,7 @@ import type {
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { LocalFactoryGateExecutor } from "../../packages/runtime/src/infrastructure/process/local-factory-gate-executor.js";
+import { SystemdFactoryProcessIsolator } from "../../packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.js";
 
 const temporaryRoots: string[] = [];
 
@@ -30,13 +32,12 @@ describe("LocalFactoryGateExecutor", () => {
     const executor = new LocalFactoryGateExecutor(
       [testGate],
       { wrap: () => Promise.resolve(wrappedCommand) },
+      passthroughProcessIsolator,
       runner,
       timestamps()
     );
 
-    await expect(
-      executor.execute({ gateId: "test", workspace: fakeWorkspace("/work") })
-    ).resolves.toMatchObject({
+    await expect(executor.execute(gateInput("/work"))).resolves.toMatchObject({
       gateId: "test",
       result: "pass",
       command: wrappedCommand,
@@ -48,7 +49,7 @@ describe("LocalFactoryGateExecutor", () => {
       options: { cleanupProcessTree: true, maxCombinedBufferBytes: 1024 }
     });
     await expect(
-      executor.execute({ gateId: "not-installed", workspace: fakeWorkspace("/work") })
+      executor.execute({ ...gateInput("/work"), gateId: "not-installed" })
     ).rejects.toThrow(/not installed/u);
   });
 
@@ -57,23 +58,27 @@ describe("LocalFactoryGateExecutor", () => {
     const failed = new LocalFactoryGateExecutor(
       [testGate],
       passthroughSandbox,
+      passthroughProcessIsolator,
       new FakeRunner(exit),
       timestamps()
     );
-    await expect(
-      failed.execute({ gateId: "test", workspace: fakeWorkspace("/work") })
-    ).resolves.toMatchObject({ result: "fail", exitCode: 2 });
+    await expect(failed.execute(gateInput("/work"))).resolves.toMatchObject({
+      result: "fail",
+      exitCode: 2
+    });
 
     const timeout = commandError("timeout", null);
     const timedOut = new LocalFactoryGateExecutor(
       [testGate],
       passthroughSandbox,
+      passthroughProcessIsolator,
       new FakeRunner(timeout),
       timestamps()
     );
-    await expect(
-      timedOut.execute({ gateId: "test", workspace: fakeWorkspace("/work") })
-    ).resolves.toMatchObject({ result: "timed-out", exitCode: null });
+    await expect(timedOut.execute(gateInput("/work"))).resolves.toMatchObject({
+      result: "timed-out",
+      exitCode: null
+    });
 
     const sandboxFailure: FactoryGateSandbox = {
       wrap: () => Promise.reject(new Error("sandbox unavailable"))
@@ -81,12 +86,11 @@ describe("LocalFactoryGateExecutor", () => {
     const unavailable = new LocalFactoryGateExecutor(
       [testGate],
       sandboxFailure,
+      passthroughProcessIsolator,
       new FakeRunner({ stdout: "", stderr: "" }),
       timestamps()
     );
-    await expect(
-      unavailable.execute({ gateId: "test", workspace: fakeWorkspace("/work") })
-    ).rejects.toThrow(/sandbox unavailable/u);
+    await expect(unavailable.execute(gateInput("/work"))).rejects.toThrow(/sandbox unavailable/u);
   });
 });
 
@@ -134,6 +138,83 @@ describe("BubblewrapFactoryGateSandbox", () => {
   });
 });
 
+describe("SystemdFactoryProcessIsolator", () => {
+  it("wraps an argument vector in a bounded transient user scope", async () => {
+    const isolator = new SystemdFactoryProcessIsolator({
+      executable: "/usr/bin/systemd-run",
+      environmentExecutable: "/usr/bin/env",
+      version: "systemd 261",
+      hostEnvironment: {
+        XDG_RUNTIME_DIR: "/run/user/1000",
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+      }
+    });
+    const result = await isolator.isolate({
+      command: { executable: "/usr/bin/bwrap", args: ["--", "/usr/bin/true"] },
+      isolationId: "77777777-7777-4777-8777-777777777777",
+      limits: resourceLimits
+    });
+
+    expect(result.command.executable).toBe("/usr/bin/systemd-run");
+    expect(result.command.args).toEqual(
+      expect.arrayContaining([
+        "--user",
+        "--scope",
+        "--property=Delegate=no",
+        "--property=TasksMax=16",
+        `--property=MemoryMax=${String(resourceLimits.maxMemoryBytes)}`,
+        "--property=MemorySwapMax=0",
+        "--property=CPUQuota=200%"
+      ])
+    );
+    expect(result.command.args.slice(-7)).toEqual([
+      "/usr/bin/env",
+      "--unset=XDG_RUNTIME_DIR",
+      "--unset=DBUS_SESSION_BUS_ADDRESS",
+      "--",
+      "/usr/bin/bwrap",
+      "--",
+      "/usr/bin/true"
+    ]);
+    expect(result.controllerEnvironment).toEqual({
+      XDG_RUNTIME_DIR: "/run/user/1000",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+    });
+    expect(result.isolation).toMatchObject({
+      mechanism: { id: "linux/systemd-user-scope", version: "systemd 261" },
+      limits: resourceLimits
+    });
+  });
+
+  it("fails closed without a user-manager channel or an absolute command", async () => {
+    expect(
+      () =>
+        new SystemdFactoryProcessIsolator({
+          executable: "/usr/bin/systemd-run",
+          environmentExecutable: "/usr/bin/env",
+          version: "systemd 261",
+          hostEnvironment: {}
+        })
+    ).toThrow(/XDG_RUNTIME_DIR/u);
+    const isolator = new SystemdFactoryProcessIsolator({
+      executable: "/usr/bin/systemd-run",
+      environmentExecutable: "/usr/bin/env",
+      version: "systemd 261",
+      hostEnvironment: {
+        XDG_RUNTIME_DIR: "/run/user/1000",
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
+      }
+    });
+    await expect(
+      isolator.isolate({
+        command: { executable: "node", args: [] },
+        isolationId: "77777777-7777-4777-8777-777777777777",
+        limits: resourceLimits
+      })
+    ).rejects.toThrow(/absolute executable/u);
+  });
+});
+
 const testGate: FactoryGateDefinition = {
   id: "test",
   evidenceKind: "test",
@@ -147,6 +228,24 @@ const wrappedCommand: CommandSpec = {
 };
 const passthroughSandbox: FactoryGateSandbox = {
   wrap: (command) => Promise.resolve(command)
+};
+const resourceLimits = {
+  maxProcesses: 16,
+  maxMemoryBytes: 2 * 1_024 * 1_024 * 1_024,
+  cpuQuotaPercent: 200
+} as const;
+const passthroughProcessIsolator: FactoryProcessIsolator = {
+  isolate: ({ command, isolationId, limits }) =>
+    Promise.resolve({
+      command,
+      controllerEnvironment: {},
+      isolation: {
+        isolationId,
+        mechanism: { id: "linux/systemd-user-scope", version: "test-systemd-1" },
+        scopeName: `agentlab-factory-${isolationId.replaceAll("-", "")}.scope`,
+        limits
+      }
+    })
 };
 
 class FakeRunner implements CommandRunner {
@@ -180,7 +279,14 @@ function fakeWorkspace(root: string): FactoryWorkspace {
 
 function timestamps() {
   const values = ["2026-08-30T12:00:00.000Z", "2026-08-30T12:00:01.000Z"];
-  return { now: () => values.shift() ?? "2026-08-30T12:00:01.000Z" };
+  return {
+    now: () => values.shift() ?? "2026-08-30T12:00:01.000Z",
+    createId: () => "77777777-7777-4777-8777-777777777777"
+  };
+}
+
+function gateInput(root: string) {
+  return { gateId: "test", workspace: fakeWorkspace(root), resourceLimits };
 }
 
 function commandError(kind: "exit" | "timeout", exitCode: number | null): Error {

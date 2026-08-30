@@ -9,7 +9,6 @@ import {
   factoryTimestampSchema,
   sha256DigestSchema,
   type EvidenceBundle,
-  type EvidenceItem,
   type FactoryActor,
   type FactoryApprovalStage,
   type FactoryControlName,
@@ -43,6 +42,10 @@ import {
   isFactoryTaskTransitionAllowed,
   isTerminalFactoryTaskState
 } from "../domain/factory-task-state.js";
+import type {
+  FactoryEvidenceCredential,
+  FactoryEvidenceIngress
+} from "./factory-evidence-ingress.js";
 
 const transitionInputSchema = z
   .object({
@@ -69,14 +72,6 @@ const controlChangeInputSchema = z
   })
   .strict();
 
-const evidenceItemsInputSchema = z
-  .object({
-    taskId: z.uuid(),
-    contractDigest: sha256DigestSchema,
-    items: z.array(evidenceItemSchema).min(1).max(1_000)
-  })
-  .strict();
-
 export interface FactoryControlPlaneDependencies {
   readonly tasks: FactoryTaskRepository;
   readonly evidence: FactoryEvidenceRepository;
@@ -86,6 +81,8 @@ export interface FactoryControlPlaneDependencies {
   readonly documents: FactoryDocumentCodec;
   readonly policy: FactoryPolicyEngine;
   readonly policyBundle: CanonicalFactoryDocument<FactoryPolicyBundle>;
+  readonly evidenceIngress: FactoryEvidenceIngress;
+  readonly evidenceCredential: FactoryEvidenceCredential;
   readonly now: () => string;
   readonly createId: () => string;
 }
@@ -202,39 +199,6 @@ export class FactoryControlPlane {
     return transitioned;
   }
 
-  public async recordEvidenceBundle(input: unknown): Promise<StoredEvidenceBundle> {
-    const document = this.dependencies.documents.evidenceBundle(input);
-    return this.#recordEvidenceDocument(document);
-  }
-
-  public async recordEvidenceItems(input: {
-    readonly taskId: string;
-    readonly contractDigest: Sha256Digest;
-    readonly items: readonly EvidenceItem[];
-  }): Promise<StoredEvidenceBundle> {
-    const command = evidenceItemsInputSchema.parse(input);
-    const task = await this.#requireTask(command.taskId);
-    if (task.contractDigest !== command.contractDigest) {
-      throw new ConflictError("Evidence items do not match the task contract.");
-    }
-    const latest = await this.dependencies.evidence.latestEvidence(command.taskId);
-    if (latest === null) throw new ConflictError("Factory task has no evidence chain.");
-    return this.#recordEvidenceDocument(
-      this.dependencies.documents.evidenceBundle({
-        schemaVersion: "agentlab.evidence-bundle.v1",
-        bundleId: this.dependencies.createId(),
-        taskId: command.taskId,
-        sequence: latest.bundle.sequence + 1,
-        contractDigest: command.contractDigest,
-        previousBundleDigest: latest.digest,
-        policyBundleDigest: this.dependencies.policyBundle.digest,
-        createdAt: this.#now(),
-        items: command.items,
-        attestations: []
-      })
-    );
-  }
-
   public async evaluatePolicy(input: unknown): Promise<RecordedPolicyDecision> {
     const command = factoryPolicyCheckInputSchema.parse(input);
     const snapshot = await this.#requireTask(command.taskId);
@@ -290,45 +254,39 @@ export class FactoryControlPlane {
     });
     const artifact = await this.#storeDocument(evaluationRecord);
     const previous = evidenceBundles.at(-1) ?? null;
-    const bundle = evidenceBundleSchema.parse({
-      schemaVersion: "agentlab.evidence-bundle.v1",
-      bundleId: this.dependencies.createId(),
-      taskId: snapshot.contract.taskId,
-      sequence: (previous?.bundle.sequence ?? 0) + 1,
-      contractDigest: snapshot.contractDigest,
-      previousBundleDigest: previous?.digest ?? null,
-      policyBundleDigest: this.dependencies.policyBundle.digest,
-      createdAt: evaluatedAt,
-      items: [
-        evidenceItemSchema.parse({
-          id: this.dependencies.createId(),
-          kind: "policy",
-          result:
-            decision.outcome === "allow"
-              ? "pass"
-              : decision.outcome === "deny"
-                ? "fail"
-                : "informational",
-          subjectDigest: command.approvalSubjectDigest,
-          artifact: {
-            digest: artifact.digest,
-            mediaType: "application/vnd.agentlab.policy-evaluation.v1+json",
-            sizeBytes: artifact.sizeBytes
-          },
-          producer: policyActor,
-          createdAt: evaluatedAt,
-          claims: [
-            { name: "outcome", value: decision.outcome },
-            { name: "stage", value: command.stage },
-            { name: "profile-id", value: decision.profileId },
-            { name: "subject-digest", value: command.approvalSubjectDigest }
-          ]
-        })
-      ],
-      attestations: []
-    });
-    const recorded = await this.#recordEvidenceDocument(
-      this.dependencies.documents.evidenceBundle(bundle)
+    if (previous === null) throw new ConflictError("Factory task has no evidence chain.");
+    const recorded = await this.dependencies.evidenceIngress.append(
+      this.dependencies.evidenceCredential,
+      {
+        taskId: snapshot.contract.taskId,
+        contractDigest: snapshot.contractDigest,
+        items: [
+          evidenceItemSchema.parse({
+            id: this.dependencies.createId(),
+            kind: "policy",
+            result:
+              decision.outcome === "allow"
+                ? "pass"
+                : decision.outcome === "deny"
+                  ? "fail"
+                  : "informational",
+            subjectDigest: command.approvalSubjectDigest,
+            artifact: {
+              digest: artifact.digest,
+              mediaType: "application/vnd.agentlab.policy-evaluation.v1+json",
+              sizeBytes: artifact.sizeBytes
+            },
+            producer: policyActor,
+            createdAt: evaluatedAt,
+            claims: [
+              { name: "outcome", value: decision.outcome },
+              { name: "stage", value: command.stage },
+              { name: "profile-id", value: decision.profileId },
+              { name: "subject-digest", value: command.approvalSubjectDigest }
+            ]
+          })
+        ]
+      }
     );
     return { decision, evidence: recorded };
   }
@@ -403,39 +361,6 @@ export class FactoryControlPlane {
     const document = this.dependencies.documents.evidenceBundle(bundle);
     await this.#storeDocument(document);
     return document;
-  }
-
-  async #recordEvidenceDocument(
-    document: CanonicalFactoryDocument<EvidenceBundle>
-  ): Promise<StoredEvidenceBundle> {
-    const task = await this.#requireTask(document.value.taskId);
-    if (
-      document.value.contractDigest !== task.contractDigest ||
-      document.value.policyBundleDigest !== task.contract.gateProfile.policyDigest ||
-      document.value.policyBundleDigest !== this.dependencies.policyBundle.digest
-    ) {
-      throw new ConflictError("Evidence bundle does not match the task contract and policy.");
-    }
-    for (const item of document.value.items) {
-      const content = await this.dependencies.artifacts.read(
-        item.artifact.digest,
-        Math.max(1, item.artifact.sizeBytes + 1)
-      );
-      if (content.byteLength !== item.artifact.sizeBytes) {
-        throw new ConflictError(`Evidence artifact ${item.artifact.digest} has the wrong size.`);
-      }
-    }
-    const storedBundle = await this.#storeDocument(document);
-    if (storedBundle.digest !== document.digest) {
-      throw new Error("Stored evidence bundle digest disagrees with canonical JSON.");
-    }
-    const appended = await this.dependencies.evidence.appendEvidence(document);
-    if (appended === null) {
-      throw new ConflictError(
-        "Evidence chain changed concurrently; rebuild the bundle before retrying."
-      );
-    }
-    return appended;
   }
 
   async #resolveTransitionEvidence(

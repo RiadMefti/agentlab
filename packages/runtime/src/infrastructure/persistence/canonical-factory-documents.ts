@@ -11,6 +11,7 @@ import {
   factoryPullRequestProposalSchema,
   factoryPullRequestRecordSchema,
   factoryReviewResultSchema,
+  factoryResourceIsolationRecordSchema,
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
   immutableTaskContractSchema,
@@ -57,6 +58,10 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public gateObservation(input: unknown) {
     return encodeCanonicalDocument(factoryGateObservationSchema.parse(input));
+  }
+
+  public resourceIsolation(input: unknown) {
+    return encodeCanonicalDocument(factoryResourceIsolationRecordSchema.parse(input));
   }
 
   public patchProposal(input: unknown) {

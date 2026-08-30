@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  evidenceBundleSchema,
   evidenceItemSchema,
   immutableTaskContractSchema,
   type EvidenceItem,
@@ -12,6 +11,10 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FactoryControlPlane } from "../../packages/runtime/src/application/factory-control-plane.js";
+import {
+  createFactoryEvidenceCredential,
+  FactoryEvidenceIngress
+} from "../../packages/runtime/src/application/factory-evidence-ingress.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
 import {
   defaultFactoryPolicyBundle,
@@ -161,40 +164,109 @@ describe("FactoryControlPlane", () => {
       );
       fixture.addActiveConversation();
       const snapshot = await fixture.controlPlane.registerTask(policyContract(), requester);
-      const latest = await fixture.repository.latestEvidence(TEST_FACTORY_TASK_ID);
-      const missing = evidenceBundleSchema.parse({
-        schemaVersion: "agentlab.evidence-bundle.v1",
-        bundleId: fixture.nextId(),
-        taskId: TEST_FACTORY_TASK_ID,
-        sequence: 2,
-        contractDigest: snapshot.contractDigest,
-        previousBundleDigest: latest?.digest,
-        policyBundleDigest: fixture.policyBundle.digest,
+      const missing = evidenceItemSchema.parse({
+        id: fixture.nextId(),
+        kind: "test",
+        result: "pass",
+        subjectDigest: snapshot.contractDigest,
+        artifact: {
+          digest: testDigest("f"),
+          mediaType: "application/json",
+          sizeBytes: 10
+        },
+        producer: {
+          kind: "control-plane",
+          role: "gate-runner",
+          id: "agentlab-local-gates",
+          sessionId: null
+        },
         createdAt: now,
-        items: [
-          evidenceItemSchema.parse({
-            id: fixture.nextId(),
-            kind: "test",
-            result: "pass",
-            subjectDigest: snapshot.contractDigest,
-            artifact: {
-              digest: testDigest("f"),
-              mediaType: "application/json",
-              sizeBytes: 10
-            },
-            producer: {
-              kind: "ci",
-              role: "gate-runner",
-              id: "ci",
-              sessionId: null
-            },
-            createdAt: now,
-            claims: [{ name: "gate-id", value: "test" }]
-          })
-        ],
-        attestations: []
+        claims: [{ name: "gate-id", value: "test" }]
       });
-      await expect(fixture.controlPlane.recordEvidenceBundle(missing)).rejects.toThrow();
+      await expect(
+        fixture.evidenceIngress.append(fixture.controlPlaneCredential, {
+          taskId: TEST_FACTORY_TASK_ID,
+          contractDigest: snapshot.contractDigest,
+          items: [missing]
+        })
+      ).rejects.toThrow(/ENOENT|does not exist|artifact/u);
+      await expect(
+        fixture.evidenceIngress.append(createFactoryEvidenceCredential(), {
+          taskId: TEST_FACTORY_TASK_ID,
+          contractDigest: snapshot.contractDigest,
+          items: [missing]
+        })
+      ).rejects.toThrow(/not registered/u);
+      const existingArtifact = await fixture.artifacts.putText("forged gate");
+      await expect(
+        fixture.evidenceIngress.append(fixture.controlPlaneCredential, {
+          taskId: TEST_FACTORY_TASK_ID,
+          contractDigest: snapshot.contractDigest,
+          items: [
+            evidenceItemSchema.parse({
+              ...missing,
+              id: fixture.nextId(),
+              artifact: { ...existingArtifact, mediaType: "text/plain" },
+              producer: {
+                kind: "ci",
+                role: "gate-runner",
+                id: "agentlab-local-sandbox",
+                sessionId: null
+              }
+            })
+          ]
+        })
+      ).rejects.toThrow(/control-plane cannot assert/u);
+      const patchArtifact = await fixture.artifacts.putText("bounded patch");
+      const patchRecord = fixture.documents.patchProposal({
+        schemaVersion: "agentlab.patch-proposal.v1",
+        taskId: TEST_FACTORY_TASK_ID,
+        contractDigest: snapshot.contractDigest,
+        executionId: "77777777-7777-4777-8777-777777777777",
+        baseRevision: snapshot.contract.repository.baseRevision,
+        changeSet: {
+          baseRevision: snapshot.contract.repository.baseRevision,
+          headRevision: null,
+          changedPaths: ["tests/example.test.ts"],
+          binaryPaths: [],
+          changedFiles: 1,
+          changedLines: 1
+        },
+        patchArtifact: { ...patchArtifact, mediaType: "text/x-diff" },
+        createdAt: now
+      });
+      await fixture.artifacts.putText(patchRecord.json);
+      await expect(
+        fixture.evidenceIngress.append(fixture.controlPlaneCredential, {
+          taskId: TEST_FACTORY_TASK_ID,
+          contractDigest: snapshot.contractDigest,
+          items: [
+            evidenceItemSchema.parse({
+              id: fixture.nextId(),
+              kind: "patch",
+              result: "pass",
+              subjectDigest: patchRecord.digest,
+              artifact: {
+                digest: patchRecord.digest,
+                mediaType: "application/vnd.agentlab.patch-proposal.v1+json",
+                sizeBytes: Buffer.byteLength(patchRecord.json)
+              },
+              producer: {
+                kind: "control-plane",
+                role: "gate-runner",
+                id: "agentlab-local-gates",
+                sessionId: null
+              },
+              createdAt: now,
+              claims: [
+                { name: "patch-digest", value: patchArtifact.digest },
+                { name: "base-revision", value: snapshot.contract.repository.baseRevision },
+                { name: "execution-id", value: "88888888-8888-4888-8888-888888888888" }
+              ]
+            })
+          ]
+        })
+      ).rejects.toThrow(/does not match/u);
       await expect(fixture.repository.listEvidence(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(1);
     } finally {
       fixture.repository.close();
@@ -236,7 +308,7 @@ function policyContract(): ImmutableTaskContract {
     ...base,
     gateProfile: {
       id: "baseline/r1",
-      version: "1.0.0",
+      version: "1.1.0",
       policyDigest: encodeCanonicalDocument(defaultFactoryPolicyBundle).digest
     }
   });
@@ -250,6 +322,7 @@ function controlPlaneFixture(addConversation = true) {
   const conversations = new MemoryConversationRepository();
   const documents = new NodeFactoryDocumentCodec();
   const policyBundle = encodeCanonicalDocument(defaultFactoryPolicyBundle);
+  const controlPlaneCredential = createFactoryEvidenceCredential();
   let nextIdentifier = 100;
   const nextId = (): string =>
     `00000000-0000-4000-8000-${String(nextIdentifier++).padStart(12, "0")}`;
@@ -273,6 +346,16 @@ function controlPlaneFixture(addConversation = true) {
     );
   };
   if (addConversation) addActiveConversation();
+  const evidenceIngress = new FactoryEvidenceIngress({
+    tasks: repository,
+    evidence: repository,
+    artifacts,
+    documents,
+    policyBundleDigest: policyBundle.digest,
+    bindings: [{ credential: controlPlaneCredential, channel: "control-plane" }],
+    now: () => now,
+    createId: nextId
+  });
   const controlPlane = new FactoryControlPlane({
     tasks: repository,
     evidence: repository,
@@ -282,18 +365,28 @@ function controlPlaneFixture(addConversation = true) {
     documents,
     policy: new FactoryPolicyEngine(policyBundle.digest),
     policyBundle,
+    evidenceIngress,
+    evidenceCredential: controlPlaneCredential,
     now: () => now,
     createId: nextId
   });
-  return { repository, artifacts, controlPlane, policyBundle, nextId, addActiveConversation };
+  return {
+    repository,
+    artifacts,
+    controlPlane,
+    policyBundle,
+    nextId,
+    addActiveConversation,
+    evidenceIngress,
+    controlPlaneCredential,
+    documents
+  };
 }
 
 async function recordPreparationGates(
   fixture: ReturnType<typeof controlPlaneFixture>,
   contractDigest: string
 ): Promise<void> {
-  const latest = await fixture.repository.latestEvidence(TEST_FACTORY_TASK_ID);
-  if (latest === null) throw new Error("Missing registration evidence.");
   const items: EvidenceItem[] = [];
   for (const gateId of ["contract-validation", "scope-validation", "policy-validation"]) {
     const artifact = await fixture.artifacts.putText(`gate:${gateId}`);
@@ -309,9 +402,9 @@ async function recordPreparationGates(
           sizeBytes: artifact.sizeBytes
         },
         producer: {
-          kind: "ci",
+          kind: "control-plane",
           role: "gate-runner",
-          id: "local-gates",
+          id: "agentlab-local-gates",
           sessionId: null
         },
         createdAt: now,
@@ -319,16 +412,9 @@ async function recordPreparationGates(
       })
     );
   }
-  await fixture.controlPlane.recordEvidenceBundle({
-    schemaVersion: "agentlab.evidence-bundle.v1",
-    bundleId: fixture.nextId(),
+  await fixture.evidenceIngress.append(fixture.controlPlaneCredential, {
     taskId: TEST_FACTORY_TASK_ID,
-    sequence: 2,
     contractDigest,
-    previousBundleDigest: latest.digest,
-    policyBundleDigest: fixture.policyBundle.digest,
-    createdAt: now,
-    items,
-    attestations: []
+    items
   });
 }

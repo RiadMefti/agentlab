@@ -8,6 +8,7 @@ import {
   type FactoryChangeSet,
   type FactoryPolicyDecision,
   type FactoryPolicyOutcome,
+  type FactoryResourceLimits,
   type FactoryRiskTier,
   type ImmutableTaskContract,
   type Sha256Digest
@@ -39,6 +40,7 @@ interface FactoryRiskProfile {
   readonly writeAllowed: boolean;
   readonly networkAllowlistAllowed: boolean;
   readonly minimumIndependentReviews: number;
+  readonly resourceLimits: FactoryResourceLimits;
   readonly minimumHumanApprovals: Readonly<Record<FactoryApprovalStage, number | "forbidden">>;
   readonly requiredGateIds: Readonly<Record<FactoryApprovalStage, readonly string[]>>;
   readonly requiredEvidence: Readonly<Record<FactoryApprovalStage, readonly EvidenceKind[]>>;
@@ -61,6 +63,7 @@ export interface FactoryStageRequirements {
   readonly gateIds: readonly string[];
   readonly evidenceKinds: readonly EvidenceKind[];
   readonly minimumIndependentReviews: number;
+  readonly resourceLimits: FactoryResourceLimits;
 }
 
 const preparationGates = ["contract-validation", "scope-validation", "policy-validation"] as const;
@@ -88,11 +91,15 @@ const executionEvidence = ["contract", "policy"] as const satisfies readonly Evi
 const r1PullRequestEvidence = [
   "contract",
   "policy",
+  "skill",
+  "execution",
   "patch",
+  "usage",
   "test",
   "build",
   "security",
-  "review"
+  "review",
+  "provenance"
 ] as const satisfies readonly EvidenceKind[];
 const mergeEvidence = [
   ...r1PullRequestEvidence,
@@ -104,6 +111,7 @@ const releaseEvidence = [
   "sbom",
   "provenance"
 ] as const satisfies readonly EvidenceKind[];
+const baselinePolicyVersion = "1.1.0";
 
 function profile(input: {
   readonly tier: FactoryRiskTier;
@@ -116,14 +124,16 @@ function profile(input: {
   readonly releaseApprovals: number | "forbidden";
   readonly pullRequestGates: readonly string[];
   readonly pullRequestEvidence: readonly EvidenceKind[];
+  readonly resourceLimits: FactoryResourceLimits;
 }): FactoryRiskProfile {
   return {
     id: `baseline/${input.tier.toLowerCase()}`,
     tier: input.tier,
-    version: "1.0.0",
+    version: baselinePolicyVersion,
     writeAllowed: input.writeAllowed,
     networkAllowlistAllowed: input.networkAllowlistAllowed,
     minimumIndependentReviews: input.minimumIndependentReviews,
+    resourceLimits: input.resourceLimits,
     minimumHumanApprovals: {
       execution: input.executionApprovals,
       "pull-request-creation": input.pullRequestApprovals,
@@ -145,10 +155,22 @@ function profile(input: {
   };
 }
 
+function resourceLimits(
+  maxProcesses: number,
+  memoryGibibytes: number,
+  cpuQuotaPercent: number
+): FactoryResourceLimits {
+  return {
+    maxProcesses,
+    maxMemoryBytes: memoryGibibytes * 1_024 * 1_024 * 1_024,
+    cpuQuotaPercent
+  };
+}
+
 export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
   schemaVersion: "agentlab.factory-policy.v1",
   id: "agentlab/baseline",
-  version: "1.0.0",
+  version: baselinePolicyVersion,
   protectedPaths: [
     { pattern: "apps/**", minimumRiskTier: "R2" },
     { pattern: "packages/*/src/**", minimumRiskTier: "R2" },
@@ -199,7 +221,8 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
       mergeApprovals: "forbidden",
       releaseApprovals: "forbidden",
       pullRequestGates: [],
-      pullRequestEvidence: []
+      pullRequestEvidence: [],
+      resourceLimits: resourceLimits(8, 1, 100)
     }),
     R1: profile({
       tier: "R1",
@@ -211,7 +234,8 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
       mergeApprovals: 1,
       releaseApprovals: "forbidden",
       pullRequestGates: r1PullRequestGates,
-      pullRequestEvidence: r1PullRequestEvidence
+      pullRequestEvidence: r1PullRequestEvidence,
+      resourceLimits: resourceLimits(32, 4, 400)
     }),
     R2: profile({
       tier: "R2",
@@ -223,7 +247,8 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
       mergeApprovals: 1,
       releaseApprovals: 1,
       pullRequestGates: r2PullRequestGates,
-      pullRequestEvidence: r1PullRequestEvidence
+      pullRequestEvidence: r1PullRequestEvidence,
+      resourceLimits: resourceLimits(64, 8, 800)
     }),
     R3: profile({
       tier: "R3",
@@ -235,7 +260,8 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
       mergeApprovals: 2,
       releaseApprovals: 2,
       pullRequestGates: r3PullRequestGates,
-      pullRequestEvidence: [...r1PullRequestEvidence, "provenance"]
+      pullRequestEvidence: [...r1PullRequestEvidence, "provenance"],
+      resourceLimits: resourceLimits(64, 8, 800)
     }),
     R4: profile({
       tier: "R4",
@@ -247,7 +273,8 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
       mergeApprovals: "forbidden",
       releaseApprovals: "forbidden",
       pullRequestGates: [],
-      pullRequestEvidence: []
+      pullRequestEvidence: [],
+      resourceLimits: resourceLimits(8, 1, 100)
     })
   }
 };
@@ -271,7 +298,8 @@ export class FactoryPolicyEngine {
     return {
       gateIds: [...profile.requiredGateIds[stage]],
       evidenceKinds: [...profile.requiredEvidence[stage]],
-      minimumIndependentReviews: profile.minimumIndependentReviews
+      minimumIndependentReviews: profile.minimumIndependentReviews,
+      resourceLimits: { ...profile.resourceLimits }
     };
   }
 
@@ -332,6 +360,23 @@ export class FactoryPolicyEngine {
       input.approvalSubjectDigest
     )) {
       denials.add(reason);
+    }
+    if (input.stage !== "execution") {
+      for (const reason of patchImplementationDenials(
+        input.evidence,
+        input.contract.digest,
+        input.approvalSubjectDigest
+      )) {
+        denials.add(reason);
+      }
+      for (const reason of resourceIsolationDenials(
+        input.evidence,
+        input.contract.digest,
+        input.approvalSubjectDigest,
+        this.policyBundleDigest
+      )) {
+        denials.add(reason);
+      }
     }
     if (
       input.stage !== "execution" &&
@@ -593,11 +638,126 @@ function evidenceSubjectMatches(
 }
 
 function evidenceProducerCanAssert(item: EvidenceItem): boolean {
+  if (item.kind === "execution") {
+    return (
+      item.producer.kind === "agent" &&
+      (item.producer.role === "implementer" ||
+        item.producer.role === "repairer" ||
+        item.producer.role === "reviewer")
+    );
+  }
+  if (item.kind === "review") {
+    return item.producer.kind === "agent" && item.producer.role === "reviewer";
+  }
   return (
     item.producer.kind === "ci" ||
     item.producer.kind === "control-plane" ||
     item.producer.kind === "broker"
   );
+}
+
+function resourceIsolationDenials(
+  evidence: readonly EvidenceItem[],
+  contractDigest: Sha256Digest,
+  approvalSubjectDigest: Sha256Digest,
+  policyBundleDigest: Sha256Digest
+): readonly string[] {
+  const provenance = evidence.filter(
+    (item) =>
+      item.kind === "provenance" &&
+      item.result === "pass" &&
+      item.producer.kind === "ci" &&
+      item.producer.role === "gate-runner" &&
+      item.producer.id === "agentlab-resource-isolator" &&
+      claimValue(item, "policy-bundle-digest") === policyBundleDigest &&
+      claimValue(item, "isolation-mechanism") === "linux/systemd-user-scope"
+  );
+  const reasons = new Set<string>();
+  const successfulAgentRuns = evidence.filter(
+    (item) =>
+      item.kind === "execution" &&
+      item.result === "pass" &&
+      item.subjectDigest === contractDigest &&
+      item.producer.kind === "agent"
+  );
+  for (const execution of successfulAgentRuns) {
+    const executionId = claimValue(execution, "execution-id");
+    const isolationId = claimValue(execution, "isolation-id");
+    if (
+      executionId === null ||
+      isolationId === null ||
+      !provenance.some(
+        (item) =>
+          item.subjectDigest === contractDigest &&
+          claimValue(item, "execution-id") === executionId &&
+          claimValue(item, "isolation-id") === isolationId
+      )
+    ) {
+      reasons.add("missing-resource-isolation/agent");
+    }
+  }
+  const successfulSandboxedGates = evidence.filter(
+    (item) =>
+      (item.kind === "test" ||
+        item.kind === "build" ||
+        item.kind === "security" ||
+        item.kind === "provenance") &&
+      item.result === "pass" &&
+      item.subjectDigest === approvalSubjectDigest &&
+      item.producer.kind === "ci" &&
+      item.producer.role === "gate-runner" &&
+      item.producer.id === "agentlab-local-sandbox" &&
+      claimValue(item, "gate-id") !== null
+  );
+  for (const gate of successfulSandboxedGates) {
+    const gateId = claimValue(gate, "gate-id");
+    const isolationId = claimValue(gate, "isolation-id");
+    if (
+      gateId === null ||
+      isolationId === null ||
+      !provenance.some(
+        (item) =>
+          item.subjectDigest === approvalSubjectDigest &&
+          claimValue(item, "gate-id") === gateId &&
+          claimValue(item, "isolation-id") === isolationId
+      )
+    ) {
+      reasons.add("missing-resource-isolation/gate");
+    }
+  }
+  return [...reasons].sort();
+}
+
+function patchImplementationDenials(
+  evidence: readonly EvidenceItem[],
+  contractDigest: Sha256Digest,
+  approvalSubjectDigest: Sha256Digest
+): readonly string[] {
+  const patch = evidence.find(
+    (item) =>
+      item.kind === "patch" &&
+      item.result === "pass" &&
+      item.subjectDigest === approvalSubjectDigest &&
+      item.producer.kind === "control-plane" &&
+      item.producer.role === "gate-runner" &&
+      item.producer.id === "agentlab-local-gates"
+  );
+  const executionId = patch === undefined ? null : claimValue(patch, "execution-id");
+  if (executionId === null) return ["missing-patch-implementation"];
+  const implemented = evidence.some(
+    (item) =>
+      item.kind === "execution" &&
+      item.result === "pass" &&
+      item.subjectDigest === contractDigest &&
+      item.producer.kind === "agent" &&
+      (item.producer.role === "implementer" || item.producer.role === "repairer") &&
+      claimValue(item, "execution-id") === executionId
+  );
+  return implemented ? [] : ["missing-patch-implementation"];
+}
+
+function claimValue(item: EvidenceItem, name: string): string | null {
+  return item.claims.find((claim) => claim.name === name)?.value ?? null;
 }
 
 function independentReviewerCount(

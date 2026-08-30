@@ -62,6 +62,52 @@ describe("FactoryPolicyEngine", () => {
     });
   });
 
+  it("requires the exact patch-producing execution and its resource isolation", () => {
+    const input = r1PullRequestInput();
+    const required = engine.evaluate(input).requiredGateIds;
+    const complete = passingEvidence(required, input.contract.digest);
+    const withoutAgentIsolation = complete.filter(
+      (item) =>
+        !(
+          item.kind === "provenance" &&
+          item.subjectDigest === input.contract.digest &&
+          item.claims.some((claim) => claim.name === "execution-id")
+        )
+    );
+    expect(engine.evaluate({ ...input, evidence: withoutAgentIsolation }).reasonCodes).toContain(
+      "missing-resource-isolation/agent"
+    );
+
+    const wrongPatchExecution = complete.map((item) =>
+      item.kind === "patch"
+        ? evidenceItemSchema.parse({
+            ...item,
+            claims: item.claims.map((claim) =>
+              claim.name === "execution-id" ? { ...claim, value: numberedUuid(81) } : claim
+            )
+          })
+        : item
+    );
+    expect(engine.evaluate({ ...input, evidence: wrongPatchExecution }).reasonCodes).toContain(
+      "missing-patch-implementation"
+    );
+
+    let changedGate = false;
+    const wrongGateIsolation = complete.map((item) => {
+      if (changedGate || item.producer.id !== "agentlab-local-sandbox") return item;
+      changedGate = true;
+      return evidenceItemSchema.parse({
+        ...item,
+        claims: item.claims.map((claim) =>
+          claim.name === "isolation-id" ? { ...claim, value: numberedUuid(199) } : claim
+        )
+      });
+    });
+    expect(engine.evaluate({ ...input, evidence: wrongGateIsolation }).reasonCodes).toContain(
+      "missing-resource-isolation/gate"
+    );
+  });
+
   it("fails closed when authority, trusted gates, or exact base revision is absent", () => {
     const input = r1PullRequestInput();
     const required = engine.evaluate(input).requiredGateIds;
@@ -178,7 +224,7 @@ describe("FactoryPolicyEngine", () => {
         minimumIndependentReviews: 2,
         requireDistinctReviewSession: true
       },
-      gateProfile: { id: "baseline/r3", version: "1.0.0", policyDigest },
+      gateProfile: { id: "baseline/r3", version: "1.1.0", policyDigest },
       approvals: {
         execution: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
         pullRequestCreation: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
@@ -294,7 +340,7 @@ function policyContract(overrides: Partial<ImmutableTaskContract> = {}): Immutab
     ...overrides,
     gateProfile: overrides.gateProfile ?? {
       id: "baseline/r1",
-      version: "1.0.0",
+      version: "1.1.0",
       policyDigest
     }
   });
@@ -358,7 +404,9 @@ function passingEvidence(
   const kinds: readonly EvidenceKind[] = [
     "contract",
     "policy",
+    "skill",
     "patch",
+    "usage",
     "test",
     "build",
     "security"
@@ -368,11 +416,17 @@ function passingEvidence(
       index: index + 1,
       kind,
       subjectDigest:
-        kind === "contract"
+        kind === "contract" || kind === "skill"
           ? contractDigestValue
           : kind === "policy"
             ? policyDigest
-            : approvalSubject
+            : approvalSubject,
+      ...(kind === "patch"
+        ? {
+            producer: localGateProducer,
+            claims: [{ name: "execution-id", value: numberedUuid(80) }]
+          }
+        : {})
     })
   );
   items.push(
@@ -385,7 +439,11 @@ function passingEvidence(
         id: "implementation-agent",
         sessionId: "implementation-session"
       },
-      subjectDigest: contractDigestValue
+      subjectDigest: contractDigestValue,
+      claims: [
+        { name: "execution-id", value: numberedUuid(80) },
+        { name: "isolation-id", value: numberedUuid(80) }
+      ]
     }),
     evidence({
       index: 21,
@@ -396,17 +454,46 @@ function passingEvidence(
         id: "review-agent",
         sessionId: "review-session"
       }
+    }),
+    evidence({
+      index: 22,
+      kind: "provenance",
+      producer: resourceIsolationProducer,
+      subjectDigest: contractDigestValue,
+      claims: resourceClaims({ name: "execution-id", value: numberedUuid(80) }, numberedUuid(80))
     })
   );
   for (const [index, gateId] of requiredGateIds.entries()) {
+    const preparation = gateId.endsWith("validation") || gateId === "independent-review";
+    const isolationId = numberedUuid(index + 100);
     items.push(
       evidence({
         index: index + 30,
         kind: "test",
         gateId,
-        subjectDigest: gateId.endsWith("validation") ? contractDigestValue : approvalSubject
+        subjectDigest: gateId.endsWith("validation") ? contractDigestValue : approvalSubject,
+        producer: preparation ? localGateProducer : sandboxGateProducer,
+        ...(preparation
+          ? {}
+          : {
+              claims: [
+                { name: "gate-id", value: gateId },
+                { name: "isolation-id", value: isolationId }
+              ]
+            })
       })
     );
+    if (!preparation) {
+      items.push(
+        evidence({
+          index: index + 60,
+          kind: "provenance",
+          subjectDigest: approvalSubject,
+          producer: resourceIsolationProducer,
+          claims: resourceClaims({ name: "gate-id", value: gateId }, isolationId)
+        })
+      );
+    }
   }
   return items;
 }
@@ -430,6 +517,7 @@ function evidence(input: {
   readonly producer?: EvidenceItem["producer"];
   readonly gateId?: string;
   readonly subjectDigest?: Sha256Digest;
+  readonly claims?: readonly { readonly name: string; readonly value: string }[];
 }): EvidenceItem {
   return evidenceItemSchema.parse({
     id: numberedUuid(input.index),
@@ -448,8 +536,40 @@ function evidence(input: {
       sessionId: null
     },
     createdAt: "2026-08-30T12:30:00.000Z",
-    claims: input.gateId === undefined ? [] : [{ name: "gate-id", value: input.gateId }]
+    claims:
+      input.claims ?? (input.gateId === undefined ? [] : [{ name: "gate-id", value: input.gateId }])
   });
+}
+
+const localGateProducer = {
+  kind: "control-plane",
+  role: "gate-runner",
+  id: "agentlab-local-gates",
+  sessionId: null
+} as const;
+const sandboxGateProducer = {
+  kind: "ci",
+  role: "gate-runner",
+  id: "agentlab-local-sandbox",
+  sessionId: null
+} as const;
+const resourceIsolationProducer = {
+  kind: "ci",
+  role: "gate-runner",
+  id: "agentlab-resource-isolator",
+  sessionId: null
+} as const;
+
+function resourceClaims(
+  link: { readonly name: string; readonly value: string },
+  isolationId: string
+) {
+  return [
+    link,
+    { name: "isolation-id", value: isolationId },
+    { name: "policy-bundle-digest", value: policyDigest },
+    { name: "isolation-mechanism", value: "linux/systemd-user-scope" }
+  ];
 }
 
 function approval(

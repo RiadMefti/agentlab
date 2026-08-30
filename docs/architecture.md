@@ -50,15 +50,28 @@ budgets, gates, evidence, and remote authority.
 The source tree now contains the dormant stages 1–4 safety path: strict contracts; an immutable
 SQLite task/evidence ledger; deterministic risk policy and kill switches; content-addressed
 artifacts; exact-base disposable worktrees; bounded provider-native implement, repair, and
-independent-review adapters; sandboxed deterministic gates; and a separate GitHub adapter that can
-reconstruct one exact patch and request only a draft PR after rechecking repository governance. The
-model-bearing subprocess environment is allowlisted and excludes repository, cloud, and package
-credentials. The broker credential is acquired only at the separate broker boundary.
+independent-review adapters; sandboxed deterministic gates; authenticated evidence channels; and a
+separate GitHub adapter that can reconstruct one exact patch and request only a draft PR after
+rechecking repository governance. Factory policy 1.1 pins per-tier process-tree limits. Every agent
+or gate executor requires an injected OS isolator; the Linux adapter creates a unique transient
+systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no unbounded fallback.
+The wrapper strips its user-manager environment before starting the target. Deterministic gates run
+Bubblewrap inside that scope. The model-bearing subprocess environment is allowlisted and excludes
+repository, cloud, and package credentials. The broker credential is acquired only at the separate
+broker boundary.
+
+Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
+capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
+ingress rejects an unknown capability, cross-channel producer impersonation, a mismatched artifact,
+or resource-isolation claims that do not match their canonical record, contract, policy, execution,
+and cgroup identity. Untrusted workers never receive any of those capabilities.
 
 This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled, deployed, or
 enabled. Normal database migration creates only its inert local ledger tables. The repository
 currently lacks the approval and last-push protections required by the broker, so the adapter fails
-closed even if a future composition supplies credentials. Intake skill execution, PR-head repair,
+closed even if a future composition supplies credentials. Complete provider cost accounting,
+target-host sandbox preflight in CI, an isolated short-lived broker identity, and protected-path
+ownership also remain activation prerequisites. Intake skill execution, PR-head repair,
 scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
 stages. Until an explicit activation change meets ADR 0006's prerequisites, user-visible behavior
 and the product network boundary remain unchanged.

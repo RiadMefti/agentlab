@@ -1,4 +1,9 @@
-import { factoryAgentRunRequestSchema, factoryTimestampSchema } from "@agentlab/contracts";
+import {
+  factoryAgentRunRequestSchema,
+  factoryResourceLimitsSchema,
+  factoryTimestampSchema,
+  type FactoryProcessIsolation
+} from "@agentlab/contracts";
 
 import type {
   FactoryAgentExecutionInput,
@@ -6,6 +11,10 @@ import type {
   FactoryAgentExecutor,
   FactoryAgentExecutorCapability
 } from "../../domain/factory-agent-executor.js";
+import {
+  narrowFactoryResourceLimits,
+  type FactoryProcessIsolator
+} from "../../domain/factory-process-isolation.js";
 import {
   commandFailureDetails,
   type CommandFailureKind,
@@ -22,6 +31,7 @@ const maximumPromptBytes = 1024 * 1024;
 
 export interface LocalFactoryAgentExecutorOptions {
   readonly now: () => string;
+  readonly processIsolator: FactoryProcessIsolator;
   readonly adapters?: readonly FactoryAgentAdapter[];
   readonly hostEnvironment?: NodeJS.ProcessEnv;
 }
@@ -32,11 +42,13 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
   readonly #now: () => string;
   readonly #hostEnvironment: NodeJS.ProcessEnv;
   readonly #adapters: ReadonlyMap<string, FactoryAgentAdapter>;
+  readonly #processIsolator: FactoryProcessIsolator;
 
   public constructor(runner: CommandRunner, options: LocalFactoryAgentExecutorOptions) {
     this.#runner = runner;
     this.#now = options.now;
     this.#hostEnvironment = options.hostEnvironment ?? process.env;
+    this.#processIsolator = options.processIsolator;
     const adapters = options.adapters ?? [codexFactoryAgentAdapter, claudeFactoryAgentAdapter];
     if (new Set(adapters.map(({ id }) => id)).size !== adapters.length) {
       throw new Error("Factory agent adapters must have unique provider IDs.");
@@ -59,10 +71,19 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
       throw new Error("Factory prompt bytes do not match their bounded artifact reference.");
     }
     const invocation = adapter.build(request, input.executable, input.workspace, input.prompt);
+    const resourceLimits = narrowFactoryResourceLimits(
+      factoryResourceLimitsSchema.parse(input.resourceLimits),
+      request.budget.maxProcesses
+    );
+    const isolated = await this.#processIsolator.isolate({
+      command: invocation.command,
+      isolationId: request.executionId,
+      limits: resourceLimits
+    });
     const startedAt = this.#timestamp();
     let result: RunResult;
     try {
-      result = await this.#runner.run(invocation.command.executable, invocation.command.args, {
+      result = await this.#runner.run(isolated.command.executable, isolated.command.args, {
         cwd: input.workspace.root,
         timeoutMs: request.budget.wallClockSeconds * 1_000,
         maxInputBytes: maximumPromptBytes,
@@ -70,11 +91,14 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
         maxCombinedBufferBytes: request.budget.maxOutputBytes,
         cleanupProcessTree: true,
         stdin: invocation.stdin,
-        environment: factoryAgentEnvironment(
-          request.provider,
-          this.#hostEnvironment,
-          invocation.command.environment
-        )
+        environment: {
+          ...factoryAgentEnvironment(
+            request.provider,
+            this.#hostEnvironment,
+            invocation.command.environment
+          ),
+          ...isolated.controllerEnvironment
+        }
       });
     } catch (error: unknown) {
       return failedOutput(
@@ -82,7 +106,8 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
         input.providerVersion,
         invocation.harnessVersion,
         startedAt,
-        this.#timestamp()
+        this.#timestamp(),
+        isolated.isolation
       );
     }
     const finishedAt = this.#timestamp();
@@ -99,7 +124,8 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
         }),
         status: "succeeded",
         exitCode: 0,
-        errorCode: null
+        errorCode: null,
+        isolation: isolated.isolation
       };
     } catch {
       return failedOutput(
@@ -108,6 +134,7 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
         invocation.harnessVersion,
         startedAt,
         finishedAt,
+        isolated.isolation,
         result,
         "provider-output-invalid"
       );
@@ -125,6 +152,7 @@ function failedOutput(
   harnessVersion: string,
   startedAt: string,
   finishedAt: string,
+  isolation: FactoryProcessIsolation,
   knownOutput?: RunResult,
   forcedErrorCode?: string
 ): FactoryAgentExecutionOutput {
@@ -150,7 +178,8 @@ function failedOutput(
       outputBytes: Buffer.byteLength(stdout) + Buffer.byteLength(stderr)
     },
     usageComplete: false,
-    errorCode: forcedErrorCode ?? failureCode(details?.kind ?? null)
+    errorCode: forcedErrorCode ?? failureCode(details?.kind ?? null),
+    isolation
   };
 }
 

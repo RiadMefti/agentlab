@@ -7,6 +7,7 @@ import {
   immutableTaskContractSchema,
   type FactoryAgentRunRequest,
   type FactoryBudgetUsage,
+  type FactoryResourceLimits,
   type FactorySkillPackage,
   type ImmutableTaskContract
 } from "@agentlab/contracts";
@@ -14,6 +15,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ArtifactFactorySkillSource } from "../../packages/runtime/src/application/artifact-factory-skill-source.js";
 import { FactoryControlPlane } from "../../packages/runtime/src/application/factory-control-plane.js";
+import {
+  createFactoryEvidenceCredential,
+  FactoryEvidenceIngress
+} from "../../packages/runtime/src/application/factory-evidence-ingress.js";
 import { FactoryExecutionService } from "../../packages/runtime/src/application/factory-execution-service.js";
 import { FactoryPullRequestService } from "../../packages/runtime/src/application/factory-pull-request-service.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
@@ -296,6 +301,31 @@ async function executionFixture(
   let id = 1_000;
   const createId = (): string => `00000000-0000-4000-8000-${String(id++).padStart(12, "0")}`;
   const now = () => "2026-08-30T13:00:00.000Z";
+  const evidenceCredentials = {
+    controlPlane: createFactoryEvidenceCredential(),
+    executionObserver: createFactoryEvidenceCredential(),
+    gateObserver: createFactoryEvidenceCredential(),
+    prBroker: createFactoryEvidenceCredential()
+  };
+  const evidenceIngress = new FactoryEvidenceIngress({
+    tasks: repository,
+    evidence: repository,
+    artifacts,
+    documents,
+    policyBundleDigest: policyBundle.digest,
+    bindings: [
+      { credential: evidenceCredentials.controlPlane, channel: "control-plane" },
+      { credential: evidenceCredentials.executionObserver, channel: "execution-observer" },
+      { credential: evidenceCredentials.gateObserver, channel: "gate-observer" },
+      {
+        credential: evidenceCredentials.prBroker,
+        channel: "pr-broker",
+        producerId: "test-pr-broker"
+      }
+    ],
+    now,
+    createId
+  });
   const controlPlane = new FactoryControlPlane({
     tasks: repository,
     evidence: repository,
@@ -305,6 +335,8 @@ async function executionFixture(
     documents,
     policy,
     policyBundle,
+    evidenceIngress,
+    evidenceCredential: evidenceCredentials.controlPlane,
     now,
     createId
   });
@@ -320,7 +352,7 @@ async function executionFixture(
   }
   for (const gateId of ["contract-validation", "scope-validation", "policy-validation"]) {
     const artifact = await artifacts.putText(`pass:${gateId}`);
-    await controlPlane.recordEvidenceItems({
+    await evidenceIngress.append(evidenceCredentials.controlPlane, {
       taskId: TEST_FACTORY_TASK_ID,
       contractDigest: task.contractDigest,
       items: [
@@ -373,6 +405,8 @@ async function executionFixture(
     evidence: repository,
     conversations,
     controlPlane,
+    evidenceIngress,
+    evidenceCredentials,
     artifacts,
     documents,
     policy,
@@ -391,6 +425,8 @@ async function executionFixture(
       controls: repository,
       conversations,
       controlPlane,
+      evidenceIngress,
+      evidenceCredentials,
       artifacts,
       documents,
       remote,
@@ -482,6 +518,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
     return Promise.resolve(
       successfulRun(
         input.request,
+        input.resourceLimits,
         this.missingReviewerIdentity && input.request.role === "reviewer"
       )
     );
@@ -490,6 +527,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
 
 class FakeGateExecutor implements FactoryGateExecutor {
   readonly #calls = new Map<string, number>();
+  #isolationSequence = 1;
   public readonly executed: string[] = [];
 
   public constructor(
@@ -506,6 +544,7 @@ class FakeGateExecutor implements FactoryGateExecutor {
     const count = (this.#calls.get(input.gateId) ?? 0) + 1;
     this.#calls.set(input.gateId, count);
     const failed = this.failFirstGate && input.gateId === "format" && count === 1;
+    const isolationId = `55555555-5555-4555-8555-${String(this.#isolationSequence++).padStart(12, "0")}`;
     return Promise.resolve({
       gateId: input.gateId,
       evidenceKind:
@@ -518,7 +557,8 @@ class FakeGateExecutor implements FactoryGateExecutor {
       wallClockSeconds: this.wallClockSeconds,
       outputBytes: failed ? 4 : 2,
       stdout: failed ? "" : "ok",
-      stderr: failed ? "fail" : ""
+      stderr: failed ? "fail" : "",
+      isolation: testIsolation(isolationId, input.resourceLimits)
     });
   }
 }
@@ -610,7 +650,7 @@ function executableContract(
         dependsOn: ["factory/implement"]
       }
     ],
-    gateProfile: { id: "baseline/r1", version: "1.0.0", policyDigest }
+    gateProfile: { id: "baseline/r1", version: "1.1.0", policyDigest }
   });
 }
 
@@ -656,6 +696,7 @@ function skillPackage(
 
 function successfulRun(
   request: FactoryAgentRunRequest,
+  resourceLimits: FactoryResourceLimits,
   missingProviderSession = false
 ): FactoryAgentExecutionOutput {
   const reviewer = request.role === "reviewer";
@@ -683,8 +724,18 @@ function successfulRun(
       workers: 1
     },
     usageComplete: true,
-    errorCode: null
+    errorCode: null,
+    isolation: testIsolation(request.executionId, resourceLimits)
   };
+}
+
+function testIsolation(isolationId: string, limits: FactoryResourceLimits) {
+  return {
+    isolationId,
+    mechanism: { id: "linux/systemd-user-scope", version: "test-systemd-1" },
+    scopeName: `agentlab-factory-${isolationId.replaceAll("-", "")}.scope`,
+    limits
+  } as const;
 }
 
 function workspacePatch(attempt: number, mutated: boolean): FactoryWorkspacePatch {
@@ -752,9 +803,9 @@ const policyActor = {
   sessionId: null
 } as const;
 const gateActor = {
-  kind: "ci",
+  kind: "control-plane",
   role: "gate-runner",
-  id: "local-gates",
+  id: "agentlab-local-gates",
   sessionId: null
 } as const;
 const zeroUsage: FactoryBudgetUsage = {

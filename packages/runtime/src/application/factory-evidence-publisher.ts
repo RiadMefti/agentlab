@@ -7,10 +7,12 @@ import {
   factoryReviewResultSchema,
   type FactoryAgentRunRequest,
   type FactoryPatchProposal,
+  type FactoryProcessIsolation,
   type FactoryPullRequestProposal,
   type FactoryPullRequestRecord,
   type FactoryReviewResult,
   type FactoryBudgetUsage,
+  type EvidenceItem,
   type Sha256Digest
 } from "@agentlab/contracts";
 
@@ -24,7 +26,10 @@ import type { FactoryGateExecutionOutput } from "../domain/factory-gate.js";
 import type { ResolvedFactorySkill } from "../domain/factory-skill.js";
 import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
 import type { FactoryWorkspacePatch } from "../domain/factory-workspace.js";
-import type { FactoryControlPlane } from "./factory-control-plane.js";
+import type {
+  FactoryEvidenceCredential,
+  FactoryEvidenceIngress
+} from "./factory-evidence-ingress.js";
 
 export interface PublishedFactoryAgentRun {
   readonly document: ReturnType<FactoryDocumentCodec["agentRun"]>;
@@ -36,8 +41,16 @@ export interface PublishedFactoryAgentRun {
   };
 }
 
+export interface FactoryEvidencePublisherCredentials {
+  readonly controlPlane: FactoryEvidenceCredential;
+  readonly executionObserver: FactoryEvidenceCredential;
+  readonly gateObserver: FactoryEvidenceCredential;
+  readonly prBroker: FactoryEvidenceCredential;
+}
+
 export interface FactoryEvidencePublisherDependencies {
-  readonly controlPlane: Pick<FactoryControlPlane, "recordEvidenceItems">;
+  readonly evidenceIngress: FactoryEvidenceIngress;
+  readonly credentials: Partial<FactoryEvidencePublisherCredentials>;
   readonly artifacts: FactoryArtifactStore;
   readonly documents: FactoryDocumentCodec;
   readonly now: () => string;
@@ -89,13 +102,29 @@ export class FactoryEvidencePublisher {
       record,
       "application/vnd.agentlab.agent-run-record.v1+json"
     );
+    const isolationRecord = this.dependencies.documents.resourceIsolation({
+      schemaVersion: "agentlab.resource-isolation-record.v1",
+      taskId: task.contract.taskId,
+      contractDigest: task.contractDigest,
+      policyBundleDigest: task.contract.gateProfile.policyDigest,
+      subjectDigest: task.contractDigest,
+      attempt: request.attempt,
+      execution: { kind: "agent", executionId: request.executionId },
+      isolation: output.isolation,
+      result: output.status === "succeeded" ? "enforced" : "failed",
+      observedAt: output.finishedAt
+    });
+    const isolationArtifact = await this.#documentArtifact(
+      isolationRecord,
+      "application/vnd.agentlab.resource-isolation-record.v1+json"
+    );
     const actor = {
       kind: "agent",
       role: request.role,
       id: `worker/${request.executionId}`,
       sessionId: output.providerSessionId
     } as const;
-    await this.#append(task, [
+    await this.#append(this.#credential("executionObserver"), task, [
       evidenceItemSchema.parse({
         id: this.dependencies.createId(),
         kind: "execution",
@@ -106,9 +135,23 @@ export class FactoryEvidencePublisher {
         createdAt: output.finishedAt,
         claims: [
           { name: "execution-id", value: request.executionId },
+          { name: "isolation-id", value: output.isolation.isolationId },
           { name: "provider", value: request.provider },
           { name: "status", value: output.status }
         ]
+      }),
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "provenance",
+        result: isolationRecord.value.result === "enforced" ? "pass" : "fail",
+        subjectDigest: task.contractDigest,
+        artifact: isolationArtifact,
+        producer: resourceIsolationActor,
+        createdAt: output.finishedAt,
+        claims: resourceIsolationClaims(isolationRecord.value.isolation, [
+          { name: "execution-id", value: request.executionId },
+          { name: "policy-bundle-digest", value: task.contract.gateProfile.policyDigest }
+        ])
       })
     ]);
     return { document: record, actor };
@@ -144,7 +187,7 @@ export class FactoryEvidencePublisher {
         });
       })
     );
-    await this.#append(task, items);
+    await this.#append(this.#credential("controlPlane"), task, items);
   }
 
   public async patch(
@@ -175,7 +218,7 @@ export class FactoryEvidencePublisher {
       proposal,
       "application/vnd.agentlab.patch-proposal.v1+json"
     );
-    await this.#append(task, [
+    await this.#append(this.#credential("controlPlane"), task, [
       evidenceItemSchema.parse({
         id: this.dependencies.createId(),
         kind: "patch",
@@ -186,7 +229,8 @@ export class FactoryEvidencePublisher {
         createdAt: proposal.value.createdAt,
         claims: [
           { name: "patch-digest", value: patchArtifact.digest },
-          { name: "base-revision", value: proposal.value.baseRevision }
+          { name: "base-revision", value: proposal.value.baseRevision },
+          { name: "execution-id", value: executionId }
         ]
       })
     ]);
@@ -196,7 +240,8 @@ export class FactoryEvidencePublisher {
   public async gate(
     task: FactoryTaskSnapshot,
     subjectDigest: Sha256Digest,
-    output: FactoryGateExecutionOutput
+    output: FactoryGateExecutionOutput,
+    attempt: number
   ): Promise<void> {
     const stdoutArtifact = await this.#textArtifact(output.stdout, "text/plain");
     const stderrArtifact = await this.#textArtifact(output.stderr, "text/plain");
@@ -220,7 +265,23 @@ export class FactoryEvidencePublisher {
       observation,
       "application/vnd.agentlab.gate-observation.v1+json"
     );
-    await this.#append(task, [
+    const isolationRecord = this.dependencies.documents.resourceIsolation({
+      schemaVersion: "agentlab.resource-isolation-record.v1",
+      taskId: task.contract.taskId,
+      contractDigest: task.contractDigest,
+      policyBundleDigest: task.contract.gateProfile.policyDigest,
+      subjectDigest,
+      attempt,
+      execution: { kind: "gate", gateId: output.gateId },
+      isolation: output.isolation,
+      result: output.result === "pass" ? "enforced" : "failed",
+      observedAt: output.finishedAt
+    });
+    const isolationArtifact = await this.#documentArtifact(
+      isolationRecord,
+      "application/vnd.agentlab.resource-isolation-record.v1+json"
+    );
+    await this.#append(this.#credential("gateObserver"), task, [
       evidenceItemSchema.parse({
         id: this.dependencies.createId(),
         kind: output.evidenceKind,
@@ -231,8 +292,22 @@ export class FactoryEvidencePublisher {
         createdAt: output.finishedAt,
         claims: [
           { name: "gate-id", value: output.gateId },
-          { name: "gate-result", value: output.result }
+          { name: "gate-result", value: output.result },
+          { name: "isolation-id", value: output.isolation.isolationId }
         ]
+      }),
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "provenance",
+        result: isolationRecord.value.result === "enforced" ? "pass" : "fail",
+        subjectDigest,
+        artifact: isolationArtifact,
+        producer: resourceIsolationActor,
+        createdAt: output.finishedAt,
+        claims: resourceIsolationClaims(isolationRecord.value.isolation, [
+          { name: "gate-id", value: output.gateId },
+          { name: "policy-bundle-digest", value: task.contract.gateProfile.policyDigest }
+        ])
       })
     ]);
   }
@@ -245,7 +320,7 @@ export class FactoryEvidencePublisher {
     summary: string
   ): Promise<void> {
     const artifact = await this.#textArtifact(summary, "text/plain");
-    await this.#append(task, [
+    await this.#append(this.#credential("controlPlane"), task, [
       evidenceItemSchema.parse({
         id: this.dependencies.createId(),
         kind: "test",
@@ -335,7 +410,7 @@ export class FactoryEvidencePublisher {
         ]
       })
     ];
-    await this.#append(input.task, items);
+    await this.#append(this.#credential("executionObserver"), input.task, items);
     return review;
   }
 
@@ -358,7 +433,7 @@ export class FactoryEvidencePublisher {
       record,
       "application/vnd.agentlab.task-usage-record.v1+json"
     );
-    await this.#append(task, [
+    await this.#append(this.#credential("controlPlane"), task, [
       evidenceItemSchema.parse({
         id: this.dependencies.createId(),
         kind: "usage",
@@ -380,9 +455,7 @@ export class FactoryEvidencePublisher {
     readonly task: FactoryTaskSnapshot;
     readonly proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>;
     readonly record: FactoryPullRequestRecord;
-    readonly authorizingPolicyItem: Parameters<
-      FactoryControlPlane["recordEvidenceItems"]
-    >[0]["items"][number];
+    readonly authorizingPolicyItem: EvidenceItem;
   }): Promise<void> {
     if (
       input.authorizingPolicyItem.kind !== "policy" ||
@@ -400,7 +473,7 @@ export class FactoryEvidencePublisher {
       recordDocument,
       "application/vnd.agentlab.pull-request-record.v1+json"
     );
-    await this.#append(input.task, [
+    await this.#append(this.#credential("prBroker"), input.task, [
       evidenceItemSchema.parse({
         ...input.authorizingPolicyItem,
         id: this.dependencies.createId()
@@ -441,11 +514,20 @@ export class FactoryEvidencePublisher {
     return artifact;
   }
 
+  #credential(name: keyof FactoryEvidencePublisherCredentials): FactoryEvidenceCredential {
+    const credential = this.dependencies.credentials[name];
+    if (credential === undefined) {
+      throw new Error(`Factory evidence publisher has no ${name} capability.`);
+    }
+    return credential;
+  }
+
   async #append(
+    credential: FactoryEvidenceCredential,
     task: FactoryTaskSnapshot,
-    items: Parameters<FactoryControlPlane["recordEvidenceItems"]>[0]["items"]
+    items: readonly EvidenceItem[]
   ): Promise<void> {
-    await this.dependencies.controlPlane.recordEvidenceItems({
+    await this.dependencies.evidenceIngress.append(credential, {
       taskId: task.contract.taskId,
       contractDigest: task.contractDigest,
       items
@@ -466,3 +548,23 @@ const ciGateActor = {
   id: "agentlab-local-sandbox",
   sessionId: null
 } as const;
+
+const resourceIsolationActor = {
+  kind: "ci",
+  role: "gate-runner",
+  id: "agentlab-resource-isolator",
+  sessionId: null
+} as const;
+
+function resourceIsolationClaims(
+  isolation: FactoryProcessIsolation,
+  additional: readonly { readonly name: string; readonly value: string }[]
+) {
+  return [
+    ...additional,
+    { name: "isolation-id", value: isolation.isolationId },
+    { name: "isolation-mechanism", value: isolation.mechanism.id },
+    { name: "isolation-version", value: isolation.mechanism.version },
+    { name: "scope-name", value: isolation.scopeName }
+  ];
+}

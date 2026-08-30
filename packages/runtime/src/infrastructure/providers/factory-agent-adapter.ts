@@ -34,7 +34,7 @@ export interface FactoryAgentAdapter {
   ): FactoryAgentCommand;
   parse(
     input: FactoryAgentParseInput
-  ): Omit<FactoryAgentExecutionOutput, "exitCode" | "status" | "errorCode">;
+  ): Omit<FactoryAgentExecutionOutput, "exitCode" | "status" | "errorCode" | "isolation">;
 }
 
 export function emptyFactoryBudgetUsage(): FactoryBudgetUsage {
