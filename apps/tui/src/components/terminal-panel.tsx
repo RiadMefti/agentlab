@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { terminalScrollbackBytes, type AgentSession } from "@agentlab/contracts";
+import type { AgentSession } from "@agentlab/contracts";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { maximumTerminalDimension, type SessionTerminal } from "@agentlab/runtime";
 
@@ -10,6 +10,7 @@ import {
   type EmbeddedTerminalRenderable
 } from "../terminal/embedded-terminal.js";
 import { TerminalIngestionPump } from "../terminal/terminal-ingestion-pump.js";
+import { terminalScrollbackBytes } from "../terminal/terminal-config.js";
 import { useRuntime } from "../runtime-context.js";
 import { palette } from "../theme.js";
 
@@ -55,11 +56,13 @@ export function mountedTerminalWriter(
 export function TerminalPanel({
   conversationId,
   session,
+  providerLabel,
   active,
   onActivate
 }: {
   readonly conversationId: string | null;
   readonly session: AgentSession | null;
+  readonly providerLabel: string;
   readonly active: boolean;
   readonly onActivate: () => void;
 }) {
@@ -253,7 +256,7 @@ export function TerminalPanel({
         <text fg={palette.text} attributes={1} wrapMode="none" truncate flexShrink={1}>
           {targetSession?.label ?? "Agent"}
           <span fg={palette.muted} attributes={0}>
-            {`  /  ${providerLabel(targetSession?.provider)}`}
+            {`  /  ${providerLabel}`}
           </span>
         </text>
         <text fg={connectionColor(connection, switching)} flexShrink={0}>
@@ -290,13 +293,6 @@ export function TerminalPanel({
 function normalizeHistory(history: string): string {
   const normalized = history.replace(/\r?\n/gu, "\r\n");
   return normalized.endsWith("\r\n") ? normalized : `${normalized}\r\n`;
-}
-
-function providerLabel(provider: AgentSession["provider"] | undefined): string {
-  if (provider === "opencode") return "OpenCode";
-  if (provider === "claude") return "Claude";
-  if (provider === "codex") return "Codex";
-  return "Agent";
 }
 
 function connectionLabel(

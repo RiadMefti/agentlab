@@ -5,7 +5,8 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { FolderCompletionInput, FolderSuggestion } from "@agentlab/contracts";
 
 import type { FolderCompleter } from "../../domain/folder-completer.js";
-import { withTimeout } from "../../domain/promise-timeout.js";
+import type { AsyncOperationOwner } from "../../domain/async-operation-owner.js";
+import { withTimeout } from "../process/promise-timeout.js";
 
 const MAX_DIRECTORY_ENTRIES = 4_096;
 const PROCESSING_BUDGET_MS = 25;
@@ -42,6 +43,7 @@ export interface FolderCompleterFilesystem {
 export interface NodeFolderCompleterOptions {
   readonly filesystem?: FolderCompleterFilesystem;
   readonly operationTimeoutMs?: number;
+  readonly operationOwner?: AsyncOperationOwner;
 }
 
 /** Non-recursive, bounded directory completion. Errors degrade to no suggestions. */
@@ -87,18 +89,24 @@ export class NodeFolderCompleter implements FolderCompleter {
     const filesystem = this.options.filesystem ?? { opendir, stat };
     const operationTimeoutMs = this.options.operationTimeoutMs ?? FILESYSTEM_OPERATION_TIMEOUT_MS;
     let handle: DirectoryHandle | null = null;
-    const pendingOpen = Promise.resolve().then(() => filesystem.opendir(directory));
+    const pendingOpen = ownOperation(
+      Promise.resolve().then(() => filesystem.opendir(directory)),
+      this.options.operationOwner
+    );
     try {
-      handle = await withTimeout(pendingOpen, {
-        timeoutMs: operationTimeoutMs,
-        message: "Folder completion timed out while opening the directory."
-      });
+      handle = await withOptionalTimeout(
+        pendingOpen,
+        this.options.operationOwner,
+        operationTimeoutMs,
+        "Folder completion timed out while opening the directory."
+      );
       const scan = await collectFolderEntries(
         handle,
         directory,
         this.now,
         filesystem.stat.bind(filesystem),
-        operationTimeoutMs
+        operationTimeoutMs,
+        this.options.operationOwner
       );
       if (!scan.complete) return scan.entries;
       this.store(directory, scan.entries);
@@ -106,13 +114,16 @@ export class NodeFolderCompleter implements FolderCompleter {
     } catch {
       if (handle === null) {
         void pendingOpen.then(
-          (lateHandle) => closeDirectory(lateHandle, operationTimeoutMs),
+          (lateHandle) =>
+            closeDirectory(lateHandle, operationTimeoutMs, this.options.operationOwner),
           () => undefined
         );
       }
       return [];
     } finally {
-      if (handle !== null) await closeDirectory(handle, operationTimeoutMs);
+      if (handle !== null) {
+        await closeDirectory(handle, operationTimeoutMs, this.options.operationOwner);
+      }
     }
   }
 
@@ -131,7 +142,8 @@ export async function collectFolderEntries(
   directory: string,
   now: () => number,
   statPath: (path: string) => Promise<{ isDirectory(): boolean }>,
-  operationTimeoutMs: number = FILESYSTEM_OPERATION_TIMEOUT_MS
+  operationTimeoutMs: number = FILESYSTEM_OPERATION_TIMEOUT_MS,
+  operationOwner?: AsyncOperationOwner
 ): Promise<{ readonly entries: readonly Entry[]; readonly complete: boolean }> {
   const entries: Entry[] = [];
   const symlinks: string[] = [];
@@ -147,10 +159,12 @@ export async function collectFolderEntries(
     }
     let result: IteratorResult<DirectoryEntry>;
     try {
-      result = await withTimeout(iterator.next(), {
-        timeoutMs: Math.max(1, Math.min(operationTimeoutMs, Math.ceil(remainingMs))),
-        message: "Folder completion timed out while reading the directory."
-      });
+      result = await withOptionalTimeout(
+        ownOperation(iterator.next(), operationOwner),
+        operationOwner,
+        Math.max(1, Math.min(operationTimeoutMs, Math.ceil(remainingMs))),
+        "Folder completion timed out while reading the directory."
+      );
     } catch {
       complete = false;
       break;
@@ -173,10 +187,12 @@ export async function collectFolderEntries(
       break;
     }
     try {
-      const metadata = await withTimeout(statPath(join(directory, name)), {
-        timeoutMs: Math.max(1, Math.min(operationTimeoutMs, Math.ceil(remainingMs))),
-        message: "Folder completion timed out while checking a symlink."
-      });
+      const metadata = await withOptionalTimeout(
+        ownOperation(statPath(join(directory, name)), operationOwner),
+        operationOwner,
+        Math.max(1, Math.min(operationTimeoutMs, Math.ceil(remainingMs))),
+        "Folder completion timed out while checking a symlink."
+      );
       if (metadata.isDirectory()) {
         entries.push({ name, symlink: true });
       }
@@ -187,15 +203,37 @@ export async function collectFolderEntries(
   return { entries, complete };
 }
 
-async function closeDirectory(handle: DirectoryHandle, timeoutMs: number): Promise<void> {
+async function closeDirectory(
+  handle: DirectoryHandle,
+  timeoutMs: number,
+  operationOwner?: AsyncOperationOwner
+): Promise<void> {
   try {
-    await withTimeout(handle.close(), {
+    await withOptionalTimeout(
+      ownOperation(handle.close(), operationOwner),
+      operationOwner,
       timeoutMs,
-      message: "Folder completion timed out while closing the directory."
-    });
+      "Folder completion timed out while closing the directory."
+    );
   } catch {
     // Completion is best effort and cannot leave the modal waiting on close diagnostics.
   }
+}
+
+function ownOperation<Output>(
+  operation: Promise<Output>,
+  owner: AsyncOperationOwner | undefined
+): Promise<Output> {
+  return owner?.own(operation) ?? operation;
+}
+
+function withOptionalTimeout<Output>(
+  operation: Promise<Output>,
+  owner: AsyncOperationOwner | undefined,
+  timeoutMs: number,
+  message: string
+): Promise<Output> {
+  return owner === undefined ? operation : withTimeout(operation, { timeoutMs, message });
 }
 
 function completionParts(

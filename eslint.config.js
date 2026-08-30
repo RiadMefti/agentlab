@@ -21,8 +21,9 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["scripts/*.mjs"],
-          defaultProject: "tsconfig.base.json"
+          allowDefaultProject: ["scripts/*.mjs", "tests/fixtures/*.mjs"],
+          defaultProject: "tsconfig.base.json",
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 9
         },
         tsconfigRootDir: import.meta.dirname
       }
@@ -39,7 +40,7 @@ export default tseslint.config(
     }
   },
   {
-    files: ["packages/**/*.ts", "scripts/*.{mjs,ts}", "*.config.{js,ts}"],
+    files: ["packages/**/*.ts", "scripts/*.{mjs,ts}", "tests/fixtures/*.mjs", "*.config.{js,ts}"],
     languageOptions: { globals: { ...globals.node, Bun: "readonly" } }
   },
   {

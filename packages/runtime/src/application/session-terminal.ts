@@ -1,12 +1,18 @@
 import { z } from "zod";
 
-import type { Disposable, PseudoTerminal } from "../domain/terminal.js";
+import type {
+  Disposable,
+  ManagedPseudoTerminal,
+  ManagedTerminalResourceOwner
+} from "../domain/terminal.js";
+import { RuntimeResourceOwner } from "./runtime-resource-owner.js";
 
 export const maximumTerminalDimension = 1_000;
 export const maximumOrderedTerminalOutputBytes = 1024 * 1024;
 
 const terminalColumnsSchema = z.number().int().min(2).max(maximumTerminalDimension);
 const terminalRowsSchema = z.number().int().min(1).max(maximumTerminalDimension);
+const utf8Encoder = new TextEncoder();
 
 export function parseTerminalDimensions(
   columns: unknown,
@@ -65,7 +71,7 @@ export class OrderedSessionTerminalCallbacks implements SessionTerminalCallbacks
       return;
     }
     if (this.#overrun) return;
-    const bytes = Buffer.byteLength(data);
+    const bytes = utf8Encoder.encode(data).byteLength;
     if (bytes > this.#maximumBytes - this.#bufferedBytes) {
       // Never replay a partial escape stream. Presentation closes this ephemeral client and
       // reattaches from durable tmux history when release reports the recoverable overrun.
@@ -84,6 +90,14 @@ export class OrderedSessionTerminalCallbacks implements SessionTerminalCallbacks
     else if (!this.#overrun) this.#events.push({ kind: "exit", exitCode });
   };
 
+  public readonly onOutputOverrun = (bufferedBytes: number): void => {
+    if (this.#released || this.#overrun) return;
+    this.#overrun = true;
+    this.#overrunBytes = bufferedBytes;
+    this.#events.splice(0);
+    this.#bufferedBytes = 0;
+  };
+
   public release(): BufferedTerminalRelease {
     if (this.#released) return { bufferedBytes: 0, overrun: this.#overrun };
     this.#released = true;
@@ -100,32 +114,46 @@ export class OrderedSessionTerminalCallbacks implements SessionTerminalCallbacks
 
 /** Owns a single PTY attachment while leaving its durable tmux session alive. */
 export class AttachedSessionTerminal implements SessionTerminal {
-  readonly #process: PseudoTerminal;
+  readonly #process: ManagedPseudoTerminal;
   readonly #subscriptions: Disposable[] = [];
   readonly #onClose: () => void;
   #closed = false;
+  #closeInFlight: Promise<void> | null = null;
+  #subscriptionsDisposed = false;
+  #ownershipReleased = false;
 
   public constructor(
-    process: PseudoTerminal,
+    process: ManagedPseudoTerminal,
     callbacks: SessionTerminalCallbacks,
     onClose: () => void = () => undefined
   ) {
     this.#process = process;
     this.#onClose = onClose;
-    this.#subscriptions.push(process.onData(callbacks.onData));
-    const exitSubscription = process.onExit(({ exitCode }) => {
-      try {
-        callbacks.onExit(exitCode);
-      } finally {
-        this.close();
+    try {
+      this.#subscriptions.push(process.onData(callbacks.onData));
+      const pendingOverrun = process.consumePendingOutputOverrun?.() ?? null;
+      if (pendingOverrun !== null && "onOutputOverrun" in callbacks) {
+        const reportOverrun = callbacks.onOutputOverrun;
+        if (typeof reportOverrun === "function") reportOverrun.call(callbacks, pendingOverrun);
       }
-    });
-    if (this.#closed) exitSubscription.dispose();
-    else this.#subscriptions.push(exitSubscription);
+      const exitSubscription = process.onExit(({ exitCode }) => {
+        try {
+          callbacks.onExit(exitCode);
+        } finally {
+          this.completeClose();
+        }
+      });
+      if (this.#closed) exitSubscription.dispose();
+      else this.#subscriptions.push(exitSubscription);
+      if (pendingOverrun !== null) this.close();
+    } catch (error: unknown) {
+      this.disposeSubscriptions();
+      throw error;
+    }
   }
 
   public write(data: Uint8Array): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#closeInFlight !== null) return;
     this.#process.write(data);
   }
 
@@ -134,50 +162,49 @@ export class AttachedSessionTerminal implements SessionTerminal {
   }
 
   public resize(columns: number, rows: number): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#closeInFlight !== null) return;
     const dimensions = parseTerminalDimensions(columns, rows);
     this.#process.resize(dimensions.columns, dimensions.rows);
   }
 
   public close(): void {
+    void this.closeAndWait().catch(() => undefined);
+  }
+
+  public closeAndWait(): Promise<void> {
+    if (this.#closed) return Promise.resolve();
+    if (this.#closeInFlight !== null) return this.#closeInFlight;
+    this.disposeSubscriptions();
+    const attempt = Promise.resolve()
+      .then(() => this.#process.killAndWait())
+      .then(() => {
+        this.completeClose();
+      });
+    const shared = attempt.finally(() => {
+      if (this.#closeInFlight === shared && !this.#closed) this.#closeInFlight = null;
+    });
+    this.#closeInFlight = shared;
+    return shared;
+  }
+
+  private completeClose(): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const subscription of this.#subscriptions) subscription.dispose();
-    try {
-      this.#process.kill();
-    } catch {
-      // The tmux client PTY may already have exited. Its tmux session remains durable.
-    } finally {
+    this.disposeSubscriptions();
+    if (!this.#ownershipReleased) {
+      this.#ownershipReleased = true;
       this.#onClose();
     }
   }
-}
 
-/** Owns every ephemeral terminal returned by one local runtime. */
-export class SessionTerminalOwner {
-  readonly #terminals = new Set<SessionTerminal>();
-
-  public track(terminal: SessionTerminal): void {
-    this.#terminals.add(terminal);
-  }
-
-  public release(terminal: SessionTerminal): void {
-    this.#terminals.delete(terminal);
-  }
-
-  public closeAll(): void {
-    const terminals = [...this.#terminals];
-    this.#terminals.clear();
-    const failures: unknown[] = [];
-    for (const terminal of terminals) {
-      try {
-        terminal.close();
-      } catch (error: unknown) {
-        failures.push(error);
-      }
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "One or more terminal attachments could not close.");
-    }
+  private disposeSubscriptions(): void {
+    if (this.#subscriptionsDisposed) return;
+    this.#subscriptionsDisposed = true;
+    for (const subscription of this.#subscriptions.splice(0)) subscription.dispose();
   }
 }
+
+/** Owns every ephemeral terminal resource created by one local runtime. */
+export class SessionTerminalOwner
+  extends RuntimeResourceOwner
+  implements ManagedTerminalResourceOwner {}

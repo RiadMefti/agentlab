@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { sessionHistoryLimit, terminalScrollbackBytes } from "@agentlab/contracts";
+import { terminalScrollbackBytes } from "../../apps/tui/src/terminal/terminal-config.js";
+import { sessionHistoryLimit } from "../../packages/runtime/src/infrastructure/tmux/tmux-policy.js";
 
 describe("terminal retention units", () => {
   it("keeps tmux lines distinct from OpenTUI's bounded byte budget", () => {

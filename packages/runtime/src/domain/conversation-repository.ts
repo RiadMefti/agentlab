@@ -1,11 +1,24 @@
-import type { Conversation } from "@agentlab/contracts";
+import type { NewConversationReservation, StoredConversation } from "./conversation-record.js";
+
+export type ConversationLifecycleTransition =
+  | { readonly id: string; readonly expected: "creating"; readonly next: "active" }
+  | {
+      readonly id: string;
+      readonly expected: "active" | "legacy-unlinked";
+      readonly next: "deleting";
+    };
+
+export type RemovableConversationLifecycle = "creating" | "deleting";
 
 /** Persistence port for durable conversation metadata. */
 export interface ConversationRepository {
-  list(): Promise<readonly Conversation[]>;
-  findById(id: string): Promise<Conversation | null>;
-  findByWorkspacePath(workspacePath: string): Promise<Conversation | null>;
-  create(conversation: Conversation): Promise<void>;
-  delete(id: string): Promise<void>;
+  list(): Promise<readonly StoredConversation[]>;
+  findById(id: string): Promise<StoredConversation | null>;
+  findByWorkspacePath(workspacePath: string): Promise<StoredConversation | null>;
+  create(conversation: NewConversationReservation): Promise<void>;
+  transitionLifecycle(
+    transition: ConversationLifecycleTransition
+  ): Promise<StoredConversation | null>;
+  deleteIfLifecycle(id: string, expected: RemovableConversationLifecycle): Promise<boolean>;
   close(): void;
 }

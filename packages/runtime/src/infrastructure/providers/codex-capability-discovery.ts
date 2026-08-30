@@ -3,13 +3,17 @@ import { spawn } from "node:child_process";
 import { z } from "zod";
 
 import { discoveredProviderCapabilitySchema } from "../../domain/provider-capability-discovery.js";
+import type { ManagedRuntimeResourceOwner } from "../../domain/runtime-resource.js";
 import type {
   DiscoveredProviderCapability,
   ProviderCapabilityDiscovery,
   ProviderDiscoveryContext
 } from "../../domain/provider-capability-discovery.js";
 import { IncompatibleProviderCapabilityError } from "../../domain/provider-capability-discovery.js";
-import { terminateProcessTree } from "../process/process-tree.js";
+import {
+  ManagedChildProcess,
+  type ProcessTreeTerminator
+} from "../process/managed-child-process.js";
 import { reasoningLabel } from "./capability-labels.js";
 
 const MAX_PROTOCOL_BYTES = 2 * 1024 * 1024;
@@ -105,7 +109,9 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
   public constructor(
     private readonly timeoutMs = REQUEST_TIMEOUT_MS,
     private readonly shutdownGraceMs = SHUTDOWN_GRACE_MS,
-    private readonly shutdownForceMs = SHUTDOWN_FORCE_MS
+    private readonly shutdownForceMs = SHUTDOWN_FORCE_MS,
+    private readonly resourceOwner?: ManagedRuntimeResourceOwner,
+    private readonly processTreeTerminator?: ProcessTreeTerminator
   ) {}
 
   public listModels(context: ProviderDiscoveryContext): Promise<unknown> {
@@ -115,6 +121,17 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"]
       });
+      let closed = false;
+      const resource = new ManagedChildProcess(
+        child,
+        () => closed,
+        {
+          gracefulTimeoutMs: this.shutdownGraceMs,
+          forcedTimeoutMs: this.shutdownForceMs
+        },
+        this.processTreeTerminator
+      );
+      this.resourceOwner?.track(resource);
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
 
@@ -122,7 +139,6 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
       let stderr = "";
       let receivedBytes = 0;
       let finishing = false;
-      let closed = false;
       let nextRequestId = 2;
       let pendingRequestId: number | null = 1;
       let pages = 0;
@@ -139,11 +155,9 @@ export class CodexAppServerCatalogClient implements CodexCatalogClient {
         } catch {
           // Cleanup below owns the final outcome even if stdin already closed synchronously.
         }
-        void terminateProcessTree(child, () => closed, {
-          gracefulTimeoutMs: this.shutdownGraceMs,
-          forcedTimeoutMs: this.shutdownForceMs
-        }).then(
+        void resource.closeAndWait().then(
           () => {
+            this.resourceOwner?.release(resource);
             if (error === null) resolve(result);
             else reject(error);
           },

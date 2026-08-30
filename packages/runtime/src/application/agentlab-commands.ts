@@ -12,9 +12,18 @@ import {
 import { z } from "zod";
 
 import { parseSessionName } from "../domain/agent-session-name.js";
-import type { ConversationService } from "./conversation-service.js";
-import type { WorkspaceInspection, WorkspacePreparation } from "./conversation-service.js";
 import type { FolderCompleter } from "../domain/folder-completer.js";
+import type {
+  ConversationOperations,
+  WorkspaceInspection,
+  WorkspacePreparation
+} from "./conversation-operations.js";
+
+export type {
+  ConversationOperations,
+  WorkspaceInspection,
+  WorkspacePreparation
+} from "./conversation-operations.js";
 
 /** Provider- and transport-neutral command surface exposed to presentation layers. */
 export interface AgentLabCommandPort {
@@ -38,9 +47,6 @@ export interface AgentLabCommandPort {
     readonly workspacePath: string;
   }>;
 }
-
-/** Structural application surface used by the validated command boundary and its test doubles. */
-export type ConversationOperations = Pick<ConversationService, keyof ConversationService>;
 
 const conversationIdSchema = z.uuid();
 const sessionNameSchema = z

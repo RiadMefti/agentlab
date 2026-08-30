@@ -20,7 +20,7 @@ The executables are compiled by Bun and include the JavaScript runtime plus the 
 library for their target. Each CycloneDX document combines the executable's Bun metafile with exact
 package/version markers from supported upstream prebundle formats. Packaging also scans the final
 executable and proves that its opaque dependency versions match the SBOM. The executables need
-neither Bun nor Node.js; tmux and at least one provider CLI remain host dependencies.
+neither Bun nor Node.js; tmux 3.2+ and at least one provider CLI remain host dependencies.
 
 ## One-time publication setup
 

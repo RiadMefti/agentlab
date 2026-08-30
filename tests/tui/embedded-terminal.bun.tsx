@@ -6,7 +6,7 @@ import { parseKeypress, type KeyEvent } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { terminalScrollbackBytes } from "@agentlab/contracts";
+import { terminalScrollbackBytes } from "../../apps/tui/src/terminal/terminal-config.js";
 
 import "../../apps/tui/src/terminal/embedded-terminal.js";
 import {

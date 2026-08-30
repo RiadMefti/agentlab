@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   CommandRunner,
@@ -45,19 +45,36 @@ function temporaryRoot(): string {
 }
 
 describe("BinaryLocator", () => {
-  it("returns after stalled candidate filesystem probes", async () => {
+  it("does not abandon an uncancellable filesystem probe", async () => {
     const runner: CommandRunner = {
       run: () => Promise.resolve({ stdout: "/opt/codex\n", stderr: "" })
     };
+    let release!: () => void;
+    const access = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
     const locator = new BinaryLocator(runner, {}, "/home/test", {
-      filesystemTimeoutMs: 10,
       filesystem: {
-        access: () => new Promise<void>(() => undefined),
-        readdir: () => new Promise(() => undefined)
+        access,
+        readdir: () => Promise.resolve([])
       }
     });
+    let settled = false;
+    const candidates = locator.candidates("codex").then((result) => {
+      settled = true;
+      return result;
+    });
 
-    await expect(locator.candidates("codex")).resolves.toEqual([]);
+    await vi.waitFor(() => {
+      expect(access).toHaveBeenCalledOnce();
+    });
+    expect(settled).toBe(false);
+    release();
+
+    await expect(candidates).resolves.toEqual(["/opt/codex"]);
   });
 
   it("requires configured overrides to be absolute", async () => {

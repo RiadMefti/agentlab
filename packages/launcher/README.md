@@ -22,7 +22,7 @@ Later launches use the cached executable.
 
 - Linux x64 with glibc, or macOS on Apple silicon
 - Node.js 20 or newer
-- `tmux`
+- `tmux` 3.2 or newer
 - At least one installed and authenticated provider CLI: `codex`, `claude`, or `opencode`
 - A terminal at least 90 columns by 18 rows
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { AsyncOperationOwner } from "../../packages/runtime/src/domain/async-operation-owner.js";
 import {
   collectFolderEntries,
   NodeFolderCompleter
@@ -95,6 +96,7 @@ describe("NodeFolderCompleter", () => {
   });
 
   it("bounds stalled directory opens and closes a handle that arrives after the deadline", async () => {
+    const owner = new RecordingOperationOwner();
     let releaseOpen: (handle: {
       close(): Promise<void>;
       [Symbol.asyncIterator](): AsyncIterator<never>;
@@ -108,6 +110,7 @@ describe("NodeFolderCompleter", () => {
     });
     const completer = new NodeFolderCompleter("/work", "/home", Date.now, {
       operationTimeoutMs: 5,
+      operationOwner: owner,
       filesystem: {
         opendir: () => pendingOpen,
         stat: () => Promise.reject(new Error("not reached"))
@@ -125,12 +128,15 @@ describe("NodeFolderCompleter", () => {
       }
     });
     await expect.poll(() => closed).toBe(true);
+    expect(owner.operations.length).toBeGreaterThanOrEqual(2);
   });
 
   it("bounds stalled iteration and symlink metadata without caching partial results", async () => {
     let scan = 0;
+    const owner = new RecordingOperationOwner();
     const completer = new NodeFolderCompleter("/work", "/home", Date.now, {
       operationTimeoutMs: 5,
+      operationOwner: owner,
       filesystem: {
         opendir: () =>
           Promise.resolve({
@@ -168,6 +174,7 @@ describe("NodeFolderCompleter", () => {
       label: "later/",
       symlink: false
     });
+    expect(owner.operations.length).toBeGreaterThan(0);
   });
 
   it("matches case predictably while preserving the filesystem spelling", async () => {
@@ -246,4 +253,13 @@ async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "agentlab-completer-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+class RecordingOperationOwner implements AsyncOperationOwner {
+  public readonly operations: Promise<unknown>[] = [];
+
+  public own<Output>(operation: Promise<Output>): Promise<Output> {
+    this.operations.push(operation);
+    return operation;
+  }
 }

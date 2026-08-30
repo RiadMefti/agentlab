@@ -7,16 +7,9 @@ import { constants } from "node:fs";
 import type { ProviderId } from "@agentlab/contracts";
 
 import type { CommandRunner } from "../process/command-runner.js";
-import { withTimeout } from "../../domain/promise-timeout.js";
-
-const FILESYSTEM_PROBE_TIMEOUT_MS = 1_000;
 const PATH_LOOKUP_TIMEOUT_MS = 2_000;
 const MAX_FILESYSTEM_CANDIDATES = 32;
 const MAX_MISE_INSTALL_ENTRIES = 4_096;
-
-/** Sequential default budget: PATH lookup, mise readdir, then parallel executable access. */
-export const BINARY_LOCATOR_MAXIMUM_DURATION_MS =
-  PATH_LOOKUP_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS + FILESYSTEM_PROBE_TIMEOUT_MS;
 
 export interface BinaryLocatorFilesystem {
   access(path: string, mode?: number): Promise<void>;
@@ -24,7 +17,6 @@ export interface BinaryLocatorFilesystem {
 }
 
 export interface BinaryLocatorOptions {
-  readonly filesystemTimeoutMs?: number;
   readonly filesystem?: BinaryLocatorFilesystem;
 }
 
@@ -70,10 +62,9 @@ export class BinaryLocator {
     const checked = await Promise.all(
       uniqueCandidates.map(async (candidate) => {
         try {
-          await withTimeout(filesystem.access(candidate, constants.X_OK), {
-            timeoutMs: this.options.filesystemTimeoutMs ?? FILESYSTEM_PROBE_TIMEOUT_MS,
-            message: `Executable probe timed out for ${candidate}.`
-          });
+          // Node's access/readdir promises have no owned cancellation contract. Keep them in the
+          // returned operation instead of reporting a timeout while I/O continues untracked.
+          await filesystem.access(candidate, constants.X_OK);
           return candidate;
         } catch {
           // A stale, inaccessible, or stalled path is not a usable provider.
@@ -89,10 +80,7 @@ export class BinaryLocator {
 
     try {
       const filesystem = this.options.filesystem ?? { access, readdir };
-      const entries = await withTimeout(filesystem.readdir(installRoot, { withFileTypes: true }), {
-        timeoutMs: this.options.filesystemTimeoutMs ?? FILESYSTEM_PROBE_TIMEOUT_MS,
-        message: "mise install discovery timed out."
-      });
+      const entries = await filesystem.readdir(installRoot, { withFileTypes: true });
       return entries
         .slice(0, MAX_MISE_INSTALL_ENTRIES)
         .filter((entry) => entry.isDirectory())

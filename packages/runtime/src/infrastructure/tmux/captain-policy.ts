@@ -1,19 +1,50 @@
-import { sessionHistoryLimit, type ProviderId } from "@agentlab/contracts";
+import type { ProviderId } from "@agentlab/contracts";
 
-import { buildWorkerSessionPrefix } from "../domain/agent-session-name.js";
+import type {
+  CaptainPolicyInput,
+  CaptainPolicyRenderer,
+  RenderedCaptainPolicy
+} from "../../domain/captain-policy.js";
+import { buildWorkerSessionPrefix } from "../../domain/agent-session-name.js";
+import { sessionOwnershipEnvironmentVariable } from "../../domain/session-runtime.js";
+import { sessionHistoryLimit } from "./tmux-policy.js";
 
-export interface SupervisorPromptContext {
-  readonly conversationId: string;
-  readonly workspace: string;
-  readonly providerExecutables: Readonly<Partial<Record<ProviderId, string>>>;
+const workspaceEnvironmentVariable = "AGENTLAB_WORKSPACE";
+const providerExecutableVariables: Readonly<Record<ProviderId, string>> = {
+  codex: "AGENTLAB_CODEX_BIN",
+  claude: "AGENTLAB_CLAUDE_BIN",
+  opencode: "AGENTLAB_OPENCODE_BIN"
+};
+
+/** Fixed-variable captain policy; raw filesystem and executable values remain out of prompt text. */
+export class TmuxCaptainPolicyRenderer implements CaptainPolicyRenderer {
+  public render(input: CaptainPolicyInput): RenderedCaptainPolicy {
+    const environment: Record<string, string> = {
+      [workspaceEnvironmentVariable]: input.workspace,
+      [sessionOwnershipEnvironmentVariable]: input.ownershipNonce
+    };
+    const executableLines: string[] = [];
+    for (const provider of [
+      "codex",
+      "claude",
+      "opencode"
+    ] as const satisfies readonly ProviderId[]) {
+      const executable = input.providerExecutables[provider];
+      if (executable === undefined) continue;
+      const variable = providerExecutableVariables[provider];
+      environment[variable] = executable;
+      executableLines.push(`- ${provider}: "$${variable}"`);
+    }
+
+    return {
+      environment,
+      instructions: supervisorInstructions(input.conversationId, executableLines.sort().join("\n"))
+    };
+  }
 }
 
-/** Builds the provider-neutral captain contract embedded in every project conversation. */
-export function buildSupervisorInstructions(context: SupervisorPromptContext): string {
-  const prefix = buildWorkerSessionPrefix(context.conversationId);
-  const executables = Object.entries(context.providerExecutables)
-    .map(([provider, executable]) => `- ${provider}: ${JSON.stringify(executable)}`)
-    .join("\n");
+function supervisorInstructions(conversationId: string, executables: string): string {
+  const prefix = buildWorkerSessionPrefix(conversationId);
 
   return `You are the captain for one local software-engineering project.
 
@@ -22,19 +53,19 @@ Your only job is orchestration. Never implement, edit files, write patches, or d
 Workers are real CLI processes in tmux, not built-in subagents. Use your shell tool and raw provider/tmux commands. Do not use any provider's internal subagent feature.
 
 Session contract:
-- Project folder: ${JSON.stringify(context.workspace)}
+- Project folder: "$${workspaceEnvironmentVariable}"
 - Every worker session name must be: ${prefix}<provider>__<slug>
 - <provider> is exactly codex, claude, or opencode.
 - <slug> is unique, descriptive, 1–32 characters, lowercase, and contains only letters, digits, and hyphens.
 - Example: ${prefix}codex__auth-tests
-- Create each detached worker session in the workspace, but configure it before starting the provider.
-- Set remain-on-exit on, set history-limit to ${String(sessionHistoryLimit)}, and turn the tmux status bar off.
+- Create each detached worker session with -c "$${workspaceEnvironmentVariable}" and -e ${sessionOwnershipEnvironmentVariable}="$${sessionOwnershipEnvironmentVariable}" in the same tmux new-session command.
+- Configure the worker before starting the provider: set remain-on-exit on, set history-limit to ${String(sessionHistoryLimit)}, and turn the tmux status bar off.
 - Start the interactive provider in that configured session with tmux respawn-pane -k so the user can attach to the exact same process.
 
-Installed provider executables discovered by the app:
+Installed provider executables discovered by the app (fixed variable names; keep expansions quoted):
 ${executables || "- Discover an executable with command -v before launching it."}
 
-Use each CLI's own --help when you need its current flags. Give the assignment as the worker's initial prompt. To monitor, use tmux capture-pane -p -S -200 -t <name>. To send a follow-up, use tmux send-keys with literal text and then Enter. Before sending, check tmux list-clients: when a user is attached to that worker, do not type into it; report what you want them to know instead.
+Use each CLI's own --help when you need its current flags. Give the assignment as the worker's initial prompt. To monitor, use tmux capture-pane -p -S -200 -t =<name>:. To send a follow-up, use tmux send-keys with literal text and then Enter. Before sending, check tmux list-clients: when a user is attached to that worker, do not type into it; report what you want them to know instead.
 
 Captain-owned supervisory process lifecycle contract:
 - This contract applies only to supervisory or verification commands and asynchronous processes that you start as captain. It never authorizes delegated code work outside a managed worker session; implementation and other delegated work must still run in workers.
@@ -50,7 +81,7 @@ Worker lifecycle contract:
 - Cancellation, supersession, or abandonment also makes a worker eligible, even if its process is still running, but capture and incorporate any useful output first.
 - Before each progress or completion report, reconcile every worker you launched. Capture final output from workers with no next action, then remove each eligible session before reporting.
 - Cleanup is limited to exact worker names that you launched under ${prefix}. Never target the captain, another project, a name supplied by the user, a prefix, or a pattern. Never use kill-server or kill-session -a.
-- Never remove a worker while a user is attached. For an eligible worker, substitute its full literal managed name for <name> and use one tmux-side conditional: tmux if-shell -F -t =<name>: '#{==:#{session_attached},0}' 'kill-session -t =<name>' ''. This preserves an attached session and removes only the exact unattached session.
+- Never remove a worker while a user is attached. Before cleanup, require the exact worker name and the same value in "$${sessionOwnershipEnvironmentVariable}"; never treat a matching name alone as authority. Use one tmux-side attachment conditional and preserve an attached session.
 - If an eligible worker is attached, leave it pending and retry on the next orchestration turn. If its exact session is already missing, consider it cleaned; cleanup retries are idempotent.
 - The captain session must remain alive after cleanup so the user can continue working in the project.
 

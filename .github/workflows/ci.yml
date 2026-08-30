@@ -52,8 +52,10 @@ jobs:
           cache: npm
       - name: Verify the runner architecture
         run: test "$(uname -m)" = "arm64"
-      - name: Install Bun
-        run: npm install --global "bun@${BUN_VERSION}"
+      - name: Install terminal runtime dependencies
+        run: |
+          brew install tmux
+          npm install --global "bun@${BUN_VERSION}"
       - run: npm ci
       - name: Build and smoke-test the executable
         run: npm run package

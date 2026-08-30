@@ -5,18 +5,17 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  DiscoveredProviderCapability,
   ProviderCapabilityDiscovery,
   ProviderDiscoveryContext
 } from "../../packages/runtime/src/domain/provider-capability-discovery.js";
+import { RuntimeTaskOwner } from "../../packages/runtime/src/application/runtime-task-owner.js";
 import type {
   CommandRunner,
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
-import {
-  claudeAgentLauncher,
-  codexAgentLauncher
-} from "../../packages/runtime/src/infrastructure/providers/agent-launchers.js";
+import { codexAgentLauncher } from "../../packages/runtime/src/infrastructure/providers/agent-launchers.js";
 import { parseCodexModels } from "../../packages/runtime/src/infrastructure/providers/codex-capability-discovery.js";
 import {
   LocalProviderCatalog,
@@ -90,104 +89,135 @@ describe("LocalProviderCatalog", () => {
     ]);
   });
 
-  it("reports a bounded unavailable result when default executable discovery never resolves", async () => {
-    vi.useFakeTimers();
-    const stalledLocator: ProviderBinaryLocator = {
-      candidates: () => new Promise<readonly string[]>(() => undefined)
+  it("does not return while an owned locator operation is still running", async () => {
+    let release!: (value: readonly string[]) => void;
+    const gatedLocator: ProviderBinaryLocator = {
+      candidates: () =>
+        new Promise<readonly string[]>((resolve) => {
+          release = resolve;
+        })
     };
     const catalog = new LocalProviderCatalog(
       [codexAgentLauncher],
       [discovery()],
-      stalledLocator,
+      gatedLocator,
       versionRunner(),
       { workspace: "/work/project" }
+    );
+
+    let settled = false;
+    const listed = catalog.list();
+    void listed.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release([]);
+    await expect(listed).resolves.toEqual([
+      expect.objectContaining({
+        available: false,
+        source: "unavailable",
+        reason: "Executable not found."
+      })
+    ]);
+  });
+
+  it("bounds the caller response while shutdown retains an uncancellable locator operation", async () => {
+    vi.useFakeTimers();
+    let release!: (value: readonly string[]) => void;
+    const tasks = new RuntimeTaskOwner();
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      {
+        candidates: () =>
+          new Promise<readonly string[]>((resolve) => {
+            release = resolve;
+          })
+      },
+      versionRunner(),
+      {
+        workspace: "/work/project",
+        catalogTimeoutMs: 25,
+        operationOwner: tasks
+      }
     );
 
     const listed = catalog.list();
-    await vi.advanceTimersByTimeAsync(4_250);
+    await vi.advanceTimersByTimeAsync(25);
     await expect(listed).resolves.toEqual([
       expect.objectContaining({
         available: false,
-        source: "unavailable",
-        reason: "Codex executable discovery timed out."
+        reason: "Codex provider catalog exhausted its discovery budget."
       })
     ]);
+
+    let drained = false;
+    const drain = tasks.stopAndDrain().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release([]);
+    await drain;
+    expect(drained).toBe(true);
   });
 
-  it("caps aggregate candidate discovery at the project-creation UX deadline", async () => {
+  it("bounds a discovery adapter response with the total catalog deadline", async () => {
     vi.useFakeTimers();
-    const stalledDiscovery = discovery(() => new Promise(() => undefined));
+    let rejectDiscovery!: (reason: Error) => void;
+    const discoverModels = vi.fn(
+      () =>
+        new Promise<DiscoveredProviderCapability>((_resolve, reject) => {
+          rejectDiscovery = reject;
+        })
+    );
+    const gatedDiscovery = discovery(discoverModels);
     const catalog = new LocalProviderCatalog(
       [codexAgentLauncher],
-      [stalledDiscovery],
-      locator(["/opt/codex-one", "/opt/codex-two"]),
+      [gatedDiscovery],
+      locator(),
       versionRunner(),
-      { workspace: "/work/project" }
+      { workspace: "/work/project", catalogTimeoutMs: 25 }
     );
-    const startedAt = Date.now();
-    let settled = false;
-    const listed = catalog.list().then((result) => {
-      settled = true;
-      return result;
-    });
+    const listed = catalog.list();
 
-    await vi.advanceTimersByTimeAsync(11_999);
-    expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(25);
 
     await expect(listed).resolves.toEqual([
       expect.objectContaining({
-        available: false,
-        source: "unavailable",
-        reason: "Codex provider catalog timed out."
+        available: true,
+        source: "fallback",
+        reason: "Model discovery failed: Codex provider catalog exhausted its discovery budget."
       })
     ]);
-    expect(Date.now() - startedAt).toBe(12_000);
+    expect(discoverModels).toHaveBeenCalledOnce();
+    rejectDiscovery(new Error("adapter eventually settled"));
+    await Promise.resolve();
   });
 
-  it("uses the catalog ceiling when a fake version runner ignores its command timeout", async () => {
-    const stalledRunner: CommandRunner = {
-      run: () => new Promise<RunResult>(() => undefined)
-    };
+  it("bounds a version probe with the same total catalog deadline", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(() => new Promise<RunResult>(() => undefined));
     const catalog = new LocalProviderCatalog(
       [codexAgentLauncher],
       [discovery()],
       locator(),
-      stalledRunner,
-      { workspace: "/work/project", versionTimeoutMs: 10, catalogTimeoutMs: 30 }
+      { run },
+      { workspace: "/work/project", catalogTimeoutMs: 25 }
     );
 
-    await expect(catalog.list()).resolves.toEqual([
+    const listed = catalog.list();
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(listed).resolves.toEqual([
       expect.objectContaining({
         available: false,
         source: "unavailable",
-        reason: "Codex provider catalog timed out."
+        reason: "Codex provider catalog exhausted its discovery budget."
       })
     ]);
-  });
-
-  it("degrades one stalled provider without hanging catalog aggregation", async () => {
-    const stalledClaude: ProviderCapabilityDiscovery = {
-      id: "claude",
-      discover: () => new Promise(() => undefined)
-    };
-    const catalog = new LocalProviderCatalog(
-      [codexAgentLauncher, claudeAgentLauncher],
-      [discovery(), stalledClaude],
-      locator(),
-      versionRunner(),
-      { workspace: "/work/project", discoveryTimeoutMs: 10, catalogTimeoutMs: 100 }
-    );
-
-    await expect(catalog.list()).resolves.toEqual([
-      expect.objectContaining({ id: "codex", available: true, source: "live" }),
-      expect.objectContaining({
-        id: "claude",
-        available: true,
-        source: "fallback",
-        reason: "Model discovery failed: Claude model catalog timed out."
-      })
-    ]);
+    expect(run).toHaveBeenCalledOnce();
   });
 
   it("caps candidate probing before a large locator result can amplify latency", async () => {
@@ -239,7 +269,7 @@ describe("LocalProviderCatalog", () => {
     expect(runner.run).toHaveBeenCalledWith(
       "/opt/codex",
       ["--version"],
-      expect.objectContaining({ cleanupProcessTree: true })
+      expect.objectContaining({ cleanupProcessTree: true, cwd: "/work/project" })
     );
     expect(discoverModels).toHaveBeenCalledTimes(1);
   });
@@ -355,6 +385,41 @@ describe("LocalProviderCatalog", () => {
     release(discoveredModels());
     await Promise.all([listed, resolved]);
     expect(runner.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("deduplicates an uncancellable raw locator across repeated facade timeouts", async () => {
+    vi.useFakeTimers();
+    let release!: (value: readonly string[]) => void;
+    const candidates = vi.fn(
+      () =>
+        new Promise<readonly string[]>((resolve) => {
+          release = resolve;
+        })
+    );
+    const catalog = new LocalProviderCatalog(
+      [codexAgentLauncher],
+      [discovery()],
+      { candidates },
+      versionRunner(),
+      {
+        workspace: "/work/project",
+        cache: new ProviderCapabilityCache(16, 1),
+        cacheDurationMs: 1,
+        catalogTimeoutMs: 5
+      }
+    );
+
+    const first = catalog.list();
+    await vi.advanceTimersByTimeAsync(5);
+    await expect(first).resolves.toEqual([expect.objectContaining({ available: false })]);
+    await vi.advanceTimersByTimeAsync(2);
+    const second = catalog.list();
+    await vi.advanceTimersByTimeAsync(5);
+    await expect(second).resolves.toEqual([expect.objectContaining({ available: false })]);
+
+    expect(candidates).toHaveBeenCalledOnce();
+    release([]);
+    await vi.runAllTimersAsync();
   });
 
   it("uses an exact-version last-known-good catalog after a failed refresh", async () => {

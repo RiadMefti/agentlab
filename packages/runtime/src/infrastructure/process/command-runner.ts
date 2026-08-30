@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 
-import { terminateProcessTree } from "./process-tree.js";
+import type { ManagedRuntimeResourceOwner } from "../../domain/runtime-resource.js";
+import { ManagedChildProcess, type ProcessTreeTerminator } from "./managed-child-process.js";
 
 const DEFAULT_MAX_BUFFER_BYTES = 1024 * 1024;
 const DEFAULT_GRACEFUL_SHUTDOWN_MS = 500;
@@ -26,16 +27,22 @@ export interface CommandRunner {
 export interface NodeCommandRunnerOptions {
   readonly gracefulShutdownMs?: number;
   readonly forcedShutdownMs?: number;
+  readonly resourceOwner?: ManagedRuntimeResourceOwner;
+  readonly processTreeTerminator?: ProcessTreeTerminator;
 }
 
 /** Executes argument vectors without invoking a shell. */
 export class NodeCommandRunner implements CommandRunner {
   readonly #gracefulShutdownMs: number;
   readonly #forcedShutdownMs: number;
+  readonly #resourceOwner: ManagedRuntimeResourceOwner | undefined;
+  readonly #processTreeTerminator: ProcessTreeTerminator | undefined;
 
   public constructor(options: NodeCommandRunnerOptions = {}) {
     this.#gracefulShutdownMs = options.gracefulShutdownMs ?? DEFAULT_GRACEFUL_SHUTDOWN_MS;
     this.#forcedShutdownMs = options.forcedShutdownMs ?? DEFAULT_FORCED_SHUTDOWN_MS;
+    this.#resourceOwner = options.resourceOwner;
+    this.#processTreeTerminator = options.processTreeTerminator;
   }
 
   public run(
@@ -43,7 +50,7 @@ export class NodeCommandRunner implements CommandRunner {
     args: readonly string[],
     options: RunOptions = {}
   ): Promise<RunResult> {
-    if (options.cleanupProcessTree === true) {
+    if (options.cleanupProcessTree === true || this.#resourceOwner !== undefined) {
       return this.runWithProcessTreeCleanup(executable, args, options);
     }
     return new Promise((resolve, reject) => {
@@ -106,9 +113,21 @@ export class NodeCommandRunner implements CommandRunner {
       let stderr = "";
       let stdoutBytes = 0;
       let stderrBytes = 0;
+      let stdoutOverflow = false;
+      let stderrOverflow = false;
       let finishing = false;
       let closed = false;
       let outcomeError: Error | null = null;
+      const resource = new ManagedChildProcess(
+        child,
+        () => closed,
+        {
+          gracefulTimeoutMs: this.#gracefulShutdownMs,
+          forcedTimeoutMs: this.#forcedShutdownMs
+        },
+        this.#processTreeTerminator
+      );
+      this.#resourceOwner?.track(resource);
 
       const timeout =
         options.timeoutMs === undefined
@@ -125,10 +144,8 @@ export class NodeCommandRunner implements CommandRunner {
         finishing = true;
         if (timeout !== null) clearTimeout(timeout);
         try {
-          await terminateProcessTree(child, () => closed, {
-            gracefulTimeoutMs: this.#gracefulShutdownMs,
-            forcedTimeoutMs: this.#forcedShutdownMs
-          });
+          await resource.closeAndWait();
+          this.#resourceOwner?.release(resource);
         } catch (cleanupError: unknown) {
           const detail =
             cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup failure.";
@@ -153,19 +170,25 @@ export class NodeCommandRunner implements CommandRunner {
       };
 
       child.stdout.on("data", (chunk: string) => {
-        stdoutBytes += Buffer.byteLength(chunk);
-        if (stdoutBytes > maxBufferBytes) {
+        if (stdoutOverflow) return;
+        const chunkBytes = Buffer.byteLength(chunk);
+        if (chunkBytes > maxBufferBytes - stdoutBytes) {
+          stdoutOverflow = true;
           void finish(new Error("Command stdout exceeded the size limit."));
           return;
         }
+        stdoutBytes += chunkBytes;
         stdout += chunk;
       });
       child.stderr.on("data", (chunk: string) => {
-        stderrBytes += Buffer.byteLength(chunk);
-        if (stderrBytes > maxBufferBytes) {
+        if (stderrOverflow) return;
+        const chunkBytes = Buffer.byteLength(chunk);
+        if (chunkBytes > maxBufferBytes - stderrBytes) {
+          stderrOverflow = true;
           void finish(new Error("Command stderr exceeded the size limit."));
           return;
         }
+        stderrBytes += chunkBytes;
         stderr += chunk;
       });
       child.on("error", (error) => {
