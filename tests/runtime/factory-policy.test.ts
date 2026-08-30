@@ -143,7 +143,7 @@ describe("FactoryPolicyEngine", () => {
   it("denies an under-classified protected path and an exceeded diff budget", () => {
     const contract = policyContract({
       scope: {
-        includePaths: ["packages/contracts/**", ".github/**"],
+        includePaths: ["packages/contracts/src/conversation.ts", ".github/workflows/ci.yml"],
         excludePaths: [],
         protectedPaths: []
       }
@@ -184,10 +184,60 @@ describe("FactoryPolicyEngine", () => {
     expect(decision.reasonCodes).toContain("risk-underclassified");
   });
 
+  it("denies an under-classified write scope before any protected path is changed", () => {
+    const contract = policyContract({
+      scope: {
+        includePaths: [".github/workflows/ci.yml"],
+        excludePaths: [],
+        protectedPaths: []
+      }
+    });
+    const input = executionInput(contract);
+    const required = engine.evaluate(input).requiredGateIds;
+    const decision = engine.evaluate({
+      ...input,
+      evidence: preparationEvidence(required, input.contract.digest)
+    });
+
+    expect(decision).toMatchObject({
+      outcome: "deny",
+      effectiveRiskTier: "R3"
+    });
+    expect(decision.reasonCodes).toContain("risk-underclassified");
+    expect(decision.reasonCodes).not.toContain("change-outside-contract-scope");
+  });
+
+  it("keeps broad read-only analysis in the R0 lane", () => {
+    const contract = policyContract({
+      riskTier: "R0",
+      scope: { includePaths: ["**"], excludePaths: [], protectedPaths: [] },
+      capabilities: {
+        ...testFactoryContract().capabilities,
+        filesystem: "read",
+        git: "read"
+      },
+      gateProfile: { id: "baseline/r0", version: "1.2.0", policyDigest },
+      approvals: {
+        execution: { mode: "automatic" },
+        pullRequestCreation: { mode: "forbidden" },
+        merge: { mode: "forbidden" },
+        release: { mode: "forbidden" }
+      }
+    });
+    const input = executionInput(contract);
+    const required = engine.evaluate(input).requiredGateIds;
+    const decision = engine.evaluate({
+      ...input,
+      evidence: preparationEvidence(required, input.contract.digest)
+    });
+
+    expect(decision).toMatchObject({ outcome: "allow", effectiveRiskTier: "R0" });
+  });
+
   it("treats factory policy and broker boundaries as protected R3 changes", () => {
     const contract = policyContract({
       scope: {
-        includePaths: ["packages/runtime/**", "tests/**"],
+        includePaths: ["packages/runtime/src/domain/factory-policy.ts"],
         excludePaths: [],
         protectedPaths: []
       }
@@ -224,7 +274,7 @@ describe("FactoryPolicyEngine", () => {
         minimumIndependentReviews: 2,
         requireDistinctReviewSession: true
       },
-      gateProfile: { id: "baseline/r3", version: "1.1.0", policyDigest },
+      gateProfile: { id: "baseline/r3", version: "1.2.0", policyDigest },
       approvals: {
         execution: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
         pullRequestCreation: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
@@ -338,9 +388,14 @@ function policyContract(overrides: Partial<ImmutableTaskContract> = {}): Immutab
   return immutableTaskContractSchema.parse({
     ...base,
     ...overrides,
+    scope: overrides.scope ?? {
+      includePaths: ["tests/runtime/factory-change.test.ts"],
+      excludePaths: [],
+      protectedPaths: []
+    },
     gateProfile: overrides.gateProfile ?? {
       id: "baseline/r1",
-      version: "1.1.0",
+      version: "1.2.0",
       policyDigest
     }
   });

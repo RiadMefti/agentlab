@@ -52,13 +52,13 @@ SQLite task/evidence ledger; deterministic risk policy and kill switches; conten
 artifacts; exact-base disposable worktrees; bounded provider-native implement, repair, and
 independent-review adapters; sandboxed deterministic gates; authenticated evidence channels; and a
 separate GitHub adapter that can reconstruct one exact patch and request only a draft PR after
-rechecking repository governance. Factory policy 1.1 pins per-tier process-tree limits. Every agent
-or gate executor requires an injected OS isolator; the Linux adapter creates a unique transient
-systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no unbounded fallback.
-The wrapper strips its user-manager environment before starting the target. Deterministic gates run
-Bubblewrap inside that scope. The model-bearing subprocess environment is allowlisted and excludes
-repository, cloud, and package credentials. The broker credential is acquired only at the separate
-broker boundary.
+rechecking repository governance. Factory policy 1.2 conservatively classifies the complete allowed
+write scope before execution and pins per-tier process-tree limits. Every agent or gate executor
+requires an injected OS isolator; the Linux adapter creates a unique transient systemd user scope
+with cgroup CPU, memory, swap, and task ceilings and has no unbounded fallback. The wrapper strips
+its user-manager environment before starting the target. Deterministic gates run Bubblewrap inside
+that scope. The model-bearing subprocess environment is allowlisted and excludes repository, cloud,
+and package credentials. The broker credential is acquired only at the separate broker boundary.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
