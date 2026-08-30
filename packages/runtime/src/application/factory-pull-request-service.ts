@@ -25,7 +25,11 @@ import type {
 } from "../domain/factory-task-repository.js";
 import { isFactoryTaskTransitionAllowed } from "../domain/factory-task-state.js";
 import type { FactoryControlPlane } from "./factory-control-plane.js";
-import { FactoryEvidencePublisher } from "./factory-evidence-publisher.js";
+import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
+import {
+  FactoryEvidencePublisher,
+  type FactoryEvidencePublisherCredentials
+} from "./factory-evidence-publisher.js";
 
 const brokerInputSchema = z.object({ taskId: z.uuid() }).strict();
 const maximumPullRequestBodyCharacters = 16_384;
@@ -35,10 +39,9 @@ export interface FactoryPullRequestServiceDependencies {
   readonly evidence: Pick<FactoryEvidenceRepository, "listEvidence" | "latestEvidence">;
   readonly controls: Pick<FactoryControlRepository, "state">;
   readonly conversations: Pick<ConversationRepository, "findById">;
-  readonly controlPlane: Pick<
-    FactoryControlPlane,
-    "evaluatePolicy" | "transition" | "recordEvidenceItems"
-  >;
+  readonly controlPlane: Pick<FactoryControlPlane, "evaluatePolicy" | "transition">;
+  readonly evidenceIngress: FactoryEvidenceIngress;
+  readonly evidenceCredentials: Pick<FactoryEvidencePublisherCredentials, "prBroker">;
   readonly artifacts: FactoryArtifactStore;
   readonly documents: FactoryDocumentCodec;
   readonly remote: FactoryDraftPullRequestBroker;
@@ -64,7 +67,8 @@ export class FactoryPullRequestService {
 
   public constructor(private readonly dependencies: FactoryPullRequestServiceDependencies) {
     this.#publisher = new FactoryEvidencePublisher({
-      controlPlane: dependencies.controlPlane,
+      evidenceIngress: dependencies.evidenceIngress,
+      credentials: { prBroker: dependencies.evidenceCredentials.prBroker },
       artifacts: dependencies.artifacts,
       documents: dependencies.documents,
       now: dependencies.now,

@@ -1,4 +1,4 @@
-import { factoryTimestampSchema } from "@agentlab/contracts";
+import { factoryResourceLimitsSchema, factoryTimestampSchema } from "@agentlab/contracts";
 import { z } from "zod";
 
 import type {
@@ -8,6 +8,7 @@ import type {
   FactoryGateExecutor,
   FactoryGateSandbox
 } from "../../domain/factory-gate.js";
+import type { FactoryProcessIsolator } from "../../domain/factory-process-isolation.js";
 import { commandFailureDetails, type CommandRunner } from "./command-runner.js";
 
 const gateDefinitionSchema = z
@@ -31,6 +32,7 @@ const gateDefinitionSchema = z
 
 export interface LocalFactoryGateExecutorOptions {
   readonly now: () => string;
+  readonly createId: () => string;
 }
 
 /** Executes only administrator-installed gate definitions through a mandatory sandbox. */
@@ -40,6 +42,7 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
   public constructor(
     definitions: readonly FactoryGateDefinition[],
     private readonly sandbox: FactoryGateSandbox,
+    private readonly processIsolator: FactoryProcessIsolator,
     private readonly runner: CommandRunner,
     private readonly options: LocalFactoryGateExecutorOptions
   ) {
@@ -57,7 +60,13 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
   public async execute(input: FactoryGateExecutionInput): Promise<FactoryGateExecutionOutput> {
     const definition = this.#definitions.get(input.gateId);
     if (definition === undefined) throw new Error(`Factory gate ${input.gateId} is not installed.`);
-    const command = await this.sandbox.wrap(definition.command, input.workspace);
+    const sandboxedCommand = await this.sandbox.wrap(definition.command, input.workspace);
+    const isolated = await this.processIsolator.isolate({
+      command: sandboxedCommand,
+      isolationId: this.options.createId(),
+      limits: factoryResourceLimitsSchema.parse(input.resourceLimits)
+    });
+    const command = isolated.command;
     const startedAt = this.#timestamp();
     try {
       const output = await this.runner.run(command.executable, command.args, {
@@ -66,7 +75,11 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
         maxBufferBytes: definition.maximumOutputBytes,
         maxCombinedBufferBytes: definition.maximumOutputBytes,
         cleanupProcessTree: true,
-        environment: { PATH: "/usr/bin:/bin", LC_ALL: "C" }
+        environment: {
+          PATH: "/usr/bin:/bin",
+          LC_ALL: "C",
+          ...isolated.controllerEnvironment
+        }
       });
       const finishedAt = this.#timestamp();
       return {
@@ -79,6 +92,7 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
         finishedAt,
         wallClockSeconds: elapsedSeconds(startedAt, finishedAt),
         outputBytes: Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr),
+        isolation: isolated.isolation,
         ...output
       };
     } catch (error: unknown) {
@@ -94,6 +108,7 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
         startedAt,
         finishedAt,
         wallClockSeconds: elapsedSeconds(startedAt, finishedAt),
+        isolation: isolated.isolation,
         ...failureOutput(error)
       };
     }

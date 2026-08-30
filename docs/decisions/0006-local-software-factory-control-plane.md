@@ -238,12 +238,30 @@ observed. Secrets are redacted before storage, but redaction never changes the o
 hash claim; a separately hashed redacted representation is retained. Trusted attestations bind the
 subject digest, workflow identity, issuer, and transparency-log reference where available.
 
+Internal evidence append uses registered object capabilities, not caller-supplied trust. Bootstrap
+binds separate capabilities to the control plane, execution observer, gate observer, and one exact
+broker identity. Each channel has a closed producer/kind matrix. The ingress verifies artifact
+existence, size, content digest, task/contract/policy identity, and—for resource evidence—the exact
+canonical isolation record and claims. An unknown capability or attempted producer impersonation
+fails before the append-only ledger changes. Any future process or HTTP boundary must authenticate
+to one of these narrow channels; it may not expose the raw evidence repository.
+
 ## Execution, PR, merge, and release controls
 
 Each attempt starts from the contract's exact base commit in a dedicated Git worktree and OS-level
 sandbox. The default is no network, no secrets, repository read, and only an explicit command set.
 An implementer receives workspace write only inside that worktree. Limits apply to the whole process
 tree, output, time, tokens, tools, cost, changed files/lines, concurrency, and repair count.
+
+Baseline policy 1.1 also pins instantaneous resource profiles by risk tier. The narrower task/skill
+process count wins. On supported Linux hosts, every provider and gate command must first be wrapped
+in a unique transient systemd user scope with cgroup `TasksMax`, `MemoryMax`, zero swap, and
+`CPUQuota`; there is no no-op fallback. Deterministic repository commands then run inside Bubblewrap
+within that scope, and the wrapper removes its user-manager environment before the target starts.
+Each successful execution and gate emits a canonical resource-isolation record, and policy denies a
+PR when any successful worker or sandboxed gate lacks matching provenance.
+`npm run test:factory-sandbox` is the adversarial host test: it reads the live process cgroup to
+verify exact CPU/memory/process ceilings and confirms an over-memory workload is killed.
 
 The model-bearing job never receives remote write authority. It emits a content-addressed patch and
 structured proposal. A separate broker process/job, with no provider key and a short-lived
@@ -333,14 +351,16 @@ metrics.
 ## Phased implementation
 
 Implementation status on 2026-08-30: phases 1–3 and the internal, draft-only mechanics of phase 4
-exist behind ports with focused fail-closed tests. They are intentionally not wired into the public
+exist behind ports with focused fail-closed tests. Authenticated channel-bound evidence ingress and
+mandatory systemd/cgroup resource isolation are implemented; the adversarial live sandbox test
+passes on the current Linux development host. They are intentionally not wired into the public
 runtime or TUI. No live agent task or PR has been created by this code. Phase 4 activation remains
 blocked until repository governance requires at least one approval, dismisses stale reviews,
 requires approval of the latest push, applies rules to administrators, forbids force-push/deletion,
 and requires the exact `verify` check. Complete provider cost accounting must also be configured; an
-incomplete usage record denies PR creation. The activation change must additionally bind evidence
-ingestion to authenticated internal producers and prove OS-enforced process, CPU, and memory
-ceilings with adversarial live sandbox tests.
+incomplete usage record denies PR creation. The activation change must run the adversarial sandbox
+test in the supported target-host CI lane, configure protected-path ownership, and supply a separate
+short-lived broker identity.
 
 1. **Safety kernel:** versioned skill/task/event/evidence schemas, explicit state machine, this ADR,
    and architecture fitness tests. No agent or remote write authority.
@@ -348,7 +368,8 @@ ceilings with adversarial live sandbox tests.
    evidence store, deterministic risk classifier/gate policy, actor/session separation, budgets,
    audit queries, and kill switch.
 3. **Isolated execution:** worktree and sandbox lifecycle, provider-neutral non-interactive runner,
-   digest-pinned skill resolver, implement/verify/review/repair attempts, and bounded logs.
+   digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
+   channels, cgroup CPU/memory/process enforcement, and bounded logs.
 4. **Minimal brokered-PR loop:** read-only intake, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, separate
    least-privilege broker, draft PR only, current branch protection, and human merge. No scheduler,
@@ -363,8 +384,9 @@ ceilings with adversarial live sandbox tests.
 The minimal loop is safe enough to enable brokered draft-PR creation only when phases 1–4, the
 repository-governance blocker, isolated broker identity, and complete usage accounting are all
 complete. Activation also requires authenticated evidence-ingestion paths and OS-enforced
-process/CPU/memory ceilings for untrusted agent and repository code, with adversarial live sandbox
-tests. Until then, its authority switches default off and no public composition can invoke it.
+process/CPU/memory ceilings for untrusted agent and repository code. Those mechanisms now exist; the
+target-host CI lane and operator preflight must execute the live adversarial test before activation.
+Until then, its authority switches default off and no public composition can invoke it.
 
 ## Consequences and fitness functions
 

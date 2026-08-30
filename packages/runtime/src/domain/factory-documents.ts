@@ -9,6 +9,7 @@ import type {
   FactoryPullRequestProposal,
   FactoryPullRequestRecord,
   FactoryReviewResult,
+  FactoryResourceIsolationRecord,
   FactorySkillPackage,
   FactoryTaskUsageRecord,
   ImmutableTaskContract,
@@ -33,6 +34,7 @@ export interface FactoryDocumentCodec {
   skillPackage(input: unknown): CanonicalFactoryDocument<FactorySkillPackage>;
   agentRun(input: unknown): CanonicalFactoryDocument<FactoryAgentRunRecord>;
   gateObservation(input: unknown): CanonicalFactoryDocument<FactoryGateObservation>;
+  resourceIsolation(input: unknown): CanonicalFactoryDocument<FactoryResourceIsolationRecord>;
   patchProposal(input: unknown): CanonicalFactoryDocument<FactoryPatchProposal>;
   reviewResult(input: unknown): CanonicalFactoryDocument<FactoryReviewResult>;
   pullRequestProposal(input: unknown): CanonicalFactoryDocument<FactoryPullRequestProposal>;

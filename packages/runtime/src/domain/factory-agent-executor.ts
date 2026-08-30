@@ -2,6 +2,8 @@ import type {
   FactoryAgentRunRequest,
   FactoryAgentRunStatus,
   FactoryBudgetUsage,
+  FactoryProcessIsolation,
+  FactoryResourceLimits,
   ProviderId
 } from "@agentlab/contracts";
 
@@ -13,6 +15,7 @@ export interface FactoryAgentExecutionInput {
   readonly providerVersion: string;
   readonly workspace: FactoryWorkspace;
   readonly prompt: string;
+  readonly resourceLimits: FactoryResourceLimits;
 }
 
 export interface FactoryAgentExecutionOutput {
@@ -29,6 +32,7 @@ export interface FactoryAgentExecutionOutput {
   readonly usage: FactoryBudgetUsage;
   readonly usageComplete: boolean;
   readonly errorCode: string | null;
+  readonly isolation: FactoryProcessIsolation;
 }
 
 export interface FactoryAgentExecutorCapability {

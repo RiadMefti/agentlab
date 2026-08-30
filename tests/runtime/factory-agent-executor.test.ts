@@ -4,6 +4,7 @@ import { factoryAgentRunRequestSchema, type FactoryAgentRunRequest } from "@agen
 import { describe, expect, it } from "vitest";
 
 import type { FactoryWorkspace } from "../../packages/runtime/src/domain/factory-workspace.js";
+import type { FactoryProcessIsolator } from "../../packages/runtime/src/domain/factory-process-isolation.js";
 import { claudeFactoryAgentAdapter } from "../../packages/runtime/src/infrastructure/providers/claude-factory-agent.js";
 import { codexFactoryAgentAdapter } from "../../packages/runtime/src/infrastructure/providers/codex-factory-agent.js";
 import { factoryAgentEnvironment } from "../../packages/runtime/src/infrastructure/providers/factory-agent-environment.js";
@@ -17,6 +18,11 @@ import { testDigest, testFactoryContract } from "../helpers/factory.js";
 
 const prompt = "Implement only the immutable task contract.";
 const workspace = fakeWorkspace();
+const resourceLimits = {
+  maxProcesses: 64,
+  maxMemoryBytes: 4 * 1_024 * 1_024 * 1_024,
+  cpuQuotaPercent: 400
+} as const;
 
 describe("factory agent adapters", () => {
   it("builds a hardened Codex argument vector with the prompt only on stdin", () => {
@@ -130,10 +136,12 @@ describe("LocalFactoryAgentExecutor", () => {
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
-      prompt
+      prompt,
+      resourceLimits
     });
 
     expect(output).toMatchObject({ status: "succeeded", exitCode: 0, errorCode: null });
+    expect(output.isolation.limits.maxProcesses).toBe(32);
     expect(runner.calls[0]).toMatchObject({
       executable: "/opt/codex",
       options: {
@@ -163,7 +171,8 @@ describe("LocalFactoryAgentExecutor", () => {
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
-      prompt
+      prompt,
+      resourceLimits
     });
 
     expect(runner.calls[0]?.options.environment).toMatchObject({
@@ -192,7 +201,8 @@ describe("LocalFactoryAgentExecutor", () => {
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
-      prompt
+      prompt,
+      resourceLimits
     });
     expect(timedOut).toMatchObject({
       status: "timed-out",
@@ -208,7 +218,8 @@ describe("LocalFactoryAgentExecutor", () => {
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
-      prompt
+      prompt,
+      resourceLimits
     });
     expect(malformed).toMatchObject({
       status: "failed",
@@ -251,9 +262,24 @@ function executorWithTimes(
   const times = ["2026-08-30T12:00:00.000Z", "2026-08-30T12:00:02.000Z"];
   return new LocalFactoryAgentExecutor(runner, {
     now: () => times.shift() ?? "2026-08-30T12:00:02.000Z",
+    processIsolator: passthroughProcessIsolator,
     ...(hostEnvironment === undefined ? {} : { hostEnvironment })
   });
 }
+
+const passthroughProcessIsolator: FactoryProcessIsolator = {
+  isolate: ({ command, isolationId, limits }) =>
+    Promise.resolve({
+      command,
+      controllerEnvironment: {},
+      isolation: {
+        isolationId,
+        mechanism: { id: "linux/systemd-user-scope", version: "test-systemd-1" },
+        scopeName: `agentlab-factory-${isolationId.replaceAll("-", "")}.scope`,
+        limits
+      }
+    })
+};
 
 function runRequest(
   provider: "codex" | "claude",

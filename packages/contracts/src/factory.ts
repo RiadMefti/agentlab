@@ -246,6 +246,40 @@ export const factoryBudgetUsageSchema = z
   .strict();
 export type FactoryBudgetUsage = z.infer<typeof factoryBudgetUsageSchema>;
 
+/** Kernel-enforced instantaneous ceilings. Cumulative task accounting remains in FactoryBudget. */
+export const factoryResourceLimitsSchema = z
+  .object({
+    maxProcesses: z.number().int().min(1).max(512),
+    maxMemoryBytes: z
+      .number()
+      .int()
+      .min(64 * 1_024 * 1_024)
+      .max(64 * 1_024 * 1_024 * 1_024),
+    cpuQuotaPercent: z.number().int().min(1).max(3_200)
+  })
+  .strict();
+export type FactoryResourceLimits = z.infer<typeof factoryResourceLimitsSchema>;
+
+export const factoryProcessIsolationSchema = z
+  .object({
+    isolationId: z.uuid(),
+    mechanism: z
+      .object({
+        id: factoryIdentifierSchema,
+        version: z.string().trim().min(1).max(180)
+      })
+      .strict(),
+    scopeName: z
+      .string()
+      .regex(
+        /^agentlab-factory-[0-9a-f]{32}\.scope$/u,
+        "Expected an AgentLab-owned transient scope name."
+      ),
+    limits: factoryResourceLimitsSchema
+  })
+  .strict();
+export type FactoryProcessIsolation = z.infer<typeof factoryProcessIsolationSchema>;
+
 export const evidenceKindSchema = z.enum([
   "request",
   "contract",
@@ -1142,6 +1176,35 @@ export const factoryGateObservationSchema = z
     }
   });
 export type FactoryGateObservation = z.infer<typeof factoryGateObservationSchema>;
+
+export const factoryResourceIsolationRecordSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.resource-isolation-record.v1"),
+    taskId: z.uuid(),
+    contractDigest: sha256DigestSchema,
+    policyBundleDigest: sha256DigestSchema,
+    subjectDigest: sha256DigestSchema,
+    attempt: z.number().int().min(1).max(20),
+    execution: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("agent"),
+          executionId: z.uuid()
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal("gate"),
+          gateId: factoryIdentifierSchema
+        })
+        .strict()
+    ]),
+    isolation: factoryProcessIsolationSchema,
+    result: z.enum(["enforced", "failed"]),
+    observedAt: factoryTimestampSchema
+  })
+  .strict();
+export type FactoryResourceIsolationRecord = z.infer<typeof factoryResourceIsolationRecordSchema>;
 
 export const factoryPatchProposalSchema = z
   .object({

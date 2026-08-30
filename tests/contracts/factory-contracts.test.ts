@@ -4,6 +4,8 @@ import {
   evidenceBundleSchema,
   factoryBudgetUsageSchema,
   factoryPullRequestProposalSchema,
+  factoryResourceIsolationRecordSchema,
+  factoryResourceLimitsSchema,
   immutableTaskContractSchema,
   skillManifestSchema,
   taskEventSchema
@@ -225,6 +227,37 @@ describe("factory contracts", () => {
         changedLines: 0
       }).wallClockSeconds
     ).toBe(3_601);
+  });
+
+  it("strictly records the kernel resource boundary applied to one execution", () => {
+    const limits = {
+      maxProcesses: 32,
+      maxMemoryBytes: 4 * 1_024 * 1_024 * 1_024,
+      cpuQuotaPercent: 400
+    };
+    expect(factoryResourceLimitsSchema.parse(limits)).toEqual(limits);
+    expect(
+      factoryResourceIsolationRecordSchema.safeParse({
+        schemaVersion: "agentlab.resource-isolation-record.v1",
+        taskId: TASK_ID,
+        contractDigest: digest("d"),
+        policyBundleDigest: digest("e"),
+        subjectDigest: digest("d"),
+        attempt: 1,
+        execution: { kind: "agent", executionId: EVENT_ID },
+        isolation: {
+          isolationId: EVENT_ID,
+          mechanism: { id: "linux/systemd-user-scope", version: "systemd 261" },
+          scopeName: `agentlab-factory-${EVENT_ID.replaceAll("-", "")}.scope`,
+          limits
+        },
+        result: "enforced",
+        observedAt: "2026-08-30T12:00:01.000Z"
+      }).success
+    ).toBe(true);
+    expect(factoryResourceLimitsSchema.safeParse({ ...limits, maxMemoryBytes: 1 }).success).toBe(
+      false
+    );
   });
 
   it("rejects control characters at the pull-request authority boundary", () => {

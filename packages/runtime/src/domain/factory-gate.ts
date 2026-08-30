@@ -1,4 +1,8 @@
-import type { EvidenceKind } from "@agentlab/contracts";
+import type {
+  EvidenceKind,
+  FactoryProcessIsolation,
+  FactoryResourceLimits
+} from "@agentlab/contracts";
 
 import type { CommandSpec } from "./command.js";
 import type { FactoryWorkspace } from "./factory-workspace.js";
@@ -14,6 +18,7 @@ export interface FactoryGateDefinition {
 export interface FactoryGateExecutionInput {
   readonly gateId: string;
   readonly workspace: FactoryWorkspace;
+  readonly resourceLimits: FactoryResourceLimits;
 }
 
 export interface FactoryGateExecutionOutput {
@@ -28,6 +33,7 @@ export interface FactoryGateExecutionOutput {
   readonly outputBytes: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly isolation: FactoryProcessIsolation;
 }
 
 export interface FactoryGateExecutor {
