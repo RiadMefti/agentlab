@@ -39,6 +39,30 @@ The observation path never carries captain-to-worker instructions. The explicit 
 the user add a project folder, start a worker with an initial task, or remove managed state; it does
 not mediate later agent communication.
 
+## Software-factory safety kernel
+
+[ADR 0006](decisions/0006-local-software-factory-control-plane.md) accepts an additive local-first
+software-factory control plane. A factory task belongs to one existing conversation, its agent
+attempts remain workers beneath that conversation's single captain, and provider-specific execution
+stays behind ports. Deterministic code—not captain instructions—owns task state, capabilities,
+budgets, gates, evidence, and remote authority.
+
+The source tree now contains the dormant stages 1–4 safety path: strict contracts; an immutable
+SQLite task/evidence ledger; deterministic risk policy and kill switches; content-addressed
+artifacts; exact-base disposable worktrees; bounded provider-native implement, repair, and
+independent-review adapters; sandboxed deterministic gates; and a separate GitHub adapter that can
+reconstruct one exact patch and request only a draft PR after rechecking repository governance. The
+model-bearing subprocess environment is allowlisted and excludes repository, cloud, and package
+credentials. The broker credential is acquired only at the separate broker boundary.
+
+This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled, deployed, or
+enabled. Normal database migration creates only its inert local ledger tables. The repository
+currently lacks the approval and last-push protections required by the broker, so the adapter fails
+closed even if a future composition supplies credentials. Intake skill execution, PR-head repair,
+scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
+stages. Until an explicit activation change meets ADR 0006's prerequisites, user-visible behavior
+and the product network boundary remain unchanged.
+
 ## Dependency map
 
 Arrows are compile-time dependencies. Runtime control flow may travel in the opposite direction

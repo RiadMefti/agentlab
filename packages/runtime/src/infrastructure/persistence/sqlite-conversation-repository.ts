@@ -1,5 +1,4 @@
 import { DatabaseSync } from "node:sqlite";
-import { chmodSync } from "node:fs";
 
 import type {
   ConversationLifecycleTransition,
@@ -13,7 +12,12 @@ import {
   type StoredConversation
 } from "../../domain/conversation-record.js";
 import { assertCaptainSessionOwnership } from "../../domain/agent-session-name.js";
-import { migrate } from "./migrations.js";
+import { openSqliteDatabase, type SqliteDatabaseOptions } from "./sqlite-database.js";
+
+export {
+  isUnconfirmedDatabaseInitializationError,
+  UnconfirmedDatabaseInitializationError
+} from "./sqlite-database.js";
 
 interface ConversationRow {
   readonly id: unknown;
@@ -45,39 +49,14 @@ const SELECT_COLUMNS = `
   ownership_nonce
 `;
 
-export interface SqliteConversationRepositoryOptions {
-  readonly createDatabase?: (databasePath: string) => DatabaseSync;
-  readonly secureDatabaseFile?: (databasePath: string) => void;
-  readonly migrateDatabase?: (database: DatabaseSync) => void;
-}
-
-const retainedAmbiguousInitializationDatabases = new Set<DatabaseSync>();
-
-/** Signals that construction failed without positive confirmation that SQLite closed. */
-export class UnconfirmedDatabaseInitializationError extends AggregateError {
-  public readonly cleanupConfirmed = false as const;
-
-  public constructor(primary: unknown, cleanup: unknown, database: DatabaseSync) {
-    super([primary, cleanup], "Database initialization and connection cleanup failed.", {
-      cause: primary
-    });
-    this.name = "UnconfirmedDatabaseInitializationError";
-    retainedAmbiguousInitializationDatabases.add(database);
-  }
-}
-
-export function isUnconfirmedDatabaseInitializationError(
-  error: unknown
-): error is UnconfirmedDatabaseInitializationError {
-  return error instanceof UnconfirmedDatabaseInitializationError;
-}
+export type SqliteConversationRepositoryOptions = SqliteDatabaseOptions;
 
 /** Local SQLite adapter with strict row validation at read boundaries. */
 export class SqliteConversationRepository implements ConversationRepository {
   readonly #database: DatabaseSync;
 
   public constructor(databasePath: string, options: SqliteConversationRepositoryOptions = {}) {
-    this.#database = openDatabase(databasePath, options);
+    this.#database = openSqliteDatabase(databasePath, options);
   }
 
   public list(): Promise<readonly StoredConversation[]> {
@@ -195,32 +174,6 @@ function assertLegalTransition(value: unknown): asserts value is ConversationLif
 function assertRemovableLifecycle(value: unknown): asserts value is RemovableConversationLifecycle {
   if (value !== "creating" && value !== "deleting") {
     throw new Error("Only pending durable conversation states may be removed.");
-  }
-}
-
-function openDatabase(
-  databasePath: string,
-  options: SqliteConversationRepositoryOptions
-): DatabaseSync {
-  const database = (options.createDatabase ?? ((path) => new DatabaseSync(path)))(databasePath);
-  try {
-    if (databasePath !== ":memory:") {
-      (
-        options.secureDatabaseFile ??
-        ((path) => {
-          chmodSync(path, 0o600);
-        })
-      )(databasePath);
-    }
-    (options.migrateDatabase ?? migrate)(database);
-    return database;
-  } catch (error: unknown) {
-    try {
-      database.close();
-    } catch (cleanupError: unknown) {
-      throw new UnconfirmedDatabaseInitializationError(error, cleanupError, database);
-    }
-    throw error;
   }
 }
 

@@ -5,6 +5,23 @@ import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/pro
 import { terminateProcessTree } from "../../packages/runtime/src/infrastructure/process/process-tree.js";
 
 describe("NodeCommandRunner", () => {
+  it("writes bounded stdin without constructing a shell command", async () => {
+    const runner = new NodeCommandRunner();
+
+    await expect(
+      runner.run(process.execPath, ["-e", "process.stdin.pipe(process.stdout)"], {
+        stdin: "exact input",
+        maxInputBytes: 64
+      })
+    ).resolves.toEqual({ stdout: "exact input", stderr: "" });
+    await expect(
+      runner.run(process.execPath, ["-e", "process.stdin.resume()"], {
+        stdin: "too large",
+        maxInputBytes: 3
+      })
+    ).rejects.toThrow(/stdin exceeded/u);
+  });
+
   it("never retains output beyond the configured cap while terminating an ignored-TERM child", async () => {
     const maximumBytes = 1_024;
     const runner = new NodeCommandRunner({ gracefulShutdownMs: 25, forcedShutdownMs: 1_000 });

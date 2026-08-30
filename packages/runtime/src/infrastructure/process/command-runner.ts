@@ -4,6 +4,7 @@ import type { ManagedRuntimeResourceOwner } from "../../domain/runtime-resource.
 import { ManagedChildProcess, type ProcessTreeTerminator } from "./managed-child-process.js";
 
 const DEFAULT_MAX_BUFFER_BYTES = 1024 * 1024;
+const DEFAULT_MAX_INPUT_BYTES = 1024 * 1024;
 const DEFAULT_GRACEFUL_SHUTDOWN_MS = 500;
 const DEFAULT_FORCED_SHUTDOWN_MS = 2_000;
 
@@ -12,12 +13,23 @@ export interface RunOptions {
   readonly timeoutMs?: number;
   readonly environment?: NodeJS.ProcessEnv;
   readonly maxBufferBytes?: number;
+  readonly maxCombinedBufferBytes?: number;
   readonly cleanupProcessTree?: boolean;
+  readonly stdin?: string;
+  readonly maxInputBytes?: number;
 }
 
 export interface RunResult {
   readonly stdout: string;
   readonly stderr: string;
+}
+
+export type CommandFailureKind = "exit" | "output-limit" | "signal" | "spawn" | "timeout";
+
+export interface CommandFailureDetails {
+  readonly kind: CommandFailureKind;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
 }
 
 export interface CommandRunner {
@@ -50,7 +62,11 @@ export class NodeCommandRunner implements CommandRunner {
     args: readonly string[],
     options: RunOptions = {}
   ): Promise<RunResult> {
-    if (options.cleanupProcessTree === true || this.#resourceOwner !== undefined) {
+    if (
+      options.cleanupProcessTree === true ||
+      this.#resourceOwner !== undefined ||
+      options.stdin !== undefined
+    ) {
       return this.runWithProcessTreeCleanup(executable, args, options);
     }
     return new Promise((resolve, reject) => {
@@ -88,8 +104,13 @@ export class NodeCommandRunner implements CommandRunner {
     options: RunOptions
   ): Promise<RunResult> {
     const maxBufferBytes = options.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
+    const maxCombinedBufferBytes = options.maxCombinedBufferBytes ?? maxBufferBytes * 2;
+    const maxInputBytes = options.maxInputBytes ?? DEFAULT_MAX_INPUT_BYTES;
     if (!Number.isSafeInteger(maxBufferBytes) || maxBufferBytes <= 0) {
       return Promise.reject(new Error("Command output limit must be a positive integer."));
+    }
+    if (!Number.isSafeInteger(maxCombinedBufferBytes) || maxCombinedBufferBytes <= 0) {
+      return Promise.reject(new Error("Combined command output limit must be a positive integer."));
     }
     if (
       options.timeoutMs !== undefined &&
@@ -97,13 +118,19 @@ export class NodeCommandRunner implements CommandRunner {
     ) {
       return Promise.reject(new Error("Command timeout must be a positive integer."));
     }
+    if (!Number.isSafeInteger(maxInputBytes) || maxInputBytes <= 0) {
+      return Promise.reject(new Error("Command input limit must be a positive integer."));
+    }
+    if (options.stdin !== undefined && Buffer.byteLength(options.stdin, "utf8") > maxInputBytes) {
+      return Promise.reject(new Error("Command stdin exceeded the size limit."));
+    }
 
     return new Promise((resolve, reject) => {
       const child = spawn(executable, [...args], {
         cwd: options.cwd,
         detached: process.platform !== "win32",
         env: options.environment,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: "pipe",
         windowsHide: true
       });
       child.stdout.setEncoding("utf8");
@@ -134,7 +161,12 @@ export class NodeCommandRunner implements CommandRunner {
           ? null
           : setTimeout(() => {
               void finish(
-                new Error(`Command timed out after ${String(options.timeoutMs)} milliseconds.`)
+                processFailure(
+                  `Command timed out after ${String(options.timeoutMs)} milliseconds.`,
+                  "timeout",
+                  null,
+                  null
+                )
               );
             }, options.timeoutMs);
 
@@ -172,9 +204,14 @@ export class NodeCommandRunner implements CommandRunner {
       child.stdout.on("data", (chunk: string) => {
         if (stdoutOverflow) return;
         const chunkBytes = Buffer.byteLength(chunk);
-        if (chunkBytes > maxBufferBytes - stdoutBytes) {
+        if (
+          chunkBytes > maxBufferBytes - stdoutBytes ||
+          chunkBytes > maxCombinedBufferBytes - stdoutBytes - stderrBytes
+        ) {
           stdoutOverflow = true;
-          void finish(new Error("Command stdout exceeded the size limit."));
+          void finish(
+            processFailure("Command stdout exceeded the size limit.", "output-limit", null, null)
+          );
           return;
         }
         stdoutBytes += chunkBytes;
@@ -183,23 +220,38 @@ export class NodeCommandRunner implements CommandRunner {
       child.stderr.on("data", (chunk: string) => {
         if (stderrOverflow) return;
         const chunkBytes = Buffer.byteLength(chunk);
-        if (chunkBytes > maxBufferBytes - stderrBytes) {
+        if (
+          chunkBytes > maxBufferBytes - stderrBytes ||
+          chunkBytes > maxCombinedBufferBytes - stdoutBytes - stderrBytes
+        ) {
           stderrOverflow = true;
-          void finish(new Error("Command stderr exceeded the size limit."));
+          void finish(
+            processFailure("Command stderr exceeded the size limit.", "output-limit", null, null)
+          );
           return;
         }
         stderrBytes += chunkBytes;
         stderr += chunk;
       });
-      child.on("error", (error) => {
+      child.stdin.on("error", (error) => {
+        if (options.stdin === undefined && hasErrorCode(error, "EPIPE")) return;
         void finish(error);
+      });
+      child.stdin.end(options.stdin ?? "", "utf8");
+      child.on("error", (error) => {
+        void finish(
+          Object.assign(processFailure(error.message, "spawn", null, null), { cause: error })
+        );
       });
       child.on("exit", (code, signal) => {
         void finish(
           code === 0
             ? null
-            : new Error(
-                `Command exited with ${code === null ? `signal ${String(signal)}` : `code ${String(code)}`}.`
+            : processFailure(
+                `Command exited with ${code === null ? `signal ${String(signal)}` : `code ${String(code)}`}.`,
+                code === null ? "signal" : "exit",
+                code,
+                signal
               )
         );
       });
@@ -209,8 +261,11 @@ export class NodeCommandRunner implements CommandRunner {
           void finish(
             code === 0
               ? null
-              : new Error(
-                  `Command closed with ${code === null ? `signal ${String(signal)}` : `code ${String(code)}`}.`
+              : processFailure(
+                  `Command closed with ${code === null ? `signal ${String(signal)}` : `code ${String(code)}`}.`,
+                  code === null ? "signal" : "exit",
+                  code,
+                  signal
                 )
           );
         }
@@ -229,4 +284,51 @@ export function errorOutput(error: unknown): string {
   const stderr = typeof record.stderr === "string" ? record.stderr : "";
   const message = error instanceof Error ? error.message : "";
   return `${stderr}\n${message}`.trim();
+}
+
+export function commandFailureDetails(error: unknown): CommandFailureDetails | null {
+  if (typeof error !== "object" || error === null || !("commandFailureKind" in error)) {
+    return null;
+  }
+  const record = error as {
+    readonly commandFailureKind?: unknown;
+    readonly exitCode?: unknown;
+    readonly signal?: unknown;
+  };
+  if (
+    record.commandFailureKind !== "exit" &&
+    record.commandFailureKind !== "output-limit" &&
+    record.commandFailureKind !== "signal" &&
+    record.commandFailureKind !== "spawn" &&
+    record.commandFailureKind !== "timeout"
+  ) {
+    return null;
+  }
+  return {
+    kind: record.commandFailureKind,
+    exitCode: typeof record.exitCode === "number" ? record.exitCode : null,
+    signal: typeof record.signal === "string" ? (record.signal as NodeJS.Signals) : null
+  };
+}
+
+function processFailure(
+  message: string,
+  kind: CommandFailureKind,
+  exitCode: number | null,
+  signal: NodeJS.Signals | null
+): Error {
+  return Object.assign(new Error(message), {
+    commandFailureKind: kind,
+    exitCode,
+    signal
+  });
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { readonly code?: unknown }).code === code
+  );
 }
