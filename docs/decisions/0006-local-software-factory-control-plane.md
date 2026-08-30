@@ -253,7 +253,11 @@ sandbox. The default is no network, no secrets, repository read, and only an exp
 An implementer receives workspace write only inside that worktree. Limits apply to the whole process
 tree, output, time, tokens, tools, cost, changed files/lines, concurrency, and repair count.
 
-Baseline policy 1.1 also pins instantaneous resource profiles by risk tier. The narrower task/skill
+Baseline policy 1.2 conservatively intersects every allowed write-scope glob with the protected-path
+rules before execution. Exclusions cannot lower this ceiling: a broad or ambiguous scope receives
+the highest tier it could reach, while the exact changed paths are classified again after execution.
+This prevents an under-classified worker from touching an R3/R4 path before the post-run diff
+exists. The policy also pins instantaneous resource profiles by risk tier. The narrower task/skill
 process count wins. On supported Linux hosts, every provider and gate command must first be wrapped
 in a unique transient systemd user scope with cgroup `TasksMax`, `MemoryMax`, zero swap, and
 `CPUQuota`; there is no no-op fallback. Deterministic repository commands then run inside Bubblewrap

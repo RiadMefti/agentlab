@@ -627,6 +627,11 @@ function executableContract(
   const base = testFactoryContract();
   return immutableTaskContractSchema.parse({
     ...base,
+    scope: {
+      includePaths: ["tests/runtime/factory-change.test.ts"],
+      excludePaths: [],
+      protectedPaths: []
+    },
     skillPlan: [
       {
         id: "factory/implement",
@@ -650,7 +655,7 @@ function executableContract(
         dependsOn: ["factory/implement"]
       }
     ],
-    gateProfile: { id: "baseline/r1", version: "1.1.0", policyDigest }
+    gateProfile: { id: "baseline/r1", version: "1.2.0", policyDigest }
   });
 }
 

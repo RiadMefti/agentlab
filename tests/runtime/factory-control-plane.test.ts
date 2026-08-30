@@ -306,9 +306,14 @@ function policyContract(): ImmutableTaskContract {
   const base = testFactoryContract();
   return immutableTaskContractSchema.parse({
     ...base,
+    scope: {
+      includePaths: ["tests/runtime/factory-change.test.ts"],
+      excludePaths: [],
+      protectedPaths: []
+    },
     gateProfile: {
       id: "baseline/r1",
-      version: "1.1.0",
+      version: "1.2.0",
       policyDigest: encodeCanonicalDocument(defaultFactoryPolicyBundle).digest
     }
   });

@@ -16,7 +16,11 @@ import {
 
 import type { CanonicalFactoryDocument } from "./factory-documents.js";
 import type { FactoryAuthorityState } from "./factory-task-repository.js";
-import { repositoryPathIsInScope, repositoryPathMatches } from "./repository-path-policy.js";
+import {
+  repositoryPathIsInScope,
+  repositoryPathMatches,
+  repositoryPatternsMayOverlap
+} from "./repository-path-policy.js";
 
 export interface FactoryPolicyEvaluation {
   readonly contract: CanonicalFactoryDocument<ImmutableTaskContract>;
@@ -111,7 +115,7 @@ const releaseEvidence = [
   "sbom",
   "provenance"
 ] as const satisfies readonly EvidenceKind[];
-const baselinePolicyVersion = "1.1.0";
+const baselinePolicyVersion = "1.2.0";
 
 function profile(input: {
   readonly tier: FactoryRiskTier;
@@ -451,6 +455,25 @@ function effectiveRisk(
 ): FactoryRiskTier {
   let effective: FactoryRiskTier =
     contract.capabilities.filesystem === "workspace-write" ? "R1" : "R0";
+  if (contract.capabilities.filesystem === "workspace-write") {
+    // Exclusions cannot lower this pre-execution ceiling: proving arbitrary glob subtraction is
+    // outside the policy language, so broad or ambiguous write scopes require the highest tier
+    // they could reach. Exact changed paths are checked again after execution.
+    for (const included of contract.scope.includePaths) {
+      for (const rule of bundle.protectedPaths) {
+        if (repositoryPatternsMayOverlap(included, rule.pattern)) {
+          effective = maximumRisk(effective, rule.minimumRiskTier);
+        }
+      }
+      if (
+        contract.scope.protectedPaths.some((protectedPath) =>
+          repositoryPatternsMayOverlap(included, protectedPath)
+        )
+      ) {
+        effective = maximumRisk(effective, "R3");
+      }
+    }
+  }
   if (contract.capabilities.network.mode === "allowlist") effective = maximumRisk(effective, "R2");
   if (contract.capabilities.secretRefs.length > 0) effective = "R4";
   if (changeSet.binaryPaths.length > 0) effective = maximumRisk(effective, "R2");
