@@ -60,7 +60,7 @@ quarantine with `xattr -d com.apple.quarantine agentlab-vVERSION-mac-arm64`.
 
 - Linux x64 with glibc, or macOS on Apple silicon
 - Node.js 20 or newer when installing through npm; direct executables do not need Node.js or Bun
-- `tmux`
+- `tmux` 3.2 or newer
 - at least one installed and authenticated provider CLI: `codex`, `claude`, or `opencode`
 - a terminal at least 90 columns by 18 rows
 
@@ -95,7 +95,7 @@ Alt shortcuts are reserved for application controls.
 
 ## Run from source
 
-Source development requires Node.js 24+, Bun 1.4+, and tmux.
+Source development requires Node.js 24+, Bun 1.4+, and tmux 3.2+.
 
 ```bash
 npm ci
@@ -129,11 +129,14 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `packages/runtime/src/domain` owns conversation, session, command, and terminal ports.
 - `packages/runtime/src/infrastructure` implements SQLite, provider discovery/launching, tmux, and
   Bun's native PTY.
+- `packages/runtime/src/local-runtime.ts` is the only concrete runtime composition root.
 - `packages/contracts` owns provider, conversation, and session schemas shared across local layers.
 
-The embedded terminal uses native VT parsing, true color, selection, resize, paste, cursor state,
-and a 16 MiB scrollback byte budget. Tmux separately retains up to 20,000 history lines; the number
-of lines held by the embedded terminal varies with encoded content. Focused tests enforce
+Cross-package imports use public entry points, inner runtime layers never depend outward, and the
+product source graph must remain acyclic. `npm run architecture:check` enforces those rules. The
+embedded terminal uses native VT parsing, true color, selection, resize, paste, cursor state, and a
+16 MiB scrollback byte budget. Tmux separately retains up to 20,000 history lines; the number of
+lines held by the embedded terminal varies with encoded content. Focused tests enforce
 multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
@@ -144,9 +147,9 @@ npm run verify
 npm audit --omit=dev
 ```
 
-`verify` checks formatting, strict TypeScript, linting, unit/component tests, real tmux and PTY
-integration, the production build, and the standalone executable. See
-[Contributing](CONTRIBUTING.md) for the engineering contract.
+`verify` checks formatting, architecture boundaries and cycles, strict TypeScript, linting,
+unit/component tests, real tmux and PTY integration, the production build, and the standalone
+executable. See [Contributing](CONTRIBUTING.md) for the engineering contract.
 
 ## Security
 

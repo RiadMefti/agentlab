@@ -1108,6 +1108,7 @@ function TerminalSwitchHarness({
     <TerminalPanel
       conversationId={conversation.id}
       session={sessions[index] ?? null}
+      providerLabel="Codex"
       active
       onActivate={() => undefined}
     />
@@ -1125,6 +1126,7 @@ function TerminalMetadataHarness({ onReady }: { readonly onReady: (refresh: () =
     <TerminalPanel
       conversationId={conversation.id}
       session={{ ...captain, attached: revision % 2 === 1 }}
+      providerLabel="Codex"
       active
       onActivate={() => undefined}
     />

@@ -14,6 +14,15 @@ interface SignalListenerTarget {
   off(signal: NodeJS.Signals, listener: () => void): unknown;
 }
 
+const processSignalListenerTarget: SignalListenerTarget = {
+  on(signal, listener) {
+    return process.on(signal, listener);
+  },
+  off(signal, listener) {
+    return process.off(signal, listener);
+  }
+};
+
 export function exitCodeForSignal(signal: string): number {
   const signalNumber = (osConstants.signals as Readonly<Record<string, number | undefined>>)[
     signal
@@ -23,7 +32,7 @@ export function exitCodeForSignal(signal: string): number {
 
 /** Preserves conventional shell status while OpenTUI owns mode restoration for the signal. */
 export function installSignalExitStatusHandlers(
-  target: SignalListenerTarget = process,
+  target: SignalListenerTarget = processSignalListenerTarget,
   setExitCode: (code: number) => void = (code) => {
     process.exitCode = code;
   }

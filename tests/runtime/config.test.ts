@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { loadLocalConfig } from "../../packages/runtime/src/local-config.js";
+import { loadLocalConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-config.js";
 
 const temporaryRoots: string[] = [];
 
@@ -42,6 +42,33 @@ describe("local application configuration", () => {
     const root = temporaryRoot();
     expect(loadLocalConfig({ HOME: root }, root).databasePath).toBe(
       join(root, ".local", "share", "agentlab", "agentlab.sqlite")
+    );
+  });
+
+  it("rejects empty, URI, null-byte, and oversized explicit database targets", () => {
+    const root = temporaryRoot();
+
+    expect(() => loadLocalConfig({ AGENTLAB_DATABASE_PATH: "" }, root)).toThrow("cannot be empty");
+    expect(() =>
+      loadLocalConfig({ AGENTLAB_DATABASE_PATH: "file:state.sqlite?mode=rwc" }, root)
+    ).toThrow("SQLite URI");
+    expect(() => loadLocalConfig({ AGENTLAB_DATABASE_PATH: "bad\0path" }, root)).toThrow(
+      "null bytes"
+    );
+    expect(() => loadLocalConfig({ AGENTLAB_DATABASE_PATH: "x".repeat(4_097) }, root)).toThrow(
+      "4096-byte"
+    );
+  });
+
+  it("requires absolute non-empty HOME and XDG data paths", () => {
+    const root = temporaryRoot();
+
+    expect(() => loadLocalConfig({ HOME: "" }, root)).toThrow("HOME cannot be empty");
+    expect(() => loadLocalConfig({ HOME: "relative" }, root)).toThrow(
+      "HOME must be an absolute path"
+    );
+    expect(() => loadLocalConfig({ XDG_DATA_HOME: "relative", HOME: root }, root)).toThrow(
+      "XDG_DATA_HOME must be an absolute path"
     );
   });
 });

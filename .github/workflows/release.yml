@@ -255,7 +255,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_notice=$'Recommended install: `npm install --global agentlab`. The npm launcher requires Node.js 20 or newer and downloads the exact verified binary for this release. AgentLab also requires tmux and an authenticated provider CLI. For a direct install, download the executable for your platform, verify it, run `chmod +x agentlab-*`, and place it on your PATH. The macOS executable is not notarized; after verifying its checksum and attestation, run `xattr -d com.apple.quarantine agentlab-v${{ needs.validate.outputs.version }}-mac-arm64` if Gatekeeper blocks it.'
+          release_notice=$'Recommended install: `npm install --global agentlab`. The npm launcher requires Node.js 20 or newer and downloads the exact verified binary for this release. AgentLab also requires tmux 3.2 or newer and an authenticated provider CLI. For a direct install, download the executable for your platform, verify it, run `chmod +x agentlab-*`, and place it on your PATH. The macOS executable is not notarized; after verifying its checksum and attestation, run `xattr -d com.apple.quarantine agentlab-v${{ needs.validate.outputs.version }}-mac-arm64` if Gatekeeper blocks it.'
           notes_arguments=()
           if [[ -n "$NOTES_START_TAG" ]]; then
             notes_arguments+=(--notes-start-tag "$NOTES_START_TAG")

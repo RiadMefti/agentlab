@@ -22,6 +22,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "architecture:check": "bun scripts/check-architecture.ts",
     "build": "npm run clean && npm run build --workspace @agentlab/contracts && npm run build --workspace @agentlab/runtime && npm run build --workspace @agentlab/tui && npm run build --workspace agentlab",
     "build:packages": "tsc --build packages/contracts packages/runtime --pretty false",
     "clean": "node scripts/clean-build.mjs",
@@ -37,11 +38,11 @@
     "release:start:check": "node scripts/check-release-start.mjs",
     "start": "npm run build:packages && bun apps/tui/src/main.tsx",
     "test": "vitest run && npm run test:bun",
-    "test:bun": "npm run build:packages && bun test ./tests/tui/app.bun.tsx ./tests/tui/embedded-terminal.bun.tsx ./tests/tui/tui-signals.bun.ts ./tests/tui/use-workspace.bun.tsx ./tests/runtime/terminal-pty.bun.ts",
+    "test:bun": "npm run build:packages && bun scripts/run-bun-tests.ts",
     "test:integration": "AGENTLAB_RUN_TMUX_INTEGRATION=1 vitest run && AGENTLAB_RUN_TMUX_INTEGRATION=1 npm run test:bun",
     "test:watch": "vitest",
     "typecheck": "tsc --build --pretty false",
-    "verify": "npm run format:check && npm run typecheck && npm run lint && npm run test:integration && npm run build && npm run package"
+    "verify": "npm run format:check && npm run architecture:check && npm run typecheck && npm run lint && npm run test:integration && npm run build && npm run package"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

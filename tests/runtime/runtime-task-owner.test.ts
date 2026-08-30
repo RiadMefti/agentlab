@@ -5,29 +5,58 @@ import {
   RuntimeTaskOwner,
   ownAgentLabCommands
 } from "../../packages/runtime/src/application/runtime-task-owner.js";
+import { withTimeout } from "../../packages/runtime/src/infrastructure/process/promise-timeout.js";
 
 describe("RuntimeTaskOwner", () => {
-  it("bounds shutdown when admitted external work never settles", async () => {
-    const tasks = new RuntimeTaskOwner(10);
-    const operation = tasks.run(() => new Promise<void>(() => undefined));
-    void operation;
-
-    await expect(tasks.stopAndDrain()).rejects.toThrow(
-      "Runtime shutdown timed out after 10 milliseconds"
-    );
-  });
-
-  it("does not mistake a drain deadline for cancellation of the admitted task", async () => {
+  it("lets a caller stop waiting without abandoning admitted work", async () => {
     let release: () => void = () => undefined;
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const tasks = new RuntimeTaskOwner(5);
+    const tasks = new RuntimeTaskOwner();
     const operation = tasks.run(() => pending);
+    const drain = tasks.stopAndDrain();
 
-    await expect(tasks.stopAndDrain()).rejects.toThrow("Runtime shutdown timed out");
+    await expect(withTimeout(drain, { timeoutMs: 5, message: "caller deadline" })).rejects.toThrow(
+      "caller deadline"
+    );
     release();
     await expect(operation).resolves.toBeUndefined();
+    await expect(drain).resolves.toBeUndefined();
+    await expect(tasks.stopAndDrain()).resolves.toBeUndefined();
+  });
+
+  it("holds command admission behind owned startup reconciliation", async () => {
+    let release: () => void = () => undefined;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tasks = new RuntimeTaskOwner();
+    const initialization = tasks.initialize(() => ready);
+    let ran = false;
+    const command = tasks.run(() => {
+      ran = true;
+      return Promise.resolve();
+    });
+
+    await Promise.resolve();
+    expect(ran).toBe(false);
+    release();
+    await initialization;
+    await command;
+    expect(ran).toBe(true);
+  });
+
+  it("fails every public command closed when startup reconciliation fails", async () => {
+    const tasks = new RuntimeTaskOwner();
+    const initialization = tasks.initialize(() =>
+      Promise.reject(new Error("pending ownership conflict"))
+    );
+    const command = tasks.run(() => Promise.resolve("must not run"));
+
+    await expect(initialization).rejects.toThrow("pending ownership conflict");
+    await expect(command).rejects.toThrow("pending ownership conflict");
+    await expect(tasks.stopAndDrain()).resolves.toBeUndefined();
   });
 
   it("stops admission and drains a worker creation before shutdown can finish", async () => {
@@ -78,6 +107,30 @@ describe("RuntimeTaskOwner", () => {
 
     await expect(operation).rejects.toThrow("provider failed");
     await expect(shutdown).resolves.toBeUndefined();
+  });
+
+  it("drains an owned adapter operation after its caller deadline expires", async () => {
+    let release: () => void = () => undefined;
+    const adapterOperation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tasks = new RuntimeTaskOwner();
+
+    await expect(
+      tasks.run(() =>
+        withTimeout(tasks.own(adapterOperation), {
+          timeoutMs: 5,
+          message: "response deadline"
+        })
+      )
+    ).rejects.toThrow("response deadline");
+
+    const drain = tasks.stopAndDrain();
+    await expect(withTimeout(drain, { timeoutMs: 5, message: "still owned" })).rejects.toThrow(
+      "still owned"
+    );
+    release();
+    await expect(drain).resolves.toBeUndefined();
   });
 });
 

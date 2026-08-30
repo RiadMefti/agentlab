@@ -5,6 +5,7 @@ import { stat } from "node:fs/promises";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { AsyncOperationOwner } from "../../packages/runtime/src/domain/async-operation-owner.js";
 import { LocalWorkspacePathResolver } from "../../packages/runtime/src/infrastructure/filesystem/local-workspace-path-resolver.js";
 
 const temporaryRoots: string[] = [];
@@ -23,8 +24,10 @@ function temporaryRoot(): string {
 
 describe("LocalWorkspacePathResolver", () => {
   it("returns an actionable bounded failure when path resolution stalls", async () => {
+    const owner = new RecordingOperationOwner();
     const resolver = new LocalWorkspacePathResolver("/work", "/home/test", {
       timeoutMs: 10,
+      operationOwner: owner,
       filesystem: {
         realpath: () => new Promise<string>(() => undefined),
         stat
@@ -34,11 +37,14 @@ describe("LocalWorkspacePathResolver", () => {
     await expect(resolver.resolve("project")).rejects.toThrow(
       "Folder path resolution timed out. Check that the filesystem is responsive."
     );
+    expect(owner.operations).toHaveLength(1);
   });
 
   it("bounds folder metadata lookup after canonicalization succeeds", async () => {
+    const owner = new RecordingOperationOwner();
     const resolver = new LocalWorkspacePathResolver("/work", "/home/test", {
       timeoutMs: 10,
+      operationOwner: owner,
       filesystem: {
         realpath: () => Promise.resolve("/work/project"),
         stat: () => new Promise(() => undefined)
@@ -48,6 +54,7 @@ describe("LocalWorkspacePathResolver", () => {
     await expect(resolver.resolve("project")).rejects.toThrow(
       "Folder metadata lookup timed out. Check that the filesystem is responsive."
     );
+    expect(owner.operations).toHaveLength(2);
   });
 
   it("accepts an arbitrary absolute folder and preserves spaces in its canonical path", async () => {
@@ -83,3 +90,12 @@ describe("LocalWorkspacePathResolver", () => {
     await expect(resolver.resolve(join(root, "missing"))).rejects.toThrow("existing folder");
   });
 });
+
+class RecordingOperationOwner implements AsyncOperationOwner {
+  public readonly operations: Promise<unknown>[] = [];
+
+  public own<Output>(operation: Promise<Output>): Promise<Output> {
+    this.operations.push(operation);
+    return operation;
+  }
+}

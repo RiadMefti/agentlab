@@ -4,11 +4,13 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { RuntimeResourceOwner } from "../../packages/runtime/src/application/runtime-resource-owner.js";
 import { IncompatibleProviderCapabilityError } from "../../packages/runtime/src/domain/provider-capability-discovery.js";
 import {
   NodeCommandRunner,
   type CommandRunner
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
+import { terminateProcessTree } from "../../packages/runtime/src/infrastructure/process/process-tree.js";
 import {
   parseClaudeModels,
   supportedModelsWithTimeout
@@ -536,6 +538,44 @@ wait "$child_pid"
     ).rejects.toThrow("Codex app-server returned invalid JSON.");
     expectProcessGone(readPid(pidPath));
     expectProcessGone(readPid(childPidPath));
+  });
+
+  it("retains a Codex app-server when its first cleanup confirmation fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-catalog-owned-cleanup-"));
+    temporaryRoots.push(root);
+    const executable = join(root, "codex");
+    const pidPath = join(root, "pid");
+    writeFileSync(
+      executable,
+      `#!/bin/sh
+printf '%s' "$$" > ${shellQuote(pidPath)}
+printf '%s\n' 'not-json'
+while :; do sleep 1; done
+`
+    );
+    chmodSync(executable, 0o755);
+    const owner = new RuntimeResourceOwner();
+    let cleanupAttempts = 0;
+    const client = new CodexAppServerCatalogClient(
+      1_000,
+      50,
+      2_000,
+      owner,
+      async (child, isClosed, options) => {
+        cleanupAttempts += 1;
+        if (cleanupAttempts === 1) throw new Error("process-tree observation failed");
+        await terminateProcessTree(child, isClosed, options);
+      }
+    );
+
+    await expect(
+      client.listModels({ executable, version: "codex-cli test", workspace: root })
+    ).rejects.toThrow("Codex app-server returned invalid JSON.");
+    expect(cleanupAttempts).toBe(1);
+
+    await expect(owner.closeAll()).resolves.toBeUndefined();
+    expect(cleanupAttempts).toBe(2);
+    expectProcessGone(readPid(pidPath));
   });
 });
 

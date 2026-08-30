@@ -11,25 +11,20 @@ import type {
   ProviderCatalog,
   ResolvedProvider
 } from "../../domain/agent-launcher.js";
+import type { AsyncOperationOwner } from "../../domain/async-operation-owner.js";
 import {
   discoveredProviderCapabilitySchema,
   IncompatibleProviderCapabilityError,
   type ProviderCapabilityDiscovery
 } from "../../domain/provider-capability-discovery.js";
 import type { CommandRunner } from "../process/command-runner.js";
-import { BINARY_LOCATOR_MAXIMUM_DURATION_MS } from "./binary-locator.js";
-import { withTimeout } from "../../domain/promise-timeout.js";
-
+import { withTimeout } from "../process/promise-timeout.js";
 const VERSION_TIMEOUT_MS = 4_000;
 const VERSION_BUFFER_BYTES = 32 * 1024;
-const OUTER_TIMEOUT_ALLOWANCE_MS = 250;
-const LOCATOR_TIMEOUT_MS = BINARY_LOCATOR_MAXIMUM_DURATION_MS + OUTER_TIMEOUT_ALLOWANCE_MS;
-const DISCOVERY_OUTCOME_TIMEOUT_MS = 8_000;
-// Aggregate provider-availability budget for responsive project creation. This intentionally
-// preempts the sum of every candidate-local maximum; those inner deadlines bound each attempt.
 const CATALOG_OUTCOME_TIMEOUT_MS = 12_000;
 const MAX_PROVIDER_CANDIDATES = 8;
-const PROCESS_CLEANUP_ALLOWANCE_MS = 3_000;
+const DEFAULT_CACHE_ENTRIES = 256;
+const DEFAULT_IN_FLIGHT_ENTRIES = 64;
 
 export interface ProviderBinaryLocator {
   candidates(provider: ProviderId): Promise<readonly string[]>;
@@ -60,34 +55,92 @@ export class ProviderCapabilityCache {
   readonly #probes = new Map<string, ExpiringProbe>();
   readonly #lastKnownGood = new Map<string, LastKnownGood>();
   readonly #inFlight = new Map<string, Promise<ProviderProbe>>();
+  readonly #locatorOperations = new Map<string, Promise<readonly string[]>>();
+
+  public constructor(
+    private readonly maximumEntries: number = DEFAULT_CACHE_ENTRIES,
+    private readonly maximumInFlight: number = DEFAULT_IN_FLIGHT_ENTRIES
+  ) {
+    if (!Number.isSafeInteger(maximumEntries) || maximumEntries < 1) {
+      throw new Error("Provider cache entry limit must be a positive integer.");
+    }
+    if (!Number.isSafeInteger(maximumInFlight) || maximumInFlight < 1) {
+      throw new Error("Provider in-flight limit must be a positive integer.");
+    }
+  }
 
   public freshProbe(key: string, now: number): ProviderProbe | null {
     const cached = this.#probes.get(key);
-    return cached !== undefined && cached.expiresAt > now ? cached.probe : null;
+    if (cached === undefined || cached.expiresAt <= now) {
+      if (cached !== undefined) this.#probes.delete(key);
+      return null;
+    }
+    touch(this.#probes, key, cached);
+    return cached.probe;
   }
 
   public storeProbe(key: string, probe: ProviderProbe, expiresAt: number): void {
     this.#probes.set(key, { probe, expiresAt });
+    trimOldest(this.#probes, this.maximumEntries);
   }
 
   public lastKnownGood(key: string): LastKnownGood | null {
-    return this.#lastKnownGood.get(key) ?? null;
+    const cached = this.#lastKnownGood.get(key);
+    if (cached === undefined) return null;
+    touch(this.#lastKnownGood, key, cached);
+    return cached;
   }
 
   public storeLastKnownGood(key: string, value: LastKnownGood): void {
     this.#lastKnownGood.set(key, value);
+    trimOldest(this.#lastKnownGood, this.maximumEntries);
   }
 
   public inFlight(key: string): Promise<ProviderProbe> | null {
     return this.#inFlight.get(key) ?? null;
   }
 
-  public storeInFlight(key: string, value: Promise<ProviderProbe>): void {
+  public startInFlight(
+    key: string,
+    operation: () => Promise<ProviderProbe>
+  ): Promise<ProviderProbe> {
+    if (!this.#inFlight.has(key) && this.#inFlight.size >= this.maximumInFlight) {
+      throw new Error("Provider discovery concurrency limit reached.");
+    }
+    const value = Promise.resolve(operation());
     this.#inFlight.set(key, value);
+    return value;
   }
 
   public clearInFlight(key: string, value: Promise<ProviderProbe>): void {
     if (this.#inFlight.get(key) === value) this.#inFlight.delete(key);
+  }
+
+  /** Deduplicates uncancellable binary discovery until the underlying operation really settles. */
+  public locate(
+    key: string,
+    operation: () => Promise<readonly string[]>
+  ): Promise<readonly string[]> {
+    const existing = this.#locatorOperations.get(key);
+    if (existing !== undefined) return existing;
+    if (this.#locatorOperations.size >= this.maximumInFlight) {
+      throw new Error("Provider locator concurrency limit reached.");
+    }
+    const value = Promise.resolve().then(operation);
+    this.#locatorOperations.set(key, value);
+    void value.then(
+      () => {
+        this.clearLocator(key, value);
+      },
+      () => {
+        this.clearLocator(key, value);
+      }
+    );
+    return value;
+  }
+
+  private clearLocator(key: string, value: Promise<readonly string[]>): void {
+    if (this.#locatorOperations.get(key) === value) this.#locatorOperations.delete(key);
   }
 }
 
@@ -95,12 +148,11 @@ export interface LocalProviderCatalogOptions {
   readonly workspace: string;
   readonly cacheDurationMs?: number;
   readonly versionTimeoutMs?: number;
-  readonly locatorTimeoutMs?: number;
-  readonly discoveryTimeoutMs?: number;
   readonly catalogTimeoutMs?: number;
   readonly maxCandidates?: number;
   readonly now?: () => number;
   readonly cache?: ProviderCapabilityCache;
+  readonly operationOwner?: AsyncOperationOwner;
 }
 
 /** Cached, provider-neutral catalog of CLIs installed on this machine. */
@@ -152,11 +204,11 @@ export class LocalProviderCatalog implements ProviderCatalog {
     const existing = this.#cache.inFlight(probeKey);
     if (existing !== null) return existing;
 
-    const pending = this.discover(id).then((probe) => {
+    const pending = this.#cache.startInFlight(probeKey, async () => {
+      const probe = await this.discover(id);
       this.#cache.storeProbe(probeKey, probe, this.#now() + this.#cacheDurationMs);
       return probe;
     });
-    this.#cache.storeInFlight(probeKey, pending);
     try {
       return await pending;
     } finally {
@@ -168,10 +220,7 @@ export class LocalProviderCatalog implements ProviderCatalog {
     const launcher = this.#launchers.get(id);
     if (launcher === undefined) throw new Error(`Unknown provider: ${id}`);
     try {
-      return await withTimeout(this.discoverWithinCatalog(id), {
-        timeoutMs: this.options.catalogTimeoutMs ?? CATALOG_OUTCOME_TIMEOUT_MS,
-        message: `${launcher.label} provider catalog timed out.`
-      });
+      return await this.discoverWithinCatalog(id);
     } catch (error: unknown) {
       return unavailableProbe(launcher, errorReason(error, "Provider catalog timed out."));
     }
@@ -187,19 +236,45 @@ export class LocalProviderCatalog implements ProviderCatalog {
 
     let reason = "Executable not found.";
     let fallback: ProviderProbe | null = null;
+    const catalogBudgetMs = this.options.catalogTimeoutMs ?? CATALOG_OUTCOME_TIMEOUT_MS;
+    if (!Number.isSafeInteger(catalogBudgetMs) || catalogBudgetMs < 1) {
+      throw new Error("Provider catalog budget must be a positive integer.");
+    }
+    const deadline = this.#now() + catalogBudgetMs;
     try {
-      const candidates = await withTimeout(this.locator.candidates(id), {
-        timeoutMs: this.options.locatorTimeoutMs ?? LOCATOR_TIMEOUT_MS,
-        message: `${launcher.label} executable discovery timed out.`
+      const ownedLocatorOperation = this.#cache.locate(
+        cacheKey("locator", id, this.options.workspace),
+        () => {
+          const locatorOperation = this.locator.candidates(id);
+          return this.options.operationOwner === undefined
+            ? locatorOperation
+            : this.options.operationOwner.own(locatorOperation);
+        }
+      );
+      const candidates = await withTimeout(ownedLocatorOperation, {
+        timeoutMs: Math.max(1, Math.floor(deadline - this.#now())),
+        message: `${launcher.label} provider catalog exhausted its discovery budget.`
       });
       const maxCandidates = this.options.maxCandidates ?? MAX_PROVIDER_CANDIDATES;
       if (!Number.isSafeInteger(maxCandidates) || maxCandidates <= 0) {
         throw new Error("Provider candidate limit must be a positive integer.");
       }
       for (const executable of candidates.slice(0, maxCandidates)) {
+        if (this.#now() >= deadline) {
+          reason = `${launcher.label} provider catalog exhausted its discovery budget.`;
+          break;
+        }
         let installed: InstalledProvider;
         try {
-          installed = await this.probeVersion(executable);
+          const remainingBudgetMs = Math.floor(deadline - this.#now());
+          if (remainingBudgetMs < 1) {
+            reason = `${launcher.label} provider catalog exhausted its discovery budget.`;
+            break;
+          }
+          installed = await withTimeout(this.probeVersion(executable), {
+            timeoutMs: remainingBudgetMs,
+            message: `${launcher.label} provider catalog exhausted its discovery budget.`
+          });
         } catch (error: unknown) {
           reason = errorReason(error, "Version probe failed.");
           continue;
@@ -212,6 +287,10 @@ export class LocalProviderCatalog implements ProviderCatalog {
           installed.versionFingerprint
         );
         try {
+          const remainingBudgetMs = Math.floor(deadline - this.#now());
+          if (remainingBudgetMs < 1) {
+            throw new Error(`${launcher.label} provider catalog exhausted its discovery budget.`);
+          }
           const discovered = discoveredProviderCapabilitySchema.parse(
             await withTimeout(
               discovery.discover({
@@ -220,8 +299,8 @@ export class LocalProviderCatalog implements ProviderCatalog {
                 workspace: this.options.workspace
               }),
               {
-                timeoutMs: this.options.discoveryTimeoutMs ?? DISCOVERY_OUTCOME_TIMEOUT_MS,
-                message: `${launcher.label} model catalog timed out.`
+                timeoutMs: remainingBudgetMs,
+                message: `${launcher.label} provider catalog exhausted its discovery budget.`
               }
             )
           );
@@ -282,17 +361,12 @@ export class LocalProviderCatalog implements ProviderCatalog {
 
   private async probeVersion(executable: string): Promise<InstalledProvider> {
     const commandTimeoutMs = this.options.versionTimeoutMs ?? VERSION_TIMEOUT_MS;
-    const { stdout, stderr } = await withTimeout(
-      this.runner.run(executable, ["--version"], {
-        timeoutMs: commandTimeoutMs,
-        maxBufferBytes: VERSION_BUFFER_BYTES,
-        cleanupProcessTree: true
-      }),
-      {
-        timeoutMs: commandTimeoutMs + PROCESS_CLEANUP_ALLOWANCE_MS,
-        message: `Version probe timed out after ${String(commandTimeoutMs)} milliseconds.`
-      }
-    );
+    const { stdout, stderr } = await this.runner.run(executable, ["--version"], {
+      cwd: this.options.workspace,
+      timeoutMs: commandTimeoutMs,
+      maxBufferBytes: VERSION_BUFFER_BYTES,
+      cleanupProcessTree: true
+    });
     const version = providerVersion(stdout, stderr);
     if (version === null) {
       throw new Error("Version probe returned no version.");
@@ -302,6 +376,19 @@ export class LocalProviderCatalog implements ProviderCatalog {
       version: conciseReason(version),
       versionFingerprint: versionFingerprint(version)
     };
+  }
+}
+
+function touch<Value>(map: Map<string, Value>, key: string, value: Value): void {
+  map.delete(key);
+  map.set(key, value);
+}
+
+function trimOldest<Value>(map: Map<string, Value>, maximumEntries: number): void {
+  while (map.size > maximumEntries) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) return;
+    map.delete(oldest);
   }
 }
 

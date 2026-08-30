@@ -7,7 +7,8 @@ import type {
   ResolvedWorkspacePath,
   WorkspacePathResolver
 } from "../../domain/workspace-path-resolver.js";
-import { withTimeout } from "../../domain/promise-timeout.js";
+import type { AsyncOperationOwner } from "../../domain/async-operation-owner.js";
+import { withTimeout } from "../process/promise-timeout.js";
 
 const FILESYSTEM_TIMEOUT_MS = 2_000;
 
@@ -19,6 +20,7 @@ export interface WorkspaceFilesystem {
 export interface LocalWorkspacePathResolverOptions {
   readonly timeoutMs?: number;
   readonly filesystem?: WorkspaceFilesystem;
+  readonly operationOwner?: AsyncOperationOwner;
 }
 
 /** Expands and canonicalizes an existing local directory selected by the user. */
@@ -37,14 +39,18 @@ export class LocalWorkspacePathResolver implements WorkspacePathResolver {
     try {
       const filesystem = this.options.filesystem ?? { realpath, stat };
       const timeoutMs = this.options.timeoutMs ?? FILESYSTEM_TIMEOUT_MS;
-      canonical = await withTimeout(filesystem.realpath(absolute), {
+      canonical = await awaitFilesystemOperation(
+        filesystem.realpath(absolute),
+        this.options.operationOwner,
         timeoutMs,
-        message: "Folder path resolution timed out. Check that the filesystem is responsive."
-      });
-      const metadata = await withTimeout(filesystem.stat(canonical), {
+        "Folder path resolution timed out. Check that the filesystem is responsive."
+      );
+      const metadata = await awaitFilesystemOperation(
+        filesystem.stat(canonical),
+        this.options.operationOwner,
         timeoutMs,
-        message: "Folder metadata lookup timed out. Check that the filesystem is responsive."
-      });
+        "Folder metadata lookup timed out. Check that the filesystem is responsive."
+      );
       if (!metadata.isDirectory()) {
         throw new Error("The selected path is not a folder.");
       }
@@ -68,6 +74,16 @@ export class LocalWorkspacePathResolver implements WorkspacePathResolver {
       suggestedName: basename(canonical) || canonical
     };
   }
+}
+
+function awaitFilesystemOperation<Output>(
+  operation: Promise<Output>,
+  owner: AsyncOperationOwner | undefined,
+  timeoutMs: number,
+  message: string
+): Promise<Output> {
+  if (owner === undefined) return operation;
+  return withTimeout(owner.own(operation), { timeoutMs, message });
 }
 
 function expandHome(input: string, homeDirectory: string): string {

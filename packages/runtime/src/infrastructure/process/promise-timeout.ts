@@ -3,7 +3,7 @@ export interface TimeoutOptions {
   readonly message: string;
 }
 
-/** Bounds a promise without blocking the event loop. */
+/** Bounds an outward adapter response without pretending that the underlying work was cancelled. */
 export async function withTimeout<Value>(
   operation: PromiseLike<Value>,
   options: TimeoutOptions

@@ -275,6 +275,12 @@ export function App() {
         <TerminalPanel
           conversationId={workspace.selectedProject?.id ?? null}
           session={workspace.selectedSession}
+          providerLabel={
+            workspace.providers.find(({ id }) => id === workspace.selectedSession?.provider)
+              ?.label ??
+            workspace.selectedSession?.provider ??
+            "Agent"
+          }
           active={pane === "terminal" && modal === null}
           onActivate={() => {
             setPane("terminal");
