@@ -1,6 +1,6 @@
 {
   "name": "@agentlab/tui",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,8 @@
   "dependencies": {
     "@opentui/core": "0.5.8",
     "@opentui/react": "0.5.8",
-    "@agentlab/contracts": "0.2.8",
-    "@agentlab/runtime": "0.2.8",
+    "@agentlab/contracts": "0.2.9",
+    "@agentlab/runtime": "0.2.9",
     "react": "^19.2.1"
   }
 }
