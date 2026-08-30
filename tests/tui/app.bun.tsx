@@ -22,6 +22,7 @@ import {
   TerminalPanel
 } from "../../apps/tui/src/components/terminal-panel.js";
 import { RuntimeContext } from "../../apps/tui/src/runtime-context.js";
+import { EmbeddedTerminalRenderable } from "../../apps/tui/src/terminal/embedded-terminal.js";
 import {
   maximumQueuedTerminalBytes,
   TerminalIngestionPump
@@ -509,6 +510,9 @@ describe("terminal workspace", () => {
 
     setup.mockInput.pressEnter();
     await allowStateUpdate(setup);
+    await setup.waitFor(
+      () => setup.renderer.currentFocusedRenderable instanceof EmbeddedTerminalRenderable
+    );
     await setup.mockInput.typeText("hello");
     await setup.flush();
     expect(callCount(terminal.write)).toBeGreaterThan(0);
