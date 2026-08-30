@@ -130,7 +130,8 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `packages/runtime/src/infrastructure` implements SQLite, provider discovery/launching, tmux, and
   Bun's native PTY.
 - `packages/runtime/src/local-runtime.ts` is the only concrete runtime composition root.
-- `packages/contracts` owns provider, conversation, and session schemas shared across local layers.
+- `packages/contracts` owns provider, conversation, session, and dormant software-factory schemas
+  shared across local layers.
 
 Cross-package imports use public entry points, inner runtime layers never depend outward, and the
 product source graph must remain acyclic. `npm run architecture:check` enforces those rules. The
@@ -139,6 +140,12 @@ embedded terminal uses native VT parsing, true color, selection, resize, paste, 
 lines held by the embedded terminal varies with encoded content. Focused tests enforce
 multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
+
+The repository also contains a tested, staged software-factory safety kernel and draft-PR broker
+design. It is not connected to the current TUI/runtime, scheduled, or enabled. Normal database
+migration creates only its inert local ledger tables; no new user-visible or remote behavior is
+active. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented
+controls, activation blockers, and later phases.
 
 ## Development
 
