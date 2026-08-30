@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
@@ -102,8 +102,16 @@ describeIntegration("Bun PTY integration", () => {
     });
     const resolution = await runtime.resolveOwnedTarget(name, ownership);
     if (resolution.status !== "owned") throw new Error("created session was not owned");
+    const previousServerPid = Number.parseInt(resolution.target.serverPid, 10);
+    if (!Number.isSafeInteger(previousServerPid) || previousServerPid <= 0) {
+      throw new Error("created session did not expose a valid server PID");
+    }
 
     await runner.run("tmux", ["-S", socketPath, "kill-server"]);
+    expect(await poll(() => processExists(previousServerPid), false)).toBe(false);
+    // tmux can leave a stale custom socket after the owning server has exited.
+    rmSync(socketPath, { force: true });
+    expect(existsSync(socketPath)).toBe(false);
     await runner.run("tmux", [
       "-S",
       socketPath,
@@ -182,7 +190,7 @@ describeIntegration("Bun PTY integration", () => {
   });
 });
 
-async function poll<T>(read: () => Promise<T>, expected: T): Promise<T> {
+async function poll<T>(read: () => T | Promise<T>, expected: T): Promise<T> {
   const deadline = Date.now() + 3_000;
   let value = await read();
   while (value !== expected && Date.now() < deadline) {
@@ -190,4 +198,13 @@ async function poll<T>(read: () => Promise<T>, expected: T): Promise<T> {
     value = await read();
   }
   return value;
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
 }
