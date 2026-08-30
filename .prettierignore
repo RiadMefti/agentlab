@@ -6,7 +6,3 @@ coverage
 *.tsbuildinfo
 package-lock.json
 .data
-.lavish
-.agent-html-render/
-.agents/
-.claude/
