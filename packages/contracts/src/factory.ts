@@ -15,13 +15,13 @@ export type GitObjectId = z.infer<typeof gitObjectIdSchema>;
 /** Canonical UTC timestamp used anywhere lexical ordering or hashing must remain deterministic. */
 export const factoryTimestampSchema = z.iso.datetime({ precision: 3 });
 
-const factoryIdentifierSchema = z
+export const factoryIdentifierSchema = z
   .string()
   .min(1)
   .max(128)
   .regex(/^[a-z0-9][a-z0-9._/-]*$/u, "Expected a stable lowercase identifier.");
 
-const semanticVersionSchema = z
+export const factorySemanticVersionSchema = z
   .string()
   .max(80)
   .regex(
@@ -282,6 +282,9 @@ export type FactoryProcessIsolation = z.infer<typeof factoryProcessIsolationSche
 
 export const evidenceKindSchema = z.enum([
   "request",
+  "qualification",
+  "specification",
+  "plan",
   "contract",
   "skill",
   "execution",
@@ -310,7 +313,7 @@ const skillManifestBaseSchema = z
   .object({
     schemaVersion: z.literal("agentlab.skill-manifest.v1"),
     id: factoryIdentifierSchema,
-    version: semanticVersionSchema,
+    version: factorySemanticVersionSchema,
     packageDigest: sha256DigestSchema,
     instructionPath: repositoryRelativePathSchema,
     description: shortTextSchema,
@@ -332,7 +335,7 @@ const skillManifestBaseSchema = z
         .strict()
     ]),
     budgetCeiling: factoryBudgetSchema,
-    requiredEvidence: z.array(evidenceKindSchema).min(1).max(20),
+    requiredEvidence: z.array(evidenceKindSchema).min(1).max(32),
     dependencyDigests: z.array(sha256DigestSchema).max(64)
   })
   .strict();
@@ -445,17 +448,29 @@ export type FactoryApprovalPolicy = z.infer<typeof factoryApprovalPolicySchema>;
 export const factoryExecutionRoleSchema = z.enum(["implementer", "repairer", "reviewer"]);
 export type FactoryExecutionRole = z.infer<typeof factoryExecutionRoleSchema>;
 
-const skillPlanEntrySchema = z
+export const factorySkillPhaseSchema = z.enum([
+  "qualify",
+  "specify",
+  "plan",
+  "implement",
+  "verify",
+  "review",
+  "repair"
+]);
+export type FactorySkillPhase = z.infer<typeof factorySkillPhaseSchema>;
+
+export const factorySkillPlanEntrySchema = z
   .object({
     id: factoryIdentifierSchema,
-    version: semanticVersionSchema,
+    version: factorySemanticVersionSchema,
     packageDigest: sha256DigestSchema,
-    phase: z.enum(["qualify", "specify", "plan", "implement", "verify", "review", "repair"]),
+    phase: factorySkillPhaseSchema,
     dependsOn: z.array(factoryIdentifierSchema).max(64)
   })
   .strict();
+export type FactorySkillPlanEntry = z.infer<typeof factorySkillPlanEntrySchema>;
 
-function skillPlanHasCycle(skills: readonly z.infer<typeof skillPlanEntrySchema>[]): boolean {
+function skillPlanHasCycle(skills: readonly FactorySkillPlanEntry[]): boolean {
   const dependencies = new Map(skills.map((skill) => [skill.id, skill.dependsOn]));
   const visiting = new Set<string>();
   const visited = new Set<string>();
@@ -511,7 +526,7 @@ export const immutableTaskContractSchema = z
       })
       .strict(),
     riskTier: factoryRiskTierSchema,
-    skillPlan: z.array(skillPlanEntrySchema).min(1).max(64),
+    skillPlan: z.array(factorySkillPlanEntrySchema).min(1).max(64),
     agentPolicy: z
       .object({
         allowedProviders: z.array(providerIdSchema).min(1).max(3),
@@ -547,11 +562,11 @@ export const immutableTaskContractSchema = z
     gateProfile: z
       .object({
         id: factoryIdentifierSchema,
-        version: semanticVersionSchema,
+        version: factorySemanticVersionSchema,
         policyDigest: sha256DigestSchema
       })
       .strict(),
-    requiredEvidence: z.array(evidenceKindSchema).min(1).max(20),
+    requiredEvidence: z.array(evidenceKindSchema).min(1).max(32),
     approvals: factoryApprovalPolicySchema
   })
   .strict()
@@ -825,7 +840,7 @@ export const factoryPolicyDecisionSchema = z
     profileId: factoryIdentifierSchema,
     reasonCodes: z.array(factoryIdentifierSchema).max(256),
     requiredGateIds: z.array(factoryIdentifierSchema).max(256),
-    requiredEvidence: z.array(evidenceKindSchema).max(20),
+    requiredEvidence: z.array(evidenceKindSchema).max(32),
     requiredHumanApprovals: z.number().int().min(0).max(5),
     satisfiedHumanApprovals: z.number().int().min(0).max(32)
   })

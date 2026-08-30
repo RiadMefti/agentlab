@@ -2,7 +2,6 @@ import type {
   FactoryActorRole,
   FactoryBudget,
   FactoryCapabilityGrant,
-  FactoryRiskTier,
   FactorySkillPackage,
   FactoryTaskState,
   ImmutableTaskContract,
@@ -10,6 +9,13 @@ import type {
   Sha256Digest,
   SkillManifest
 } from "@agentlab/contracts";
+
+import {
+  factoryCapabilitiesFit,
+  factoryRiskRank,
+  mergeFactoryCapabilities,
+  minimumFactoryBudget
+} from "./factory-authority-limits.js";
 
 export type FactorySkillPhase = ImmutableTaskContract["skillPlan"][number]["phase"];
 
@@ -75,10 +81,10 @@ export async function resolveFactorySkillPlan(
     ) {
       throw new Error(`Skill ${entry.id} is not authorized for its planned phase.`);
     }
-    if (riskRank(contract.riskTier) > riskRank(skill.manifest.riskCeiling)) {
+    if (factoryRiskRank(contract.riskTier) > factoryRiskRank(skill.manifest.riskCeiling)) {
       throw new Error(`Skill ${entry.id} does not permit task risk ${contract.riskTier}.`);
     }
-    if (!capabilitiesFit(skill.manifest.requestedCapabilities, contract.capabilities)) {
+    if (!factoryCapabilitiesFit(skill.manifest.requestedCapabilities, contract.capabilities)) {
       throw new Error(`Skill ${entry.id} requests capabilities outside the task contract.`);
     }
     const dependencyDigests = entry.dependsOn.map((id) => {
@@ -123,10 +129,10 @@ export function selectFactorySkills(input: {
     skills: phaseSkills,
     capabilities: phaseSkills
       .map(({ manifest }) => manifest.requestedCapabilities)
-      .reduce(mergeCapabilities),
+      .reduce(mergeFactoryCapabilities),
     budget: phaseSkills
       .map(({ manifest }) => manifest.budgetCeiling)
-      .reduce(minimumBudget, input.contract.budget)
+      .reduce(minimumFactoryBudget, input.contract.budget)
   };
 }
 
@@ -144,89 +150,6 @@ function topologicalSkillIds(contract: ImmutableTaskContract): readonly string[]
   };
   for (const entry of contract.skillPlan) visit(entry.id);
   return result;
-}
-
-function capabilitiesFit(
-  requested: FactoryCapabilityGrant,
-  granted: FactoryCapabilityGrant
-): boolean {
-  return (
-    accessRank(requested.filesystem) <= accessRank(granted.filesystem) &&
-    accessRank(requested.git) <= accessRank(granted.git) &&
-    accessRank(requested.remoteRepository) <= accessRank(granted.remoteRepository) &&
-    accessRank(requested.process) <= accessRank(granted.process) &&
-    networkFits(requested.network, granted.network) &&
-    requested.commandAllowlist.every((command) => granted.commandAllowlist.includes(command)) &&
-    requested.secretRefs.every((secret) => granted.secretRefs.includes(secret))
-  );
-}
-
-function mergeCapabilities(
-  left: FactoryCapabilityGrant,
-  right: FactoryCapabilityGrant
-): FactoryCapabilityGrant {
-  return {
-    filesystem: maximumAccess(left.filesystem, right.filesystem),
-    git: maximumAccess(left.git, right.git),
-    remoteRepository: maximumAccess(left.remoteRepository, right.remoteRepository),
-    process: maximumAccess(left.process, right.process),
-    network:
-      left.network.mode === "off" && right.network.mode === "off"
-        ? { mode: "off" }
-        : {
-            mode: "allowlist",
-            hosts: unique([
-              ...(left.network.mode === "allowlist" ? left.network.hosts : []),
-              ...(right.network.mode === "allowlist" ? right.network.hosts : [])
-            ])
-          },
-    commandAllowlist: unique([...left.commandAllowlist, ...right.commandAllowlist]),
-    secretRefs: unique([...left.secretRefs, ...right.secretRefs])
-  };
-}
-
-function minimumBudget(left: FactoryBudget, right: FactoryBudget): FactoryBudget {
-  return {
-    wallClockSeconds: Math.min(left.wallClockSeconds, right.wallClockSeconds),
-    maxAgentTurns: Math.min(left.maxAgentTurns, right.maxAgentTurns),
-    maxToolCalls: Math.min(left.maxToolCalls, right.maxToolCalls),
-    maxInputTokens: Math.min(left.maxInputTokens, right.maxInputTokens),
-    maxOutputTokens: Math.min(left.maxOutputTokens, right.maxOutputTokens),
-    maxCostMicrousd: Math.min(left.maxCostMicrousd, right.maxCostMicrousd),
-    maxProcesses: Math.min(left.maxProcesses, right.maxProcesses),
-    maxOutputBytes: Math.min(left.maxOutputBytes, right.maxOutputBytes),
-    maxWorkers: Math.min(left.maxWorkers, right.maxWorkers),
-    maxRepairAttempts: Math.min(left.maxRepairAttempts, right.maxRepairAttempts),
-    maxChangedFiles: Math.min(left.maxChangedFiles, right.maxChangedFiles),
-    maxChangedLines: Math.min(left.maxChangedLines, right.maxChangedLines)
-  };
-}
-
-function networkFits(
-  requested: FactoryCapabilityGrant["network"],
-  granted: FactoryCapabilityGrant["network"]
-): boolean {
-  if (requested.mode === "off") return true;
-  if (granted.mode === "off") return false;
-  return requested.hosts.every((host) => granted.hosts.includes(host));
-}
-
-function maximumAccess<Value extends string>(left: Value, right: Value): Value {
-  return accessRank(left) >= accessRank(right) ? left : right;
-}
-
-function accessRank(value: string): number {
-  if (value === "none") return 0;
-  if (value === "read") return 1;
-  return 2;
-}
-
-function riskRank(tier: FactoryRiskTier): number {
-  return ["R0", "R1", "R2", "R3", "R4"].indexOf(tier);
-}
-
-function unique<Value>(values: readonly Value[]): Value[] {
-  return [...new Set(values)];
 }
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {

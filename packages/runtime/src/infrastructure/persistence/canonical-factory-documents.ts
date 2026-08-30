@@ -6,14 +6,20 @@ import {
   factoryControlEventSchema,
   factoryGateObservationSchema,
   factoryPatchProposalSchema,
+  factoryPlanSchema,
   factoryPolicyDecisionSchema,
   factoryPolicyEvaluationRecordSchema,
   factoryPullRequestProposalSchema,
   factoryPullRequestRecordSchema,
+  factoryPreparationAuthoritySchema,
+  factoryPreparationBundleSchema,
+  factoryQualificationSchema,
   factoryReviewResultSchema,
   factoryResourceIsolationRecordSchema,
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
+  factoryIntakeRequestSchema,
+  factorySpecificationSchema,
   immutableTaskContractSchema,
   taskEventSchema
 } from "@agentlab/contracts";
@@ -24,6 +30,30 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public intakeRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryIntakeRequestSchema.parse(input));
+  }
+
+  public qualification(input: unknown) {
+    return encodeCanonicalDocument(factoryQualificationSchema.parse(input));
+  }
+
+  public specification(input: unknown) {
+    return encodeCanonicalDocument(factorySpecificationSchema.parse(input));
+  }
+
+  public plan(input: unknown) {
+    return encodeCanonicalDocument(factoryPlanSchema.parse(input));
+  }
+
+  public preparationAuthority(input: unknown) {
+    return encodeCanonicalDocument(factoryPreparationAuthoritySchema.parse(input));
+  }
+
+  public preparationBundle(input: unknown) {
+    return encodeCanonicalDocument(factoryPreparationBundleSchema.parse(input));
+  }
+
   public taskContract(input: unknown) {
     return encodeCanonicalDocument(immutableTaskContractSchema.parse(input));
   }
