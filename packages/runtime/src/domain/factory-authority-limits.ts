@@ -18,7 +18,20 @@ export function factoryCapabilitiesFit(
 
 /** Returns true only when every cumulative task limit is no greater than its authority ceiling. */
 export function factoryBudgetFits(requested: FactoryBudget, ceiling: FactoryBudget): boolean {
-  return budgetValues(requested).every(([name, value]) => value <= ceiling[name]);
+  return (
+    requested.wallClockSeconds <= ceiling.wallClockSeconds &&
+    requested.maxAgentTurns <= ceiling.maxAgentTurns &&
+    requested.maxToolCalls <= ceiling.maxToolCalls &&
+    requested.maxInputTokens <= ceiling.maxInputTokens &&
+    requested.maxOutputTokens <= ceiling.maxOutputTokens &&
+    requested.maxCostMicrousd <= ceiling.maxCostMicrousd &&
+    requested.maxProcesses <= ceiling.maxProcesses &&
+    requested.maxOutputBytes <= ceiling.maxOutputBytes &&
+    requested.maxWorkers <= ceiling.maxWorkers &&
+    requested.maxRepairAttempts <= ceiling.maxRepairAttempts &&
+    requested.maxChangedFiles <= ceiling.maxChangedFiles &&
+    requested.maxChangedLines <= ceiling.maxChangedLines
+  );
 }
 
 export function mergeFactoryCapabilities(
@@ -68,23 +81,6 @@ export function maximumFactoryRisk(left: FactoryRiskTier, right: FactoryRiskTier
 
 export function factoryRiskRank(tier: FactoryRiskTier): number {
   return ["R0", "R1", "R2", "R3", "R4"].indexOf(tier);
-}
-
-function budgetValues(budget: FactoryBudget): readonly (readonly [keyof FactoryBudget, number])[] {
-  return [
-    ["wallClockSeconds", budget.wallClockSeconds],
-    ["maxAgentTurns", budget.maxAgentTurns],
-    ["maxToolCalls", budget.maxToolCalls],
-    ["maxInputTokens", budget.maxInputTokens],
-    ["maxOutputTokens", budget.maxOutputTokens],
-    ["maxCostMicrousd", budget.maxCostMicrousd],
-    ["maxProcesses", budget.maxProcesses],
-    ["maxOutputBytes", budget.maxOutputBytes],
-    ["maxWorkers", budget.maxWorkers],
-    ["maxRepairAttempts", budget.maxRepairAttempts],
-    ["maxChangedFiles", budget.maxChangedFiles],
-    ["maxChangedLines", budget.maxChangedLines]
-  ];
 }
 
 function networkFits(
