@@ -23,7 +23,12 @@ export class ArtifactFactorySkillSource implements FactorySkillSource {
       ...document.value.manifest,
       packageDigest
     });
-    const instructions = document.value.files[manifest.instructionPath];
+    let instructions: string | undefined;
+    for (const [path, content] of Object.entries(document.value.files)) {
+      if (path !== manifest.instructionPath) continue;
+      instructions = content;
+      break;
+    }
     if (instructions === undefined || instructions.trim().length === 0) {
       throw new Error(`Skill ${manifest.id} has no usable instruction file.`);
     }
