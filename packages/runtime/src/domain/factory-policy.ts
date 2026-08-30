@@ -2,6 +2,7 @@ import {
   factoryTimestampSchema,
   type EvidenceItem,
   type EvidenceKind,
+  type FactoryApprovalPolicy,
   type FactoryApprovalRecord,
   type FactoryApprovalStage,
   type FactoryBudgetUsage,
@@ -15,6 +16,7 @@ import {
 } from "@agentlab/contracts";
 
 import type { CanonicalFactoryDocument } from "./factory-documents.js";
+import { factoryRiskRank, maximumFactoryRisk } from "./factory-authority-limits.js";
 import type { FactoryAuthorityState } from "./factory-task-repository.js";
 import {
   repositoryPathIsInScope,
@@ -70,6 +72,22 @@ export interface FactoryStageRequirements {
   readonly resourceLimits: FactoryResourceLimits;
 }
 
+export interface FactoryApprovalRoleBindings {
+  readonly execution: readonly string[];
+  readonly pullRequestCreation: readonly string[];
+  readonly merge: readonly string[];
+  readonly release: readonly string[];
+}
+
+export interface FactoryContractControls {
+  readonly gateProfile: ImmutableTaskContract["gateProfile"];
+  readonly writeAllowed: boolean;
+  readonly networkAllowlistAllowed: boolean;
+  readonly minimumIndependentReviews: number;
+  readonly requireDistinctReviewSession: boolean;
+  readonly approvals: FactoryApprovalPolicy;
+}
+
 const preparationGates = ["contract-validation", "scope-validation", "policy-validation"] as const;
 const r1PullRequestGates = [
   ...preparationGates,
@@ -115,7 +133,7 @@ const releaseEvidence = [
   "sbom",
   "provenance"
 ] as const satisfies readonly EvidenceKind[];
-const baselinePolicyVersion = "1.2.0";
+const baselinePolicyVersion = "1.3.0";
 
 function profile(input: {
   readonly tier: FactoryRiskTier;
@@ -307,10 +325,48 @@ export class FactoryPolicyEngine {
     };
   }
 
+  /** Classifies the complete prospective capability and write scope before any worker starts. */
+  public minimumRiskTier(
+    input: Pick<ImmutableTaskContract, "scope" | "capabilities">
+  ): FactoryRiskTier {
+    return prospectiveRisk(input, this.bundle);
+  }
+
+  /** Derives authority-bearing contract controls from policy, never from model output. */
+  public contractControls(
+    tier: FactoryRiskTier,
+    approvalRoles: FactoryApprovalRoleBindings
+  ): FactoryContractControls {
+    const profile = this.bundle.profiles[tier];
+    return {
+      gateProfile: {
+        id: profile.id,
+        version: profile.version,
+        policyDigest: this.policyBundleDigest
+      },
+      writeAllowed: profile.writeAllowed,
+      networkAllowlistAllowed: profile.networkAllowlistAllowed,
+      minimumIndependentReviews: profile.minimumIndependentReviews,
+      requireDistinctReviewSession: profile.minimumIndependentReviews > 0,
+      approvals: {
+        execution: approvalRequirement(
+          profile.minimumHumanApprovals.execution,
+          approvalRoles.execution
+        ),
+        pullRequestCreation: approvalRequirement(
+          profile.minimumHumanApprovals["pull-request-creation"],
+          approvalRoles.pullRequestCreation
+        ),
+        merge: approvalRequirement(profile.minimumHumanApprovals.merge, approvalRoles.merge),
+        release: approvalRequirement(profile.minimumHumanApprovals.release, approvalRoles.release)
+      }
+    };
+  }
+
   public evaluate(input: FactoryPolicyEvaluation): FactoryPolicyDecision {
     const profileForContract = this.bundle.profiles[input.contract.value.riskTier];
     const detectedRiskFloor = effectiveRisk(input.contract.value, input.changeSet, this.bundle);
-    const effectiveRiskTier = maximumRisk(input.contract.value.riskTier, detectedRiskFloor);
+    const effectiveRiskTier = maximumFactoryRisk(input.contract.value.riskTier, detectedRiskFloor);
     const denials = new Set<string>();
 
     const evaluationTime = factoryTimestampSchema.safeParse(input.now);
@@ -331,7 +387,7 @@ export class FactoryPolicyEngine {
     ) {
       denials.add("gate-profile-mismatch");
     }
-    if (riskRank(detectedRiskFloor) > riskRank(input.contract.value.riskTier)) {
+    if (factoryRiskRank(detectedRiskFloor) > factoryRiskRank(input.contract.value.riskTier)) {
       denials.add("risk-underclassified");
     }
     for (const reason of capabilityDenials(input.contract.value, profileForContract)) {
@@ -453,6 +509,27 @@ function effectiveRisk(
   changeSet: FactoryChangeSet,
   bundle: FactoryPolicyBundle
 ): FactoryRiskTier {
+  let effective = prospectiveRisk(contract, bundle);
+  if (changeSet.binaryPaths.length > 0) {
+    effective = maximumFactoryRisk(effective, "R2");
+  }
+  for (const path of changeSet.changedPaths) {
+    for (const rule of bundle.protectedPaths) {
+      if (repositoryPathMatches(path, rule.pattern)) {
+        effective = maximumFactoryRisk(effective, rule.minimumRiskTier);
+      }
+    }
+    if (contract.scope.protectedPaths.some((pattern) => repositoryPathMatches(path, pattern))) {
+      effective = maximumFactoryRisk(effective, "R3");
+    }
+  }
+  return effective;
+}
+
+function prospectiveRisk(
+  contract: Pick<ImmutableTaskContract, "scope" | "capabilities">,
+  bundle: FactoryPolicyBundle
+): FactoryRiskTier {
   let effective: FactoryRiskTier =
     contract.capabilities.filesystem === "workspace-write" ? "R1" : "R0";
   if (contract.capabilities.filesystem === "workspace-write") {
@@ -462,7 +539,7 @@ function effectiveRisk(
     for (const included of contract.scope.includePaths) {
       for (const rule of bundle.protectedPaths) {
         if (repositoryPatternsMayOverlap(included, rule.pattern)) {
-          effective = maximumRisk(effective, rule.minimumRiskTier);
+          effective = maximumFactoryRisk(effective, rule.minimumRiskTier);
         }
       }
       if (
@@ -470,23 +547,14 @@ function effectiveRisk(
           repositoryPatternsMayOverlap(included, protectedPath)
         )
       ) {
-        effective = maximumRisk(effective, "R3");
+        effective = maximumFactoryRisk(effective, "R3");
       }
     }
   }
-  if (contract.capabilities.network.mode === "allowlist") effective = maximumRisk(effective, "R2");
+  if (contract.capabilities.network.mode === "allowlist") {
+    effective = maximumFactoryRisk(effective, "R2");
+  }
   if (contract.capabilities.secretRefs.length > 0) effective = "R4";
-  if (changeSet.binaryPaths.length > 0) effective = maximumRisk(effective, "R2");
-  for (const path of changeSet.changedPaths) {
-    for (const rule of bundle.protectedPaths) {
-      if (repositoryPathMatches(path, rule.pattern)) {
-        effective = maximumRisk(effective, rule.minimumRiskTier);
-      }
-    }
-    if (contract.scope.protectedPaths.some((pattern) => repositoryPathMatches(path, pattern))) {
-      effective = maximumRisk(effective, "R3");
-    }
-  }
   return effective;
 }
 
@@ -654,7 +722,16 @@ function evidenceSubjectMatches(
   approvalSubjectDigest: Sha256Digest
 ): boolean {
   if (kind === "policy") return item.subjectDigest === policyBundleDigest;
-  if (kind === "contract" || kind === "skill" || kind === "execution" || kind === "command") {
+  if (
+    kind === "request" ||
+    kind === "qualification" ||
+    kind === "specification" ||
+    kind === "plan" ||
+    kind === "contract" ||
+    kind === "skill" ||
+    kind === "execution" ||
+    kind === "command"
+  ) {
     return item.subjectDigest === contractDigest;
   }
   return item.subjectDigest === approvalSubjectDigest;
@@ -888,14 +965,14 @@ function actorKey(kind: string, id: string, sessionId: string | null): string {
   return `${kind}/${id}/${sessionId ?? "none"}`;
 }
 
-function maximumRisk(left: FactoryRiskTier, right: FactoryRiskTier): FactoryRiskTier {
-  return riskRank(left) >= riskRank(right) ? left : right;
-}
-
-function riskRank(tier: FactoryRiskTier): number {
-  if (tier === "R0") return 0;
-  if (tier === "R1") return 1;
-  if (tier === "R2") return 2;
-  if (tier === "R3") return 3;
-  return 4;
+function approvalRequirement(
+  minimum: number | "forbidden",
+  roles: readonly string[]
+): FactoryApprovalPolicy["execution"] {
+  if (minimum === "forbidden") return { mode: "forbidden" };
+  if (minimum === 0) return { mode: "automatic" };
+  if (roles.length === 0 || new Set(roles).size !== roles.length) {
+    throw new Error("Human approval policy requires unique authority roles.");
+  }
+  return { mode: "human", minimumApprovals: minimum, roles: [...roles] };
 }

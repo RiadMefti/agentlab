@@ -119,6 +119,41 @@ or future HTTP boundary. Canonical JSON is hashed with SHA-256. Mutating a task 
 contract that references the previous contract digest; it never means editing a signed contract in
 place.
 
+### Governed preparation chain
+
+The raw request is not an execution contract, and agent-authored preparation is never an authority
+source. Six canonical documents form the pre-contract boundary:
+
+- intake binds a task/conversation, exact repository/base, source references, trigger, requester,
+  deduplication key, title, body, and creation time;
+- qualification links the intake digest and records `ready`, `needs-human`, or `rejected`, plus the
+  clarified objective, assumptions, questions, or rejection reason;
+- specification links the exact qualification and records the unchanged qualified objective,
+  acceptance criteria, non-goals, and requested path scope;
+- plan links the exact specification and proposes risk, authorized skill/profile IDs, capabilities,
+  budget, and extra evidence—never gates, approvals, credentials, or policy;
+- preparation authority is issued by trusted policy for that exact task/request/base and pins the
+  predecessor contract, active policy digest, exact skill manifests/DAG, worker profiles, exact
+  include-path allowlist, protected paths, risk/capability/budget ceilings, evidence floor, approval
+  roles, and validity/lifetime limits;
+- the preparation bundle links every artifact/authority digest and one session-bound agent run for
+  each `qualify`, `specify`, and `plan` phase, including exact skill package and output digests.
+
+The deterministic compiler receives authority only through its trusted construction boundary; the
+agent-facing compilation input cannot supply or replace it. It recanonicalizes all six documents and
+rejects unknown fields, invalid dispositions, digest substitution/replay, objective drift, stale or
+mismatched authority, causal time violations, unpinned skills/workers, missing dependency closure or
+execution phases, provider incompatibility, and any scope/capability/budget/risk widening. It unions
+trusted protected paths and evidence floors, calculates prospective risk with the same policy used
+at execution, and derives the gate profile, independent-review count, and every stage approval from
+pinned policy. The result is the existing `agentlab.task-contract.v1`; there is no second
+execution-authority format.
+
+The schemas and compiler now exist with adversarial tests. Provider execution of the three
+preparation skills, append-only storage of their artifacts, authenticated preparation evidence, and
+atomic materialization of the `intake → qualified → specified → planned` ledger remain activation
+work. Until those pieces exist, callers cannot use agent prose as a substitute for a compiled chain.
+
 ### Skill manifest
 
 A reusable skill manifest contains:
@@ -253,9 +288,10 @@ sandbox. The default is no network, no secrets, repository read, and only an exp
 An implementer receives workspace write only inside that worktree. Limits apply to the whole process
 tree, output, time, tokens, tools, cost, changed files/lines, concurrency, and repair count.
 
-Baseline policy 1.2 conservatively intersects every allowed write-scope glob with the protected-path
-rules before execution. Exclusions cannot lower this ceiling: a broad or ambiguous scope receives
-the highest tier it could reach, while the exact changed paths are classified again after execution.
+Baseline policy 1.3 conservatively intersects every allowed write-scope glob with the protected-path
+rules before execution and binds request/qualification/specification/plan evidence to the compiled
+contract digest. Exclusions cannot lower this ceiling: a broad or ambiguous scope receives the
+highest tier it could reach, while the exact changed paths are classified again after execution.
 This prevents an under-classified worker from touching an R3/R4 path before the post-run diff
 exists. The policy also pins instantaneous resource profiles by risk tier. The narrower task/skill
 process count wins. On supported Linux hosts, every provider and gate command must first be wrapped
@@ -354,30 +390,31 @@ metrics.
 
 ## Phased implementation
 
-Implementation status on 2026-08-30: phases 1–3 and the internal, draft-only mechanics of phase 4
-exist behind ports with focused fail-closed tests. Authenticated channel-bound evidence ingress and
-mandatory systemd/cgroup resource isolation are implemented; the adversarial live sandbox test
-passes on the current Linux development host. They are intentionally not wired into the public
-runtime or TUI. No live agent task or PR has been created by this code. Phase 4 activation remains
-blocked until repository governance requires at least one approval, dismisses stale reviews,
-requires approval of the latest push, applies rules to administrators, forbids force-push/deletion,
-and requires the exact `verify` check. Complete provider cost accounting must also be configured; an
-incomplete usage record denies PR creation. The activation change must run the adversarial sandbox
-test in the supported target-host CI lane, configure protected-path ownership, and supply a separate
-short-lived broker identity.
+Implementation status on 2026-08-30: phases 1–3, the governed request-to-contract compiler, and the
+internal, draft-only mechanics of phase 4 exist behind ports with focused fail-closed tests.
+Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource isolation are
+implemented; the adversarial live sandbox test passes on the current Linux development host. They
+are intentionally not wired into the public runtime or TUI. No live agent task or PR has been
+created by this code. Phase 4 activation remains blocked until repository governance requires at
+least one approval, dismisses stale reviews, requires approval of the latest push, applies rules to
+administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
+provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
+activation change must run the adversarial sandbox test in the supported target-host CI lane,
+configure protected-path ownership, and supply a separate short-lived broker identity.
 
-1. **Safety kernel:** versioned skill/task/event/evidence schemas, explicit state machine, this ADR,
-   and architecture fitness tests. No agent or remote write authority.
+1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
+   evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
+   architecture fitness tests. No agent or remote write authority.
 2. **Local control plane:** canonical hashing, append-only SQLite task ledger, content-addressed
    evidence store, deterministic risk classifier/gate policy, actor/session separation, budgets,
    audit queries, and kill switch.
 3. **Isolated execution:** worktree and sandbox lifecycle, provider-neutral non-interactive runner,
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
    channels, cgroup CPU/memory/process enforcement, and bounded logs.
-4. **Minimal brokered-PR loop:** read-only intake, exact-base worktree, one implementer,
-   deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, separate
-   least-privilege broker, draft PR only, current branch protection, and human merge. No scheduler,
-   auto-merge, release, or protected-path write.
+4. **Minimal brokered-PR loop:** execute and durably ingest the governed preparation chain,
+   exact-base worktree, one implementer, deterministic `verify`, one distinct read-only reviewer,
+   hashed patch/evidence, separate least-privilege broker, draft PR only, current branch protection,
+   and human merge. No scheduler, auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, GitHub App
    identity, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and incident tooling.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,

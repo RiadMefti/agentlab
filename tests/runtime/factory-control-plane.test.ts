@@ -313,7 +313,7 @@ function policyContract(): ImmutableTaskContract {
     },
     gateProfile: {
       id: "baseline/r1",
-      version: "1.2.0",
+      version: "1.3.0",
       policyDigest: encodeCanonicalDocument(defaultFactoryPolicyBundle).digest
     }
   });

@@ -62,6 +62,40 @@ describe("FactoryPolicyEngine", () => {
     });
   });
 
+  it("binds request and preparation evidence to the immutable contract", () => {
+    const base = policyContract();
+    const contract = policyContract({
+      requiredEvidence: [
+        ...base.requiredEvidence,
+        "request",
+        "qualification",
+        "specification",
+        "plan"
+      ]
+    });
+    const input = r1PullRequestInput(contract);
+    const required = engine.evaluate(input).requiredGateIds;
+    const preparation = (["request", "qualification", "specification", "plan"] as const).map(
+      (kind, index) =>
+        evidence({
+          index: index + 92,
+          kind,
+          subjectDigest: input.contract.digest
+        })
+    );
+    const complete = [...passingEvidence(required, input.contract.digest), ...preparation];
+
+    expect(engine.evaluate({ ...input, evidence: complete }).outcome).toBe("allow");
+    expect(
+      engine.evaluate({
+        ...input,
+        evidence: complete.map((item) =>
+          item.kind === "qualification" ? { ...item, subjectDigest: approvalSubject } : item
+        )
+      }).reasonCodes
+    ).toContain("missing-evidence/qualification");
+  });
+
   it("requires the exact patch-producing execution and its resource isolation", () => {
     const input = r1PullRequestInput();
     const required = engine.evaluate(input).requiredGateIds;
@@ -216,7 +250,7 @@ describe("FactoryPolicyEngine", () => {
         filesystem: "read",
         git: "read"
       },
-      gateProfile: { id: "baseline/r0", version: "1.2.0", policyDigest },
+      gateProfile: { id: "baseline/r0", version: "1.3.0", policyDigest },
       approvals: {
         execution: { mode: "automatic" },
         pullRequestCreation: { mode: "forbidden" },
@@ -274,7 +308,7 @@ describe("FactoryPolicyEngine", () => {
         minimumIndependentReviews: 2,
         requireDistinctReviewSession: true
       },
-      gateProfile: { id: "baseline/r3", version: "1.2.0", policyDigest },
+      gateProfile: { id: "baseline/r3", version: "1.3.0", policyDigest },
       approvals: {
         execution: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
         pullRequestCreation: { mode: "human", minimumApprovals: 1, roles: ["maintainer"] },
@@ -395,7 +429,7 @@ function policyContract(overrides: Partial<ImmutableTaskContract> = {}): Immutab
     },
     gateProfile: overrides.gateProfile ?? {
       id: "baseline/r1",
-      version: "1.2.0",
+      version: "1.3.0",
       policyDigest
     }
   });

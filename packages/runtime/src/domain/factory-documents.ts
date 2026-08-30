@@ -4,14 +4,20 @@ import type {
   FactoryAgentRunRecord,
   FactoryGateObservation,
   FactoryPatchProposal,
+  FactoryPlan,
   FactoryPolicyDecision,
   FactoryPolicyEvaluationRecord,
   FactoryPullRequestProposal,
   FactoryPullRequestRecord,
+  FactoryPreparationAuthority,
+  FactoryPreparationBundle,
+  FactoryQualification,
   FactoryReviewResult,
   FactoryResourceIsolationRecord,
   FactorySkillPackage,
   FactoryTaskUsageRecord,
+  FactoryIntakeRequest,
+  FactorySpecification,
   ImmutableTaskContract,
   Sha256Digest,
   TaskEvent
@@ -25,6 +31,12 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  intakeRequest(input: unknown): CanonicalFactoryDocument<FactoryIntakeRequest>;
+  qualification(input: unknown): CanonicalFactoryDocument<FactoryQualification>;
+  specification(input: unknown): CanonicalFactoryDocument<FactorySpecification>;
+  plan(input: unknown): CanonicalFactoryDocument<FactoryPlan>;
+  preparationAuthority(input: unknown): CanonicalFactoryDocument<FactoryPreparationAuthority>;
+  preparationBundle(input: unknown): CanonicalFactoryDocument<FactoryPreparationBundle>;
   taskContract(input: unknown): CanonicalFactoryDocument<ImmutableTaskContract>;
   taskEvent(input: unknown): CanonicalFactoryDocument<TaskEvent>;
   evidenceBundle(input: unknown): CanonicalFactoryDocument<EvidenceBundle>;

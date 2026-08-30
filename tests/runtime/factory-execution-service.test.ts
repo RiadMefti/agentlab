@@ -655,7 +655,7 @@ function executableContract(
         dependsOn: ["factory/implement"]
       }
     ],
-    gateProfile: { id: "baseline/r1", version: "1.2.0", policyDigest }
+    gateProfile: { id: "baseline/r1", version: "1.3.0", policyDigest }
   });
 }
 
