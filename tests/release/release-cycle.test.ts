@@ -722,6 +722,24 @@ describe("release workflow trust boundaries", () => {
     expect(workflow).not.toMatch(/Electron|AppImage|\.dmg|electron-builder/u);
   });
 
+  it("installs tmux in every CI job that smoke-starts a packaged terminal", async () => {
+    const ci = await readFile(join(projectRoot, ".github", "workflows", "ci.yml"), "utf8");
+    const release = await readFile(
+      join(projectRoot, ".github", "workflows", "release.yml"),
+      "utf8"
+    );
+    const ciMac = ci.slice(ci.indexOf("  package_macos:"));
+    const releaseLinux = release.slice(release.indexOf("  linux:"), release.indexOf("  macos:"));
+    const releaseMac = release.slice(
+      release.indexOf("  macos:"),
+      release.indexOf("  github_release:")
+    );
+
+    expect(ciMac).toContain("brew install tmux");
+    expect(releaseLinux).toContain("sudo apt-get install --no-install-recommends -y tmux");
+    expect(releaseMac).toContain("brew install tmux");
+  });
+
   it("coordinates releases only from the exact green default-branch commit", async () => {
     const coordinator = await readFile(
       join(projectRoot, ".github", "workflows", "start-release.yml"),

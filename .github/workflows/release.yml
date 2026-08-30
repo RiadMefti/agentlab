@@ -89,8 +89,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Install Bun
-        run: npm install --global "bun@${BUN_VERSION}"
+      - name: Install terminal runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y tmux
+          npm install --global "bun@${BUN_VERSION}"
       - name: Install locked dependencies
         run: npm ci
       - name: Build and smoke-test the executable
@@ -126,8 +129,10 @@ jobs:
           cache: npm
       - name: Verify the runner architecture
         run: test "$(uname -m)" = "arm64"
-      - name: Install Bun
-        run: npm install --global "bun@${BUN_VERSION}"
+      - name: Install terminal runtime dependencies
+        run: |
+          brew install tmux
+          npm install --global "bun@${BUN_VERSION}"
       - name: Install locked dependencies
         run: npm ci
       - name: Build and smoke-test the executable
