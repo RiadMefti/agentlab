@@ -182,6 +182,42 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires an exact task, policy pin, and confirmation for PR observation", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const policy = `sha256:${"c".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-observe-pr",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy,
+        "--confirm-observe"
+      ])
+    ).toEqual({
+      kind: "factory-broker-observe-pr",
+      configPath: "/private/agentlab/broker.json",
+      taskId,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "confirm-observe"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-observe-pr",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires exact compare-and-set state, reason, and matching broker confirmation", () => {
     expect(
       parseCliArguments([
@@ -255,10 +291,12 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory broker-open-draft --config");
+    expect(helpText).toContain("factory broker-observe-pr --config");
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
+    expect(helpText).toContain("--confirm-observe");
     expect(helpText).toContain("--confirm-run");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");

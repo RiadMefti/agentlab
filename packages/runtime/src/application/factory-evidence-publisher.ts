@@ -8,6 +8,7 @@ import {
   type FactoryAgentRunRequest,
   type FactoryPatchProposal,
   type FactoryProcessIsolation,
+  type FactoryPullRequestObservation,
   type FactoryPullRequestProposal,
   type FactoryPullRequestRecord,
   type FactoryReviewResult,
@@ -23,6 +24,7 @@ import type {
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
 import type { FactoryGateExecutionOutput } from "../domain/factory-gate.js";
+import type { FactoryPullRequestAssessment } from "../domain/factory-pull-request-observation.js";
 import type { ResolvedFactorySkill } from "../domain/factory-skill.js";
 import type {
   FactoryTaskSnapshot,
@@ -507,6 +509,51 @@ export class FactoryEvidencePublisher {
           { name: "head-revision", value: input.record.headRevision },
           { name: "proposal-digest", value: input.proposal.digest },
           { name: "proposal-artifact", value: proposalArtifact.digest }
+        ]
+      })
+    ]);
+  }
+
+  public async pullRequestObservation(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly observation: CanonicalFactoryDocument<FactoryPullRequestObservation>;
+    readonly assessment: FactoryPullRequestAssessment;
+  }): Promise<StoredEvidenceBundle> {
+    const artifact = await this.#documentArtifact(
+      input.observation,
+      "application/vnd.agentlab.pull-request-observation.v1+json"
+    );
+    return this.#append(this.#credential("prBroker"), input.task, [
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "pull-request",
+        result:
+          input.assessment.disposition === "clear"
+            ? "pass"
+            : input.assessment.disposition === "pending"
+              ? "informational"
+              : "fail",
+        subjectDigest: input.observation.digest,
+        artifact,
+        producer: {
+          kind: "broker",
+          role: "pr-broker",
+          id: input.observation.value.brokerId,
+          sessionId: null
+        },
+        createdAt: input.observation.value.observedAt,
+        claims: [
+          { name: "disposition", value: input.assessment.disposition },
+          { name: "reason-codes", value: input.assessment.reasonCodes.join(",") },
+          {
+            name: "pull-request-number",
+            value: String(input.observation.value.pullRequestNumber)
+          },
+          { name: "head-revision", value: input.observation.value.remoteHeadRevision },
+          {
+            name: "pull-request-record-digest",
+            value: input.observation.value.pullRequestRecordDigest
+          }
         ]
       })
     ]);

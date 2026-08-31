@@ -162,13 +162,16 @@ function assertExactBrokerPermissions(
   permissions: Readonly<Record<string, "read" | "write">>
 ): void {
   const keys = Object.keys(permissions).sort();
-  const allowed = ["contents", "metadata", "pull_requests"];
+  const allowed = ["checks", "contents", "metadata", "pull_requests"];
   if (
+    permissions.checks !== "read" ||
     permissions.contents !== "write" ||
     permissions.pull_requests !== "write" ||
     (permissions.metadata !== undefined && permissions.metadata !== "read") ||
     keys.some((key) => !allowed.includes(key))
   ) {
-    throw new Error("GitHub installation token permissions exceed the PR broker boundary.");
+    throw new Error(
+      "GitHub installation token permissions do not match the exact PR broker boundary."
+    );
   }
 }

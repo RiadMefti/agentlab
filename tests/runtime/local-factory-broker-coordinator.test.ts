@@ -112,6 +112,9 @@ function createOperator(
     },
     pullRequests: {
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
+    },
+    pullRequestObservations: {
+      observe: () => Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] })
     }
   });
 }

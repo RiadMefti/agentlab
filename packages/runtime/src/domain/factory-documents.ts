@@ -10,6 +10,7 @@ import type {
   FactoryPlan,
   FactoryPolicyDecision,
   FactoryPolicyEvaluationRecord,
+  FactoryPullRequestObservation,
   FactoryPullRequestProposal,
   FactoryPullRequestRecord,
   FactoryPullRequestDispatchEvent,
@@ -63,6 +64,7 @@ export interface FactoryDocumentCodec {
   resourceIsolation(input: unknown): CanonicalFactoryDocument<FactoryResourceIsolationRecord>;
   patchProposal(input: unknown): CanonicalFactoryDocument<FactoryPatchProposal>;
   reviewResult(input: unknown): CanonicalFactoryDocument<FactoryReviewResult>;
+  pullRequestObservation(input: unknown): CanonicalFactoryDocument<FactoryPullRequestObservation>;
   pullRequestProposal(input: unknown): CanonicalFactoryDocument<FactoryPullRequestProposal>;
   pullRequestRecord(input: unknown): CanonicalFactoryDocument<FactoryPullRequestRecord>;
   pullRequestDispatchRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestDispatchRun>;

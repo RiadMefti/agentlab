@@ -254,7 +254,15 @@ function brokerRuntime(
   openDraft: LocalFactoryBrokerRuntime["commands"]["openDraft"],
   close: () => Promise<void> = () => Promise.resolve()
 ): LocalFactoryBrokerRuntime {
-  return { commands: { preflight: () => preflightResult, openDraft }, close };
+  return {
+    commands: {
+      preflight: () => preflightResult,
+      openDraft,
+      observePullRequest: () =>
+        Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] })
+    },
+    close
+  };
 }
 
 function preflight(

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { GitHubApiError } from "./github-rest-client.js";
 
 export const githubPullRequestBrokerPermissions = Object.freeze({
+  checks: "read",
   contents: "write",
   pull_requests: "write"
 } as const);

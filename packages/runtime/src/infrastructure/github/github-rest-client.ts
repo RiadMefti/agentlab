@@ -13,6 +13,11 @@ export interface GitHubRestApi {
   ): Promise<unknown>;
 }
 
+/** Compile-time read capability used by observers that must not express a remote mutation. */
+export interface GitHubReadApi {
+  request(method: "GET", path: string): Promise<unknown>;
+}
+
 export class GitHubApiError extends Error {
   public constructor(
     public readonly statusCode: number,

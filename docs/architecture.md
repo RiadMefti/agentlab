@@ -65,11 +65,11 @@ subprocess environment is allowlisted and excludes repository, cloud, and packag
 broker credential is acquired only at the separate broker boundary.
 
 That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
-requests an installation token for one configured numeric repository ID with only `contents:write`
-and `pull_requests:write`. The response must name that exact selected repository, must not widen the
-permission map, and must expire within the bounded installation-token window. Tokens coalesce in
-memory, refresh before expiry, and are invalidated on authentication or push failure. Neither the
-App key nor installation token crosses into a model-bearing process. The exact
+requests an installation token for one configured numeric repository ID with only `checks:read`,
+`contents:write`, and `pull_requests:write`. The response must name that exact selected repository,
+must not widen the permission map, and must expire within the bounded installation-token window.
+Tokens coalesce in memory, refresh before expiry, and are invalidated on authentication or push
+failure. Neither the App key nor installation token crosses into a model-bearing process. The exact
 `@agentlab/runtime/factory-broker` package subpath is the only public composition entry for this
 authority plane; the interactive `@agentlab/runtime` entry does not re-export it. Its strict
 owner-only configuration points to a canonical owner-only App-key file and pins the trusted GitHub
@@ -108,6 +108,17 @@ denies draft mutation, so readiness is not merely advisory. The safe manual cere
 require broker preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the
 exact draft command; then compare-and-set disable even when the draft attempt fails. The broker's
 immediate preflight and inner rechecks remain authoritative throughout.
+
+The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
+clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
+local append-only evidence ingress. It resolves the completed durable dispatch itself and binds the
+exact repository, PR number, broker, recorded head, and observation digest. The GitHub adapter reads
+less than one full bounded page each of formal reviews, inline review comments, and PR conversation
+comments, plus one bounded page of check runs for the observed head. Only check names paired with
+their configured App IDs count as trusted; ambiguous or truncated pages fail closed. Review bodies
+remain explicitly untrusted fields inside the content-addressed artifact, while the CLI emits only
+counts, revisions, digests, and a deterministic facts-only disposition. The command cannot update
+the branch, invoke a provider, transition into repair, merge, or release.
 
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
 policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
@@ -280,8 +291,9 @@ provision a reviewed owner-only rate card; actual rate, authority config, and br
 provisioning remain activation prerequisites. An incomplete usage record already denies PR creation,
 and the explicit write command refuses a blocked preflight or unexpected policy digest. Governed
 intake is implemented but no live intake configuration or task has been provisioned. No live agent
-task or PR has been created by this code. PR-head repair, scheduler/quotas, eval promotion, merge,
-release, canary, and incident automation remain later stages.
+task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
+are implemented; feedback qualification, fresh-worker PR repair, scheduler/quotas, eval promotion,
+merge, release, canary, and incident automation remain later stages.
 
 ## Dependency map
 

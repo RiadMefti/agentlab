@@ -428,11 +428,11 @@ The concrete GitHub App credential adapter is bound at construction to one lower
 numeric repository ID, one installation, and one App client ID. For each mint it loads the RSA
 private key only at the signer boundary, issues GitHub's bounded JWT, erases both mutable key
 buffers after signing, and calls only the fixed installation-token endpoint with the exact
-repository ID and `contents:write` plus `pull_requests:write`. It accepts the result only when
-GitHub reports that exact selected repository, no broader permissions, and a safe short lifetime.
-Concurrent requests coalesce; the token is refreshed five minutes before expiry and invalidated
-after an HTTP 401 or failed Git push. The variable-length token is never placed in a URL, argv,
-artifact, or error.
+repository ID and `checks:read`, `contents:write`, plus `pull_requests:write`. It accepts the result
+only when GitHub reports that exact selected repository, no broader permissions, and a safe short
+lifetime. Concurrent requests coalesce; the token is refreshed five minutes before expiry and
+invalidated after an HTTP 401 or failed Git push. The variable-length token is never placed in a
+URL, argv, artifact, or error.
 
 The remote authority plane has its own exact package entry, `@agentlab/runtime/factory-broker`, and
 is absent from the interactive runtime entry. Its strict `agentlab.local-factory-broker.v1`
@@ -472,6 +472,19 @@ rather than cryptographic personhood. Live key/config provisioning plus successf
 activation work, not assumptions. An empty rate card both adds `cost-policy-unconfigured` to
 preflight and denies draft mutation itself.
 
+The separate `broker-observe-pr` command is a credentialed read-and-local-evidence operation, not a
+remote-write entry. Exact argument order binds the owner-only broker config, task UUID, expected
+policy digest, and literal `--confirm-observe`. After clean preflight it resolves only a completed
+durable dispatch, rechecks task/contract/proposal/record/broker identity, and reads the exact PR.
+Formal reviews, inline review comments, PR conversation comments, and check runs are bounded below
+one full 100-item page so pagination can never be silently discarded. Required checks match both
+configured context and App ID on the observed head; a same-named run from another producer has no
+authority. Canonical `agentlab.pull-request-observation.v1` stores raw feedback in fields named
+`untrustedBody`, while the CLI reports no feedback body. A deterministic facts-only assessment can
+report drift, trusted-check failure, formal changes requested, pending checks, or feedback awaiting
+classification, but cannot interpret text, widen scope, update a branch, start repair, or change
+task state.
+
 The separate `worker-run` command requires an exact task UUID, expected policy digest, and literal
 `--confirm-run`. It ignores only `scheduler-disabled` during manual readiness; cost, host,
 toolchain, storage, provider, gate, and policy drift remain blocking. A generated correlation UUID
@@ -501,8 +514,10 @@ nor a second PR. A checkpoint that observes revocation performs no new write. If
 already in-flight call, the exact remote result is journaled but cannot authorize the task
 transition; the dispatch remains recoverable for operator action.
 
-PR CI checks the actual head SHA. A failure appends evidence and may create a bounded repair attempt
-in a fresh isolated worker; it cannot silently widen scope. The repaired patch repeats all gates and
+PR CI observation now binds the actual head SHA, exact check context and App ID, bounded formal
+reviews, inline comments, conversation comments, the durable PR record digest, and one authenticated
+evidence bundle. A later failure-handling stage may create a bounded repair attempt in a fresh
+isolated worker; it cannot silently widen scope. The repaired patch must repeat all gates and
 independent review. Exhausted budget becomes `needs-attention`.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
@@ -661,11 +676,12 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    the immutable preparation root from an owner-confirmed feature or bug report, and a separate
    human-only authority composition owns atomic enable/disable without broker or scheduler
    capability. The explicit worker task command now connects intake to the local broker-ready
-   proposal checkpoint without joining worker and broker authority. Activation still requires the
-   missing review protections, provisioned live key/config and exact cost rules, passing live
-   preflights, separate human execution of the authority ceremony, and human merge. No scheduler,
-   auto-merge, release, or protected-path write.
-5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
+   proposal checkpoint without joining worker and broker authority. A separate bounded read command
+   records exact-head trusted checks and untrusted review feedback without invoking repair.
+   Activation still requires the missing review protections, provisioned live key/config and exact
+   cost rules, passing live preflights, separate human execution of the authority ceremony, and
+   human merge. No scheduler, auto-merge, release, or protected-path write.
+5. **CI repair and operations:** feedback qualification, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,

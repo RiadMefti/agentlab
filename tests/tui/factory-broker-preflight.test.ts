@@ -104,7 +104,9 @@ function brokerRuntime(
   return {
     commands: {
       preflight: () => preflight,
-      openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
+      openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
+      observePullRequest: () =>
+        Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] })
     },
     close
   };

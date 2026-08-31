@@ -20,11 +20,16 @@ import type {
 } from "../../domain/factory-pull-request-broker.js";
 import type { CommandRunner } from "../process/command-runner.js";
 import { GitBrokerWorkspace, type PreparedGitBrokerCommit } from "./git-broker-workspace.js";
+import { githubPullRequestSchema } from "./github-pull-request-api-contracts.js";
 import {
   GitHubApiError,
   type GitHubRestApi,
   type GitHubTokenSource
 } from "./github-rest-client.js";
+import {
+  githubTrustedStatusCheckBindings,
+  type GitHubTrustedStatusCheck
+} from "./github-trusted-status-checks.js";
 
 const repositorySchema = z.object({ default_branch: z.string().min(1).max(128) });
 const refSchema = z.object({ object: z.object({ sha: gitObjectIdSchema }) });
@@ -57,18 +62,6 @@ const protectionSchema = z.object({
   allow_force_pushes: z.object({ enabled: z.boolean() }).optional(),
   allow_deletions: z.object({ enabled: z.boolean() }).optional()
 });
-const pullRequestSchema = z.object({
-  number: z.number().int().min(1),
-  html_url: z.url(),
-  title: z.string().trim().min(1).max(120),
-  body: z.string().max(16_384).nullable(),
-  state: z.enum(["open", "closed"]),
-  draft: z.boolean(),
-  created_at: z.iso.datetime(),
-  base: z.object({ ref: z.string(), sha: gitObjectIdSchema }),
-  head: z.object({ ref: z.string(), sha: gitObjectIdSchema })
-});
-const trustedStatusCheckContexts: ReadonlySet<string> = new Set(["verify", "factory-sandbox"]);
 
 export interface GitHubFactoryPullRequestBrokerOptions {
   readonly repositoryId: string;
@@ -81,10 +74,7 @@ export interface GitHubFactoryPullRequestBrokerOptions {
   readonly authorName?: string;
   readonly authorEmail?: string;
   readonly maximumPatchBytes?: number;
-  readonly trustedStatusChecks: readonly {
-    readonly context: "verify" | "factory-sandbox";
-    readonly appId: number;
-  }[];
+  readonly trustedStatusChecks: readonly GitHubTrustedStatusCheck[];
 }
 
 /** GitHub authority adapter: exact-base commit, non-force push, draft PR, and compensating close. */
@@ -113,7 +103,7 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     if (!Number.isSafeInteger(this.#maximumPatchBytes) || this.#maximumPatchBytes < 1) {
       throw new Error("GitHub factory patch limit must be a positive integer.");
     }
-    this.#trustedStatusChecks = trustedStatusCheckBindings(options.trustedStatusChecks);
+    this.#trustedStatusChecks = githubTrustedStatusCheckBindings(options.trustedStatusChecks);
     this.#workspace = new GitBrokerWorkspace(runner, {
       root: options.temporaryRoot,
       gitExecutable: options.gitExecutable,
@@ -288,9 +278,9 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     } else if (priorReference.object.sha !== headRevision) {
       throw new Error("Broker branch exists with a different head revision.");
     }
-    let created: z.infer<typeof pullRequestSchema>;
+    let created: z.infer<typeof githubPullRequestSchema>;
     try {
-      created = pullRequestSchema.parse(
+      created = githubPullRequestSchema.parse(
         await this.options.api.request("POST", `/repos/${this.#repositoryId}/pulls`, {
           title: proposal.title,
           body: proposal.body,
@@ -301,7 +291,7 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
         })
       );
     } catch (error: unknown) {
-      let found: readonly z.infer<typeof pullRequestSchema>[];
+      let found: readonly z.infer<typeof githubPullRequestSchema>[];
       try {
         found = await this.#pullRequestsForBranch(proposal.branchName);
       } catch (inspectionError: unknown) {
@@ -370,7 +360,7 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
   }
 
   #record(
-    pullRequest: z.infer<typeof pullRequestSchema>,
+    pullRequest: z.infer<typeof githubPullRequestSchema>,
     proposal: FactoryPullRequestProposal
   ): FactoryPullRequestRecord {
     return factoryPullRequestRecordSchema.parse({
@@ -395,11 +385,11 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
       "GET",
       `/repos/${this.#repositoryId}/pulls?state=all&head=${encodeURIComponent(`${this.#owner}:${branchName}`)}&per_page=10`
     );
-    return z.array(pullRequestSchema).max(10).parse(value);
+    return z.array(githubPullRequestSchema).max(10).parse(value);
   }
 
-  async #pullRequest(number: number): Promise<z.infer<typeof pullRequestSchema>> {
-    return pullRequestSchema.parse(
+  async #pullRequest(number: number): Promise<z.infer<typeof githubPullRequestSchema>> {
+    return githubPullRequestSchema.parse(
       await this.options.api.request("GET", `/repos/${this.#repositoryId}/pulls/${String(number)}`)
     );
   }
@@ -438,7 +428,7 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
   }
 
   async #closePullRequest(pullRequestNumber: number): Promise<void> {
-    const closed = pullRequestSchema.parse(
+    const closed = githubPullRequestSchema.parse(
       await this.options.api.request(
         "PATCH",
         `/repos/${this.#repositoryId}/pulls/${String(pullRequestNumber)}`,
@@ -495,7 +485,7 @@ function assertRecordMatchesProposal(
 }
 
 function matchesProposal(
-  pullRequest: z.infer<typeof pullRequestSchema>,
+  pullRequest: z.infer<typeof githubPullRequestSchema>,
   proposal: FactoryPullRequestProposal,
   headRevision: string
 ): boolean {
@@ -544,27 +534,6 @@ function validateToken(token: string): string {
     throw new Error("GitHub broker credential is invalid.");
   }
   return token;
-}
-
-function trustedStatusCheckBindings(
-  checks: GitHubFactoryPullRequestBrokerOptions["trustedStatusChecks"]
-): ReadonlyMap<string, number> {
-  const bindings = new Map<string, number>();
-  for (const check of checks) {
-    if (
-      !trustedStatusCheckContexts.has(check.context) ||
-      !Number.isSafeInteger(check.appId) ||
-      check.appId < 1 ||
-      bindings.has(check.context)
-    ) {
-      throw new Error("GitHub trusted status-check bindings are invalid.");
-    }
-    bindings.set(check.context, check.appId);
-  }
-  if (!bindings.has("verify") || !bindings.has("factory-sandbox") || bindings.size !== 2) {
-    throw new Error("GitHub trusted status checks must bind verify and factory-sandbox.");
-  }
-  return bindings;
 }
 
 function deduplicationBranch(proposal: FactoryPullRequestProposal): string {

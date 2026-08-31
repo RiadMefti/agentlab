@@ -16,6 +16,7 @@ import {
   FactoryEvidenceIngress
 } from "./application/factory-evidence-ingress.js";
 import { FactoryPullRequestService } from "./application/factory-pull-request-service.js";
+import { FactoryPullRequestObservationService } from "./application/factory-pull-request-observation-service.js";
 import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import type { LocalFactoryBrokerConfig } from "./infrastructure/filesystem/local-factory-broker-config.js";
@@ -27,6 +28,7 @@ import {
   type GitHubAppPrivateKeySource
 } from "./infrastructure/github/github-app-jwt.js";
 import { GitHubFactoryPullRequestBroker } from "./infrastructure/github/github-factory-pull-request-broker.js";
+import { GitHubFactoryPullRequestObserver } from "./infrastructure/github/github-factory-pull-request-observer.js";
 import { GitHubRestClient } from "./infrastructure/github/github-rest-client.js";
 import {
   encodeCanonicalDocument,
@@ -134,6 +136,14 @@ export function createLocalFactoryBroker(
       temporaryRoot: options.temporaryRoot,
       trustedStatusChecks: options.githubApp.trustedStatusChecks
     });
+    const pullRequestObserver = new GitHubFactoryPullRequestObserver({
+      repositoryId: options.repositoryId,
+      brokerId: options.brokerId,
+      api,
+      documents,
+      trustedStatusChecks: options.githubApp.trustedStatusChecks,
+      now
+    });
     const pullRequests = new FactoryPullRequestService({
       dispatches,
       tasks: factory,
@@ -149,13 +159,26 @@ export function createLocalFactoryBroker(
       now,
       createId
     });
+    const pullRequestObservations = new FactoryPullRequestObservationService({
+      dispatches,
+      tasks: factory,
+      controls: factory,
+      evidenceIngress,
+      evidenceCredentials: { prBroker: brokerCredential },
+      artifacts,
+      documents,
+      remote: pullRequestObserver,
+      now,
+      createId
+    });
     const operator = new FactoryBrokerOperator({
       repositoryId: options.repositoryId,
       policyBundleDigest: policyBundle.digest,
       costPolicyConfigured: policyBundle.value.costPolicy.rules.length > 0,
       remote,
       controls: factory,
-      pullRequests
+      pullRequests,
+      pullRequestObservations
     });
     return new LocalFactoryBrokerCoordinator({
       operator,
