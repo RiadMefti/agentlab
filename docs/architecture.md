@@ -768,6 +768,15 @@ annotated-tag-on-main validation, checksums, SBOM/provenance attestations, immut
 OIDC trusted npm publication, byte-for-byte candidate comparison, and release recovery verification.
 Release-control changes require separate review.
 
+Interactive application smoke tests are an isolated release boundary. Before either the source TUI
+or newly compiled application is executed, the harness creates one canonical owner-only disposable
+root and pins its home, temporary, XDG data/config/state/cache/runtime, AgentLab database/cache, and
+tmux socket paths below that root. The child receives only an allowlist of non-secret host
+variables; provider credentials, provider executable overrides, ambient AgentLab overrides, and an
+existing `TMUX` identity never cross the boundary. Every interactive-runtime smoke subprocess uses
+that exact environment, and the root is removed after success or failure. See
+[ADR 0008](decisions/0008-isolated-runtime-smokes.md).
+
 ## Architecture acceptance
 
 The architecture is releasable only when automated tests prove:
@@ -788,5 +797,7 @@ The architecture is releasable only when automated tests prove:
 - a caller deadline cannot cancel or poison eventual all-operation drain and cleanup;
 - failed or timed-out command, provider-query, and PTY cleanup stays owned, blocks lease release,
   and succeeds only after a confirmed retry; and
+- interactive runtime smokes confine every writable path below a disposable private root and do not
+  inherit operator credentials, database overrides, or tmux identity; and
 - formatting, strict types, lint, unit/component tests, real tmux/Bun PTY integration, production
   build, packaging, dependency audit, and release metadata all pass.

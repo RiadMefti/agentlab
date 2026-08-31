@@ -109,6 +109,9 @@ npm run package
 ./release/agentlab-vVERSION-linux-x64 --help
 ```
 
+Packaging smoke-runs the new binary inside a disposable private home/data/state/cache/tmux sandbox;
+it never opens the database or provider credentials from your normal AgentLab environment.
+
 ## Configuration
 
 | Variable                 | Default                                   | Purpose                         |
