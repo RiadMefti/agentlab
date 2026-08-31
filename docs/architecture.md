@@ -18,11 +18,12 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. The optional factory authority entry is a
-separate, short-lived local process and may make explicit GitHub API calls; it is never loaded into
-the model-bearing interactive runtime. AgentLab has no HTTP server, WebSocket gateway, browser
-renderer, desktop shell, remote mode, app command language, MCP bridge, or provider-session
-translation layer.
+The interactive product is local-only and single-process. Optional factory operations use three
+separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
+authority operator, and a credential-bearing draft-PR broker. Only the broker may make explicit
+GitHub API calls; none is loaded into the interactive runtime. AgentLab has no HTTP server,
+WebSocket gateway, browser renderer, desktop shell, remote mode, app command language, MCP bridge,
+or provider-session translation layer.
 
 ## Two paths
 
@@ -80,17 +81,33 @@ from another App does not count. Config, cost policy, and key reject symlinks, h
 permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
 fresh mutable bytes that the signer erases after one signature.
 
-The product CLI exposes separate broker and worker preflight commands. Each loads only its exact
-runtime, emits one deterministically ordered non-secret JSON record after clean shutdown, and exits
-with 0 for ready, 2 for policy-blocked, or 1 for an operational failure. The explicit
-`broker-open-draft` command additionally requires a task UUID, the operator's expected policy
-digest, and the literal `--confirm-draft`. It never calls the write port unless broker preflight is
-clean and the digest matches. The service then rechecks the exact task, policy, evidence, complete
-usage, base revision, remote governance, and kill switch around its durable idempotent dispatch. The
-CLI cannot enable authority; the broker command port deliberately has no authority-switch command,
-so broker and human enablement duties remain separate. All switches remain default-off. An empty
-rate card adds `cost-policy-unconfigured` to preflight and independently denies draft mutation, so
-readiness is not merely advisory.
+Human enablement is a fourth exact runtime package entry, `@agentlab/runtime/factory-authority`. Its
+strict owner-only `agentlab.local-factory-authority.v1` config contains only a durable database path
+and a pinned operator identifier. The composition can inspect both switches and atomically
+compare-and-set only `pr-broker`, recording a canonical append-only human control event. It exposes
+no scheduler mutation, task execution, process runner, provider, GitHub, tmux, terminal, broker, or
+interactive runtime capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the
+expected-state check and append one transaction. OS file ownership is the local authorization
+boundary; the configured operator identifier is audit metadata, not independent proof of a person,
+so production use requires a dedicated non-shared operating-system account.
+
+The product CLI exposes separate authority inspection, broker and worker preflight, and broker
+authority compare-and-set commands. Each loads only its exact runtime, emits one deterministically
+ordered non-secret JSON record after clean shutdown, and exits with 0 for success/ready, 2 for a
+policy-blocked preflight, or 1 for an operational failure. Authority mutation requires the exact
+expected and desired opposite states, a bounded reason, and the matching literal enable/disable
+confirmation. The explicit `broker-open-draft` command additionally requires a task UUID, the
+operator's expected policy digest, and the literal `--confirm-draft`. It never calls the write port
+unless broker preflight is clean and the digest matches. The service then rechecks the exact task,
+policy, evidence, complete usage, base revision, remote governance, and kill switch around its
+durable idempotent dispatch. The broker command port deliberately has no authority-switch command,
+and the authority port has no remote-write command, so broker and human enablement duties remain
+separate. Scheduler has no CLI enable path. All switches remain default-off. An empty rate card adds
+`cost-policy-unconfigured` to preflight and independently denies draft mutation, so readiness is not
+merely advisory. The safe manual ceremony is: inspect; require broker preflight to report only
+`pr-broker-disabled`; enable with compare-and-set; issue the exact draft command; then
+compare-and-set disable even when the draft attempt fails. The broker's immediate preflight and
+inner rechecks remain authoritative throughout.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -217,18 +234,19 @@ commands execute serially against one SQLite writer lease. Recovery remains call
 work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
 repositories and the lease are released. The port exposes no intake-authority issuer, control
 switch, GitHub adapter, or broker credential. A separate broker composition, owner-only key source,
-readiness command, and explicit draft-only command also exist, but the normal TUI cannot enable
-authority or invoke them. Current branch protection requires exact `verify` and `factory-sandbox`
-checks, dismisses stale reviews, enforces administrators, and forbids force-push and deletion. It
-still has zero required approvals, does not require approval of the latest push, and has neither a
-CODEOWNERS policy nor required code-owner review. Preflight therefore reports blocked for those
-controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but the repository
-ships no live config or provider/model rates. Config v2 can now provision a reviewed owner-only rate
-card; actual rate and broker-key provisioning remain activation prerequisites. An incomplete usage
-record already denies PR creation, and the explicit write command refuses a blocked preflight or
-unexpected policy digest. No live agent task or PR has been created by this code. PR-head repair,
-scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
-stages.
+readiness command, and explicit draft-only command also exist. The isolated human authority
+composition and non-interactive CLI can change only the broker switch; the normal TUI cannot invoke
+factory authority, worker, or broker commands. Current branch protection requires exact `verify` and
+`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
+and deletion. It still has zero required approvals, does not require approval of the latest push,
+and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
+blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
+the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
+owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
+prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
+refuses a blocked preflight or unexpected policy digest. No live agent task or PR has been created
+by this code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
+automation remain later stages.
 
 ## Dependency map
 
@@ -239,6 +257,7 @@ through an injected port.
 interactive TUI ──▶ @agentlab/runtime ───────────────▶ local-runtime composition
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
+human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
                                                          │              │
                                                          ▼              ▼
                                                    application     infrastructure
@@ -256,7 +275,7 @@ launcher (distribution only; independent source graph)
 | `runtime/domain`          | Invariants, value objects, errors, and ports                  | domain, contracts                              |
 | `runtime/application`     | Typed use cases, validated commands, coordination, ownership  | application, domain, contracts                 |
 | `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, credentialless-worker, and broker construction   | runtime layers, contracts                      |
+| runtime composition roots | Interactive, worker, human-authority, and broker construction | runtime layers, contracts                      |
 | `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation       | TUI, contracts, registered runtime public APIs |
 | `packages/launcher`       | Binary acquisition, verification, and process handoff         | launcher                                       |
 
@@ -266,12 +285,14 @@ The product-source rules are executable and fail closed:
   imports.
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
-- TUI and CLI code see runtime modules only through registered package entry points. The broker and
-  worker subpaths are exact; every runtime deep import fails.
+- TUI and CLI code see runtime modules only through registered package entry points. The broker,
+  worker, and human-authority subpaths are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
-  interactive closure cannot reach either factory composition or GitHub authority modules.
+  interactive closure cannot reach any factory composition or GitHub authority modules. The human
+  authority closure has an explicit application/infrastructure allowlist and cannot reach remote,
+  model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -296,16 +317,18 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                       |
-| ------------------------------------------------------------ | ---------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                           |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                  |
-| Product use case or coordination policy                      | `packages/runtime/src/application`             |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`          |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`        |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts` |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                     |
-| Installer, cache, or binary handoff                          | `packages/launcher`                            |
+| Change                                                       | Location                                          |
+| ------------------------------------------------------------ | ------------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                              |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                     |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`             |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`           |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`    |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`    |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                        |
+| Installer, cache, or binary handoff                          | `packages/launcher`                               |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

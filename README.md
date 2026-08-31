@@ -132,7 +132,9 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `packages/runtime/src/local-runtime.ts` composes the interactive runtime;
   `local-factory-broker.ts` is a separate broker-only composition exported only through
   `@agentlab/runtime/factory-broker`; and `local-factory-worker.ts` is a credentialless execution
-  composition exported only through `@agentlab/runtime/factory-worker`.
+  composition exported only through `@agentlab/runtime/factory-worker`. `local-factory-authority.ts`
+  is a human-only local control composition exported only through
+  `@agentlab/runtime/factory-authority`; it has no scheduler, provider, process, or GitHub port.
 - `packages/contracts` owns provider, conversation, session, and dormant software-factory schemas
   shared across local layers.
 
@@ -145,19 +147,21 @@ multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
 The repository also contains a tested, staged software-factory safety kernel, credentialless local
-worker composition, and draft-PR broker. Neither factory composition is connected to the interactive
-runtime, scheduled, deployed, published, or enabled. The worker has a bounded serialized command
-port and read-only host preflight covering its pinned toolchain and owner-only storage roots, but no
-GitHub or authority-control capability. Separate CLI commands report broker and worker readiness.
-The sole remote-write command requires an exact task UUID, an operator-pinned policy digest, and the
-literal `--confirm-draft`; it invokes only the draft broker after a clean preflight, then the broker
-rechecks policy, evidence, base revision, governance, and the kill switch. The CLI cannot enable
-authority, which remains default-off. Provider-neutral per-run cost accounting is policy-pinned and
-fail-closed, and the shipped live rate card is intentionally empty. Owner-only worker and broker
-config can load the same separate strict cost-policy file without sharing broker credentials. The
-current repository governance blocks the write command. No live factory task or PR has been created.
-See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented
-controls, activation blockers, and later phases.
+worker composition, human-only authority composition, and draft-PR broker. None is connected to the
+interactive runtime, scheduled, deployed, published, or enabled. The worker has a bounded serialized
+command port and read-only host preflight covering its pinned toolchain and owner-only storage
+roots, but no GitHub or authority-control capability. Separate CLI commands inspect local authority
+and report broker and worker readiness. The sole remote-write command requires an exact task UUID,
+an operator-pinned policy digest, and the literal `--confirm-draft`; it invokes only the draft
+broker after a clean preflight, then the broker rechecks policy, evidence, base revision,
+governance, and the kill switch. A separate owner-only human CLI can atomically compare-and-set only
+the broker switch with an explicit reason and matching confirmation; it cannot enable scheduling or
+contact GitHub. Authority remains default-off. Provider-neutral per-run cost accounting is
+policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
+worker and broker config can load the same separate strict cost-policy file without sharing broker
+credentials. The current repository governance blocks the write command. No live factory task or PR
+has been created. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
+implemented controls, activation blockers, and later phases.
 
 ## Development
 

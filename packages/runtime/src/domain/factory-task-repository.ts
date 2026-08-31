@@ -44,6 +44,10 @@ export interface FactoryAuthorityState {
 export interface FactoryControlRepository {
   state(): Promise<FactoryAuthorityState>;
   record(event: CanonicalFactoryDocument<FactoryControlEvent>): Promise<FactoryAuthorityState>;
+  record(
+    event: CanonicalFactoryDocument<FactoryControlEvent>,
+    expectedEnabled: boolean
+  ): Promise<FactoryAuthorityState | null>;
   history(control: FactoryControlName, limit: number): Promise<readonly FactoryControlEvent[]>;
 }
 

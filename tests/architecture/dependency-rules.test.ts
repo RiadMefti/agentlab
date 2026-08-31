@@ -78,13 +78,55 @@ describe("architecture dependency rules", () => {
     const report = architectureReport([
       source("apps/tui/src/factory-ports.ts", [
         local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts"),
-        local("@agentlab/runtime/factory-worker", "packages/runtime/src/local-factory-worker.ts")
+        local("@agentlab/runtime/factory-worker", "packages/runtime/src/local-factory-worker.ts"),
+        local(
+          "@agentlab/runtime/factory-authority",
+          "packages/runtime/src/local-factory-authority.ts"
+        )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
-      source("packages/runtime/src/local-factory-worker.ts")
+      source("packages/runtime/src/local-factory-worker.ts"),
+      source("packages/runtime/src/local-factory-authority.ts")
     ]);
 
     expect(report.violations).toEqual([]);
+  });
+
+  it("prevents the human authority boundary from acquiring execution or remote capabilities", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-authority.ts", [
+        local(
+          "./application/factory-authority-operator.js",
+          "packages/runtime/src/application/factory-authority-operator.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-authority-operator.ts", [
+        local(
+          "../infrastructure/github/github-rest-client.js",
+          "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+        ),
+        local(
+          "../infrastructure/process/local-factory-gate-executor.js",
+          "packages/runtime/src/infrastructure/process/local-factory-gate-executor.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/infrastructure/process/local-factory-gate-executor.ts"),
+      source("apps/tui/src/run-factory-authority.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(3);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+        "packages/runtime/src/infrastructure/process/local-factory-gate-executor.ts",
+        "packages/runtime/src/local-factory-broker.ts"
+      ])
+    );
   });
 
   it("keeps authority and model-bearing composition closures separate", () => {
@@ -587,6 +629,10 @@ function architectureFixture(): string {
       "./factory-worker": {
         default: "./dist/local-factory-worker.js",
         types: "./dist/local-factory-worker.d.ts"
+      },
+      "./factory-authority": {
+        default: "./dist/local-factory-authority.js",
+        types: "./dist/local-factory-authority.d.ts"
       }
     }
   });
@@ -594,6 +640,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-runtime.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-broker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-worker.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
   return root;
 }
 

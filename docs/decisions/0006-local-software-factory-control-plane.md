@@ -433,8 +433,8 @@ Concurrent requests coalesce; the token is refreshed five minutes before expiry 
 after an HTTP 401 or failed Git push. The variable-length token is never placed in a URL, argv,
 artifact, or error.
 
-The authority plane now has its own exact package entry, `@agentlab/runtime/factory-broker`, and is
-absent from the interactive runtime entry. Its strict `agentlab.local-factory-broker.v1`
+The remote authority plane has its own exact package entry, `@agentlab/runtime/factory-broker`, and
+is absent from the interactive runtime entry. Its strict `agentlab.local-factory-broker.v1`
 configuration binds the database, artifact and temporary roots, lowercase repository name and
 numeric ID, broker ID, absolute Git executable, App client and installation IDs, private-key path,
 and exact trusted GitHub App ID for each required `verify` and `factory-sandbox` status context. A
@@ -460,9 +460,16 @@ digest, and literal `--confirm-draft`. It does not call the write port unless br
 clean and the policy pin matches; the inner service independently rechecks task state, exact
 evidence and complete usage, base revision, governance, authority, and policy around durable
 idempotent dispatch. The authority switch still defaults off, and no broker or worker command can
-change it. A future authenticated human administration boundary must own enablement separately. Live
-key provisioning plus successful preflights are activation work, not assumptions. An empty rate card
-both adds `cost-policy-unconfigured` to preflight and denies draft mutation itself.
+change it. The separate `@agentlab/runtime/factory-authority` entry is the local human
+administration boundary. Its owner-only v1 config pins only the durable ledger and operator ID; its
+port can inspect controls and atomically compare-and-set only `pr-broker` while appending one
+canonical human event. Exact expected state, opposite desired state, bounded reason, and matching
+literal confirmation are mandatory. It has no scheduler mutation, worker, provider, process, GitHub,
+broker, tmux, terminal, or interactive capability, and architecture fitness tests enforce that
+closure. OS account/file ownership authorizes the local operation; operator ID is audit metadata
+rather than cryptographic personhood. Live key/config provisioning plus successful preflights are
+activation work, not assumptions. An empty rate card both adds `cost-policy-unconfigured` to
+preflight and denies draft mutation itself.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -584,6 +591,10 @@ deterministic branch/PR reconciliation, injected recovery tests spanning remote 
 append, and task-ledger transition, and an exact-repository GitHub App installation-token source. An
 exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
 non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
+The separate owner-only human authority composition now supplies status plus atomic compare-and-set
+enable/disable of only the draft-PR switch. It records canonical append-only events under a pinned
+operator ID and is mechanically isolated from the broker, GitHub, providers, execution, and the
+scheduler. The broker cannot self-enable, and the authority process cannot perform a remote write.
 The provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also
 exist behind the separate worker port. Owner-only config v2 provisions the broker's canonical copy
 of the rate card, and the worker composition loads the same separate owner-only document without
@@ -593,16 +604,17 @@ serialized 32-command queue, recovery access under normal-work blockers, and ret
 process/repository/lease shutdown. Its public closure is mechanically barred from GitHub, broker,
 tmux, terminal, interactive discovery, and every provider module except the explicit factory adapter
 allowlist. The default bundle remains empty. The normal TUI has no enable or PR action; the explicit
-non-interactive draft command remains blocked by current controls. No live agent task or PR has been
-created by this code.
+non-interactive human command can change only the local broker switch, while the explicit draft
+command remains blocked by current governance and provisioning controls. No live authority change,
+agent task, PR, deployment, or publication has been performed through this code.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
 activation remains blocked by zero required approvals, missing latest-push approval, missing
 CODEOWNERS and required code-owner review, unprovisioned live broker config/key, and incomplete live
-cost-policy provisioning. An incomplete usage record already denies PR creation. The non-authorizing
-preflight reports these governance, empty-cost-policy, and default-off-authority blockers rather
-than weakening them.
+cost-policy provisioning. A dedicated owner-only live authority config is also not provisioned. An
+incomplete usage record already denies PR creation. The non-authorizing preflight reports these
+governance, empty-cost-policy, and default-off-authority blockers rather than weakening them.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -620,10 +632,11 @@ than weakening them.
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
    recovery/sandbox CI, credentialless worker composition, isolated exact-repository credential
    adapter, broker-only composition, owner-only key provisioning boundary, operator preflights, and
-   fail-closed explicit draft command now exist. Activation still requires the missing review
-   protections, provisioned live key/config and exact cost rules, passing live preflights, separate
-   human authority enablement, and human merge. No scheduler, auto-merge, release, or protected-path
-   write.
+   fail-closed explicit draft command now exist. A separate human-only authority composition now
+   owns atomic enable/disable without broker or scheduler capability. Activation still requires the
+   missing review protections, provisioned live key/config and exact cost rules, passing live
+   preflights, separate human execution of the authority ceremony, and human merge. No scheduler,
+   auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.

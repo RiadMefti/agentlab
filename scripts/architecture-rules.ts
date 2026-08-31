@@ -80,6 +80,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-worker.ts",
         default: "./dist/local-factory-worker.js",
         types: "./dist/local-factory-worker.d.ts"
+      },
+      "./factory-authority": {
+        source: "packages/runtime/src/local-factory-authority.ts",
+        default: "./dist/local-factory-authority.js",
+        types: "./dist/local-factory-authority.d.ts"
       }
     }
   }
@@ -352,6 +357,7 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-runtime.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
+        isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -362,6 +368,7 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-factory-broker.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
+        isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
     {
@@ -370,11 +377,17 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-runtime.ts" ||
         path === "packages/runtime/src/local-factory-broker.ts" ||
+        isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
         (path.startsWith("packages/runtime/src/infrastructure/providers/") &&
           !factoryWorkerProviderModules.has(path))
+    },
+    {
+      entry: "packages/runtime/src/local-factory-authority.ts",
+      description: "human authority composition",
+      forbidden: authorityCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -390,6 +403,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-worker-preflight.ts",
       description: "worker preflight command",
       forbidden: workerCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-authority.ts",
+      description: "human authority command",
+      forbidden: authorityCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -431,6 +449,7 @@ function brokerCommandForbidden(path: string): boolean {
   return (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
+    isFactoryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -441,12 +460,58 @@ function workerCommandForbidden(path: string): boolean {
   return (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
+    isFactoryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
     (path.startsWith("packages/runtime/src/infrastructure/providers/") &&
       !factoryWorkerProviderModules.has(path))
   );
+}
+
+const factoryAuthorityApplicationModules = new Set([
+  "packages/runtime/src/application/factory-authority-operator.ts",
+  "packages/runtime/src/application/local-factory-authority-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryAuthorityInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-authority-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryAuthorityModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/application/factory-authority-operator.ts" ||
+    path === "packages/runtime/src/application/local-factory-authority-coordinator.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/local-factory-authority-config.ts"
+  );
+}
+
+function authorityCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts"
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryAuthorityApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryAuthorityInfrastructureModules.has(path);
+  }
+  return false;
 }
 
 export function architectureLayer(path: string): ArchitectureLayer | null {
@@ -458,7 +523,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
   if (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
-    path === "packages/runtime/src/local-factory-worker.ts"
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts"
   ) {
     return "runtime-composition";
   }

@@ -34,6 +34,22 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryWorkerPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-authority-status") {
+    const { runFactoryAuthorityStatus } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactoryAuthorityStatus(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-broker-authority") {
+    const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactoryBrokerAuthority(
+      action.configPath,
+      action.expectedEnabled,
+      action.enabled,
+      action.reason,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-broker-open-draft") {
     const { runFactoryBrokerOpenDraft } = await import("./run-factory-broker-open-draft.js");
     process.exitCode = await runFactoryBrokerOpenDraft(

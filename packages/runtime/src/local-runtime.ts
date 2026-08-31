@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { AgentLabCommands } from "./application/agentlab-commands.js";
 import { cleanupFailedRuntimeConstruction } from "./application/local-runtime-construction.js";
-import { RuntimeTaskOwner, ownAgentLabCommands } from "./application/runtime-task-owner.js";
+import { ownAgentLabCommands } from "./application/owned-agentlab-commands.js";
+import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
 import { RuntimeResourceOwner } from "./application/runtime-resource-owner.js";
 import { ConversationService } from "./application/conversation-service.js";
 import {
