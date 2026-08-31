@@ -11,6 +11,10 @@
     "./factory-broker": {
       "types": "./dist/local-factory-broker.d.ts",
       "default": "./dist/local-factory-broker.js"
+    },
+    "./factory-worker": {
+      "types": "./dist/local-factory-worker.d.ts",
+      "default": "./dist/local-factory-worker.js"
     }
   },
   "files": [

@@ -1,13 +1,80 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
+import { LocalFactoryWorkerHostInspector } from "../../packages/runtime/src/infrastructure/process/local-factory-worker-host-inspector.js";
 import { SystemdFactoryProcessIsolator } from "../../packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.js";
 
 const runLive = process.platform === "linux" && process.env.AGENTLAB_RUN_FACTORY_SANDBOX === "1";
 
 describe.runIf(runLive)("SystemdFactoryProcessIsolator integration", () => {
+  it("proves the credentialless worker toolchain and exact user-manager identity", async () => {
+    const runner = new NodeCommandRunner();
+    const ownedRoot = realpathSync(mkdtempSync(join(tmpdir(), "agentlab-live-worker-host-")));
+    const artifactRoot = join(ownedRoot, "artifacts");
+    const workspaceRoot = join(ownedRoot, "worktrees");
+    mkdirSync(artifactRoot, { mode: 0o700 });
+    mkdirSync(workspaceRoot, { mode: 0o700 });
+    const environment = {
+      CI: "true",
+      LC_ALL: "C",
+      NO_COLOR: "1",
+      PATH: "/usr/local/bin:/usr/bin:/bin",
+      TERM: "dumb"
+    };
+    const version = (
+      await runner.run("/usr/bin/systemd-run", ["--version"], {
+        timeoutMs: 5_000,
+        cleanupProcessTree: true,
+        maxBufferBytes: 32 * 1_024,
+        environment
+      })
+    ).stdout.split(/\r?\n/u)[0];
+    if (version === undefined || version.length === 0) {
+      throw new Error("The live systemd executable returned no version identity.");
+    }
+    try {
+      const inspector = new LocalFactoryWorkerHostInspector(runner, {
+        workingDirectory: realpathSync(process.cwd()),
+        artifactRoot,
+        workspaceRoot,
+        gitExecutable: "/usr/bin/git",
+        flockExecutable: "/usr/bin/flock",
+        systemdRunExecutable: "/usr/bin/systemd-run",
+        systemdControlExecutable: "/usr/bin/systemctl",
+        environmentExecutable: "/usr/bin/env",
+        systemdVersion: version,
+        bubblewrapExecutable: "/usr/bin/bwrap",
+        runtimeRoots: [dirname(dirname(realpathSync(process.execPath)))],
+        gates: [
+          {
+            id: "format",
+            evidenceKind: "test",
+            command: { executable: realpathSync(process.execPath), args: [] },
+            timeoutMs: 5_000,
+            maximumOutputBytes: 4_096
+          }
+        ],
+        configuredProviders: ["codex"],
+        providers: {
+          resolve: () =>
+            Promise.resolve({
+              executable: realpathSync(process.execPath),
+              version: process.version
+            })
+        },
+        hostEnvironment: process.env
+      });
+
+      await expect(inspector.inspect()).resolves.toEqual({ status: "ready", reasonCodes: [] });
+    } finally {
+      rmSync(ownedRoot, { force: true, recursive: true });
+    }
+  });
+
   it("places the live process tree under the exact cgroup ceilings", async () => {
     const limits = {
       maxProcesses: 7,

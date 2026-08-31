@@ -215,9 +215,9 @@ contract, the complete `intake → qualified → specified → planned` task-eve
 to the compiled contract and pinned policy), and the preparation `prepared` marker. Those
 deterministic gate claims are emitted only by the materializer, not by a worker. A forced late
 insert failure is tested to leave neither a partial task ledger nor a false prepared marker. These
-paths remain internal: the Linux recovery adapter is not composed or exercised in the supported
-target-host CI lane, and a composition root, operator command/TUI, and activation controls are still
-required before a live request can invoke them.
+paths are reachable only through the separate credentialless worker composition. The Linux recovery
+adapter is exercised in the supported target-host CI lane, while no product CLI, scheduler, TUI, or
+authority issuer can invoke a live request.
 
 Execution admission is deterministic and separate from execution. Its command accepts only a task
 UUID. The service reloads the planned task and active conversation, obtains the current commit from
@@ -584,10 +584,15 @@ append, and task-ledger transition, and an exact-repository GitHub App installat
 exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
 non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
 The provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also
-exist behind dormant execution ports. Owner-only config v2 now provisions the broker's canonical
-copy of the rate card; the future worker composition will reuse the same loader and file. V1 and the
-default bundle remain empty. The normal TUI has no enable or PR command. No live agent task or PR
-has been created by this code.
+exist behind the separate worker port. Owner-only config v2 provisions the broker's canonical copy
+of the rate card, and the worker composition loads the same separate owner-only document without
+receiving broker credentials. The worker has a read-only fixed-argv host preflight that also proves
+canonical owner-only artifact and worktree roots, an exact provider/gate inventory, a globally
+serialized 32-command queue, recovery access under normal-work blockers, and retryable
+process/repository/lease shutdown. Its public closure is mechanically barred from GitHub, broker,
+tmux, terminal, interactive discovery, and every provider module except the explicit factory adapter
+allowlist. The default bundle remains empty. The normal TUI has no enable or PR command. No live
+agent task or PR has been created by this code.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
@@ -606,14 +611,16 @@ than weakening them.
 3. **Isolated execution:** worktree and sandbox lifecycle, provider-neutral non-interactive runner,
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
    channels, cgroup CPU/memory/process enforcement, bounded logs, durable resource coordinates, and
-   deterministic crash recovery.
+   deterministic crash recovery. A separate credentialless worker composition now owns these ports,
+   serializes work, and retains its writer lease until cleanup is conclusive.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
-   recovery/sandbox CI, isolated exact-repository credential adapter, broker-only composition,
-   owner-only key provisioning boundary, and operator preflight now exist. Activation still requires
-   the missing review protections, provisioned live key/config and exact cost rules, a passing live
-   preflight, and human merge. No scheduler, auto-merge, release, or protected-path write.
+   recovery/sandbox CI, credentialless worker composition, isolated exact-repository credential
+   adapter, broker-only composition, owner-only key provisioning boundary, and operator preflights
+   now exist. Activation still requires the missing review protections, provisioned live key/config
+   and exact cost rules, passing live preflights, and human merge. No scheduler, auto-merge,
+   release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.

@@ -76,10 +76,12 @@ describe("architecture dependency rules", () => {
 
   it("resolves each explicitly registered public package subpath", () => {
     const report = architectureReport([
-      source("apps/tui/src/broker.ts", [
-        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      source("apps/tui/src/factory-ports.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts"),
+        local("@agentlab/runtime/factory-worker", "packages/runtime/src/local-factory-worker.ts")
       ]),
-      source("packages/runtime/src/local-factory-broker.ts")
+      source("packages/runtime/src/local-factory-broker.ts"),
+      source("packages/runtime/src/local-factory-worker.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -103,17 +105,39 @@ describe("architecture dependency rules", () => {
           "packages/runtime/src/infrastructure/github/authority.ts"
         )
       ]),
-      source("packages/runtime/src/infrastructure/github/authority.ts")
+      source("packages/runtime/src/infrastructure/github/authority.ts"),
+      source("packages/runtime/src/local-factory-worker.ts", [
+        local("./application/worker.js", "packages/runtime/src/application/worker.ts")
+      ]),
+      source("packages/runtime/src/application/worker.ts", [
+        local(
+          "../infrastructure/providers/catalog-factory-agent-provider-resolver.js",
+          "packages/runtime/src/infrastructure/providers/catalog-factory-agent-provider-resolver.ts"
+        ),
+        local(
+          "../infrastructure/github/authority.js",
+          "packages/runtime/src/infrastructure/github/authority.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/infrastructure/providers/catalog-factory-agent-provider-resolver.ts"
+      )
     ]);
 
     const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
-    expect(violations).toHaveLength(2);
+    expect(violations).toHaveLength(4);
     expect(violations.map(({ message }) => message).join("\n")).toContain(
       "application/bridge.ts -> packages/runtime/src/infrastructure/providers/model.ts"
     );
     expect(violations.map(({ target }) => target)).toContain(
       "packages/runtime/src/infrastructure/github/authority.ts"
     );
+    expect(violations.map(({ target }) => target)).toContain(
+      "packages/runtime/src/infrastructure/providers/catalog-factory-agent-provider-resolver.ts"
+    );
+    expect(
+      violations.filter(({ source }) => source === "packages/runtime/src/local-factory-worker.ts")
+    ).toHaveLength(2);
   });
 
   it("detects cycles and unresolved local imports", () => {
@@ -547,12 +571,17 @@ function architectureFixture(): string {
       "./factory-broker": {
         default: "./dist/local-factory-broker.js",
         types: "./dist/local-factory-broker.d.ts"
+      },
+      "./factory-worker": {
+        default: "./dist/local-factory-worker.js",
+        types: "./dist/local-factory-worker.d.ts"
       }
     }
   });
   workspaceTsconfig(root, "packages/runtime", ["src/**/*.ts"]);
   write(root, "packages/runtime/src/local-runtime.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-broker.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-worker.ts", "export {};\n");
   return root;
 }
 

@@ -208,19 +208,26 @@ Provider resolution rechecks file identity/digest and version for each use under
 that contains no GitHub, package-registry, or cloud credential variables. The schema has no GitHub
 App, remote-repository, or authority-control field, and the sandbox refuses `/` as a runtime mount.
 
-This path is not composed into `local-runtime.ts`, scheduled, deployed, published, or enabled.
-Normal database migration creates only its inert local ledger tables. A separate broker composition,
-owner-only key source, and non-authorizing operator preflight now exist, but the normal TUI cannot
-enable authority or open a PR. Current branch protection requires exact `verify` and
-`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
-and deletion. It still has zero required approvals, does not require approval of the latest push,
-and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
-blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
-owner-only rate card; actual rate and broker-key provisioning remain activation prerequisites. An
-incomplete usage record already denies PR creation. No live agent task or PR has been created by
-this code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
-automation remain later stages.
+The worker path is now composed only through the separate `@agentlab/runtime/factory-worker`
+subpath; it is not reachable from `local-runtime.ts`, scheduled, deployed, published, or enabled.
+Its read-only host preflight revalidates canonical executable and runtime paths, owner-only
+artifact/worktree roots, exact systemd/provider identities, credentialless fixed-argv probes, cost
+readiness, user-manager reachability, and the observed scheduler switch. A maximum of 32 admitted
+commands execute serially against one SQLite writer lease. Recovery remains callable when normal
+work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
+repositories and the lease are released. The port exposes no intake-authority issuer, control
+switch, GitHub adapter, or broker credential. A separate broker composition, owner-only key source,
+and non-authorizing operator preflight also exist, but the normal TUI cannot enable authority or
+open a PR. Current branch protection requires exact `verify` and `factory-sandbox` checks, dismisses
+stale reviews, enforces administrators, and forbids force-push and deletion. It still has zero
+required approvals, does not require approval of the latest push, and has neither a CODEOWNERS
+policy nor required code-owner review. Preflight therefore reports blocked for those controls and
+`cost-policy-unconfigured`. The cost-accounting mechanism exists, but the repository ships no live
+config or provider/model rates. Config v2 can now provision a reviewed owner-only rate card; actual
+rate and broker-key provisioning remain activation prerequisites. An incomplete usage record already
+denies PR creation. No live agent task or PR has been created by this code. PR-head repair,
+scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
+stages.
 
 ## Dependency map
 
@@ -230,13 +237,14 @@ through an injected port.
 ```text
 interactive TUI ──▶ @agentlab/runtime ───────────────▶ local-runtime composition
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
-                                                        │              │
-                                                        ▼              ▼
-                                                  application     infrastructure
-                                                        └────▶ domain ◀────┘
-                                                                │
-                                                                ▼
-                                                            contracts
+worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
+                                                         │              │
+                                                         ▼              ▼
+                                                   application     infrastructure
+                                                         └────▶ domain ◀────┘
+                                                                 │
+                                                                 ▼
+                                                             contracts
 
 launcher (distribution only; independent source graph)
 ```
@@ -247,7 +255,7 @@ launcher (distribution only; independent source graph)
 | `runtime/domain`          | Invariants, value objects, errors, and ports                  | domain, contracts                              |
 | `runtime/application`     | Typed use cases, validated commands, coordination, ownership  | application, domain, contracts                 |
 | `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive runtime and isolated factory-broker construction  | runtime layers, contracts                      |
+| runtime composition roots | Interactive, credentialless-worker, and broker construction   | runtime layers, contracts                      |
 | `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation       | TUI, contracts, registered runtime public APIs |
 | `packages/launcher`       | Binary acquisition, verification, and process handoff         | launcher                                       |
 
@@ -257,10 +265,12 @@ The product-source rules are executable and fail closed:
   imports.
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
-- TUI and CLI code see runtime modules only through registered package entry points. The broker
-  subpath is exact; every other runtime deep import fails.
+- TUI and CLI code see runtime modules only through registered package entry points. The broker and
+  worker subpaths are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
-  modules; the interactive composition closure cannot reach broker or GitHub authority modules.
+  modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
+  cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
+  interactive closure cannot reach either factory composition or GitHub authority modules.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
