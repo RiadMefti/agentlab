@@ -117,7 +117,9 @@ function countFlakyCases(run: FactoryEvalRun): number {
 
 function sumCost(run: FactoryEvalRun, candidate: "baseline" | "challenger"): number {
   return run.samples.reduce((total, sample) => {
-    const result = total + sample[candidate].costMicrousd;
+    const cost =
+      candidate === "baseline" ? sample.baseline.costMicrousd : sample.challenger.costMicrousd;
+    const result = total + cost;
     if (!Number.isSafeInteger(result)) throw new Error("Eval cost total exceeds safe arithmetic.");
     return result;
   }, 0);
