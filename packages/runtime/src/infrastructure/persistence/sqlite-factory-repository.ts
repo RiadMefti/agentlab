@@ -259,10 +259,7 @@ export class SqliteFactoryRepository
   }
 
   public state(): Promise<FactoryAuthorityState> {
-    return Promise.resolve({
-      scheduler: this.#latestControlValue("scheduler"),
-      prBroker: this.#latestControlValue("pr-broker")
-    });
+    return Promise.resolve(this.#authorityState());
   }
 
   public appendEvidence(
@@ -303,8 +300,38 @@ export class SqliteFactoryRepository
 
   public record(
     eventDocument: CanonicalFactoryDocument<FactoryControlEvent>
-  ): Promise<FactoryAuthorityState> {
+  ): Promise<FactoryAuthorityState>;
+
+  public record(
+    eventDocument: CanonicalFactoryDocument<FactoryControlEvent>,
+    expectedEnabled: boolean
+  ): Promise<FactoryAuthorityState | null>;
+
+  public record(
+    eventDocument: CanonicalFactoryDocument<FactoryControlEvent>,
+    expectedEnabled?: boolean
+  ): Promise<FactoryAuthorityState | null> {
+    return this.#recordControl(eventDocument, expectedEnabled);
+  }
+
+  #recordControl(
+    eventDocument: CanonicalFactoryDocument<FactoryControlEvent>,
+    expectedEnabled?: boolean
+  ): Promise<FactoryAuthorityState | null> {
     const event = this.#verifiedControlDocument(eventDocument);
+    if (expectedEnabled !== undefined) {
+      const result = this.#inTransaction(() => {
+        if (this.#latestControlValue(event.value.control) !== expectedEnabled) return null;
+        this.#insertControlEvent(event);
+        return this.#authorityState();
+      });
+      return Promise.resolve(result);
+    }
+    this.#insertControlEvent(event);
+    return Promise.resolve(this.#authorityState());
+  }
+
+  #insertControlEvent(event: CanonicalFactoryDocument<FactoryControlEvent>): void {
     this.#database
       .prepare(
         `INSERT INTO factory_control_events (
@@ -326,7 +353,6 @@ export class SqliteFactoryRepository
         event.value.occurredAt,
         event.value.reason
       );
-    return this.state();
   }
 
   public history(
@@ -565,6 +591,13 @@ export class SqliteFactoryRepository
       )
       .get(control) as ControlRow | undefined;
     return row === undefined ? false : this.#controlFromRow(row).value.enabled;
+  }
+
+  #authorityState(): FactoryAuthorityState {
+    return {
+      scheduler: this.#latestControlValue("scheduler"),
+      prBroker: this.#latestControlValue("pr-broker")
+    };
   }
 
   #controlFromRow(row: ControlRow): CanonicalFactoryDocument<FactoryControlEvent> {

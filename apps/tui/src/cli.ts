@@ -1,4 +1,9 @@
-import { isFactoryTaskId, isNormalizedAbsolutePath, isSha256Digest } from "./factory-cli-input.js";
+import {
+  isFactoryAuthorityReason,
+  isFactoryTaskId,
+  isNormalizedAbsolutePath,
+  isSha256Digest
+} from "./factory-cli-input.js";
 
 export type CliAction =
   | { readonly kind: "help" }
@@ -6,6 +11,15 @@ export type CliAction =
   | { readonly kind: "run" }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
+  | { readonly kind: "factory-authority-status"; readonly configPath: string }
+  | {
+      readonly kind: "factory-broker-authority";
+      readonly configPath: string;
+      readonly expectedEnabled: boolean;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly confirmation: "enable-draft-broker" | "disable-draft-broker";
+    }
   | {
       readonly kind: "factory-broker-open-draft";
       readonly configPath: string;
@@ -44,6 +58,49 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "authority-status" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-authority-status", configPath };
+    }
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
+    input[1] === "broker-authority" &&
+    input[2] === "--config" &&
+    input[4] === "--expected" &&
+    input[6] === "--to" &&
+    input[8] === "--reason"
+  ) {
+    const configPath = input[3];
+    const expectedEnabled = authorityState(input[5]);
+    const enabled = authorityState(input[7]);
+    const reason = input[9];
+    const confirmation = authorityConfirmation(input[10], enabled);
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      expectedEnabled !== null &&
+      enabled !== null &&
+      expectedEnabled !== enabled &&
+      isFactoryAuthorityReason(reason) &&
+      confirmation !== null
+    ) {
+      return {
+        kind: "factory-broker-authority",
+        configPath,
+        expectedEnabled,
+        enabled,
+        reason,
+        confirmation
+      };
+    }
+  }
+  if (
     input.length === 9 &&
     input[0] === "factory" &&
     input[1] === "broker-open-draft" &&
@@ -70,8 +127,27 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory broker-preflight|worker-preflight|broker-open-draft ...]"
+    "Usage: agentlab [factory broker-preflight|worker-preflight|authority-status|broker-authority ...|broker-open-draft ...]"
   );
+}
+
+function authorityState(value: string | undefined): boolean | null {
+  if (value === "enabled") return true;
+  if (value === "disabled") return false;
+  return null;
+}
+
+function authorityConfirmation(
+  value: string | undefined,
+  enabled: boolean | null
+): "enable-draft-broker" | "disable-draft-broker" | null {
+  if (enabled === true && value === "--confirm-enable-draft-broker") {
+    return "enable-draft-broker";
+  }
+  if (enabled === false && value === "--confirm-disable-draft-broker") {
+    return "disable-draft-broker";
+  }
+  return null;
 }
 
 export function assertSupportedTerminalRuntime(
@@ -88,6 +164,10 @@ export const helpText = `agentlab
 Open the local terminal UI, then choose or add a project folder.
 
 Factory authority:
+  agentlab factory authority-status --config <absolute-path>
+      Inspect local scheduler and draft-PR authority plus recent broker authority events.
+  agentlab factory broker-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-draft-broker
+      Compare-and-set only the local draft-PR switch; never enables scheduling or contacts GitHub.
   agentlab factory broker-preflight --config <absolute-path>
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>

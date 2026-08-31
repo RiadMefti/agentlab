@@ -12,6 +12,8 @@ import {
 import type { FactoryCostPolicy } from "@agentlab/contracts";
 // @ts-expect-error Broker authority must not be exported by the interactive runtime entry point.
 import { createLocalFactoryBroker as forbiddenInteractiveBroker } from "@agentlab/runtime";
+// @ts-expect-error Human authority mutation must not be exported by the credential-bearing broker.
+import { createLocalFactoryAuthority as forbiddenBrokerAuthority } from "@agentlab/runtime/factory-broker";
 
 type Equal<Left, Right> = [Left] extends [Right]
   ? [Right] extends [Left]
@@ -128,3 +130,4 @@ export type FactoryBrokerPublicApiAssertions = [
 ];
 
 void forbiddenInteractiveBroker;
+void forbiddenBrokerAuthority;

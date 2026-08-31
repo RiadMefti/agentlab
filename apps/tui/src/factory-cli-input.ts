@@ -21,3 +21,10 @@ export function isFactoryTaskId(value: string | undefined): value is string {
 export function isSha256Digest(value: string | undefined): value is `sha256:${string}` {
   return value !== undefined && sha256DigestPattern.test(value);
 }
+
+export function isFactoryAuthorityReason(value: string | undefined): value is string {
+  if (value === undefined) return false;
+  return (
+    value === value.trim() && value.length >= 1 && value.length <= 500 && !value.includes("\0")
+  );
+}

@@ -1,4 +1,3 @@
-import type { AgentLabCommandPort } from "./agentlab-commands.js";
 import type { AsyncOperationOwner } from "../domain/async-operation-owner.js";
 
 const CLOSED_RUNTIME_MESSAGE = "The agentlab runtime is closing.";
@@ -42,30 +41,4 @@ export class RuntimeTaskOwner implements AsyncOperationOwner {
     );
     return task;
   }
-}
-
-/** Applies runtime ownership to every command without coupling domain services to shutdown. */
-export function ownAgentLabCommands(
-  commands: AgentLabCommandPort,
-  tasks: RuntimeTaskOwner
-): AgentLabCommandPort {
-  return {
-    listConversations: () => tasks.run(() => commands.listConversations()),
-    inspectWorkspace: (workspacePath) => tasks.run(() => commands.inspectWorkspace(workspacePath)),
-    prepareWorkspace: (workspacePath) => tasks.run(() => commands.prepareWorkspace(workspacePath)),
-    discoverWorkspaceProviders: (workspacePath) =>
-      tasks.run(() => commands.discoverWorkspaceProviders(workspacePath)),
-    completeFolders: (input) => tasks.run(() => commands.completeFolders(input)),
-    listProviders: (conversationId) => tasks.run(() => commands.listProviders(conversationId)),
-    createConversation: (input) => tasks.run(() => commands.createConversation(input)),
-    deleteConversation: (conversationId) =>
-      tasks.run(() => commands.deleteConversation(conversationId)),
-    listSessions: (conversationId) => tasks.run(() => commands.listSessions(conversationId)),
-    createWorker: (conversationId, input) =>
-      tasks.run(() => commands.createWorker(conversationId, input)),
-    deleteWorker: (conversationId, sessionName) =>
-      tasks.run(() => commands.deleteWorker(conversationId, sessionName)),
-    requireAttachableSession: (conversationId, sessionName) =>
-      tasks.run(() => commands.requireAttachableSession(conversationId, sessionName))
-  };
 }

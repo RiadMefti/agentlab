@@ -15,6 +15,10 @@
     "./factory-worker": {
       "types": "./dist/local-factory-worker.d.ts",
       "default": "./dist/local-factory-worker.js"
+    },
+    "./factory-authority": {
+      "types": "./dist/local-factory-authority.d.ts",
+      "default": "./dist/local-factory-authority.js"
     }
   },
   "files": [

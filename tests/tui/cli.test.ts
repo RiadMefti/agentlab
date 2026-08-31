@@ -100,10 +100,79 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires exact compare-and-set state, reason, and matching broker confirmation", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "authority-status",
+        "--config",
+        "/private/agentlab/authority.json"
+      ])
+    ).toEqual({
+      kind: "factory-authority-status",
+      configPath: "/private/agentlab/authority.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Approved for one governed canary.",
+        "--confirm-enable-draft-broker"
+      ])
+    ).toEqual({
+      kind: "factory-broker-authority",
+      configPath: "/private/agentlab/authority.json",
+      expectedEnabled: false,
+      enabled: true,
+      reason: "Approved for one governed canary.",
+      confirmation: "enable-draft-broker"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Wrong confirmation.",
+        "--confirm-disable-draft-broker"
+      ])
+    ).toThrow(/Usage/u);
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "enabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "No-op.",
+        "--confirm-enable-draft-broker"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("documents explicit factory commands and the child-mouse emergency kill switch", () => {
     expect(helpText).toContain("factory broker-preflight --config");
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory broker-open-draft --config");
+    expect(helpText).toContain("factory authority-status --config");
+    expect(helpText).toContain("factory broker-authority --config");
+    expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");

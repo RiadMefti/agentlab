@@ -159,6 +159,50 @@ describe("SqliteFactoryRepository", () => {
     }
   });
 
+  it("atomically compares authority state before appending a control event", async () => {
+    const repository = new SqliteFactoryRepository(":memory:");
+    const enable = codec.controlEvent(
+      testControlEvent({
+        eventId: "88888888-8888-4888-8888-888888888888",
+        control: "pr-broker",
+        enabled: true
+      })
+    );
+    const staleDisable = codec.controlEvent(
+      testControlEvent({
+        eventId: "99999999-9999-4999-8999-999999999999",
+        control: "pr-broker",
+        enabled: false
+      })
+    );
+    const disable = codec.controlEvent(
+      testControlEvent({
+        eventId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        control: "pr-broker",
+        enabled: false
+      })
+    );
+
+    try {
+      await expect(repository.record(enable, false)).resolves.toEqual({
+        scheduler: false,
+        prBroker: true
+      });
+      await expect(repository.record(staleDisable, false)).resolves.toBeNull();
+      await expect(repository.history("pr-broker", 10)).resolves.toEqual([enable.value]);
+      await expect(repository.record(disable, true)).resolves.toEqual({
+        scheduler: false,
+        prBroker: false
+      });
+      await expect(repository.history("pr-broker", 10)).resolves.toEqual([
+        disable.value,
+        enable.value
+      ]);
+    } finally {
+      repository.close();
+    }
+  });
+
   it("enforces append-only task rows at the SQLite boundary", async () => {
     const databasePath = temporaryDatabase("agentlab-factory-ledger-");
     const repository = new SqliteFactoryRepository(databasePath);

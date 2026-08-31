@@ -15,6 +15,8 @@ import {
 import { createLocalFactoryWorker as forbiddenInteractiveWorker } from "@agentlab/runtime";
 // @ts-expect-error Worker execution must not be exported by the GitHub authority entry point.
 import { createLocalFactoryWorker as forbiddenBrokerWorker } from "@agentlab/runtime/factory-broker";
+// @ts-expect-error Human authority mutation must not be exported by the model-bearing worker.
+import { createLocalFactoryAuthority as forbiddenWorkerAuthority } from "@agentlab/runtime/factory-worker";
 
 type Equal<Left, Right> = [Left] extends [Right]
   ? [Right] extends [Left]
@@ -138,3 +140,4 @@ export type FactoryWorkerPublicApiAssertions = [
 
 void forbiddenInteractiveWorker;
 void forbiddenBrokerWorker;
+void forbiddenWorkerAuthority;

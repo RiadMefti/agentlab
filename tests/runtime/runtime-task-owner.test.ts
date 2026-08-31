@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentLabCommandPort } from "../../packages/runtime/src/application/agentlab-commands.js";
-import {
-  RuntimeTaskOwner,
-  ownAgentLabCommands
-} from "../../packages/runtime/src/application/runtime-task-owner.js";
+import { ownAgentLabCommands } from "../../packages/runtime/src/application/owned-agentlab-commands.js";
+import { RuntimeTaskOwner } from "../../packages/runtime/src/application/runtime-task-owner.js";
 import { withTimeout } from "../../packages/runtime/src/infrastructure/process/promise-timeout.js";
 
 describe("RuntimeTaskOwner", () => {
