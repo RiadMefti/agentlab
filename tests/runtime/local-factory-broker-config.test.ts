@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryBrokerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-broker-config.js";
+import { loadLocalFactoryCostPolicy } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.js";
 
 const temporaryRoots: string[] = [];
 
@@ -24,11 +25,34 @@ describe("local factory broker configuration boundary", () => {
     await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual(config);
   });
 
+  it("loads v2 with one separately protected exact cost policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "broker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const costPolicy = validCostPolicy();
+    const config = {
+      ...validConfig(root),
+      schemaVersion: "agentlab.local-factory-broker.v2" as const,
+      costPolicyPath
+    };
+    await writePrivateJson(costPolicyPath, costPolicy);
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual({ ...config, costPolicy });
+    await expect(loadLocalFactoryCostPolicy(costPolicyPath)).resolves.toEqual(costPolicy);
+  });
+
   it("rejects unknown fields, unsafe numbers, relative fields, and malformed JSON", async () => {
     const root = await temporaryRoot();
     const path = join(root, "broker.json");
 
     await writePrivateJson(path, { ...validConfig(root), surprise: true });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow();
+
+    await writePrivateJson(path, {
+      ...validConfig(root),
+      costPolicyPath: join(root, "cost-policy.json")
+    });
     await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow();
 
     await writePrivateJson(path, {
@@ -88,6 +112,33 @@ describe("local factory broker configuration boundary", () => {
       /bounded absolute path/u
     );
   });
+
+  it("rejects missing, malformed, permissive, or non-exact v2 cost policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "broker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const config = {
+      ...validConfig(root),
+      schemaVersion: "agentlab.local-factory-broker.v2" as const,
+      costPolicyPath
+    };
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow();
+
+    await writePrivateJson(costPolicyPath, { ...validCostPolicy(), mutableFallback: 0 });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow();
+
+    await writePrivateJson(costPolicyPath, {
+      ...validCostPolicy(),
+      rules: [{ ...validCostPolicy().rules[0], model: "gpt-*" }]
+    });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/exact model/iu);
+
+    await writePrivateJson(costPolicyPath, validCostPolicy());
+    await chmod(costPolicyPath, 0o644);
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/owner-only/u);
+  });
 });
 
 function validConfig(root: string) {
@@ -109,6 +160,30 @@ function validConfig(root: string) {
         { context: "factory-sandbox", appId: 15_368 }
       ]
     }
+  } as const;
+}
+
+function validCostPolicy() {
+  return {
+    schemaVersion: "agentlab.cost-policy.v1",
+    id: "agentlab/live-costs",
+    version: "1.0.0",
+    rules: [
+      {
+        provider: "codex",
+        model: "gpt-5.4",
+        accounting: {
+          mode: "token-rate",
+          inputMicrousdPerMillionTokens: 1_000_000,
+          outputMicrousdPerMillionTokens: 2_000_000
+        }
+      },
+      {
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        accounting: { mode: "provider-reported" }
+      }
+    ]
   } as const;
 }
 

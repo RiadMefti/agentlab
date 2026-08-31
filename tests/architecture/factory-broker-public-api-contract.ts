@@ -9,6 +9,7 @@ import {
   type LocalFactoryBrokerOptions,
   type LocalFactoryBrokerRuntime
 } from "@agentlab/runtime/factory-broker";
+import type { FactoryCostPolicy } from "@agentlab/contracts";
 // @ts-expect-error Broker authority must not be exported by the interactive runtime entry point.
 import { createLocalFactoryBroker as forbiddenInteractiveBroker } from "@agentlab/runtime";
 
@@ -23,8 +24,7 @@ type Equal<Left, Right> = [Left] extends [Right]
   : false;
 type Assert<Value extends true> = Value;
 
-interface ExpectedConfig {
-  schemaVersion: "agentlab.local-factory-broker.v1";
+interface ExpectedConfigFields {
   databasePath: string;
   artifactRoot: string;
   temporaryRoot: string;
@@ -43,6 +43,16 @@ interface ExpectedConfig {
   };
 }
 
+type ExpectedConfig = ExpectedConfigFields &
+  (
+    | { schemaVersion: "agentlab.local-factory-broker.v1" }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v2";
+        costPolicyPath: string;
+        costPolicy: FactoryCostPolicy;
+      }
+  );
+
 interface ExpectedOptions {
   readonly databasePath: string;
   readonly artifactRoot: string;
@@ -51,6 +61,7 @@ interface ExpectedOptions {
   readonly repositoryNumericId: number;
   readonly brokerId: string;
   readonly gitExecutable: string;
+  readonly costPolicy?: FactoryCostPolicy;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;
