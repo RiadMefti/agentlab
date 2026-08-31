@@ -46,6 +46,7 @@ import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persi
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
+import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryTaskMaterializer } from "./infrastructure/persistence/sqlite-factory-task-materializer.js";
@@ -127,6 +128,9 @@ export function createLocalFactoryWorker(
     );
     const pullRequestRepairs = repositories.track(
       new SqliteFactoryPullRequestRepairExecutionRepository(databasePath, { documents })
+    );
+    const pullRequestUpdates = repositories.track(
+      new SqliteFactoryPullRequestUpdateRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
@@ -302,6 +306,7 @@ export function createLocalFactoryWorker(
       executions: pullRequestRepairs,
       recovery: pullRequestRepairRecovery,
       dispatches: pullRequestDispatches,
+      updates: pullRequestUpdates,
       tasks: factory,
       evidence: factory,
       conversations,

@@ -121,6 +121,24 @@ describe("FactoryBrokerOperator", () => {
     expect(fixture.openDraft).not.toHaveBeenCalled();
     expect(fixture.observe).not.toHaveBeenCalled();
   });
+
+  it("delegates repaired branch publication only through the governed update service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      taskId: "0198f005-4ec4-7000-8000-000000000001",
+      authorizationDigest: `sha256:${"e".repeat(64)}`
+    };
+
+    await expect(fixture.operator.updatePullRequest(command)).resolves.toEqual({
+      status: "denied",
+      reasonCodes: ["test-update-denial"],
+      decision: null
+    });
+    expect(fixture.updatePullRequest).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+    expect(fixture.observe).not.toHaveBeenCalled();
+    expect(fixture.admitRepair).not.toHaveBeenCalled();
+  });
 });
 
 const strongGovernance: FactoryRepositoryGovernance = {
@@ -162,6 +180,11 @@ function operatorFixture(
     status: "denied" as const,
     reasonCodes: ["test-repair-denial"]
   });
+  const updatePullRequest = vi.fn().mockResolvedValue({
+    status: "denied" as const,
+    reasonCodes: ["test-update-denial"],
+    decision: null
+  });
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
@@ -170,7 +193,8 @@ function operatorFixture(
     controls: { state },
     pullRequests: { openDraft },
     pullRequestObservations: { observe },
-    pullRequestRepairAdmissions: { admit: admitRepair }
+    pullRequestRepairAdmissions: { admit: admitRepair },
+    pullRequestUpdates: { update: updatePullRequest }
   };
   return {
     operator: new FactoryBrokerOperator(dependencies),
@@ -178,6 +202,7 @@ function operatorFixture(
     state,
     openDraft,
     observe,
-    admitRepair
+    admitRepair,
+    updatePullRequest
   };
 }

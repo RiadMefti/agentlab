@@ -29,6 +29,7 @@ import type {
   FactoryPullRequestRepairExecutionRepository,
   FactoryPullRequestRepairExecutionSnapshot
 } from "../domain/factory-pull-request-repair-execution-repository.js";
+import type { FactoryPullRequestUpdateRepository } from "../domain/factory-pull-request-update-repository.js";
 import {
   resolveFactorySkillPlan,
   selectFactorySkills,
@@ -56,10 +57,8 @@ import {
 } from "./factory-execution-journal.js";
 import { FactoryExecutionOperations, patchLimits } from "./factory-execution-operations.js";
 import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
-import {
-  FactoryPullRequestRepairEvidenceReader,
-  requireFactoryPullRequestRepairDispatch
-} from "./factory-pull-request-repair-evidence.js";
+import { FactoryPullRequestRepairEvidenceReader } from "./factory-pull-request-repair-evidence.js";
+import { FactoryPullRequestLineageReader } from "./factory-pull-request-lineage.js";
 import type { FactoryPullRequestRepairRecoveryService } from "./factory-pull-request-repair-recovery-service.js";
 
 const repairInputSchema = z
@@ -72,6 +71,7 @@ const repairInputSchema = z
 
 type WorkerProfile = FactoryTaskSnapshot["contract"]["agentPolicy"]["workerProfiles"][number];
 type RepairTerminalState = "pr-proposed" | "needs-attention" | "failed" | "quarantined";
+type RepairExecutionStatus = RepairTerminalState | "already-advanced";
 
 interface RepairAttemptResult {
   readonly state: RepairTerminalState;
@@ -88,6 +88,10 @@ export interface FactoryPullRequestRepairExecutionServiceDependencies extends Om
   readonly executions: FactoryPullRequestRepairExecutionRepository;
   readonly recovery: Pick<FactoryPullRequestRepairRecoveryService, "recover">;
   readonly dispatches: Pick<FactoryPullRequestDispatchRepository, "findByTaskId">;
+  readonly updates: Pick<
+    FactoryPullRequestUpdateRepository,
+    "listByTaskId" | "findByRepairRunDigest"
+  >;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly evidence: Pick<FactoryEvidenceRepository, "listEvidence" | "latestEvidence">;
   readonly conversations: Pick<ConversationRepository, "findById">;
@@ -108,7 +112,7 @@ export interface FactoryPullRequestRepairExecutionServiceDependencies extends Om
 }
 
 export interface FactoryPullRequestRepairExecutionOutcome {
-  readonly status: RepairTerminalState;
+  readonly status: RepairExecutionStatus;
   readonly task: FactoryTaskSnapshot;
   readonly authorizationDigest: Sha256Digest;
   readonly repairRunDigest: Sha256Digest;
@@ -124,6 +128,7 @@ export class FactoryPullRequestRepairExecutionService {
   readonly #publisher: FactoryEvidencePublisher;
   readonly #operations: FactoryExecutionOperations;
   readonly #reader: FactoryPullRequestRepairEvidenceReader;
+  readonly #lineage: FactoryPullRequestLineageReader;
 
   public constructor(
     private readonly dependencies: FactoryPullRequestRepairExecutionServiceDependencies
@@ -138,6 +143,7 @@ export class FactoryPullRequestRepairExecutionService {
     });
     this.#operations = new FactoryExecutionOperations(dependencies, this.#publisher);
     this.#reader = new FactoryPullRequestRepairEvidenceReader(dependencies);
+    this.#lineage = new FactoryPullRequestLineageReader(dependencies);
   }
 
   public async execute(input: unknown): Promise<FactoryPullRequestRepairExecutionOutcome> {
@@ -162,25 +168,22 @@ export class FactoryPullRequestRepairExecutionService {
     if (repositoryRoot === null) {
       throw new Error("PR repair execution requires its active owning conversation.");
     }
-    const { dispatch, record } = requireFactoryPullRequestRepairDispatch(
-      task,
-      await this.dependencies.dispatches.findByTaskId(command.taskId),
-      this.dependencies.documents
-    );
+    const lineage = await this.#lineage.current(task);
+    const record = lineage.record;
     const bundles = await this.dependencies.evidence.listEvidence(command.taskId);
     const authorization = await this.#reader.exactAuthorization({
       bundles,
       expectedDigest: command.authorizationDigest,
       task,
       record,
-      proposalDigest: dispatch.run.proposalDigest,
-      priorPatchProposalDigest: dispatch.run.proposal.patchProposalDigest
+      proposalDigest: lineage.dispatch.run.proposalDigest,
+      priorPatchProposalDigest: lineage.currentPatchProposalDigest
     });
     const observed = await this.#reader.exactLatestObservation({
       bundles,
       expectedDigest: authorization.value.observationDigest,
       task,
-      proposalDigest: dispatch.run.proposalDigest,
+      proposalDigest: lineage.dispatch.run.proposalDigest,
       record
     });
     const feedback = this.#reader.repairFeedback({
@@ -189,7 +192,7 @@ export class FactoryPullRequestRepairExecutionService {
     });
     const priorPatch = await this.#reader.priorPatch({
       bundles,
-      expectedDigest: authorization.value.priorPatchProposalDigest,
+      expectedDigest: lineage.currentPatchProposalDigest,
       task
     });
     const initialUsage = await this.#reader.initialUsage({
@@ -204,8 +207,8 @@ export class FactoryPullRequestRepairExecutionService {
       bundles,
       task,
       record,
-      proposalDigest: dispatch.run.proposalDigest,
-      priorPatchProposalDigest: dispatch.run.proposal.patchProposalDigest
+      proposalDigest: lineage.dispatch.run.proposalDigest,
+      priorPatchProposalDigest: lineage.currentPatchProposalDigest
     });
     const recordedRuns = await this.#reader.repairRuns({ bundles, task, authorizations });
     if (recordedRuns.some(({ value }) => value.authorizationDigest === authorization.digest)) {
@@ -508,7 +511,23 @@ export class FactoryPullRequestRepairExecutionService {
         execution.lastEvent.kind !== "execution-finished" ||
         execution.lastEvent.taskState !== task.state
       ) {
-        throw new Error("Completed PR repair journal disagrees with its durable task state.");
+        const update = await this.dependencies.updates.findByRepairRunDigest(execution.runDigest);
+        const alreadyAdvanced =
+          execution.lastEvent.kind === "execution-finished" &&
+          execution.lastEvent.taskState === "pr-proposed" &&
+          task.state === "pr-open" &&
+          update?.state === "completed" &&
+          update.run.taskId === command.taskId &&
+          update.run.proposal.repairAuthorizationDigest === command.authorizationDigest &&
+          update.run.proposal.repairRunDigest === execution.runDigest &&
+          update.record !== null &&
+          update.record.repairAuthorizationDigest === command.authorizationDigest &&
+          update.record.repairRunDigest === execution.runDigest &&
+          update.record.headRevision !== update.run.proposal.priorHeadRevision;
+        if (!alreadyAdvanced) {
+          throw new Error("Completed PR repair journal disagrees with its durable task state.");
+        }
+        return outcome(task, execution, null, [], null, false, false, "already-advanced");
       }
     }
     const status = repairTerminalState(task);
@@ -610,7 +629,7 @@ function outcome(
   usage: FactoryBudgetUsage | null,
   usageComplete: boolean,
   created: boolean,
-  status: RepairTerminalState = repairTerminalState(task)
+  status: RepairExecutionStatus = repairTerminalState(task)
 ): FactoryPullRequestRepairExecutionOutcome {
   return {
     status,

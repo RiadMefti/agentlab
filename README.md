@@ -157,6 +157,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   Every strict gate and a distinct read-only review run again. Its append-only journal makes
   interruption recoverable, cumulative task budgets remain authoritative, and it stops at a new
   local `pr-proposed` checkpoint; branch update remains a separate broker responsibility.
+- `agentlab factory broker-update-draft --config ... --task ... --authorization ... --policy ... --confirm-update`
+  consumes the completed repair only in the credential-bearing broker composition. It revalidates
+  the exact repair journal, patch, cumulative usage, policy, prior PR authority record, repository
+  governance, and kill switch. The broker creates a deterministic commit whose sole parent is the
+  recorded remote head and performs a normal non-force fast-forward. Its five-checkpoint SQLite
+  journal reconciles an exact already-applied update after interruption, records authenticated
+  evidence, returns the task to `pr-open`, and makes re-observation bind the new head.
 - `packages/contracts` owns provider, conversation, session, and software-factory schemas shared
   across local layers.
 
@@ -178,15 +185,16 @@ has a bounded serialized command port and read-only host preflight covering its 
 owner-only storage roots, but no GitHub or authority-control capability. Its explicit policy-pinned
 task runner and authorization-bound PR repair runner are crash-resumable and stop before remote
 writes. Separate CLI commands inspect intake and local authority and report broker and worker
-readiness. The sole remote-write command requires an exact task UUID, an operator-pinned policy
-digest, and the literal `--confirm-draft`; it invokes only the draft broker after a clean preflight,
-then the broker rechecks policy, evidence, base revision, governance, and the kill switch. A
-separate owner-only human CLI can atomically compare-and-set only the broker switch with an explicit
-reason and matching confirmation; it cannot enable scheduling or contact GitHub. Authority remains
+readiness. The two remote-write commands require an exact task UUID, an operator-pinned policy
+digest, and literal confirmation: one opens the initial draft and one advances an
+authorization-bound repaired branch. Both invoke only the broker after a clean preflight, and their
+inner services recheck policy, evidence, base revision, governance, and the kill switch. A separate
+owner-only human CLI can atomically compare-and-set only the broker switch with an explicit reason
+and matching confirmation; it cannot enable scheduling or contact GitHub. Authority remains
 default-off. Provider-neutral per-run cost accounting is policy-pinned and fail-closed, and the
 shipped live rate card is intentionally empty. Owner-only worker and broker config can load the same
 separate strict cost-policy file without sharing broker credentials. The current repository
-governance blocks the write command. No live factory task or PR has been created. See
+governance blocks the write commands. No live factory task or PR has been created. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases.
 

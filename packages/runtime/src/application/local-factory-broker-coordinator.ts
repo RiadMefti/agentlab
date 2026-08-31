@@ -3,6 +3,7 @@ import type { FactoryBrokerOperator, FactoryBrokerPreflight } from "./factory-br
 import type { FactoryPullRequestOutcome } from "./factory-pull-request-service.js";
 import type { FactoryPullRequestObservationOutcome } from "./factory-pull-request-observation-service.js";
 import type { FactoryPullRequestRepairAdmissionOutcome } from "./factory-pull-request-repair-admission-service.js";
+import type { FactoryPullRequestUpdateOutcome } from "./factory-pull-request-update-service.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
 
@@ -11,6 +12,7 @@ export interface FactoryBrokerCommandPort {
   openDraft(input: unknown): Promise<FactoryPullRequestOutcome>;
   observePullRequest(input: unknown): Promise<FactoryPullRequestObservationOutcome>;
   admitPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairAdmissionOutcome>;
+  updatePullRequest(input: unknown): Promise<FactoryPullRequestUpdateOutcome>;
 }
 
 export interface LocalFactoryBrokerRuntime {
@@ -50,7 +52,9 @@ export class LocalFactoryBrokerCoordinator implements LocalFactoryBrokerRuntime 
       observePullRequest: (input) =>
         this.#tasks.run(() => dependencies.operator.observePullRequest(input)),
       admitPullRequestRepair: (input) =>
-        this.#tasks.run(() => dependencies.operator.admitPullRequestRepair(input))
+        this.#tasks.run(() => dependencies.operator.admitPullRequestRepair(input)),
+      updatePullRequest: (input) =>
+        this.#tasks.run(() => dependencies.operator.updatePullRequest(input))
     };
   }
 

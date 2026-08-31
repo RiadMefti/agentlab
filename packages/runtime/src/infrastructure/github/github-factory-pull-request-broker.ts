@@ -3,9 +3,15 @@ import { createHash } from "node:crypto";
 import {
   factoryPullRequestProposalSchema,
   factoryPullRequestRecordSchema,
+  factoryPullRequestAuthorityRecordSchema,
+  factoryPullRequestUpdateProposalSchema,
+  factoryPullRequestUpdateRecordSchema,
   gitObjectIdSchema,
+  type FactoryPullRequestAuthorityRecord,
   type FactoryPullRequestProposal,
-  type FactoryPullRequestRecord
+  type FactoryPullRequestRecord,
+  type FactoryPullRequestUpdateProposal,
+  type FactoryPullRequestUpdateRecord
 } from "@agentlab/contracts";
 import { z } from "zod";
 
@@ -16,8 +22,12 @@ import type {
   FactoryRemoteRepositorySnapshot,
   OpenFactoryDraftPullRequestInput,
   OpenFactoryDraftPullRequestResult,
+  UpdateFactoryDraftPullRequestInput,
+  UpdateFactoryDraftPullRequestResult,
+  VerifyUpdatedFactoryDraftPullRequestInput,
   VerifyFactoryDraftPullRequestInput
 } from "../../domain/factory-pull-request-broker.js";
+import { factoryPullRequestAuthorityCoordinates } from "../../domain/factory-pull-request-authority-record.js";
 import type { CommandRunner } from "../process/command-runner.js";
 import { GitBrokerWorkspace, type PreparedGitBrokerCommit } from "./git-broker-workspace.js";
 import { githubPullRequestSchema } from "./github-pull-request-api-contracts.js";
@@ -68,7 +78,10 @@ export interface GitHubFactoryPullRequestBrokerOptions {
   readonly brokerId: string;
   readonly tokenSource: GitHubTokenSource;
   readonly api: GitHubRestApi;
-  readonly documents: Pick<FactoryDocumentCodec, "pullRequestProposal">;
+  readonly documents: Pick<
+    FactoryDocumentCodec,
+    "pullRequestProposal" | "pullRequestAuthorityRecord" | "pullRequestUpdateProposal"
+  >;
   readonly gitExecutable: string;
   readonly temporaryRoot: string;
   readonly authorName?: string;
@@ -185,6 +198,103 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     }
   }
 
+  public async updateDraft(
+    input: UpdateFactoryDraftPullRequestInput
+  ): Promise<UpdateFactoryDraftPullRequestResult> {
+    const proposal = factoryPullRequestUpdateProposalSchema.parse(input.proposal);
+    const priorRecord = factoryPullRequestAuthorityRecordSchema.parse(input.priorRecord);
+    const priorCoordinates = factoryPullRequestAuthorityCoordinates(priorRecord);
+    this.#assertRepository(proposal.repositoryId);
+    assertPriorRecordMatchesUpdate(priorRecord, proposal, this.options.documents);
+    this.#assertUpdatePatch(proposal, input.patch);
+    const remote = await this.inspect(proposal.repositoryId);
+    assertUpdateRemoteStillAuthorized(remote, proposal);
+    const pullRequest = await this.#pullRequest(proposal.pullRequestNumber);
+    const reference = await this.#branchReference(proposal.branchName);
+    if (
+      reference === null ||
+      pullRequest.number !== proposal.pullRequestNumber ||
+      pullRequest.state !== "open" ||
+      !pullRequest.draft ||
+      pullRequest.base.ref !== proposal.baseBranch ||
+      pullRequest.base.sha !== proposal.baseRevision ||
+      pullRequest.head.ref !== proposal.branchName ||
+      pullRequest.head.sha !== reference.object.sha ||
+      pullRequest.html_url !== priorCoordinates.url
+    ) {
+      throw new Error("Remote draft PR no longer matches its authorized update identity.");
+    }
+    const prepared = await this.#workspace.prepare({
+      repositoryRoot: input.repositoryRoot,
+      baseRevision: proposal.baseRevision,
+      patch: input.patch,
+      patchMaximumBytes: this.#maximumPatchBytes,
+      expectedChangeSet: proposal.changeSet,
+      title: proposal.commitTitle,
+      timestamp: proposal.createdAt
+    });
+    try {
+      const token = validateToken(await this.options.tokenSource.token(this.#repositoryId));
+      const authorizationHeader = gitAuthorizationHeader(token);
+      let reparented: Awaited<ReturnType<typeof prepared.reparent>>;
+      try {
+        reparented = await prepared.reparent({
+          repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
+          branchName: proposal.branchName,
+          authorizationHeader,
+          expectedParent: proposal.priorHeadRevision,
+          title: proposal.commitTitle,
+          timestamp: proposal.createdAt
+        });
+      } catch (error: unknown) {
+        this.options.tokenSource.invalidate?.(this.#repositoryId, token);
+        throw error;
+      }
+      let updated = false;
+      if (reparented.remoteHead === proposal.priorHeadRevision) {
+        const currentPullRequest = await this.#pullRequest(proposal.pullRequestNumber);
+        if (
+          currentPullRequest.html_url !== priorCoordinates.url ||
+          !matchesUpdatedProposal(currentPullRequest, proposal, reparented.remoteHead)
+        ) {
+          throw new Error(
+            "Remote draft PR changed immediately before its authorized fast-forward."
+          );
+        }
+        try {
+          await prepared.push({
+            repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
+            branchName: proposal.branchName,
+            authorizationHeader
+          });
+          updated = true;
+        } catch (error: unknown) {
+          this.options.tokenSource.invalidate?.(this.#repositoryId, token);
+          throw error;
+        }
+      } else if (reparented.remoteHead !== reparented.headRevision) {
+        throw new Error("Broker branch moved outside the exact authorized update lineage.");
+      }
+      const [confirmedReference, confirmedPullRequest] = await Promise.all([
+        this.#branchReference(proposal.branchName),
+        this.#pullRequest(proposal.pullRequestNumber)
+      ]);
+      if (
+        confirmedReference?.object.sha !== reparented.headRevision ||
+        !matchesUpdatedProposal(confirmedPullRequest, proposal, reparented.headRevision) ||
+        confirmedPullRequest.html_url !== priorCoordinates.url
+      ) {
+        throw new Error("Remote draft PR did not confirm the exact repaired branch update.");
+      }
+      return {
+        record: this.#updateRecord(confirmedPullRequest, proposal, reparented.headRevision),
+        updated
+      };
+    } finally {
+      await prepared.close();
+    }
+  }
+
   public async verifyDraft(input: VerifyFactoryDraftPullRequestInput): Promise<void> {
     const proposal = factoryPullRequestProposalSchema.parse(input.proposal);
     const record = factoryPullRequestRecordSchema.parse(input.record);
@@ -202,6 +312,24 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
       !matchesProposal(pullRequest, proposal, record.headRevision)
     ) {
       throw new Error("Remote draft PR no longer matches its exact broker record and proposal.");
+    }
+  }
+
+  public async verifyUpdatedDraft(input: VerifyUpdatedFactoryDraftPullRequestInput): Promise<void> {
+    const proposal = factoryPullRequestUpdateProposalSchema.parse(input.proposal);
+    const record = factoryPullRequestUpdateRecordSchema.parse(input.record);
+    this.#assertRepository(proposal.repositoryId);
+    assertUpdateRecordMatchesProposal(record, proposal, this.options.documents);
+    const [reference, pullRequest] = await Promise.all([
+      this.#branchReference(record.branchName),
+      this.#pullRequest(record.number)
+    ]);
+    if (
+      reference?.object.sha !== record.headRevision ||
+      !matchesUpdatedProposal(pullRequest, proposal, record.headRevision) ||
+      pullRequest.html_url !== record.url
+    ) {
+      throw new Error("Remote draft PR no longer matches its exact repaired update record.");
     }
   }
 
@@ -380,6 +508,35 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     });
   }
 
+  #updateRecord(
+    pullRequest: z.infer<typeof githubPullRequestSchema>,
+    proposal: FactoryPullRequestUpdateProposal,
+    headRevision: string
+  ): FactoryPullRequestUpdateRecord {
+    return factoryPullRequestUpdateRecordSchema.parse({
+      schemaVersion: "agentlab.pull-request-update-record.v1",
+      taskId: proposal.taskId,
+      contractDigest: proposal.contractDigest,
+      initialProposalDigest: proposal.initialProposalDigest,
+      updateProposalDigest: this.options.documents.pullRequestUpdateProposal(proposal).digest,
+      priorPullRequestRecordDigest: proposal.priorPullRequestRecordDigest,
+      repairAuthorizationDigest: proposal.repairAuthorizationDigest,
+      repairRunDigest: proposal.repairRunDigest,
+      repairedPatchProposalDigest: proposal.repairedPatchProposalDigest,
+      repositoryId: proposal.repositoryId,
+      number: pullRequest.number,
+      url: pullRequest.html_url,
+      baseRevision: pullRequest.base.sha,
+      priorHeadRevision: proposal.priorHeadRevision,
+      headRevision,
+      branchName: proposal.branchName,
+      draft: true,
+      brokerId: this.#brokerId,
+      contractRepairAttempt: proposal.contractRepairAttempt,
+      updatedAt: proposal.createdAt
+    });
+  }
+
   async #pullRequestsForBranch(branchName: string) {
     const value = await this.options.api.request(
       "GET",
@@ -457,6 +614,16 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     }
   }
 
+  #assertUpdatePatch(proposal: FactoryPullRequestUpdateProposal, patch: string): void {
+    if (Buffer.byteLength(patch, "utf8") > this.#maximumPatchBytes) {
+      throw new Error("GitHub broker repaired patch exceeds its configured limit.");
+    }
+    const digest = `sha256:${createHash("sha256").update(patch, "utf8").digest("hex")}`;
+    if (digest !== proposal.repairedPatchArtifactDigest) {
+      throw new Error("GitHub broker repaired patch bytes do not match the authorized artifact.");
+    }
+  }
+
   #assertRepository(repositoryId: string): void {
     if (repositoryId.toLowerCase() !== this.#repositoryId) {
       throw new Error("GitHub broker is not authorized for this repository.");
@@ -484,6 +651,55 @@ function assertRecordMatchesProposal(
   }
 }
 
+function assertPriorRecordMatchesUpdate(
+  record: FactoryPullRequestAuthorityRecord,
+  proposal: FactoryPullRequestUpdateProposal,
+  documents: Pick<FactoryDocumentCodec, "pullRequestAuthorityRecord">
+): void {
+  const coordinates = factoryPullRequestAuthorityCoordinates(record);
+  if (
+    coordinates.taskId !== proposal.taskId ||
+    coordinates.contractDigest !== proposal.contractDigest ||
+    coordinates.initialProposalDigest !== proposal.initialProposalDigest ||
+    coordinates.repositoryId !== proposal.repositoryId ||
+    coordinates.number !== proposal.pullRequestNumber ||
+    coordinates.baseRevision !== proposal.baseRevision ||
+    coordinates.headRevision !== proposal.priorHeadRevision ||
+    coordinates.branchName !== proposal.branchName ||
+    coordinates.brokerId !== proposal.brokerId ||
+    documents.pullRequestAuthorityRecord(record).digest !== proposal.priorPullRequestRecordDigest
+  ) {
+    throw new Error("Prior PR record does not match the exact update proposal.");
+  }
+}
+
+function assertUpdateRecordMatchesProposal(
+  record: FactoryPullRequestUpdateRecord,
+  proposal: FactoryPullRequestUpdateProposal,
+  documents: Pick<FactoryDocumentCodec, "pullRequestUpdateProposal">
+): void {
+  if (
+    record.taskId !== proposal.taskId ||
+    record.contractDigest !== proposal.contractDigest ||
+    record.initialProposalDigest !== proposal.initialProposalDigest ||
+    record.updateProposalDigest !== documents.pullRequestUpdateProposal(proposal).digest ||
+    record.priorPullRequestRecordDigest !== proposal.priorPullRequestRecordDigest ||
+    record.repairAuthorizationDigest !== proposal.repairAuthorizationDigest ||
+    record.repairRunDigest !== proposal.repairRunDigest ||
+    record.repairedPatchProposalDigest !== proposal.repairedPatchProposalDigest ||
+    record.repositoryId !== proposal.repositoryId ||
+    record.number !== proposal.pullRequestNumber ||
+    record.baseRevision !== proposal.baseRevision ||
+    record.priorHeadRevision !== proposal.priorHeadRevision ||
+    record.headRevision === record.priorHeadRevision ||
+    record.branchName !== proposal.branchName ||
+    record.brokerId !== proposal.brokerId ||
+    record.contractRepairAttempt !== proposal.contractRepairAttempt
+  ) {
+    throw new Error("Updated PR record does not match its exact broker proposal.");
+  }
+}
+
 function matchesProposal(
   pullRequest: z.infer<typeof githubPullRequestSchema>,
   proposal: FactoryPullRequestProposal,
@@ -494,6 +710,22 @@ function matchesProposal(
     pullRequest.draft &&
     pullRequest.title === proposal.title &&
     pullRequest.body === proposal.body &&
+    pullRequest.base.ref === proposal.baseBranch &&
+    pullRequest.base.sha === proposal.baseRevision &&
+    pullRequest.head.ref === proposal.branchName &&
+    pullRequest.head.sha === headRevision
+  );
+}
+
+function matchesUpdatedProposal(
+  pullRequest: z.infer<typeof githubPullRequestSchema>,
+  proposal: FactoryPullRequestUpdateProposal,
+  headRevision: string
+): boolean {
+  return (
+    pullRequest.number === proposal.pullRequestNumber &&
+    pullRequest.state === "open" &&
+    pullRequest.draft &&
     pullRequest.base.ref === proposal.baseBranch &&
     pullRequest.base.sha === proposal.baseRevision &&
     pullRequest.head.ref === proposal.branchName &&
@@ -529,11 +761,43 @@ function assertRemoteStillAuthorized(
   }
 }
 
+function assertUpdateRemoteStillAuthorized(
+  remote: FactoryRemoteRepositorySnapshot,
+  proposal: FactoryPullRequestUpdateProposal
+): void {
+  if (
+    remote.repositoryId !== proposal.repositoryId ||
+    remote.baseBranch !== proposal.baseBranch ||
+    remote.baseRevision !== proposal.baseRevision
+  ) {
+    throw new Error("GitHub base changed after repaired update authorization.");
+  }
+  const governance = remote.governance;
+  if (
+    !governance.requiresPullRequest ||
+    governance.requiredApprovals < 1 ||
+    !governance.dismissesStaleReviews ||
+    !governance.requiresCodeOwnerReviews ||
+    !governance.requiresLastPushApproval ||
+    !governance.enforcesAdmins ||
+    governance.allowsForcePushes ||
+    governance.allowsDeletions ||
+    !governance.requiredStatusChecks.includes("verify") ||
+    !governance.requiredStatusChecks.includes("factory-sandbox")
+  ) {
+    throw new Error("GitHub governance weakened after repaired update authorization.");
+  }
+}
+
 function validateToken(token: string): string {
   if (token.length < 1 || token.length > 4_096 || /[\0\r\n]/u.test(token)) {
     throw new Error("GitHub broker credential is invalid.");
   }
   return token;
+}
+
+function gitAuthorizationHeader(token: string): string {
+  return `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
 }
 
 function deduplicationBranch(proposal: FactoryPullRequestProposal): string {

@@ -100,7 +100,9 @@ function runtime(
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
       observePullRequest: () =>
         Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] }),
-      admitPullRequestRepair
+      admitPullRequestRepair,
+      updatePullRequest: () =>
+        Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
     },
     close
   };

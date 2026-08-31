@@ -1,7 +1,10 @@
 import type {
   FactoryPullRequestProposal,
   FactoryPullRequestObservation,
+  FactoryPullRequestAuthorityRecord,
   FactoryPullRequestRecord,
+  FactoryPullRequestUpdateProposal,
+  FactoryPullRequestUpdateRecord,
   GitObjectId
 } from "@agentlab/contracts";
 
@@ -46,7 +49,24 @@ export interface VerifyFactoryDraftPullRequestInput {
 }
 
 export interface ObserveFactoryPullRequestInput {
-  readonly record: FactoryPullRequestRecord;
+  readonly record: FactoryPullRequestAuthorityRecord;
+}
+
+export interface UpdateFactoryDraftPullRequestInput {
+  readonly proposal: FactoryPullRequestUpdateProposal;
+  readonly priorRecord: FactoryPullRequestAuthorityRecord;
+  readonly patch: string;
+  readonly repositoryRoot: string;
+}
+
+export interface UpdateFactoryDraftPullRequestResult {
+  readonly record: FactoryPullRequestUpdateRecord;
+  readonly updated: boolean;
+}
+
+export interface VerifyUpdatedFactoryDraftPullRequestInput {
+  readonly proposal: FactoryPullRequestUpdateProposal;
+  readonly record: FactoryPullRequestUpdateRecord;
 }
 
 /** Credentialed read-only port. Returned feedback is untrusted evidence, never authority. */
@@ -60,6 +80,10 @@ export interface FactoryDraftPullRequestBroker {
   identity(): FactoryPullRequestBrokerIdentity;
   inspect(repositoryId: string): Promise<FactoryRemoteRepositorySnapshot>;
   openDraft(input: OpenFactoryDraftPullRequestInput): Promise<OpenFactoryDraftPullRequestResult>;
+  updateDraft(
+    input: UpdateFactoryDraftPullRequestInput
+  ): Promise<UpdateFactoryDraftPullRequestResult>;
   verifyDraft(input: VerifyFactoryDraftPullRequestInput): Promise<void>;
+  verifyUpdatedDraft(input: VerifyUpdatedFactoryDraftPullRequestInput): Promise<void>;
   closeDraft(record: FactoryPullRequestRecord, reason: string): Promise<void>;
 }

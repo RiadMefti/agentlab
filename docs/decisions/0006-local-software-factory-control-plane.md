@@ -455,7 +455,7 @@ rates are committed in this repository.
 The CLI has non-authorizing broker and worker preflight commands. They report deterministic
 non-secret JSON and close their runtimes before output. Normal SQLite initialization may still apply
 local schema migrations. A blocked result exits 2; an inspection or cleanup failure exits 1 without
-emitting a misleading readiness record. The separate `broker-open-draft` command is the only
+emitting a misleading readiness record. The separate `broker-open-draft` command is the only initial
 remote-write entry: exact argument order binds an owner-only config, task UUID, expected policy
 digest, and literal `--confirm-draft`. It does not call the write port unless broker preflight is
 clean and the policy pin matches; the inner service independently rechecks task state, exact
@@ -471,6 +471,13 @@ closure. OS account/file ownership authorizes the local operation; operator ID i
 rather than cryptographic personhood. Live key/config provisioning plus successful preflights are
 activation work, not assumptions. An empty rate card both adds `cost-policy-unconfigured` to
 preflight and denies draft mutation itself.
+
+The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
+bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
+literal `--confirm-update`. Its service admits only the exact completed repair journal and evidence,
+complete cumulative usage, allowing policy, authenticated prior PR record, unchanged base and
+governance, and enabled broker switch. It cannot start a model, reserve another repair, merge, or
+release.
 
 The separate `broker-observe-pr` command is a credentialed read-and-local-evidence operation, not a
 remote-write entry. Exact argument order binds the owner-only broker config, task UUID, expected
@@ -535,8 +542,14 @@ reviewer. Cumulative time/token/tool/process/output/cost usage is carried forwar
 execution; exhaustion or incomplete accounting becomes `needs-attention`. A crash is reconciled
 through exact journal-owned process/worktree coordinates and cannot reuse the consumed
 authorization. Success returns to a new local `pr-proposed` checkpoint. The worker still has no
-remote credential or write port; brokered branch update and re-observation remain the next separate
-slice.
+remote credential or write port. A separate broker operation now consumes that completed repair. Its
+immutable `agentlab.pull-request-update-proposal.v1` and SQLite v10 five-checkpoint journal bind the
+exact prior PR authority record/head, repair authorization and run, repaired patch, policy,
+repository, broker, and repair slot before a remote side effect. The Git adapter rebuilds the full
+repaired tree from the contract base, makes the prior remote head the new commit's sole parent, and
+uses a normal non-force push. Retry accepts only the exact deterministic already-applied head. The
+broker verifies the draft, records authenticated update evidence, returns the task to `pr-open`, and
+promotes the completed update record as the sole input to re-observation and the next repair cycle.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
 stale-review dismissal, last-push approval, CODEOWNERS for protected paths, linear history, and a
@@ -700,13 +713,16 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    records exact-head trusted checks and untrusted review feedback. A separate admission command
    selects actionable facts, and the credentialless repair command consumes one immutable
    authorization in a fresh worktree, repeats all gates and independent review, and stops before a
-   remote branch update. Activation still requires the missing review protections, provisioned live
-   key/config and exact cost rules, passing live preflights, separate human execution of the
-   authority ceremony, and human merge. No scheduler, auto-merge, release, or protected-path write.
-5. **CI repair and operations:** brokered repaired-branch update and re-observation, credential
-   rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
-   incident tooling. Deterministic feedback qualification and bounded fresh repair execution now
-   exist.
+   remote branch update. A separate confirmed broker command now advances only that exact repaired
+   draft through a deterministic non-force child commit, crash-durable journal, authenticated
+   evidence, and re-observable head lineage. Activation still requires the missing review
+   protections, provisioned live key/config and exact cost rules, passing live preflights, separate
+   human execution of the authority ceremony, and human merge. No scheduler, auto-merge, release, or
+   protected-path write.
+5. **CI repair and operations:** credential rotation/monitoring, CODEOWNERS/last-push/approval
+   rules, dashboards, alerts, quotas, and incident tooling. Deterministic feedback qualification,
+   bounded fresh repair execution, brokered repaired-branch update, and exact-head re-observation
+   now exist.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
    provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new

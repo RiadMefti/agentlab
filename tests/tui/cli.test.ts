@@ -224,6 +224,48 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires an exact repair authorization, policy pin, and broker update confirmation", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const authorization = `sha256:${"f".repeat(64)}`;
+    const policy = `sha256:${"e".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-update-draft",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--authorization",
+        authorization,
+        "--policy",
+        policy,
+        "--confirm-update"
+      ])
+    ).toEqual({
+      kind: "factory-broker-update-draft",
+      configPath: "/private/agentlab/broker.json",
+      taskId,
+      authorizationDigest: authorization,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "confirm-update"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-update-draft",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--authorization",
+        authorization,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires an exact task, policy pin, and confirmation for PR observation", () => {
     const taskId = "0198f005-4ec4-7000-8000-000000000001";
     const policy = `sha256:${"c".repeat(64)}`;
@@ -375,12 +417,14 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory broker-open-draft --config");
+    expect(helpText).toContain("factory broker-update-draft --config");
     expect(helpText).toContain("factory broker-observe-pr --config");
     expect(helpText).toContain("factory broker-authorize-repair --config");
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
+    expect(helpText).toContain("--confirm-update");
     expect(helpText).toContain("--confirm-observe");
     expect(helpText).toContain("--confirm-repair");
     expect(helpText).toContain("--confirm-run");

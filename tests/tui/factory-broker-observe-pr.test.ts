@@ -93,7 +93,9 @@ function runtime(
       preflight: () => Promise.resolve(preflight()),
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
       observePullRequest,
-      admitPullRequestRepair: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] })
+      admitPullRequestRepair: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] }),
+      updatePullRequest: () =>
+        Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
     },
     close
   };

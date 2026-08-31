@@ -1,14 +1,12 @@
-import {
-  factoryPullRequestRecordSchema,
-  type FactoryPullRequestObservation,
-  type Sha256Digest
-} from "@agentlab/contracts";
+import { type FactoryPullRequestObservation, type Sha256Digest } from "@agentlab/contracts";
 import { z } from "zod";
 
 import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
 import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
 import type { FactoryPullRequestObserver } from "../domain/factory-pull-request-broker.js";
 import type { FactoryPullRequestDispatchRepository } from "../domain/factory-pull-request-dispatch-repository.js";
+import { factoryPullRequestAuthorityCoordinates } from "../domain/factory-pull-request-authority-record.js";
+import type { FactoryPullRequestUpdateRepository } from "../domain/factory-pull-request-update-repository.js";
 import {
   assessFactoryPullRequestObservation,
   type FactoryPullRequestAssessment
@@ -22,11 +20,13 @@ import {
   FactoryEvidencePublisher,
   type FactoryEvidencePublisherCredentials
 } from "./factory-evidence-publisher.js";
+import { FactoryPullRequestLineageReader } from "./factory-pull-request-lineage.js";
 
 const observationInputSchema = z.object({ taskId: z.uuid() }).strict();
 
 export interface FactoryPullRequestObservationServiceDependencies {
   readonly dispatches: Pick<FactoryPullRequestDispatchRepository, "findByTaskId">;
+  readonly updates: Pick<FactoryPullRequestUpdateRepository, "listByTaskId">;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly controls: Pick<FactoryControlRepository, "state">;
   readonly evidenceIngress: FactoryEvidenceIngress;
@@ -54,6 +54,7 @@ export type FactoryPullRequestObservationOutcome =
 /** Observes one durable PR record and appends facts; it owns no repair or remote-write path. */
 export class FactoryPullRequestObservationService {
   readonly #publisher: FactoryEvidencePublisher;
+  readonly #lineage: FactoryPullRequestLineageReader;
 
   public constructor(
     private readonly dependencies: FactoryPullRequestObservationServiceDependencies
@@ -66,6 +67,7 @@ export class FactoryPullRequestObservationService {
       now: dependencies.now,
       createId: dependencies.createId
     });
+    this.#lineage = new FactoryPullRequestLineageReader(dependencies);
   }
 
   public async observe(input: unknown): Promise<FactoryPullRequestObservationOutcome> {
@@ -78,40 +80,37 @@ export class FactoryPullRequestObservationService {
     if (task.state !== "pr-open") {
       throw new Error("PR observation requires a task with a durably opened pull request.");
     }
-    const dispatch = await this.dependencies.dispatches.findByTaskId(command.taskId);
-    if (dispatch?.state !== "completed" || dispatch.record === null) {
-      throw new Error("PR observation requires a completed durable dispatch record.");
-    }
-    const record = factoryPullRequestRecordSchema.parse(dispatch.record);
+    const lineage = await this.#lineage.current(task);
+    const record = lineage.record;
+    const coordinates = factoryPullRequestAuthorityCoordinates(record.value);
     const identity = this.dependencies.remote.identity();
-    const recordDigest = this.dependencies.documents.pullRequestRecord(record).digest;
     if (
-      dispatch.run.taskId !== task.contract.taskId ||
-      dispatch.run.contractDigest !== task.contractDigest ||
-      dispatch.run.proposalDigest !== record.proposalDigest ||
-      record.taskId !== task.contract.taskId ||
-      record.contractDigest !== task.contractDigest ||
-      record.repositoryId !== task.contract.repository.id ||
-      identity.repositoryId !== record.repositoryId ||
-      identity.brokerId !== record.brokerId
+      lineage.dispatch.run.taskId !== task.contract.taskId ||
+      lineage.dispatch.run.contractDigest !== task.contractDigest ||
+      lineage.dispatch.run.proposalDigest !== coordinates.initialProposalDigest ||
+      coordinates.taskId !== task.contract.taskId ||
+      coordinates.contractDigest !== task.contractDigest ||
+      coordinates.repositoryId !== task.contract.repository.id ||
+      identity.repositoryId !== coordinates.repositoryId ||
+      identity.brokerId !== coordinates.brokerId
     ) {
       throw new Error("PR observation identities do not match the task and durable dispatch.");
     }
     const observation = this.dependencies.documents.pullRequestObservation(
-      await this.dependencies.remote.observe({ record })
+      await this.dependencies.remote.observe({ record: record.value })
     );
     if (
       observation.value.taskId !== task.contract.taskId ||
       observation.value.contractDigest !== task.contractDigest ||
-      observation.value.proposalDigest !== record.proposalDigest ||
-      observation.value.pullRequestRecordDigest !== recordDigest ||
-      observation.value.repositoryId !== record.repositoryId ||
-      observation.value.pullRequestNumber !== record.number ||
-      observation.value.url !== record.url ||
-      observation.value.brokerId !== record.brokerId ||
-      observation.value.authorizedBaseRevision !== record.baseRevision ||
-      observation.value.recordedHeadRevision !== record.headRevision ||
-      observation.value.branchName !== record.branchName
+      observation.value.proposalDigest !== coordinates.initialProposalDigest ||
+      observation.value.pullRequestRecordDigest !== record.digest ||
+      observation.value.repositoryId !== coordinates.repositoryId ||
+      observation.value.pullRequestNumber !== coordinates.number ||
+      observation.value.url !== coordinates.url ||
+      observation.value.brokerId !== coordinates.brokerId ||
+      observation.value.authorizedBaseRevision !== coordinates.baseRevision ||
+      observation.value.recordedHeadRevision !== coordinates.headRevision ||
+      observation.value.branchName !== coordinates.branchName
     ) {
       throw new Error("PR observation does not match its exact local authority record.");
     }

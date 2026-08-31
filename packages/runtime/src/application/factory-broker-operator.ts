@@ -18,6 +18,10 @@ import type {
   FactoryPullRequestRepairAdmissionOutcome,
   FactoryPullRequestRepairAdmissionService
 } from "./factory-pull-request-repair-admission-service.js";
+import type {
+  FactoryPullRequestUpdateOutcome,
+  FactoryPullRequestUpdateService
+} from "./factory-pull-request-update-service.js";
 
 export interface FactoryBrokerPreflight {
   readonly schemaVersion: "agentlab.broker-preflight.v1";
@@ -37,6 +41,7 @@ export interface FactoryBrokerOperatorDependencies {
   readonly pullRequests: Pick<FactoryPullRequestService, "openDraft">;
   readonly pullRequestObservations: Pick<FactoryPullRequestObservationService, "observe">;
   readonly pullRequestRepairAdmissions: Pick<FactoryPullRequestRepairAdmissionService, "admit">;
+  readonly pullRequestUpdates: Pick<FactoryPullRequestUpdateService, "update">;
 }
 
 /** Public authority-plane boundary; this process has no model or provider execution dependency. */
@@ -83,5 +88,16 @@ export class FactoryBrokerOperator {
 
   public admitPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairAdmissionOutcome> {
     return this.dependencies.pullRequestRepairAdmissions.admit(input);
+  }
+
+  public updatePullRequest(input: unknown): Promise<FactoryPullRequestUpdateOutcome> {
+    if (!this.dependencies.costPolicyConfigured) {
+      return Promise.resolve({
+        status: "denied",
+        reasonCodes: ["cost-policy-unconfigured"],
+        decision: null
+      });
+    }
+    return this.dependencies.pullRequestUpdates.update(input);
   }
 }

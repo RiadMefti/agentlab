@@ -109,7 +109,11 @@ export type FactoryBrokerPublicApiAssertions = [
   Assert<
     Equal<
       keyof FactoryBrokerCommandPort,
-      "preflight" | "openDraft" | "observePullRequest" | "admitPullRequestRepair"
+      | "preflight"
+      | "openDraft"
+      | "updatePullRequest"
+      | "observePullRequest"
+      | "admitPullRequestRepair"
     >
   >,
   Assert<Equal<keyof LocalFactoryBrokerRuntime, "commands" | "close">>,

@@ -6,7 +6,9 @@ import { join } from "node:path";
 
 import {
   factoryPullRequestProposalSchema,
-  type FactoryPullRequestProposal
+  factoryPullRequestUpdateProposalSchema,
+  type FactoryPullRequestProposal,
+  type FactoryPullRequestRecord
 } from "@agentlab/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -97,6 +99,89 @@ describe("GitHub pull-request authority adapters", () => {
     await expect(
       fixture.broker.verifyDraft({ proposal: fixture.proposal, record: opened.record })
     ).rejects.toThrow(/no longer matches/u);
+  });
+
+  it("advances a repaired draft as a deterministic fast-forward and reconciles an exact retry", async () => {
+    const fixture = brokerFixture();
+    const opened = await fixture.broker.openDraft({
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    });
+    writeFileSync(join(fixture.repository, "tracked.txt"), "repaired\n", "utf8");
+    const repairedPatch = git(fixture.repository, [
+      "diff",
+      "--binary",
+      "--full-index",
+      "--no-ext-diff"
+    ]);
+    const updateProposal = updateProposalFor(fixture, opened.record, repairedPatch);
+    const input = {
+      proposal: updateProposal,
+      priorRecord: opened.record,
+      patch: repairedPatch,
+      repositoryRoot: fixture.repository
+    };
+
+    const first = await fixture.broker.updateDraft(input);
+    const second = await fixture.broker.updateDraft(input);
+
+    expect(first).toMatchObject({
+      updated: true,
+      record: {
+        priorHeadRevision: opened.record.headRevision,
+        repairedPatchProposalDigest: updateProposal.repairedPatchProposalDigest
+      }
+    });
+    expect(second).toMatchObject({
+      updated: false,
+      record: { headRevision: first.record.headRevision }
+    });
+    expect(fixture.runner.pushes).toBe(2);
+    expect(fixture.runner.pushArguments).not.toContain("--force");
+    expect(
+      git(fixture.remoteRepository, ["rev-parse", `${first.record.headRevision}^`]).trim()
+    ).toBe(opened.record.headRevision);
+    expect(
+      git(fixture.remoteRepository, ["show", `${first.record.headRevision}:tracked.txt`])
+    ).toBe("repaired\n");
+    await expect(
+      fixture.broker.verifyUpdatedDraft({ proposal: updateProposal, record: first.record })
+    ).resolves.toBeUndefined();
+    const observation = await fixture.observer.observe({ record: first.record });
+    expect(observation).toMatchObject({
+      recordedHeadRevision: first.record.headRevision,
+      remoteHeadRevision: first.record.headRevision,
+      pullRequestRecordDigest: fixture.documents.pullRequestUpdateRecord(first.record).digest
+    });
+  });
+
+  it("rechecks the live draft immediately before a repaired branch fast-forward", async () => {
+    const fixture = brokerFixture({ closeBeforeUpdatePush: true });
+    const opened = await fixture.broker.openDraft({
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    });
+    writeFileSync(join(fixture.repository, "tracked.txt"), "repaired\n", "utf8");
+    const repairedPatch = git(fixture.repository, [
+      "diff",
+      "--binary",
+      "--full-index",
+      "--no-ext-diff"
+    ]);
+    const updateProposal = updateProposalFor(fixture, opened.record, repairedPatch);
+
+    await expect(
+      fixture.broker.updateDraft({
+        proposal: updateProposal,
+        priorRecord: opened.record,
+        patch: repairedPatch,
+        repositoryRoot: fixture.repository
+      })
+    ).rejects.toThrow(/immediately before its authorized fast-forward/u);
+    expect(fixture.runner.pushes).toBe(1);
+    expect(fixture.state.branchHead).toBe(opened.record.headRevision);
   });
 
   it("observes bounded feedback and only exact-app trusted checks for the recorded head", async () => {
@@ -344,6 +429,7 @@ function brokerFixture(
     readonly failPushOnce?: boolean;
     readonly excessiveFeedback?: boolean;
     readonly driftDuringObservation?: boolean;
+    readonly closeBeforeUpdatePush?: boolean;
     readonly missingGovernance?:
       "code-owner review" | "factory sandbox" | "status-check app binding";
   } = {}
@@ -361,7 +447,10 @@ function brokerFixture(
   writeFileSync(join(repository, "tracked.txt"), "changed\n", "utf8");
   const patch = git(repository, ["diff", "--binary", "--full-index", "--no-ext-diff"]);
   const proposal = proposalFor(baseRevision, patch);
-  const state: RemoteState = { branchHead: null };
+  const remoteRepository = join(root, "remote.git");
+  git(root, ["init", "--bare", "--initial-branch=main", remoteRepository]);
+  git(repository, ["push", remoteRepository, `${baseRevision}:refs/heads/main`]);
+  const state: RemoteState = { branchHead: null, remoteRepository };
   const runner = new RecordingPushRunner(state, options.failPushOnce === true);
   const api = new FakeGitHubApi(baseRevision, state, options);
   const documents = new NodeFactoryDocumentCodec();
@@ -395,9 +484,11 @@ function brokerFixture(
     baseRevision,
     broker,
     observer,
+    documents,
     patch,
     proposal,
     repository,
+    remoteRepository,
     runner,
     state,
     tokenSource
@@ -433,8 +524,48 @@ function proposalFor(baseRevision: string, patch: string): FactoryPullRequestPro
   });
 }
 
+function updateProposalFor(
+  fixture: ReturnType<typeof brokerFixture>,
+  record: FactoryPullRequestRecord,
+  patch: string
+) {
+  const patchArtifactDigest = `sha256:${createHash("sha256").update(patch, "utf8").digest("hex")}`;
+  return factoryPullRequestUpdateProposalSchema.parse({
+    schemaVersion: "agentlab.pull-request-update-proposal.v1",
+    taskId,
+    contractDigest: fixture.proposal.contractDigest,
+    policyBundleDigest: digest("5"),
+    initialProposalDigest: fixture.documents.pullRequestProposal(fixture.proposal).digest,
+    priorPullRequestRecordDigest: fixture.documents.pullRequestRecord(record).digest,
+    repairAuthorizationDigest: digest("6"),
+    repairRunDigest: digest("7"),
+    repairedPatchProposalDigest: digest("8"),
+    repairedPatchArtifactDigest: patchArtifactDigest,
+    policyEvaluationDigest: digest("9"),
+    changeSet: {
+      baseRevision: fixture.baseRevision,
+      headRevision: null,
+      changedPaths: ["tracked.txt"],
+      binaryPaths: [],
+      changedFiles: 1,
+      changedLines: 2
+    },
+    repositoryId,
+    baseRevision: fixture.baseRevision,
+    baseBranch: "main",
+    branchName,
+    pullRequestNumber: record.number,
+    priorHeadRevision: record.headRevision,
+    brokerId: record.brokerId,
+    contractRepairAttempt: 1,
+    commitTitle: "fix: address authorized review feedback",
+    createdAt: "2026-08-30T12:06:00.000Z"
+  });
+}
+
 interface RemoteState {
   branchHead: string | null;
+  readonly remoteRepository: string;
 }
 
 class RecordingPushRunner implements CommandRunner {
@@ -454,6 +585,9 @@ class RecordingPushRunner implements CommandRunner {
     args: readonly string[],
     options?: RunOptions
   ): Promise<RunResult> {
+    const remoteArgs = args.map((argument) =>
+      argument === `https://github.com/${repositoryId}.git` ? this.state.remoteRepository : argument
+    );
     if (args.includes("push")) {
       this.pushes += 1;
       this.pushArguments = args;
@@ -462,12 +596,15 @@ class RecordingPushRunner implements CommandRunner {
         this.#failedPush = true;
         return Promise.reject(new Error("Injected push failure."));
       }
-      const root = args[args.indexOf("-C") + 1];
-      if (root === undefined) throw new Error("Test broker push omitted its workspace.");
-      this.state.branchHead = git(root, ["rev-parse", "HEAD"]).trim();
-      return Promise.resolve({ stdout: "ok", stderr: "" });
+      return this.#delegate.run(executable, remoteArgs, options).then((result) => {
+        this.state.branchHead = git(this.state.remoteRepository, [
+          "rev-parse",
+          `refs/heads/${branchName}`
+        ]).trim();
+        return result;
+      });
     }
-    return this.#delegate.run(executable, args, options);
+    return this.#delegate.run(executable, remoteArgs, options);
   }
 }
 
@@ -501,6 +638,7 @@ class FakeGitHubApi implements GitHubRestApi {
       readonly loseCreateResponseOnce?: boolean;
       readonly excessiveFeedback?: boolean;
       readonly driftDuringObservation?: boolean;
+      readonly closeBeforeUpdatePush?: boolean;
       readonly missingGovernance?:
         "code-owner review" | "factory sandbox" | "status-check app binding";
     }
@@ -556,7 +694,16 @@ class FakeGitHubApi implements GitHubRestApi {
     }
     if (method === "GET" && path.endsWith("/pulls/42")) {
       if (this.#pullRequest === null) return Promise.reject(new GitHubApiError(404, "missing"));
+      if (this.state.branchHead !== null && this.options.mismatchedCreatedHead !== true) {
+        this.#pullRequest = {
+          ...this.#pullRequest,
+          head: { ...this.#pullRequest.head, sha: this.state.branchHead }
+        };
+      }
       this.#pullRequestReads += 1;
+      if (this.options.closeBeforeUpdatePush === true && this.#pullRequestReads === 2) {
+        this.#pullRequest = { ...this.#pullRequest, state: "closed" };
+      }
       if (this.options.driftDuringObservation === true && this.#pullRequestReads === 2) {
         this.#pullRequest = {
           ...this.#pullRequest,
@@ -625,6 +772,7 @@ class FakeGitHubApi implements GitHubRestApi {
     }
     if (method === "DELETE" && path.includes("/git/refs/heads/agentlab%2F")) {
       this.deletedBranches.push(branchName);
+      git(this.state.remoteRepository, ["update-ref", "-d", `refs/heads/${branchName}`]);
       this.state.branchHead = null;
       return Promise.resolve(null);
     }
