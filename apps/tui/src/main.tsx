@@ -107,6 +107,17 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-update-draft") {
+    const { runFactoryBrokerUpdateDraft } = await import("./run-factory-broker-update-draft.js");
+    process.exitCode = await runFactoryBrokerUpdateDraft(
+      action.configPath,
+      action.taskId,
+      action.authorizationDigest,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-broker-authorize-repair") {
     const { runFactoryBrokerAuthorizeRepair } =
       await import("./run-factory-broker-authorize-repair.js");

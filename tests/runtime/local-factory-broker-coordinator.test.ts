@@ -118,6 +118,9 @@ function createOperator(
     },
     pullRequestRepairAdmissions: {
       admit: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] })
+    },
+    pullRequestUpdates: {
+      update: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
     }
   });
 }

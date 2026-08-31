@@ -62,7 +62,10 @@ export async function runFactoryWorkerRepairPullRequest(
         correlationId: dependencies.createCorrelationId()
       });
       assertResultIdentity(result, taskId, authorizationDigest);
-      reasonCodes = result.status === "pr-proposed" ? [] : [`pr-repair-${result.status}`];
+      reasonCodes =
+        result.status === "pr-proposed" || result.status === "already-advanced"
+          ? []
+          : [`pr-repair-${result.status}`];
     }
   } catch (error: unknown) {
     return closeAfterFailure(runtime, error);
@@ -90,7 +93,7 @@ export async function runFactoryWorkerRepairPullRequest(
             }
     })}\n`
   );
-  return result?.status === "pr-proposed" ? 0 : 2;
+  return result?.status === "pr-proposed" || result?.status === "already-advanced" ? 0 : 2;
 }
 
 function assertCommandInput(
@@ -123,7 +126,9 @@ function assertResultIdentity(
   if (
     result.task.contract.taskId !== taskId ||
     result.authorizationDigest !== authorizationDigest ||
-    result.status !== result.task.state
+    (result.status === "already-advanced"
+      ? result.task.state !== "pr-open"
+      : result.status !== result.task.state)
   ) {
     throw new Error("Factory worker repair result does not match its confirmed command.");
   }

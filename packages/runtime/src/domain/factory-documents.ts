@@ -17,6 +17,11 @@ import type {
   FactoryPullRequestRecord,
   FactoryPullRequestDispatchEvent,
   FactoryPullRequestDispatchRun,
+  FactoryPullRequestAuthorityRecord,
+  FactoryPullRequestUpdateEvent,
+  FactoryPullRequestUpdateProposal,
+  FactoryPullRequestUpdateRecord,
+  FactoryPullRequestUpdateRun,
   FactoryPreparationAuthority,
   FactoryPreparationBundle,
   FactoryPreparationEvent,
@@ -73,6 +78,15 @@ export interface FactoryDocumentCodec {
   pullRequestRepairRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestRepairRun>;
   pullRequestProposal(input: unknown): CanonicalFactoryDocument<FactoryPullRequestProposal>;
   pullRequestRecord(input: unknown): CanonicalFactoryDocument<FactoryPullRequestRecord>;
+  pullRequestAuthorityRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryPullRequestAuthorityRecord>;
+  pullRequestUpdateProposal(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryPullRequestUpdateProposal>;
+  pullRequestUpdateRecord(input: unknown): CanonicalFactoryDocument<FactoryPullRequestUpdateRecord>;
+  pullRequestUpdateRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestUpdateRun>;
+  pullRequestUpdateEvent(input: unknown): CanonicalFactoryDocument<FactoryPullRequestUpdateEvent>;
   pullRequestDispatchRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestDispatchRun>;
   pullRequestDispatchEvent(
     input: unknown

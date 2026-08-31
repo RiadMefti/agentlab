@@ -18,6 +18,7 @@ import {
 import { FactoryPullRequestService } from "./application/factory-pull-request-service.js";
 import { FactoryPullRequestObservationService } from "./application/factory-pull-request-observation-service.js";
 import { FactoryPullRequestRepairAdmissionService } from "./application/factory-pull-request-repair-admission-service.js";
+import { FactoryPullRequestUpdateService } from "./application/factory-pull-request-update-service.js";
 import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import type { LocalFactoryBrokerConfig } from "./infrastructure/filesystem/local-factory-broker-config.js";
@@ -37,6 +38,8 @@ import {
 } from "./infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
+import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
+import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 import { NodeCommandRunner } from "./infrastructure/process/command-runner.js";
@@ -78,6 +81,12 @@ export function createLocalFactoryBroker(
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
     const dispatches = repositories.track(
       new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
+    );
+    const repairExecutions = repositories.track(
+      new SqliteFactoryPullRequestRepairExecutionRepository(databasePath, { documents })
+    );
+    const updates = repositories.track(
+      new SqliteFactoryPullRequestUpdateRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const costPolicy = factoryCostPolicySchema.parse(
@@ -162,6 +171,7 @@ export function createLocalFactoryBroker(
     });
     const pullRequestObservations = new FactoryPullRequestObservationService({
       dispatches,
+      updates,
       tasks: factory,
       controls: factory,
       evidenceIngress,
@@ -174,6 +184,7 @@ export function createLocalFactoryBroker(
     });
     const pullRequestRepairAdmissions = new FactoryPullRequestRepairAdmissionService({
       dispatches,
+      updates,
       tasks: factory,
       evidence: factory,
       controls: factory,
@@ -184,6 +195,24 @@ export function createLocalFactoryBroker(
       now,
       createId
     });
+    const pullRequestUpdates = new FactoryPullRequestUpdateService({
+      updates,
+      dispatches,
+      executions: repairExecutions,
+      tasks: factory,
+      evidence: factory,
+      controls: factory,
+      conversations,
+      controlPlane,
+      evidenceIngress,
+      evidenceCredentials: { prBroker: brokerCredential },
+      artifacts,
+      documents,
+      remote,
+      now,
+      createId,
+      brokerId: options.brokerId
+    });
     const operator = new FactoryBrokerOperator({
       repositoryId: options.repositoryId,
       policyBundleDigest: policyBundle.digest,
@@ -192,7 +221,8 @@ export function createLocalFactoryBroker(
       controls: factory,
       pullRequests,
       pullRequestObservations,
-      pullRequestRepairAdmissions
+      pullRequestRepairAdmissions,
+      pullRequestUpdates
     });
     return new LocalFactoryBrokerCoordinator({
       operator,

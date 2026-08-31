@@ -145,7 +145,25 @@ under the same authorization, every resource counter remains cumulative, and int
 reconciled from exact journal-owned process/worktree coordinates before abandonment and a safe task
 terminal state. Success returns to a local `pr-proposed` checkpoint. The composition still has no
 GitHub, broker credential, authority-control, merge, or release port; publishing the repaired branch
-is a later, separately authorized broker operation.
+is a separately authorized broker operation.
+
+The separate `broker-update-draft` command binds the owner-only broker config, task UUID, exact
+repair-authorization digest, policy digest, and literal `--confirm-update`. The broker revalidates
+the completed repair journal and evidence, exact repaired patch and complete cumulative usage,
+current policy, repository/base/governance, authenticated PR lineage, and kill switch. It prepares
+the repaired tree from the immutable contract base, fetches the recorded PR branch, creates a
+deterministic commit whose sole parent is the prior authenticated head, and performs a normal
+non-force push. SQLite version 10 stores the proposal before remote mutation and appends:
+
+```text
+ready → update-active → remote-updated → evidence-recorded → completed
+```
+
+If the remote fast-forward succeeds before its checkpoint is durable, retry reconstructs the same
+commit, accepts only that exact already-applied head, and performs no second branch mutation. The
+broker then verifies the live draft, records authenticated proposal/record/policy evidence, changes
+only `pr-proposed → pr-open`, and makes later observation and repair admission resolve the new head.
+The model-bearing worker never receives the GitHub credential; the broker cannot run a provider.
 
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
 policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
@@ -266,6 +284,14 @@ database constraints allow only one run per authorization and per contract repai
 keeps initial implementation history immutable and makes authorization consumption independently
 auditable.
 
+Repaired-branch publication uses the separate SQLite version 10 update journal rather than changing
+either execution journal. Its immutable header binds the exact repair authorization and repair-run
+digests, repaired patch proposal/artifact, policy decision, prior PR authority-record digest and
+head, repository/base/branch/PR coordinates, broker identity, repair slot, and correlation ID.
+Database guards require the prerequisite repair row and contiguous completed PR-head lineage;
+headers are immutable and events append-only. A completed update record becomes the sole authority
+record for observation and any later repair cycle.
+
 The supported Linux-host preflight is a distinct required `factory-sandbox` CI job. It executes the
 live systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash
 recovery, and a Bubblewrap probe that proves the source checkout is hidden, dependencies are
@@ -329,9 +355,10 @@ prerequisites. An incomplete usage record already denies PR creation, and the ex
 refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
 intake configuration or task has been provisioned. No live agent task or PR has been created by this
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
-and fresh credentialless repair execution are implemented. Brokered branch update and
-re-observation, scheduler/quotas, eval promotion, merge, release, canary, and incident automation
-remain later stages.
+and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
+reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
+Scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
+stages.
 
 ## Dependency map
 

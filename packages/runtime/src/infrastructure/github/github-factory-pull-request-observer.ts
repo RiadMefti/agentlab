@@ -1,6 +1,6 @@
 import {
   factoryPullRequestObservationSchema,
-  factoryPullRequestRecordSchema,
+  factoryPullRequestAuthorityRecordSchema,
   type FactoryPullRequestCheckObservation,
   type FactoryPullRequestFeedbackAuthor,
   type FactoryPullRequestObservation
@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 
 import type { FactoryDocumentCodec } from "../../domain/factory-documents.js";
+import { factoryPullRequestAuthorityCoordinates } from "../../domain/factory-pull-request-authority-record.js";
 import type {
   FactoryPullRequestBrokerIdentity,
   FactoryPullRequestObserver,
@@ -33,7 +34,7 @@ export interface GitHubFactoryPullRequestObserverOptions {
   readonly repositoryId: string;
   readonly brokerId: string;
   readonly api: GitHubReadApi;
-  readonly documents: Pick<FactoryDocumentCodec, "pullRequestRecord">;
+  readonly documents: Pick<FactoryDocumentCodec, "pullRequestAuthorityRecord">;
   readonly trustedStatusChecks: readonly GitHubTrustedStatusCheck[];
   readonly now?: () => string;
 }
@@ -63,16 +64,17 @@ export class GitHubFactoryPullRequestObserver implements FactoryPullRequestObser
   public async observe(
     input: ObserveFactoryPullRequestInput
   ): Promise<FactoryPullRequestObservation> {
-    const record = factoryPullRequestRecordSchema.parse(input.record);
-    this.#assertRepository(record.repositoryId);
-    if (record.brokerId !== this.#brokerId) {
+    const record = factoryPullRequestAuthorityRecordSchema.parse(input.record);
+    const coordinates = factoryPullRequestAuthorityCoordinates(record);
+    this.#assertRepository(coordinates.repositoryId);
+    if (coordinates.brokerId !== this.#brokerId) {
       throw new Error("GitHub observer is not bound to this pull-request record.");
     }
-    const pullRequest = await this.#pullRequest(record.number);
+    const pullRequest = await this.#pullRequest(coordinates.number);
     if (
-      pullRequest.number !== record.number ||
-      pullRequest.html_url !== record.url ||
-      pullRequest.head.ref !== record.branchName
+      pullRequest.number !== coordinates.number ||
+      pullRequest.html_url !== coordinates.url ||
+      pullRequest.head.ref !== coordinates.branchName
     ) {
       throw new Error("Remote pull request no longer matches its durable broker identity.");
     }
@@ -80,15 +82,15 @@ export class GitHubFactoryPullRequestObserver implements FactoryPullRequestObser
       await Promise.all([
         this.options.api.request(
           "GET",
-          `/repos/${this.#repositoryId}/pulls/${String(record.number)}/reviews?per_page=100`
+          `/repos/${this.#repositoryId}/pulls/${String(coordinates.number)}/reviews?per_page=100`
         ),
         this.options.api.request(
           "GET",
-          `/repos/${this.#repositoryId}/pulls/${String(record.number)}/comments?per_page=100`
+          `/repos/${this.#repositoryId}/pulls/${String(coordinates.number)}/comments?per_page=100`
         ),
         this.options.api.request(
           "GET",
-          `/repos/${this.#repositoryId}/issues/${String(record.number)}/comments?per_page=100`
+          `/repos/${this.#repositoryId}/issues/${String(coordinates.number)}/comments?per_page=100`
         ),
         this.options.api.request(
           "GET",
@@ -115,22 +117,22 @@ export class GitHubFactoryPullRequestObserver implements FactoryPullRequestObser
     if (checkRuns.total_count !== checkRuns.check_runs.length || checkRuns.total_count === 100) {
       throw new Error("GitHub check runs exceed or contradict the bounded observation page.");
     }
-    const confirmedPullRequest = await this.#pullRequest(record.number);
+    const confirmedPullRequest = await this.#pullRequest(coordinates.number);
     if (!sameObservedPullRequest(pullRequest, confirmedPullRequest)) {
       throw new Error("Remote pull request changed during its bounded observation.");
     }
     return factoryPullRequestObservationSchema.parse({
       schemaVersion: "agentlab.pull-request-observation.v1",
-      taskId: record.taskId,
-      contractDigest: record.contractDigest,
-      proposalDigest: record.proposalDigest,
-      pullRequestRecordDigest: this.options.documents.pullRequestRecord(record).digest,
-      repositoryId: record.repositoryId,
-      pullRequestNumber: record.number,
-      url: record.url,
-      brokerId: record.brokerId,
-      authorizedBaseRevision: record.baseRevision,
-      recordedHeadRevision: record.headRevision,
+      taskId: coordinates.taskId,
+      contractDigest: coordinates.contractDigest,
+      proposalDigest: coordinates.initialProposalDigest,
+      pullRequestRecordDigest: this.options.documents.pullRequestAuthorityRecord(record).digest,
+      repositoryId: coordinates.repositoryId,
+      pullRequestNumber: coordinates.number,
+      url: coordinates.url,
+      brokerId: coordinates.brokerId,
+      authorizedBaseRevision: coordinates.baseRevision,
+      recordedHeadRevision: coordinates.headRevision,
       remoteBaseRevision: pullRequest.base.sha,
       remoteHeadRevision: pullRequest.head.sha,
       branchName: pullRequest.head.ref,

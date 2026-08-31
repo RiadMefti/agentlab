@@ -58,6 +58,14 @@ export type CliAction =
       readonly confirmation: "confirm-observe";
     }
   | {
+      readonly kind: "factory-broker-update-draft";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly authorizationDigest: `sha256:${string}`;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+      readonly confirmation: "confirm-update";
+    }
+  | {
       readonly kind: "factory-broker-authorize-repair";
       readonly configPath: string;
       readonly taskId: string;
@@ -72,6 +80,36 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
+    input[1] === "broker-update-draft" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--authorization" &&
+    input[8] === "--policy" &&
+    input[10] === "--confirm-update"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    const authorizationDigest = input[7];
+    const expectedPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(authorizationDigest) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-update-draft",
+        configPath,
+        taskId,
+        authorizationDigest,
+        expectedPolicyBundleDigest,
+        confirmation: "confirm-update"
+      };
+    }
   }
   if (
     input.length === 11 &&
@@ -314,7 +352,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|authority-status|broker-authority ...|broker-open-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|authority-status|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -369,6 +407,8 @@ Factory authority:
       Consume one exact authorization in a fresh credentialless repair worker; repeat all gates and independent review.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
+  agentlab factory broker-update-draft --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-update
+      Advance one repaired draft branch without force-push, then record its authenticated new head.
   agentlab factory broker-observe-pr --config <absolute-path> --task <uuid> --policy <sha256> --confirm-observe
       Record bounded checks and untrusted PR feedback as local evidence; never repair or write GitHub.
   agentlab factory broker-authorize-repair --config <absolute-path> --task <uuid> --observation <sha256> --policy <sha256> --confirm-repair

@@ -103,6 +103,8 @@ describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
         database.prepare("DELETE FROM factory_pull_request_repair_events").run()
       ).toThrow(/append-only/u);
       database.exec(`
+        DROP TABLE factory_pull_request_update_events;
+        DROP TABLE factory_pull_request_updates;
         DROP TABLE factory_pull_request_repair_events;
         DROP TABLE factory_pull_request_repair_runs;
         PRAGMA user_version = 8;

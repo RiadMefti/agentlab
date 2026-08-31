@@ -10,7 +10,9 @@ import { z } from "zod";
 import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
 import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
 import type { FactoryPullRequestDispatchRepository } from "../domain/factory-pull-request-dispatch-repository.js";
+import { factoryPullRequestAuthorityCoordinates } from "../domain/factory-pull-request-authority-record.js";
 import { selectFactoryPullRequestRepair } from "../domain/factory-pull-request-repair.js";
+import type { FactoryPullRequestUpdateRepository } from "../domain/factory-pull-request-update-repository.js";
 import type {
   FactoryControlRepository,
   FactoryEvidenceRepository,
@@ -24,9 +26,9 @@ import {
 } from "./factory-evidence-publisher.js";
 import {
   FactoryPullRequestRepairEvidenceReader,
-  requireFactoryPullRequestRepairDispatch,
   type FactoryPullRequestObservedEvidence
 } from "./factory-pull-request-repair-evidence.js";
+import { FactoryPullRequestLineageReader } from "./factory-pull-request-lineage.js";
 
 const admissionInputSchema = z
   .object({
@@ -38,6 +40,7 @@ const admissionInputSchema = z
 
 export interface FactoryPullRequestRepairAdmissionServiceDependencies {
   readonly dispatches: Pick<FactoryPullRequestDispatchRepository, "findByTaskId">;
+  readonly updates: Pick<FactoryPullRequestUpdateRepository, "listByTaskId">;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly evidence: Pick<FactoryEvidenceRepository, "listEvidence">;
   readonly controls: Pick<FactoryControlRepository, "state">;
@@ -66,6 +69,7 @@ export type FactoryPullRequestRepairAdmissionOutcome =
 export class FactoryPullRequestRepairAdmissionService {
   readonly #publisher: FactoryEvidencePublisher;
   readonly #evidenceReader: FactoryPullRequestRepairEvidenceReader;
+  readonly #lineage: FactoryPullRequestLineageReader;
 
   public constructor(
     private readonly dependencies: FactoryPullRequestRepairAdmissionServiceDependencies
@@ -79,6 +83,7 @@ export class FactoryPullRequestRepairAdmissionService {
       createId: dependencies.createId
     });
     this.#evidenceReader = new FactoryPullRequestRepairEvidenceReader(dependencies);
+    this.#lineage = new FactoryPullRequestLineageReader(dependencies);
   }
 
   public async admit(input: unknown): Promise<FactoryPullRequestRepairAdmissionOutcome> {
@@ -95,17 +100,15 @@ export class FactoryPullRequestRepairAdmissionService {
     }
     const inspectedAt = factoryTimestampSchema.parse(this.dependencies.now());
     if (inspectedAt >= task.contract.expiresAt) return denied("task-contract-expired");
-    const { dispatch, record } = requireFactoryPullRequestRepairDispatch(
-      task,
-      await this.dependencies.dispatches.findByTaskId(command.taskId),
-      this.dependencies.documents
-    );
+    const lineage = await this.#lineage.current(task);
+    const record = lineage.record;
+    const coordinates = factoryPullRequestAuthorityCoordinates(record.value);
     const bundles = await this.dependencies.evidence.listEvidence(command.taskId);
     const observed = await this.#evidenceReader.exactLatestObservation({
       bundles,
       expectedDigest: command.observationDigest,
       task,
-      proposalDigest: dispatch.run.proposalDigest,
+      proposalDigest: lineage.dispatch.run.proposalDigest,
       record
     });
     const selection = selectFactoryPullRequestRepair(observed.observation.value);
@@ -120,8 +123,8 @@ export class FactoryPullRequestRepairAdmissionService {
       bundles,
       task,
       record,
-      proposalDigest: dispatch.run.proposalDigest,
-      priorPatchProposalDigest: dispatch.run.proposal.patchProposalDigest
+      proposalDigest: lineage.dispatch.run.proposalDigest,
+      priorPatchProposalDigest: lineage.currentPatchProposalDigest
     });
     const consumedRuns = await this.#evidenceReader.repairRuns({
       bundles,
@@ -155,7 +158,7 @@ export class FactoryPullRequestRepairAdmissionService {
     const usage = await this.#evidenceReader.initialUsage({
       bundles,
       task,
-      patchProposalDigest: dispatch.run.proposal.patchProposalDigest
+      patchProposalDigest: lineage.currentPatchProposalDigest
     });
     const contractRepairAttempt = usage.value.usage.repairAttempts + 1;
     const missingRequirements = [
@@ -186,15 +189,15 @@ export class FactoryPullRequestRepairAdmissionService {
       taskId: task.contract.taskId,
       contractDigest: task.contractDigest,
       policyBundleDigest: task.contract.gateProfile.policyDigest,
-      proposalDigest: dispatch.run.proposalDigest,
-      priorPatchProposalDigest: dispatch.run.proposal.patchProposalDigest,
+      proposalDigest: lineage.dispatch.run.proposalDigest,
+      priorPatchProposalDigest: lineage.currentPatchProposalDigest,
       pullRequestRecordDigest: record.digest,
       observationDigest: observed.observation.digest,
       observationEvidenceBundleDigest: observed.bundle.digest,
-      repositoryId: record.value.repositoryId,
-      pullRequestNumber: record.value.number,
-      headRevision: record.value.headRevision,
-      brokerId: record.value.brokerId,
+      repositoryId: coordinates.repositoryId,
+      pullRequestNumber: coordinates.number,
+      headRevision: coordinates.headRevision,
+      brokerId: coordinates.brokerId,
       contractRepairAttempt,
       reasonCodes: selection.reasonCodes,
       selectedReviewIds: selection.selectedReviewIds,

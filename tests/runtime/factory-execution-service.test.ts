@@ -8,6 +8,8 @@ import {
   type FactoryAgentRunRequest,
   type FactoryBudgetUsage,
   type FactoryPullRequestDispatchEvent,
+  type FactoryPullRequestUpdateEvent,
+  type FactoryPullRequestUpdateProposal,
   type FactoryResourceLimits,
   type FactorySkillPackage,
   type ImmutableTaskContract
@@ -27,6 +29,7 @@ import { FactoryPullRequestObservationService } from "../../packages/runtime/src
 import { FactoryPullRequestRepairAdmissionService } from "../../packages/runtime/src/application/factory-pull-request-repair-admission-service.js";
 import { FactoryPullRequestRepairExecutionService } from "../../packages/runtime/src/application/factory-pull-request-repair-execution-service.js";
 import { FactoryPullRequestRepairRecoveryService } from "../../packages/runtime/src/application/factory-pull-request-repair-recovery-service.js";
+import { FactoryPullRequestUpdateService } from "../../packages/runtime/src/application/factory-pull-request-update-service.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
 import type {
   FactoryAgentExecutionInput,
@@ -46,9 +49,13 @@ import type {
   FactoryRepositoryGovernance,
   ObserveFactoryPullRequestInput,
   OpenFactoryDraftPullRequestInput,
+  UpdateFactoryDraftPullRequestResult,
+  UpdateFactoryDraftPullRequestInput,
+  VerifyUpdatedFactoryDraftPullRequestInput,
   VerifyFactoryDraftPullRequestInput
 } from "../../packages/runtime/src/domain/factory-pull-request-broker.js";
 import type { FactoryPullRequestDispatchRepository } from "../../packages/runtime/src/domain/factory-pull-request-dispatch-repository.js";
+import type { FactoryPullRequestUpdateRepository } from "../../packages/runtime/src/domain/factory-pull-request-update-repository.js";
 import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain/factory-documents.js";
 import {
   defaultFactoryPolicyBundle,
@@ -74,6 +81,7 @@ import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructu
 import { SqliteFactoryExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
+import { SqliteFactoryPullRequestUpdateRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { MemoryConversationRepository } from "../helpers/fakes.js";
 import {
   TEST_FACTORY_CONVERSATION_ID,
@@ -433,6 +441,205 @@ describe("FactoryPullRequestService", () => {
     }
   });
 
+  it("durably updates a repaired draft, re-observes its new head, and makes worker replay idempotent", async () => {
+    const fixture = await executionFixture();
+    try {
+      await fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID });
+      await fixture.controlPlane.setAuthority({
+        control: "pr-broker",
+        enabled: true,
+        actor: requester,
+        reason: "Exercise the complete post-PR repair handoff."
+      });
+      const remote = new FakePullRequestBroker(strongGovernance);
+      await fixture.pullRequests(remote).openDraft({ taskId: TEST_FACTORY_TASK_ID });
+      const firstObservation = await fixture.pullRequestObservations(remote).observe({
+        taskId: TEST_FACTORY_TASK_ID
+      });
+      if (firstObservation.status !== "observed") throw new Error("Observation was denied.");
+      const authorization = await fixture.pullRequestRepairAdmissions.admit({
+        taskId: TEST_FACTORY_TASK_ID,
+        observationDigest: firstObservation.observationDigest
+      });
+      if (authorization.status !== "authorized") throw new Error("Repair was not authorized.");
+      const repaired = await fixture.pullRequestRepairs.execute({
+        taskId: TEST_FACTORY_TASK_ID,
+        authorizationDigest: authorization.authorizationDigest
+      });
+      expect(repaired).toMatchObject({ status: "pr-proposed", usageComplete: true });
+
+      const updated = await fixture.pullRequestUpdateService(remote).update({
+        taskId: TEST_FACTORY_TASK_ID,
+        authorizationDigest: authorization.authorizationDigest
+      });
+      expect(updated).toMatchObject({
+        status: "updated",
+        remoteUpdated: true,
+        record: {
+          priorHeadRevision: "b".repeat(40),
+          headRevision: "c".repeat(40),
+          contractRepairAttempt: 1
+        }
+      });
+      if (updated.status !== "updated") throw new Error("Pull request was not updated.");
+      expect(remote.updated).toHaveLength(1);
+      await expect(
+        fixture.pullRequestUpdates.findByAuthorizationDigest(authorization.authorizationDigest)
+      ).resolves.toMatchObject({ state: "completed", remoteUpdated: true });
+      await expect(
+        fixture.pullRequestRepairs.execute({
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: authorization.authorizationDigest
+        })
+      ).resolves.toMatchObject({ status: "already-advanced", task: { state: "pr-open" } });
+
+      const secondObservation = await fixture.pullRequestObservations(remote).observe({
+        taskId: TEST_FACTORY_TASK_ID
+      });
+      expect(secondObservation).toMatchObject({
+        status: "observed",
+        observation: {
+          recordedHeadRevision: "c".repeat(40),
+          remoteHeadRevision: "c".repeat(40)
+        }
+      });
+      if (secondObservation.status !== "observed") throw new Error("Re-observation was denied.");
+      const secondAuthorization = await fixture.pullRequestRepairAdmissions.admit({
+        taskId: TEST_FACTORY_TASK_ID,
+        observationDigest: secondObservation.observationDigest
+      });
+      expect(secondAuthorization).toMatchObject({
+        status: "authorized",
+        authorization: {
+          priorPatchProposalDigest: updated.record.repairedPatchProposalDigest,
+          pullRequestRecordDigest: secondObservation.observation.pullRequestRecordDigest,
+          headRevision: "c".repeat(40),
+          contractRepairAttempt: 2
+        }
+      });
+      if (secondAuthorization.status !== "authorized") {
+        throw new Error("Second repair was not authorized.");
+      }
+      await expect(
+        fixture.pullRequestRepairs.execute({
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: secondAuthorization.authorizationDigest
+        })
+      ).resolves.toMatchObject({ status: "pr-proposed", usageComplete: true });
+      await expect(
+        fixture.pullRequestUpdateService(remote).update({
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: secondAuthorization.authorizationDigest
+        })
+      ).resolves.toMatchObject({
+        status: "updated",
+        record: {
+          priorHeadRevision: "c".repeat(40),
+          headRevision: "d".repeat(40),
+          contractRepairAttempt: 2
+        }
+      });
+
+      await expect(
+        fixture.pullRequestUpdateService(remote).update({
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: authorization.authorizationDigest
+        })
+      ).resolves.toMatchObject({
+        status: "updated",
+        record: { headRevision: "c".repeat(40), contractRepairAttempt: 1 }
+      });
+      expect(remote.updated).toHaveLength(2);
+      expect(remote.branchUpdates).toBe(2);
+      await expect(
+        fixture.pullRequestObservations(remote).observe({ taskId: TEST_FACTORY_TASK_ID })
+      ).resolves.toMatchObject({
+        status: "observed",
+        observation: {
+          recordedHeadRevision: "d".repeat(40),
+          remoteHeadRevision: "d".repeat(40)
+        }
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it.each([
+    ["remote-updated", "update-active", 2, "pr-proposed", 2, false],
+    ["evidence-recorded", "remote-updated", 3, "pr-proposed", 1, true],
+    ["task-recorded", "evidence-recorded", 4, "pr-open", 1, true]
+  ] as const)(
+    "reconciles one exact repaired draft after interruption at %s",
+    async (
+      checkpoint,
+      stateAfterFailure,
+      sequenceAfterFailure,
+      taskStateAfterFailure,
+      remoteCalls,
+      remoteUpdated
+    ) => {
+      const fixture = await executionFixture({ updateAppendFailure: checkpoint });
+      try {
+        await fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID });
+        await fixture.controlPlane.setAuthority({
+          control: "pr-broker",
+          enabled: true,
+          actor: requester,
+          reason: "Exercise durable repaired-branch recovery."
+        });
+        const remote = new FakePullRequestBroker(strongGovernance);
+        await fixture.pullRequests(remote).openDraft({ taskId: TEST_FACTORY_TASK_ID });
+        const observation = await fixture.pullRequestObservations(remote).observe({
+          taskId: TEST_FACTORY_TASK_ID
+        });
+        if (observation.status !== "observed") throw new Error("Observation was denied.");
+        const authorization = await fixture.pullRequestRepairAdmissions.admit({
+          taskId: TEST_FACTORY_TASK_ID,
+          observationDigest: observation.observationDigest
+        });
+        if (authorization.status !== "authorized") throw new Error("Repair was not authorized.");
+        await fixture.pullRequestRepairs.execute({
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: authorization.authorizationDigest
+        });
+        const command = {
+          taskId: TEST_FACTORY_TASK_ID,
+          authorizationDigest: authorization.authorizationDigest
+        };
+
+        await expect(fixture.pullRequestUpdateService(remote).update(command)).rejects.toThrow(
+          /Injected update append failure/u
+        );
+        expect(remote.branchUpdates).toBe(1);
+        await expect(
+          fixture.pullRequestUpdates.findByAuthorizationDigest(authorization.authorizationDigest)
+        ).resolves.toMatchObject({ state: stateAfterFailure, sequence: sequenceAfterFailure });
+        await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+          state: taskStateAfterFailure
+        });
+
+        await expect(
+          fixture.pullRequestUpdateService(remote).update(command)
+        ).resolves.toMatchObject({
+          status: "updated",
+          remoteUpdated,
+          record: { priorHeadRevision: "b".repeat(40), headRevision: "c".repeat(40) }
+        });
+        expect(remote.updated).toHaveLength(remoteCalls);
+        expect(remote.branchUpdates).toBe(1);
+        await expect(
+          fixture.pullRequestUpdates.findByAuthorizationDigest(authorization.authorizationDigest)
+        ).resolves.toMatchObject({ state: "completed", remoteUpdated, sequence: 5 });
+        await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+          state: "pr-open"
+        });
+      } finally {
+        fixture.close();
+      }
+    }
+  );
+
   it("idempotently reserves one exact post-PR repair without copying untrusted text or changing state", async () => {
     const fixture = await executionFixture();
     try {
@@ -756,6 +963,10 @@ async function executionFixture(
       FactoryPullRequestDispatchEvent["kind"],
       "remote-observed" | "evidence-recorded" | "task-recorded"
     >;
+    readonly updateAppendFailure?: Extract<
+      FactoryPullRequestUpdateEvent["kind"],
+      "remote-updated" | "evidence-recorded" | "task-recorded"
+    >;
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-execution-test-"));
@@ -770,6 +981,10 @@ async function executionFixture(
   const repository = new SqliteFactoryRepository(databasePath);
   const executions = new SqliteFactoryExecutionRepository(databasePath);
   const repairExecutions = new SqliteFactoryPullRequestRepairExecutionRepository(databasePath);
+  const pullRequestUpdates = new FailOnceUpdateRepository(
+    new SqliteFactoryPullRequestUpdateRepository(databasePath),
+    options.updateAppendFailure
+  );
   const dispatches = new FailOnceDispatchRepository(
     new SqliteFactoryPullRequestDispatchRepository(databasePath),
     options.dispatchAppendFailure
@@ -949,6 +1164,7 @@ async function executionFixture(
   const pullRequestObservations = (remote: FactoryPullRequestObserver) =>
     new FactoryPullRequestObservationService({
       dispatches,
+      updates: pullRequestUpdates,
       tasks: repository,
       controls: repository,
       evidenceIngress,
@@ -961,6 +1177,7 @@ async function executionFixture(
     });
   const pullRequestRepairAdmissions = new FactoryPullRequestRepairAdmissionService({
     dispatches,
+    updates: pullRequestUpdates,
     tasks: repository,
     evidence: repository,
     controls: repository,
@@ -987,6 +1204,7 @@ async function executionFixture(
     executions: repairExecutions,
     recovery: pullRequestRepairRecovery,
     dispatches,
+    updates: pullRequestUpdates,
     tasks: repository,
     evidence: repository,
     conversations,
@@ -1005,6 +1223,25 @@ async function executionFixture(
     createId,
     controlPlaneActorId: "agentlab-execution"
   });
+  const pullRequestUpdateService = (remote: FactoryDraftPullRequestBroker) =>
+    new FactoryPullRequestUpdateService({
+      updates: pullRequestUpdates,
+      dispatches,
+      executions: repairExecutions,
+      tasks: repository,
+      evidence: repository,
+      controls: repository,
+      conversations,
+      controlPlane,
+      evidenceIngress,
+      evidenceCredentials,
+      artifacts,
+      documents,
+      remote,
+      now,
+      createId,
+      brokerId: "test-pr-broker"
+    });
   return {
     repository,
     artifacts,
@@ -1016,8 +1253,10 @@ async function executionFixture(
     pullRequestObservations,
     pullRequestRepairAdmissions,
     pullRequestRepairs,
+    pullRequestUpdateService,
     pullRequestRepairRecovery,
     repairExecutions,
+    pullRequestUpdates,
     workspaces,
     agents,
     gates,
@@ -1028,6 +1267,7 @@ async function executionFixture(
     close: () => {
       dispatches.close();
       repairExecutions.close();
+      pullRequestUpdates.close();
       executions.close();
       repository.close();
     }
@@ -1203,8 +1443,11 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker, FactoryPul
   public createdPullRequests = 0;
   public verifiedDrafts = 0;
   public observations = 0;
+  public readonly updated: UpdateFactoryDraftPullRequestInput[] = [];
+  public branchUpdates = 0;
   public forgeObservationBranch = false;
   #proposal: OpenFactoryDraftPullRequestInput["proposal"] | null = null;
+  readonly #updateRecords = new Map<string, UpdateFactoryDraftPullRequestResult["record"]>();
 
   public constructor(private readonly governance: FactoryRepositoryGovernance) {}
 
@@ -1268,6 +1511,49 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker, FactoryPul
     return Promise.resolve();
   }
 
+  public updateDraft(input: UpdateFactoryDraftPullRequestInput) {
+    this.updated.push(input);
+    const updateProposalDigest = encodeCanonicalDocument(input.proposal).digest;
+    const existing = this.#updateRecords.get(updateProposalDigest);
+    if (existing !== undefined) return Promise.resolve({ updated: false, record: existing });
+    const headRevision = repairedHead(input.proposal);
+    const record = {
+      schemaVersion: "agentlab.pull-request-update-record.v1" as const,
+      taskId: input.proposal.taskId,
+      contractDigest: input.proposal.contractDigest,
+      initialProposalDigest: input.proposal.initialProposalDigest,
+      updateProposalDigest,
+      priorPullRequestRecordDigest: input.proposal.priorPullRequestRecordDigest,
+      repairAuthorizationDigest: input.proposal.repairAuthorizationDigest,
+      repairRunDigest: input.proposal.repairRunDigest,
+      repairedPatchProposalDigest: input.proposal.repairedPatchProposalDigest,
+      repositoryId: input.proposal.repositoryId,
+      number: input.proposal.pullRequestNumber,
+      url: "https://github.com/example/agentlab/pull/42",
+      baseRevision: input.proposal.baseRevision,
+      priorHeadRevision: input.proposal.priorHeadRevision,
+      headRevision,
+      branchName: input.proposal.branchName,
+      draft: true as const,
+      brokerId: input.proposal.brokerId,
+      contractRepairAttempt: input.proposal.contractRepairAttempt,
+      updatedAt: input.proposal.createdAt
+    };
+    this.#updateRecords.set(updateProposalDigest, record);
+    this.branchUpdates += 1;
+    return Promise.resolve({ updated: true, record });
+  }
+
+  public verifyUpdatedDraft(input: VerifyUpdatedFactoryDraftPullRequestInput) {
+    if (
+      input.record.updateProposalDigest !== encodeCanonicalDocument(input.proposal).digest ||
+      input.record.headRevision !== repairedHead(input.proposal)
+    ) {
+      return Promise.reject(new Error("Remote update differs from its durable proposal."));
+    }
+    return Promise.resolve();
+  }
+
   public closeDraft(record: { readonly url: string }) {
     this.closed.push(record.url);
     return Promise.resolve();
@@ -1280,7 +1566,10 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker, FactoryPul
       schemaVersion: "agentlab.pull-request-observation.v1" as const,
       taskId: record.taskId,
       contractDigest: record.contractDigest,
-      proposalDigest: record.proposalDigest,
+      proposalDigest:
+        record.schemaVersion === "agentlab.pull-request-record.v1"
+          ? record.proposalDigest
+          : record.initialProposalDigest,
       pullRequestRecordDigest: encodeCanonicalDocument(record).digest,
       repositoryId: record.repositoryId,
       pullRequestNumber: record.number,
@@ -1329,6 +1618,11 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker, FactoryPul
   }
 }
 
+function repairedHead(proposal: FactoryPullRequestUpdateProposal): string {
+  const digit = ((proposal.contractRepairAttempt + 11) % 16).toString(16);
+  return digit.repeat(40);
+}
+
 class FailOnceDispatchRepository implements FactoryPullRequestDispatchRepository {
   #failed = false;
 
@@ -1360,6 +1654,60 @@ class FailOnceDispatchRepository implements FactoryPullRequestDispatchRepository
     if (!this.#failed && event.value.kind === this.failureKind) {
       this.#failed = true;
       throw new Error(`Injected dispatch append failure at ${event.value.kind}.`);
+    }
+    return this.delegate.append(event);
+  }
+
+  public close(): void {
+    this.delegate.close();
+  }
+}
+
+class FailOnceUpdateRepository implements FactoryPullRequestUpdateRepository {
+  #failed = false;
+
+  public constructor(
+    private readonly delegate: FactoryPullRequestUpdateRepository,
+    private readonly failureKind?: Extract<
+      FactoryPullRequestUpdateEvent["kind"],
+      "remote-updated" | "evidence-recorded" | "task-recorded"
+    >
+  ) {}
+
+  public register(...args: Parameters<FactoryPullRequestUpdateRepository["register"]>) {
+    return this.delegate.register(...args);
+  }
+
+  public findByAuthorizationDigest(
+    ...args: Parameters<FactoryPullRequestUpdateRepository["findByAuthorizationDigest"]>
+  ) {
+    return this.delegate.findByAuthorizationDigest(...args);
+  }
+
+  public findByRepairRunDigest(
+    ...args: Parameters<FactoryPullRequestUpdateRepository["findByRepairRunDigest"]>
+  ) {
+    return this.delegate.findByRepairRunDigest(...args);
+  }
+
+  public listByTaskId(...args: Parameters<FactoryPullRequestUpdateRepository["listByTaskId"]>) {
+    return this.delegate.listByTaskId(...args);
+  }
+
+  public listRecoverable(
+    ...args: Parameters<FactoryPullRequestUpdateRepository["listRecoverable"]>
+  ) {
+    return this.delegate.listRecoverable(...args);
+  }
+
+  public listEvents(...args: Parameters<FactoryPullRequestUpdateRepository["listEvents"]>) {
+    return this.delegate.listEvents(...args);
+  }
+
+  public append(event: CanonicalFactoryDocument<FactoryPullRequestUpdateEvent>) {
+    if (!this.#failed && event.value.kind === this.failureKind) {
+      this.#failed = true;
+      throw new Error(`Injected update append failure at ${event.value.kind}.`);
     }
     return this.delegate.append(event);
   }

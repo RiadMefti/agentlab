@@ -3,6 +3,7 @@ export * from "./factory-execution.js";
 export * from "./factory-pull-request-observation.js";
 export * from "./factory-pull-request-repair.js";
 export * from "./factory-pull-request-dispatch.js";
+export * from "./factory-pull-request-update.js";
 export * from "./factory.js";
 export * from "./factory-preparation.js";
 export * from "./provider.js";

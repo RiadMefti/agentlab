@@ -13,6 +13,8 @@ import {
   type FactoryPullRequestRepairRun,
   type FactoryPullRequestProposal,
   type FactoryPullRequestRecord,
+  type FactoryPullRequestUpdateProposal,
+  type FactoryPullRequestUpdateRecord,
   type FactoryReviewResult,
   type FactoryBudgetUsage,
   type EvidenceItem,
@@ -555,6 +557,63 @@ export class FactoryEvidencePublisher {
           {
             name: "pull-request-record-digest",
             value: input.observation.value.pullRequestRecordDigest
+          }
+        ]
+      })
+    ]);
+  }
+
+  public async pullRequestUpdate(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly proposal: CanonicalFactoryDocument<FactoryPullRequestUpdateProposal>;
+    readonly record: FactoryPullRequestUpdateRecord;
+    readonly authorizingPolicyItem: EvidenceItem;
+  }): Promise<StoredEvidenceBundle> {
+    if (
+      input.authorizingPolicyItem.kind !== "policy" ||
+      input.authorizingPolicyItem.result !== "pass" ||
+      input.authorizingPolicyItem.subjectDigest !== input.proposal.value.repairedPatchProposalDigest
+    ) {
+      throw new Error("Pull-request update evidence requires the exact passing policy item.");
+    }
+    const proposalArtifact = await this.#documentArtifact(
+      input.proposal,
+      "application/vnd.agentlab.pull-request-update-proposal.v1+json"
+    );
+    const recordDocument = this.dependencies.documents.pullRequestUpdateRecord(input.record);
+    const recordArtifact = await this.#documentArtifact(
+      recordDocument,
+      "application/vnd.agentlab.pull-request-update-record.v1+json"
+    );
+    return this.#append(this.#credential("prBroker"), input.task, [
+      evidenceItemSchema.parse({
+        ...input.authorizingPolicyItem,
+        id: this.dependencies.createId()
+      }),
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "pull-request",
+        result: "pass",
+        subjectDigest: input.proposal.value.repairedPatchProposalDigest,
+        artifact: recordArtifact,
+        producer: {
+          kind: "broker",
+          role: "pr-broker",
+          id: input.record.brokerId,
+          sessionId: null
+        },
+        createdAt: input.record.updatedAt,
+        claims: [
+          { name: "pull-request-number", value: String(input.record.number) },
+          { name: "prior-head-revision", value: input.record.priorHeadRevision },
+          { name: "head-revision", value: input.record.headRevision },
+          { name: "update-proposal-digest", value: input.proposal.digest },
+          { name: "update-proposal-artifact", value: proposalArtifact.digest },
+          { name: "repair-authorization-digest", value: input.record.repairAuthorizationDigest },
+          { name: "repair-run-digest", value: input.record.repairRunDigest },
+          {
+            name: "contract-repair-attempt",
+            value: String(input.record.contractRepairAttempt)
           }
         ]
       })

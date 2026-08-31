@@ -26,6 +26,7 @@ import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
+import { factoryPullRequestAuthorityCoordinates } from "../domain/factory-pull-request-authority-record.js";
 import {
   factoryPolicyBundleMediaType,
   FactoryPolicyEngine,
@@ -446,12 +447,13 @@ export class FactoryControlPlane {
         item.artifact.digest,
         Math.max(1, item.artifact.sizeBytes + 1)
       );
-      const record = this.dependencies.documents.pullRequestRecord(parseJson(json));
+      const record = this.dependencies.documents.pullRequestAuthorityRecord(parseJson(json));
+      const coordinates = factoryPullRequestAuthorityCoordinates(record.value);
       if (
         record.digest === item.artifact.digest &&
-        record.value.taskId === snapshot.contract.taskId &&
-        record.value.contractDigest === snapshot.contractDigest &&
-        record.value.brokerId === item.producer.id
+        coordinates.taskId === snapshot.contract.taskId &&
+        coordinates.contractDigest === snapshot.contractDigest &&
+        coordinates.brokerId === item.producer.id
       ) {
         return true;
       }

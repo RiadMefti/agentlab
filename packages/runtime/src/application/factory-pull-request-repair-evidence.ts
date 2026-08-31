@@ -1,6 +1,7 @@
 import type {
   EvidenceItem,
   FactoryPatchProposal,
+  FactoryPullRequestAuthorityRecord,
   FactoryPullRequestObservation,
   FactoryPullRequestRecord,
   FactoryPullRequestRepairAuthorization,
@@ -19,6 +20,7 @@ import type {
   StoredEvidenceBundle
 } from "../domain/factory-task-repository.js";
 import type { FactoryPullRequestDispatchSnapshot } from "../domain/factory-pull-request-dispatch-repository.js";
+import { factoryPullRequestAuthorityCoordinates } from "../domain/factory-pull-request-authority-record.js";
 import {
   selectFactoryPullRequestRepair,
   type FactoryPullRequestRepairFeedback
@@ -59,7 +61,7 @@ export class FactoryPullRequestRepairEvidenceReader {
     readonly expectedDigest: Sha256Digest;
     readonly task: FactoryTaskSnapshot;
     readonly proposalDigest: Sha256Digest;
-    readonly record: CanonicalFactoryDocument<FactoryPullRequestRecord>;
+    readonly record: CanonicalFactoryDocument<FactoryPullRequestAuthorityRecord>;
   }): Promise<FactoryPullRequestObservedEvidence> {
     const candidates = input.bundles.flatMap((bundle) =>
       bundle.bundle.items
@@ -102,7 +104,7 @@ export class FactoryPullRequestRepairEvidenceReader {
   public async authorizations(input: {
     readonly bundles: readonly StoredEvidenceBundle[];
     readonly task: FactoryTaskSnapshot;
-    readonly record: CanonicalFactoryDocument<FactoryPullRequestRecord>;
+    readonly record: CanonicalFactoryDocument<FactoryPullRequestAuthorityRecord>;
     readonly proposalDigest: Sha256Digest;
     readonly priorPatchProposalDigest: Sha256Digest;
   }): Promise<readonly CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>[]> {
@@ -120,6 +122,13 @@ export class FactoryPullRequestRepairEvidenceReader {
             )
           )
         );
+        const coordinates = factoryPullRequestAuthorityCoordinates(input.record.value);
+        if (
+          authorization.value.priorPatchProposalDigest !== input.priorPatchProposalDigest ||
+          authorization.value.pullRequestRecordDigest !== input.record.digest
+        ) {
+          continue;
+        }
         if (
           authorization.digest !== item.artifact.digest ||
           authorization.digest !== item.subjectDigest ||
@@ -127,12 +136,10 @@ export class FactoryPullRequestRepairEvidenceReader {
           authorization.value.contractDigest !== input.task.contractDigest ||
           authorization.value.policyBundleDigest !== input.task.contract.gateProfile.policyDigest ||
           authorization.value.proposalDigest !== input.proposalDigest ||
-          authorization.value.priorPatchProposalDigest !== input.priorPatchProposalDigest ||
-          authorization.value.pullRequestRecordDigest !== input.record.digest ||
-          authorization.value.repositoryId !== input.record.value.repositoryId ||
-          authorization.value.pullRequestNumber !== input.record.value.number ||
-          authorization.value.headRevision !== input.record.value.headRevision ||
-          authorization.value.brokerId !== input.record.value.brokerId ||
+          authorization.value.repositoryId !== coordinates.repositoryId ||
+          authorization.value.pullRequestNumber !== coordinates.number ||
+          authorization.value.headRevision !== coordinates.headRevision ||
+          authorization.value.brokerId !== coordinates.brokerId ||
           authorization.value.expiresAt !== input.task.contract.expiresAt ||
           authorization.value.contractRepairAttempt >
             input.task.contract.budget.maxRepairAttempts ||
@@ -165,7 +172,7 @@ export class FactoryPullRequestRepairEvidenceReader {
     readonly bundles: readonly StoredEvidenceBundle[];
     readonly expectedDigest: Sha256Digest;
     readonly task: FactoryTaskSnapshot;
-    readonly record: CanonicalFactoryDocument<FactoryPullRequestRecord>;
+    readonly record: CanonicalFactoryDocument<FactoryPullRequestAuthorityRecord>;
     readonly proposalDigest: Sha256Digest;
     readonly priorPatchProposalDigest: Sha256Digest;
   }): Promise<CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>> {
@@ -198,8 +205,8 @@ export class FactoryPullRequestRepairEvidenceReader {
           )
         );
         const authorization = authorizationByDigest.get(run.value.authorizationDigest);
+        if (authorization === undefined) continue;
         if (
-          authorization === undefined ||
           run.digest !== item.artifact.digest ||
           run.value.taskId !== input.task.contract.taskId ||
           run.value.contractDigest !== input.task.contractDigest ||
@@ -396,10 +403,11 @@ export class FactoryPullRequestRepairEvidenceReader {
 function assertObservationIdentity(
   task: FactoryTaskSnapshot,
   proposalDigest: Sha256Digest,
-  record: CanonicalFactoryDocument<FactoryPullRequestRecord>,
+  record: CanonicalFactoryDocument<FactoryPullRequestAuthorityRecord>,
   observed: FactoryPullRequestObservedEvidence
 ): void {
   const observation = observed.observation.value;
+  const coordinates = factoryPullRequestAuthorityCoordinates(record.value);
   if (
     observation.taskId !== task.contract.taskId ||
     observation.contractDigest !== task.contractDigest ||
@@ -407,11 +415,11 @@ function assertObservationIdentity(
     observation.pullRequestRecordDigest !== record.digest ||
     observation.repositoryId !== task.contract.repository.id ||
     observation.authorizedBaseRevision !== task.contract.repository.baseRevision ||
-    observation.pullRequestNumber !== record.value.number ||
-    observation.url !== record.value.url ||
-    observation.recordedHeadRevision !== record.value.headRevision ||
-    observation.branchName !== record.value.branchName ||
-    observation.brokerId !== record.value.brokerId ||
+    observation.pullRequestNumber !== coordinates.number ||
+    observation.url !== coordinates.url ||
+    observation.recordedHeadRevision !== coordinates.headRevision ||
+    observation.branchName !== coordinates.branchName ||
+    observation.brokerId !== coordinates.brokerId ||
     observation.recordedHeadRevision !== observation.remoteHeadRevision ||
     observation.remoteBaseRevision !== observation.authorizedBaseRevision ||
     observation.pullRequestNumber !== Number(claim(observed.item, "pull-request-number")) ||

@@ -29,6 +29,20 @@ export interface PrepareGitBrokerCommitInput {
   readonly timestamp: string;
 }
 
+export interface ReparentGitBrokerCommitInput {
+  readonly repositoryUrl: string;
+  readonly branchName: string;
+  readonly authorizationHeader: string;
+  readonly expectedParent: GitObjectId;
+  readonly title: string;
+  readonly timestamp: string;
+}
+
+export interface ReparentGitBrokerCommitResult {
+  readonly remoteHead: GitObjectId;
+  readonly headRevision: GitObjectId;
+}
+
 /** Fresh non-model Git repository used only to verify, commit, and publish one authorized patch. */
 export class GitBrokerWorkspace {
   readonly #rootPath: string;
@@ -159,17 +173,14 @@ export class PreparedGitBrokerCommit {
     readonly authorizationHeader: string;
   }): Promise<void> {
     if (this.headRevision === null) throw new Error("Broker commit is not prepared.");
-    if (!/^https:\/\/github\.com\/[a-z0-9-]+\/[a-z0-9._-]+\.git$/u.test(input.repositoryUrl)) {
-      throw new Error("Broker push URL is outside GitHub.");
-    }
-    if (!/^[a-z0-9][a-z0-9._/-]*$/u.test(input.branchName)) {
-      throw new Error("Broker branch name is invalid.");
-    }
-    if (!/^AUTHORIZATION: basic [A-Za-z0-9+/=]+$/u.test(input.authorizationHeader)) {
-      throw new Error("Broker Git authorization header is invalid.");
-    }
+    assertRemoteGitInput(input);
     await this.#git(
-      ["push", "--porcelain", input.repositoryUrl, `HEAD:refs/heads/${input.branchName}`],
+      [
+        "push",
+        "--porcelain",
+        input.repositoryUrl,
+        `${this.headRevision}:refs/heads/${input.branchName}`
+      ],
       4 * 1_024 * 1_024,
       undefined,
       {
@@ -178,6 +189,69 @@ export class PreparedGitBrokerCommit {
         GIT_CONFIG_VALUE_0: input.authorizationHeader
       }
     );
+  }
+
+  /**
+   * Reuses the fully verified repaired tree while making the existing remote head its sole parent.
+   * The caller may then perform a normal non-force push; a concurrent head move is rejected by Git.
+   */
+  public async reparent(
+    input: ReparentGitBrokerCommitInput
+  ): Promise<ReparentGitBrokerCommitResult> {
+    if (this.headRevision === null) throw new Error("Broker commit is not prepared.");
+    assertRemoteGitInput(input);
+    const environment = {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+      GIT_CONFIG_VALUE_0: input.authorizationHeader
+    };
+    await this.#git(
+      ["fetch", "--no-tags", "--depth=2", input.repositoryUrl, `refs/heads/${input.branchName}`],
+      4 * 1_024 * 1_024,
+      undefined,
+      environment
+    );
+    const remoteHead = (
+      await this.#git(["rev-parse", "--verify", "FETCH_HEAD^{commit}"])
+    ).stdout.trim();
+    if (!isGitObjectId(remoteHead)) throw new Error("Broker fetched an invalid remote head.");
+    await this.#git(["cat-file", "-e", `${input.expectedParent}^{commit}`]);
+    const tree = (
+      await this.#git(["rev-parse", "--verify", `${this.headRevision}^{tree}`])
+    ).stdout.trim();
+    if (!isGitObjectId(tree)) throw new Error("Broker prepared an invalid repaired tree.");
+    const reparented = (
+      await this.#git(
+        [
+          "-c",
+          `user.name=${this.options.authorName}`,
+          "-c",
+          `user.email=${this.options.authorEmail}`,
+          "commit-tree",
+          tree,
+          "-p",
+          input.expectedParent,
+          "-m",
+          input.title
+        ],
+        4 * 1_024 * 1_024,
+        undefined,
+        {
+          GIT_AUTHOR_DATE: input.timestamp,
+          GIT_COMMITTER_DATE: input.timestamp
+        }
+      )
+    ).stdout.trim();
+    if (!isGitObjectId(reparented)) throw new Error("Broker produced an invalid update commit.");
+    const [parent, observedTree] = await Promise.all([
+      this.#git(["rev-parse", "--verify", `${reparented}^`]),
+      this.#git(["rev-parse", "--verify", `${reparented}^{tree}`])
+    ]);
+    if (parent.stdout.trim() !== input.expectedParent || observedTree.stdout.trim() !== tree) {
+      throw new Error("Broker update commit does not preserve its exact parent and repaired tree.");
+    }
+    this.headRevision = reparented;
+    return { remoteHead, headRevision: reparented };
   }
 
   public async close(): Promise<void> {
@@ -388,6 +462,26 @@ async function canonicalDirectory(path: string): Promise<string> {
 
 function pathsOverlap(left: string, right: string): boolean {
   return pathWithin(left, right) || pathWithin(right, left);
+}
+
+function assertRemoteGitInput(input: {
+  readonly repositoryUrl: string;
+  readonly branchName: string;
+  readonly authorizationHeader: string;
+}): void {
+  if (!/^https:\/\/github\.com\/[a-z0-9-]+\/[a-z0-9._-]+\.git$/u.test(input.repositoryUrl)) {
+    throw new Error("Broker Git URL is outside GitHub.");
+  }
+  if (!/^[a-z0-9][a-z0-9._/-]*$/u.test(input.branchName)) {
+    throw new Error("Broker branch name is invalid.");
+  }
+  if (!/^AUTHORIZATION: basic [A-Za-z0-9+/=]+$/u.test(input.authorizationHeader)) {
+    throw new Error("Broker Git authorization header is invalid.");
+  }
+}
+
+function isGitObjectId(value: string): value is GitObjectId {
+  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value);
 }
 
 function pathWithin(parent: string, child: string): boolean {

@@ -19,6 +19,11 @@ import {
   factoryPullRequestRecordSchema,
   factoryPullRequestDispatchEventSchema,
   factoryPullRequestDispatchRunSchema,
+  factoryPullRequestAuthorityRecordSchema,
+  factoryPullRequestUpdateEventSchema,
+  factoryPullRequestUpdateProposalSchema,
+  factoryPullRequestUpdateRecordSchema,
+  factoryPullRequestUpdateRunSchema,
   factoryPreparationAuthoritySchema,
   factoryPreparationBundleSchema,
   factoryPreparationEventSchema,
@@ -155,6 +160,26 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public pullRequestRecord(input: unknown) {
     return encodeCanonicalDocument(factoryPullRequestRecordSchema.parse(input));
+  }
+
+  public pullRequestAuthorityRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestAuthorityRecordSchema.parse(input));
+  }
+
+  public pullRequestUpdateProposal(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestUpdateProposalSchema.parse(input));
+  }
+
+  public pullRequestUpdateRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestUpdateRecordSchema.parse(input));
+  }
+
+  public pullRequestUpdateRun(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestUpdateRunSchema.parse(input));
+  }
+
+  public pullRequestUpdateEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestUpdateEventSchema.parse(input));
   }
 
   public pullRequestDispatchRun(input: unknown) {
