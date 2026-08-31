@@ -11,6 +11,8 @@ import type {
 
 import type { FactoryWorkspace } from "./factory-workspace.js";
 
+export const factoryProcessCleanupUnconfirmedErrorCode = "process-cleanup-failed";
+
 export interface FactoryAgentExecutionInput {
   readonly request: FactoryAgentRunRequest;
   readonly executable: string;

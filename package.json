@@ -39,7 +39,7 @@
     "start": "npm run build:packages && bun apps/tui/src/main.tsx",
     "test": "vitest run && npm run test:bun",
     "test:bun": "npm run build:packages && bun scripts/run-bun-tests.ts",
-    "test:factory-sandbox": "AGENTLAB_RUN_FACTORY_SANDBOX=1 vitest run tests/runtime/systemd-factory-process-isolator.integration.test.ts",
+    "test:factory-sandbox": "AGENTLAB_RUN_FACTORY_SANDBOX=1 vitest run tests/runtime/systemd-factory-process-isolator.integration.test.ts tests/runtime/local-factory-preparation-recovery.integration.test.ts",
     "test:integration": "AGENTLAB_RUN_TMUX_INTEGRATION=1 vitest run && AGENTLAB_RUN_TMUX_INTEGRATION=1 npm run test:bun",
     "test:watch": "vitest",
     "typecheck": "tsc --build --pretty false",

@@ -4,13 +4,14 @@ import {
   type FactoryProcessIsolation
 } from "@agentlab/contracts";
 
-import type {
-  FactoryAgentExecutionInput,
-  FactoryAgentExecutionOutput,
-  FactoryAgentExecutor,
-  FactoryAgentExecutorCapability,
-  FactoryPreparationAgentExecutionInput,
-  FactoryPreparationAgentExecutor
+import {
+  factoryProcessCleanupUnconfirmedErrorCode,
+  type FactoryAgentExecutionInput,
+  type FactoryAgentExecutionOutput,
+  type FactoryAgentExecutor,
+  type FactoryAgentExecutorCapability,
+  type FactoryPreparationAgentExecutionInput,
+  type FactoryPreparationAgentExecutor
 } from "../../domain/factory-agent-executor.js";
 import {
   narrowFactoryResourceLimits,
@@ -204,5 +205,5 @@ function failureCode(kind: CommandFailureKind | null): string {
   if (kind === "exit") return "provider-exit";
   if (kind === "signal") return "provider-signal";
   if (kind === "spawn") return "provider-spawn";
-  return "process-cleanup-failed";
+  return factoryProcessCleanupUnconfirmedErrorCode;
 }

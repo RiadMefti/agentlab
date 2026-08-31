@@ -28,7 +28,7 @@ import type {
   FactoryArtifactStore,
   StoredFactoryArtifact
 } from "../../packages/runtime/src/domain/factory-artifact-store.js";
-import type { FactoryPreparationRecoveryProbe } from "../../packages/runtime/src/domain/factory-preparation-recovery.js";
+import type { FactoryPreparationRecoveryReconciler } from "../../packages/runtime/src/domain/factory-preparation-recovery.js";
 import type {
   FactorySkillSource,
   ResolvedFactorySkill
@@ -94,6 +94,9 @@ describe("FactoryPreparationService", () => {
       expect(context.agents.prompts[1]).not.toContain("## Exact specification");
       expect(context.agents.prompts[2]).toContain("## Exact specification");
       expect(context.workspaces.closedAttempts).toEqual([1, 1, 1]);
+      expect(context.workspaces.createdWorkspaceIds).toEqual(
+        context.agents.requests.map(({ executionId }) => executionId)
+      );
       expect(events.map(({ kind }) => kind)).toEqual([
         "registered",
         "phase-started",
@@ -137,7 +140,7 @@ describe("FactoryPreparationService", () => {
     }
   });
 
-  it("keeps an uncertain cleanup in-flight until a recovery probe proves inactivity", async () => {
+  it("keeps an uncertain cleanup in-flight until recovery proves inactivity", async () => {
     const context = await preparationContext({ failWorkspaceClose: true });
     try {
       await expect(context.service.advance(command(1))).rejects.toThrow(
@@ -150,10 +153,55 @@ describe("FactoryPreparationService", () => {
         lastEvent: { kind: "phase-started" }
       });
       await expect(context.service.recover(command(2))).rejects.toThrow(
-        "still live or cannot be disproved"
+        "preparation-process-not-inactive"
       );
       context.recovery.inactive = true;
       await expect(context.service.recover(command(3))).resolves.toMatchObject({
+        state: "registered",
+        lastEvent: { kind: "phase-abandoned" }
+      });
+    } finally {
+      context.repository.close();
+    }
+  });
+
+  it("keeps failed workspace acquisition in-flight until recovery proves no residue", async () => {
+    const context = await preparationContext({ failWorkspaceCreate: true });
+    try {
+      await expect(context.service.advance(command(1))).rejects.toThrow(
+        "workspace creation failed"
+      );
+      await expect(
+        context.repository.findById(context.fixture.request.taskId)
+      ).resolves.toMatchObject({
+        state: "qualifying",
+        lastEvent: { kind: "phase-started" }
+      });
+      context.recovery.inactive = true;
+      await expect(context.service.recover(command(2))).resolves.toMatchObject({
+        state: "registered",
+        lastEvent: { kind: "phase-abandoned" }
+      });
+    } finally {
+      context.repository.close();
+    }
+  });
+
+  it("does not remove a workspace or journal completion when process cleanup is unconfirmed", async () => {
+    const context = await preparationContext({ outputMode: "process-cleanup-failed" });
+    try {
+      await expect(context.service.advance(command(1))).rejects.toThrow(
+        "process cleanup was not confirmed"
+      );
+      await expect(
+        context.repository.findById(context.fixture.request.taskId)
+      ).resolves.toMatchObject({
+        state: "qualifying",
+        lastEvent: { kind: "phase-started" }
+      });
+      expect(context.workspaces.closedAttempts).toEqual([]);
+      context.recovery.inactive = true;
+      await expect(context.service.recover(command(2))).resolves.toMatchObject({
         state: "registered",
         lastEvent: { kind: "phase-abandoned" }
       });
@@ -504,12 +552,13 @@ describe("FactoryPreparationService", () => {
   });
 });
 
-type OutputMode = "success" | "invalid" | "needs-human";
+type OutputMode = "success" | "invalid" | "needs-human" | "process-cleanup-failed";
 
 async function preparationContext(
   options: {
     readonly outputMode?: OutputMode;
     readonly failWorkspaceClose?: boolean;
+    readonly failWorkspaceCreate?: boolean;
     readonly advertisePreparation?: boolean;
     readonly databasePath?: string;
     readonly timestamps?: readonly string[];
@@ -568,13 +617,16 @@ async function preparationContext(
       ownershipNonce: null
     })
   );
-  const workspaces = new FakePreparationWorkspaceManager(options.failWorkspaceClose === true);
+  const workspaces = new FakePreparationWorkspaceManager(
+    options.failWorkspaceClose === true,
+    options.failWorkspaceCreate === true
+  );
   const agents = new FakePreparationAgentExecutor(
     fixture,
     options.outputMode ?? "success",
     options.advertisePreparation !== false
   );
-  const recovery = new MutableRecoveryProbe();
+  const recovery = new MutableRecoveryReconciler();
   const timestamps = [
     ...(options.timestamps ?? [
       "2026-08-30T12:02:00.000Z",
@@ -646,14 +698,20 @@ class MemoryFactoryArtifactStore implements FactoryArtifactStore {
 
 class FakePreparationWorkspaceManager implements FactoryWorkspaceManager {
   public readonly createdAttempts: number[] = [];
+  public readonly createdWorkspaceIds: (string | undefined)[] = [];
   public readonly closedAttempts: number[] = [];
 
-  public constructor(private readonly failClose: boolean) {}
+  public constructor(
+    private readonly failClose: boolean,
+    private readonly failCreate: boolean
+  ) {}
 
   public create(input: CreateFactoryWorkspaceInput): Promise<FactoryWorkspace> {
     this.createdAttempts.push(input.attempt);
+    this.createdWorkspaceIds.push(input.workspaceId);
+    if (this.failCreate) return Promise.reject(new Error("workspace creation failed"));
     return Promise.resolve({
-      id: uuid(900 + input.attempt),
+      id: input.workspaceId ?? uuid(900 + input.attempt),
       taskId: input.taskId,
       attempt: input.attempt,
       repositoryRoot: input.repositoryRoot,
@@ -676,11 +734,18 @@ class FakePreparationWorkspaceManager implements FactoryWorkspaceManager {
   }
 }
 
-class MutableRecoveryProbe implements FactoryPreparationRecoveryProbe {
+class MutableRecoveryReconciler implements FactoryPreparationRecoveryReconciler {
   public inactive = false;
 
-  public confirmInactive(): Promise<boolean> {
-    return Promise.resolve(this.inactive);
+  public reconcile() {
+    return Promise.resolve(
+      this.inactive
+        ? ({ status: "inactive" } as const)
+        : ({
+            status: "uncertain",
+            reasonCode: "preparation-process-not-inactive"
+          } as const)
+    );
   }
 }
 
@@ -717,6 +782,27 @@ class FakePreparationAgentExecutor implements FactoryPreparationAgentExecutor {
     this.prompts.push(input.prompt);
     const times = phaseTimes(input.request.phase, input.request.attempt);
     const finalOutput = this.#finalOutput(input.request.phase);
+    if (this.outputMode === "process-cleanup-failed") {
+      return Promise.resolve({
+        status: "failed",
+        exitCode: null,
+        stdout: "",
+        stderr: "provider process tree may still be active",
+        finalOutput: null,
+        providerSessionId: null,
+        providerVersion: input.providerVersion,
+        harnessVersion: "test-harness-v1",
+        startedAt: times.startedAt,
+        finishedAt: times.finishedAt,
+        usage: successfulUsage(""),
+        usageComplete: false,
+        errorCode: "process-cleanup-failed",
+        isolation: testIsolation(
+          input.request.executionId,
+          narrowFactoryResourceLimits(input.resourceLimits, input.request.budget.maxProcesses)
+        )
+      });
+    }
     return Promise.resolve({
       status: "succeeded",
       exitCode: 0,

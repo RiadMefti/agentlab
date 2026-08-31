@@ -156,15 +156,26 @@ exact read-only/offline/no-secret worker profile, skill package, provider/model/
 capability grant, budget, attempt, request/authority digest, predecessor artifacts, and OS resource
 profile. The journal records `phase-started` before side effects and captures canonical run
 requests, run records, outputs, usage, isolation, and terminal decisions. Recovery can abandon an
-in-flight run only after a narrow probe positively confirms it inactive.
+in-flight run only after the local reconciler positively confirms it inactive. The durable execution
+ID binds the journal run, transient systemd scope, and disposable Git worktree. Recovery validates
+the canonical source repository, exact base commit, and factory root; checks the exact scope before
+cleanup, immediately before cleanup, and after cleanup; and requires non-blocking acquisition of the
+canonical task-directory `flock` held by every worktree Git command. The lock also remains held by
+an orphaned command after a control-plane crash. Recovery removes only the derived worktree or its
+exact partial directory, rejects symlink/path ambiguity, and verifies both Git registration and
+filesystem absence. Unknown or changing systemd state, a held or unobservable worktree lock,
+repository mismatch, and unconfirmed cleanup preserve the running journal state. Workspace
+acquisition failure and a process runner that cannot confirm tree cleanup also remain in-flight
+rather than manufacturing completion.
 
 Materialization replays all referenced artifacts and rejects missing, changed, substituted,
 over-budget, or identity-mismatched data. One SQLite transaction then inserts the immutable
 contract, the complete `intake → qualified → specified → planned` task-event chain, initial
 evidence, and the preparation `prepared` marker. A forced late insert failure is tested to leave
-neither a partial task ledger nor a false prepared marker. These paths remain internal: a concrete
-host recovery probe, composition root, operator command/TUI, and activation controls are still
-required before a live request can invoke them.
+neither a partial task ledger nor a false prepared marker. These paths remain internal: the Linux
+recovery adapter is not composed or exercised in the supported target-host CI lane, and a
+composition root, operator command/TUI, and activation controls are still required before a live
+request can invoke them.
 
 ```text
 registered → qualifying → qualified → specifying → specified → planning → planned → prepared
@@ -418,14 +429,14 @@ exist behind ports with focused fail-closed tests. The governed request-to-contr
 has trusted authority issuance, provider-neutral read-only workers, a crash-durable preparation
 journal, canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
 materialization. Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource
-isolation are implemented; the adversarial live sandbox test passes on the current Linux development
-host. They are intentionally not wired into the public runtime or TUI. No live agent task or PR has
-been created by this code. Phase 4 activation remains blocked until repository governance requires
-at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
-to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
-provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
-activation change must run the adversarial sandbox test in the supported target-host CI lane,
-configure protected-path ownership, and supply a separate short-lived broker identity.
+isolation are implemented; the live sandbox and preparation-recovery preflights pass on the current
+Linux development host. They are intentionally not wired into the public runtime or TUI. No live
+agent task or PR has been created by this code. Phase 4 activation remains blocked until repository
+governance requires at least one approval, dismisses stale reviews, requires approval of the latest
+push, applies rules to administrators, forbids force-push/deletion, and requires the exact `verify`
+check. Complete provider cost accounting must also be configured; an incomplete usage record denies
+PR creation. The activation change must run `test:factory-sandbox` in the supported target-host CI
+lane, configure protected-path ownership, and supply a separate short-lived broker identity.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -437,10 +448,11 @@ configure protected-path ownership, and supply a separate short-lived broker ide
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
    channels, cgroup CPU/memory/process enforcement, and bounded logs.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
-   deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, and separate
-   draft-only broker mechanics exist. Activation still requires a concrete crash-recovery probe,
-   public composition/operator boundary, current branch protection, isolated broker identity,
-   complete accounting, and human merge. No scheduler, auto-merge, release, or protected-path write.
+   deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
+   crash reconciler, and separate draft-only broker mechanics exist. Activation still requires the
+   public composition/operator boundary, target-host recovery/sandbox preflight, current branch
+   protection, isolated broker identity, complete accounting, and human merge. No scheduler,
+   auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, GitHub App
    identity, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and incident tooling.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
