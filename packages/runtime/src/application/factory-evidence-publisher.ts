@@ -10,6 +10,7 @@ import {
   type FactoryProcessIsolation,
   type FactoryPullRequestObservation,
   type FactoryPullRequestRepairAuthorization,
+  type FactoryPullRequestRepairRun,
   type FactoryPullRequestProposal,
   type FactoryPullRequestRecord,
   type FactoryReviewResult,
@@ -615,6 +616,45 @@ export class FactoryEvidencePublisher {
     ]);
   }
 
+  public async pullRequestRepairRun(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly run: CanonicalFactoryDocument<FactoryPullRequestRepairRun>;
+  }): Promise<StoredEvidenceBundle> {
+    if (
+      input.run.value.taskId !== input.task.contract.taskId ||
+      input.run.value.contractDigest !== input.task.contractDigest ||
+      input.run.value.policyBundleDigest !== input.task.contract.gateProfile.policyDigest ||
+      input.run.value.repository.id !== input.task.contract.repository.id ||
+      input.run.value.repository.baseRevision !== input.task.contract.repository.baseRevision
+    ) {
+      throw new Error("PR repair run does not match its immutable task contract.");
+    }
+    const artifact = await this.#documentArtifact(
+      input.run,
+      "application/vnd.agentlab.pull-request-repair-run.v1+json"
+    );
+    return this.#append(this.#credential("controlPlane"), input.task, [
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "execution",
+        result: "informational",
+        subjectDigest: input.run.value.authorizationDigest,
+        artifact,
+        producer: controlPlanePolicyActor,
+        createdAt: input.run.value.createdAt,
+        claims: [
+          { name: "repair-run-digest", value: input.run.digest },
+          { name: "authorization-id", value: input.run.value.authorizationId },
+          { name: "authorization-digest", value: input.run.value.authorizationDigest },
+          {
+            name: "contract-repair-attempt",
+            value: String(input.run.value.contractRepairAttempt)
+          }
+        ]
+      })
+    ]);
+  }
+
   async #textArtifact(content: string, mediaType: string) {
     const stored = await this.dependencies.artifacts.putText(content);
     return { digest: stored.digest, mediaType, sizeBytes: stored.sizeBytes };
@@ -653,6 +693,13 @@ const controlPlaneGateActor = {
   kind: "control-plane",
   role: "gate-runner",
   id: "agentlab-local-gates",
+  sessionId: null
+} as const;
+
+const controlPlanePolicyActor = {
+  kind: "control-plane",
+  role: "policy-engine",
+  id: "agentlab-policy",
   sessionId: null
 } as const;
 

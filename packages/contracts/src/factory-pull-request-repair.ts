@@ -126,6 +126,46 @@ export type FactoryPullRequestRepairAuthorization = z.infer<
   typeof factoryPullRequestRepairAuthorizationSchema
 >;
 
+/**
+ * Immutable header for one credentialless post-PR repair execution. The authorization digest is
+ * the capability being consumed; all other coordinates make that transitive binding inspectable
+ * without reopening mutable task or remote state.
+ */
+export const factoryPullRequestRepairRunSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.pull-request-repair-run.v1"),
+    runId: z.uuid(),
+    taskId: z.uuid(),
+    contractDigest: sha256DigestSchema,
+    policyBundleDigest: sha256DigestSchema,
+    authorizationId: z.uuid(),
+    authorizationDigest: sha256DigestSchema,
+    observationDigest: sha256DigestSchema,
+    priorPatchProposalDigest: sha256DigestSchema,
+    repository: z
+      .object({
+        id: factoryIdentifierSchema,
+        baseRevision: gitObjectIdSchema
+      })
+      .strict(),
+    contractRepairAttempt: z.number().int().min(1).max(20),
+    maximumAttempts: z.number().int().min(1).max(20),
+    createdAt: factoryTimestampSchema,
+    correlationId: z.uuid()
+  })
+  .strict()
+  .superRefine((run, context) => {
+    if (run.maximumAttempts !== run.contractRepairAttempt) {
+      context.addIssue({
+        code: "custom",
+        path: ["maximumAttempts"],
+        message: "A PR repair run may consume only its exact contract repair attempt."
+      });
+    }
+  });
+
+export type FactoryPullRequestRepairRun = z.infer<typeof factoryPullRequestRepairRunSchema>;
+
 function hasAsciiControl(value: string): boolean {
   return Array.from(value).some((character) => {
     const codePoint = character.codePointAt(0) ?? 0;

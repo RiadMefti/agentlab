@@ -12,6 +12,7 @@ import type {
   FactoryPolicyEvaluationRecord,
   FactoryPullRequestObservation,
   FactoryPullRequestRepairAuthorization,
+  FactoryPullRequestRepairRun,
   FactoryPullRequestProposal,
   FactoryPullRequestRecord,
   FactoryPullRequestDispatchEvent,
@@ -69,6 +70,7 @@ export interface FactoryDocumentCodec {
   pullRequestRepairAuthorization(
     input: unknown
   ): CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>;
+  pullRequestRepairRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestRepairRun>;
   pullRequestProposal(input: unknown): CanonicalFactoryDocument<FactoryPullRequestProposal>;
   pullRequestRecord(input: unknown): CanonicalFactoryDocument<FactoryPullRequestRecord>;
   pullRequestDispatchRun(input: unknown): CanonicalFactoryDocument<FactoryPullRequestDispatchRun>;

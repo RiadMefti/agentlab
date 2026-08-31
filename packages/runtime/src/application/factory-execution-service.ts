@@ -348,6 +348,7 @@ export class FactoryExecutionService {
       resolvedSkills,
       attempt,
       meter,
+      repairAttempts: progress.repairs,
       journal
     });
     progress.reviews = reviewResult.reviews;

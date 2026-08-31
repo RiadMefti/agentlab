@@ -144,6 +144,8 @@ function workerRuntime(
       admitExecution: noResult,
       execute: noResult,
       recoverExecution: noResult,
+      executePullRequestRepair: noResult,
+      recoverPullRequestRepair: noResult,
       runTask: noResult
     },
     close

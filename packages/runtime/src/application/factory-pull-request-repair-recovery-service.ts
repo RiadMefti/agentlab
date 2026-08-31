@@ -1,12 +1,12 @@
-import { factoryIdentifierSchema } from "@agentlab/contracts";
+import { factoryIdentifierSchema, sha256DigestSchema } from "@agentlab/contracts";
 import { z } from "zod";
 
 import type { ConversationRepository } from "../domain/conversation-repository.js";
-import type {
-  FactoryExecutionRepository,
-  FactoryExecutionSnapshot
-} from "../domain/factory-execution-repository.js";
 import { activeFactoryExecutionSnapshotCoordinates } from "../domain/factory-execution-integrity.js";
+import type {
+  FactoryPullRequestRepairExecutionRepository,
+  FactoryPullRequestRepairExecutionSnapshot
+} from "../domain/factory-pull-request-repair-execution-repository.js";
 import type {
   FactoryEvidenceRepository,
   FactoryTaskRepository,
@@ -26,12 +26,15 @@ import {
 const recoveryCommandSchema = z
   .object({
     taskId: z.uuid(),
+    authorizationDigest: sha256DigestSchema,
     correlationId: z.uuid()
   })
   .strict();
 
-export interface FactoryExecutionRecoveryServiceDependencies extends FactoryExecutionJournalDependencies {
-  readonly executions: FactoryExecutionRepository;
+export interface FactoryPullRequestRepairRecoveryServiceDependencies extends FactoryExecutionJournalDependencies<
+  FactoryPullRequestRepairExecutionSnapshot["run"]
+> {
+  readonly executions: FactoryPullRequestRepairExecutionRepository;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly evidence: Pick<FactoryEvidenceRepository, "latestEvidence">;
   readonly conversations: Pick<ConversationRepository, "findById">;
@@ -39,24 +42,37 @@ export interface FactoryExecutionRecoveryServiceDependencies extends FactoryExec
   readonly workspaces: FactoryWorkspaceRecoveryReconciler;
 }
 
-export interface FactoryExecutionRecoveryOutcome {
-  readonly execution: FactoryExecutionSnapshot;
+export interface FactoryPullRequestRepairRecoveryOutcome {
+  readonly execution: FactoryPullRequestRepairExecutionSnapshot;
   readonly task: FactoryTaskSnapshot;
 }
 
-/** Recovers one interrupted execution only after exact process and worktree inactivity proof. */
-export class FactoryExecutionRecoveryService {
+/** Abandons an interrupted repair only after exact process and worktree inactivity proof. */
+export class FactoryPullRequestRepairRecoveryService {
   readonly #actorId: string;
 
-  public constructor(private readonly dependencies: FactoryExecutionRecoveryServiceDependencies) {
+  public constructor(
+    private readonly dependencies: FactoryPullRequestRepairRecoveryServiceDependencies
+  ) {
     this.#actorId = factoryIdentifierSchema.parse(dependencies.controlPlaneActorId);
   }
 
-  public async recover(input: unknown): Promise<FactoryExecutionRecoveryOutcome> {
+  public async recover(input: unknown): Promise<FactoryPullRequestRepairRecoveryOutcome> {
     const command = recoveryCommandSchema.parse(input);
-    let execution = await this.dependencies.executions.findByTaskId(command.taskId);
-    if (execution === null) throw new Error(`Factory task ${command.taskId} has no execution run.`);
+    let execution = await this.dependencies.executions.findByAuthorizationDigest(
+      command.authorizationDigest
+    );
+    if (execution?.run.taskId !== command.taskId) {
+      throw new Error("Factory task has no matching PR repair execution.");
+    }
     let task = await this.#requireTask(command.taskId);
+    if (
+      execution.run.contractDigest !== task.contractDigest ||
+      execution.run.repository.id !== task.contract.repository.id ||
+      execution.run.repository.baseRevision !== task.contract.repository.baseRevision
+    ) {
+      throw new Error("PR repair execution does not match its immutable task contract.");
+    }
     if (execution.state === "completed") return { execution, task };
 
     if (execution.state !== "abandoned") {
@@ -68,7 +84,7 @@ export class FactoryExecutionRecoveryService {
         const repositoryRoot =
           conversation?.lifecycleState === "active" ? conversation.workspacePath : null;
         if (repositoryRoot === null) {
-          throw new Error("Factory execution recovery requires its active owning conversation.");
+          throw new Error("PR repair recovery requires its active owning conversation.");
         }
         const result = await this.dependencies.workspaces.reconcile({
           taskId: task.contract.taskId,
@@ -79,11 +95,11 @@ export class FactoryExecutionRecoveryService {
           processExecutionIds: active.operationId === null ? [] : [active.operationId]
         });
         if (result.status !== "inactive") {
-          throw new Error(`Execution recovery is uncertain: ${result.reasonCode}.`);
+          throw new Error(`PR repair recovery is uncertain: ${result.reasonCode}.`);
         }
       }
       const journal = FactoryExecutionJournalSession.resume(this.dependencies, execution);
-      await journal.abandon("execution-interrupted", command.correlationId);
+      await journal.abandon("pr-repair-interrupted", command.correlationId);
       execution = journal.snapshot;
     }
 
@@ -93,15 +109,13 @@ export class FactoryExecutionRecoveryService {
 
   async #terminalize(task: FactoryTaskSnapshot): Promise<FactoryTaskSnapshot> {
     if (isTerminalFactoryTaskState(task.state)) return task;
-    const preferred =
-      task.state === "reviewing" || task.state === "pr-proposed" ? "needs-attention" : "failed";
-    const nextState = isFactoryTaskTransitionAllowed(task.state, preferred)
-      ? preferred
+    const nextState = isFactoryTaskTransitionAllowed(task.state, "needs-attention")
+      ? "needs-attention"
       : isFactoryTaskTransitionAllowed(task.state, "quarantined")
         ? "quarantined"
         : null;
     if (nextState === null) {
-      throw new Error(`Interrupted execution cannot safely terminalize task state ${task.state}.`);
+      throw new Error(`Interrupted PR repair cannot terminalize task state ${task.state}.`);
     }
     const latest = await this.dependencies.evidence.latestEvidence(task.contract.taskId);
     return this.dependencies.controlPlane.transition({
@@ -114,7 +128,7 @@ export class FactoryExecutionRecoveryService {
         id: this.#actorId,
         sessionId: null
       },
-      reasonCode: "execution-interrupted",
+      reasonCode: "pr-repair-interrupted",
       evidenceBundleDigest: latest?.digest ?? null
     });
   }

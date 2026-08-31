@@ -158,7 +158,9 @@ function coordinator(
     materializer: { materialize: noResult },
     admission: { admit: noResult },
     execution: { execute: noResult },
-    executionRecovery: { recover: noResult }
+    executionRecovery: { recover: noResult },
+    pullRequestRepair: { execute: noResult },
+    pullRequestRepairRecovery: { recover: noResult }
   });
   return new LocalFactoryWorkerCoordinator({
     operator,

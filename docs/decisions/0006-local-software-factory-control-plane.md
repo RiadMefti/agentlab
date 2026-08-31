@@ -522,10 +522,21 @@ selects formal exact-head changes-requested reviews from trusted human repositor
 their linked inline comments, and failed checks from pinned producers by IDs, never by interpreting
 or copying raw feedback. Complete initial usage determines the next remaining contract repair slot;
 an outstanding authorization prevents a second reservation. Admission is idempotent and performs no
-model execution, task transition, or remote write. The later worker stage must consume it in a fresh
-isolation without widening the original contract, and the repaired patch must repeat all gates and
-independent review before a separate broker update. Exhausted budget becomes `needs-attention`; that
-execution/update path is not yet implemented.
+model execution, task transition, or remote write.
+
+The separate `worker-repair-pr` command now consumes that exact authorization. Its immutable
+`agentlab.pull-request-repair-run.v1` header and SQLite v9 append-only journal are durable before
+the model starts and bind the task/contract/policy, authorization, observation, prior patch, exact
+base, cumulative repair slot, and correlation ID. The credentialless worker creates a fresh
+exact-base worktree, reapplies the prior patch, resolves only the selected feedback IDs from
+authenticated local observation evidence, labels all bodies untrusted, and permits one repairer
+attempt. It then repeats the complete gate profile and requires a distinct identified read-only
+reviewer. Cumulative time/token/tool/process/output/cost usage is carried forward from initial
+execution; exhaustion or incomplete accounting becomes `needs-attention`. A crash is reconciled
+through exact journal-owned process/worktree coordinates and cannot reuse the consumed
+authorization. Success returns to a new local `pr-proposed` checkpoint. The worker still has no
+remote credential or write port; brokered branch update and re-observation remain the next separate
+slice.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
 stale-review dismissal, last-push approval, CODEOWNERS for protected paths, linear history, and a
@@ -639,9 +650,11 @@ tmux, terminal, interactive discovery, and every provider module except the expl
 allowlist. The default bundle remains empty. The normal TUI has no enable or PR action; the explicit
 non-interactive human command can change only the local broker switch, while the explicit draft
 command remains blocked by current governance and provisioning controls. The explicit worker task
-command now supplies the local request-to-proposal driver, but no live configuration has been
-provisioned or invoked. No live authority change, agent task, PR, deployment, or publication has
-been performed through this code.
+command now supplies the local request-to-proposal driver, and the authorization-bound repair
+command has its own immutable SQLite v9 journal, fresh isolation, cumulative budgets, repeated
+gates, distinct review, and deterministic crash recovery. No live configuration has been provisioned
+or invoked. No live authority change, agent task, PR, deployment, or publication has been performed
+through this code.
 
 The pre-contract intake is now a fifth mechanically separate runtime entry,
 `@agentlab/runtime/factory-intake`. It loads an owner-only configuration plus separately protected
@@ -684,13 +697,16 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    human-only authority composition owns atomic enable/disable without broker or scheduler
    capability. The explicit worker task command now connects intake to the local broker-ready
    proposal checkpoint without joining worker and broker authority. A separate bounded read command
-   records exact-head trusted checks and untrusted review feedback without invoking repair.
-   Activation still requires the missing review protections, provisioned live key/config and exact
-   cost rules, passing live preflights, separate human execution of the authority ceremony, and
-   human merge. No scheduler, auto-merge, release, or protected-path write.
-5. **CI repair and operations:** feedback qualification, bounded fresh repair attempts, credential
+   records exact-head trusted checks and untrusted review feedback. A separate admission command
+   selects actionable facts, and the credentialless repair command consumes one immutable
+   authorization in a fresh worktree, repeats all gates and independent review, and stops before a
+   remote branch update. Activation still requires the missing review protections, provisioned live
+   key/config and exact cost rules, passing live preflights, separate human execution of the
+   authority ceremony, and human merge. No scheduler, auto-merge, release, or protected-path write.
+5. **CI repair and operations:** brokered repaired-branch update and re-observation, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
-   incident tooling.
+   incident tooling. Deterministic feedback qualification and bounded fresh repair execution now
+   exist.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
    provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new

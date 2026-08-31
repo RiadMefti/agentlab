@@ -130,9 +130,22 @@ coordinates, selected review/comment IDs from trusted human repository associati
 failing check identities; raw bodies remain only in the separately bound untrusted observation
 artifact. An existing exact authorization is replayed idempotently, while another outstanding
 authorization blocks a second reservation. This broker composition still has no
-provider/model/process port, and admission neither changes task state nor updates the PR. A later
-credentialless worker must consume the authorization in a fresh isolation and repeat all gates and
-independent review before a separate broker update can exist.
+provider/model/process port, and admission neither changes task state nor updates the PR.
+
+The separate `worker-repair-pr` command consumes one exact authorization through the credentialless
+worker composition. It requires the owner-only worker config, task UUID, authorization digest,
+policy digest, and literal `--confirm-repair`; scheduler-disabled alone is ignored for this explicit
+manual operation. The worker revalidates the completed dispatch, latest exact observation,
+authorization, prior patch, cumulative usage, contract, policy, repository/base commit, and pinned
+repair skill before creating an immutable repair-run record. SQLite version 9 stores that record and
+its append-only execution-event chain before a model starts. One fresh exact-base worktree reapplies
+the prior patch, one repairer sees only the selected feedback bodies marked as untrusted data, all
+strict gates run again, and a distinct read-only reviewer must approve. The attempt cannot retry
+under the same authorization, every resource counter remains cumulative, and interruption is
+reconciled from exact journal-owned process/worktree coordinates before abandonment and a safe task
+terminal state. Success returns to a local `pr-proposed` checkpoint. The composition still has no
+GitHub, broker credential, authority-control, merge, or release port; publishing the repaired branch
+is a later, separately authorized broker operation.
 
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
 policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
@@ -245,6 +258,14 @@ checkpoint without creating a second PR or manufacturing completion. A checkpoin
 broker revocation performs no new write. If revocation races an already in-flight remote call, its
 exact result is journaled but the task cannot advance; the dispatch remains recoverable.
 
+Post-PR repair uses a different SQLite version 9 journal rather than reopening the terminal initial
+execution journal. Its immutable header binds the authorization, observation, prior patch, task
+contract, policy, repository/base, cumulative repair slot, and correlation ID. The shared execution
+event vocabulary records the exact worktree plus every repairer, gate, and reviewer operation, while
+database constraints allow only one run per authorization and per contract repair attempt. This
+keeps initial implementation history immutable and makes authorization consumption independently
+auditable.
+
 The supported Linux-host preflight is a distinct required `factory-sandbox` CI job. It executes the
 live systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash
 recovery, and a Bubblewrap probe that proves the source checkout is hidden, dependencies are
@@ -292,22 +313,25 @@ work is cost- or host-blocked, and close drains admitted work and proves process
 repositories and the lease are released. The port exposes no intake-authority issuer, control
 switch, GitHub adapter, or broker credential. An explicit policy-pinned `worker-run` command can
 resume one already registered task through those existing services and stops at broker readiness; it
-does not enable the scheduler or perform a remote write. A separate broker composition, owner-only
-key source, readiness command, and explicit draft-only command also exist. The isolated human
-authority composition and non-interactive CLI can change only the broker switch; the normal TUI
-cannot invoke factory authority, worker, or broker commands. Current branch protection requires
-exact `verify` and `factory-sandbox` checks, dismisses stale reviews, enforces administrators, and
-forbids force-push and deletion. It still has zero required approvals, does not require approval of
-the latest push, and has neither a CODEOWNERS policy nor required code-owner review. Preflight
-therefore reports blocked for those controls and `cost-policy-unconfigured`. The cost-accounting
-mechanism exists, but the repository ships no live config or provider/model rates. Config v2 can now
-provision a reviewed owner-only rate card; actual rate, authority config, and broker-key
-provisioning remain activation prerequisites. An incomplete usage record already denies PR creation,
-and the explicit write command refuses a blocked preflight or unexpected policy digest. Governed
-intake is implemented but no live intake configuration or task has been provisioned. No live agent
-task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
-are implemented; feedback qualification, fresh-worker PR repair, scheduler/quotas, eval promotion,
-merge, release, canary, and incident automation remain later stages.
+does not enable the scheduler or perform a remote write. The authorization-bound `worker-repair-pr`
+command uses the same closure for one fresh post-PR attempt, repeats the gate/review floor, and
+stops at a new local proposal. A separate broker composition, owner-only key source, readiness
+command, and explicit draft-only command also exist. The isolated human authority composition and
+non-interactive CLI can change only the broker switch; the normal TUI cannot invoke factory
+authority, worker, or broker commands. Current branch protection requires exact `verify` and
+`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
+and deletion. It still has zero required approvals, does not require approval of the latest push,
+and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
+blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
+the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
+owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
+prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
+refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
+intake configuration or task has been provisioned. No live agent task or PR has been created by this
+code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
+and fresh credentialless repair execution are implemented. Brokered branch update and
+re-observation, scheduler/quotas, eval promotion, merge, release, canary, and incident automation
+remain later stages.
 
 ## Dependency map
 

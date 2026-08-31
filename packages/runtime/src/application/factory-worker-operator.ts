@@ -15,6 +15,14 @@ import type {
   FactoryExecutionService
 } from "./factory-execution-service.js";
 import type {
+  FactoryPullRequestRepairExecutionOutcome,
+  FactoryPullRequestRepairExecutionService
+} from "./factory-pull-request-repair-execution-service.js";
+import type {
+  FactoryPullRequestRepairRecoveryOutcome,
+  FactoryPullRequestRepairRecoveryService
+} from "./factory-pull-request-repair-recovery-service.js";
+import type {
   FactoryPreparationMaterializationResult,
   FactoryPreparationMaterializer
 } from "./factory-preparation-materializer.js";
@@ -56,6 +64,8 @@ export interface FactoryWorkerOperatorDependencies {
   readonly admission: Pick<FactoryExecutionAdmissionService, "admit">;
   readonly execution: Pick<FactoryExecutionService, "execute">;
   readonly executionRecovery: Pick<FactoryExecutionRecoveryService, "recover">;
+  readonly pullRequestRepair: Pick<FactoryPullRequestRepairExecutionService, "execute">;
+  readonly pullRequestRepairRecovery: Pick<FactoryPullRequestRepairRecoveryService, "recover">;
 }
 
 /** Credentialless worker boundary; it can observe controls but cannot grant authority. */
@@ -123,6 +133,19 @@ export class FactoryWorkerOperator {
 
   public recoverExecution(input: unknown): Promise<FactoryExecutionRecoveryOutcome> {
     return this.dependencies.executionRecovery.recover(input);
+  }
+
+  public async executePullRequestRepair(
+    input: unknown
+  ): Promise<FactoryPullRequestRepairExecutionOutcome> {
+    await this.#requireOperationalHost();
+    return this.dependencies.pullRequestRepair.execute(input);
+  }
+
+  public recoverPullRequestRepair(
+    input: unknown
+  ): Promise<FactoryPullRequestRepairRecoveryOutcome> {
+    return this.dependencies.pullRequestRepairRecovery.recover(input);
   }
 
   async #requireOperationalHost(): Promise<void> {

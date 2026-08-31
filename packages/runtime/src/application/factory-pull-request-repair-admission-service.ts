@@ -24,6 +24,7 @@ import {
 } from "./factory-evidence-publisher.js";
 import {
   FactoryPullRequestRepairEvidenceReader,
+  requireFactoryPullRequestRepairDispatch,
   type FactoryPullRequestObservedEvidence
 } from "./factory-pull-request-repair-evidence.js";
 
@@ -94,28 +95,11 @@ export class FactoryPullRequestRepairAdmissionService {
     }
     const inspectedAt = factoryTimestampSchema.parse(this.dependencies.now());
     if (inspectedAt >= task.contract.expiresAt) return denied("task-contract-expired");
-    const dispatch = await this.dependencies.dispatches.findByTaskId(command.taskId);
-    if (dispatch?.state !== "completed" || dispatch.record === null) {
-      throw new Error("PR repair admission requires a completed durable dispatch record.");
-    }
-    const record = this.dependencies.documents.pullRequestRecord(dispatch.record);
-    if (
-      dispatch.run.taskId !== task.contract.taskId ||
-      dispatch.run.contractDigest !== task.contractDigest ||
-      dispatch.run.proposal.taskId !== task.contract.taskId ||
-      dispatch.run.proposal.contractDigest !== task.contractDigest ||
-      dispatch.run.proposal.repositoryId !== task.contract.repository.id ||
-      dispatch.run.proposal.baseRevision !== task.contract.repository.baseRevision ||
-      record.value.taskId !== task.contract.taskId ||
-      record.value.contractDigest !== task.contractDigest ||
-      record.value.proposalDigest !== dispatch.run.proposalDigest ||
-      record.value.repositoryId !== task.contract.repository.id ||
-      record.value.baseRevision !== task.contract.repository.baseRevision ||
-      record.value.branchName !== dispatch.run.proposal.branchName ||
-      record.value.brokerId !== dispatch.run.brokerId
-    ) {
-      throw new Error("PR repair dispatch does not match its immutable task contract.");
-    }
+    const { dispatch, record } = requireFactoryPullRequestRepairDispatch(
+      task,
+      await this.dependencies.dispatches.findByTaskId(command.taskId),
+      this.dependencies.documents
+    );
     const bundles = await this.dependencies.evidence.listEvidence(command.taskId);
     const observed = await this.#evidenceReader.exactLatestObservation({
       bundles,
@@ -139,6 +123,14 @@ export class FactoryPullRequestRepairAdmissionService {
       proposalDigest: dispatch.run.proposalDigest,
       priorPatchProposalDigest: dispatch.run.proposal.patchProposalDigest
     });
+    const consumedRuns = await this.#evidenceReader.repairRuns({
+      bundles,
+      task,
+      authorizations: existing
+    });
+    const consumedAuthorizationDigests = new Set(
+      consumedRuns.map(({ value }) => value.authorizationDigest)
+    );
     const exactExisting = existing.find(
       ({ value }) => value.observationDigest === observed.observation.digest
     );
@@ -156,7 +148,9 @@ export class FactoryPullRequestRepairAdmissionService {
         created: false
       };
     }
-    if (existing.length > 0) return denied("repair-authorization-outstanding");
+    if (existing.some(({ digest }) => !consumedAuthorizationDigests.has(digest))) {
+      return denied("repair-authorization-outstanding");
+    }
 
     const usage = await this.#evidenceReader.initialUsage({
       bundles,

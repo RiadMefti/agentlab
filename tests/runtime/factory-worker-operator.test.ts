@@ -38,10 +38,18 @@ describe("FactoryWorkerOperator", () => {
     await expect(operator.materializePreparation({})).rejects.toThrow(/cost policy/u);
     await expect(operator.admitExecution({})).rejects.toThrow(/cost policy/u);
     await expect(operator.execute({})).rejects.toThrow(/cost policy/u);
+    await expect(operator.executePullRequestRepair({})).rejects.toThrow(/cost policy/u);
     await expect(operator.recoverPreparation({ taskId: "recovery" })).resolves.toBeUndefined();
     await expect(operator.recoverExecution({ taskId: "recovery" })).resolves.toBeUndefined();
+    await expect(
+      operator.recoverPullRequestRepair({ taskId: "recovery" })
+    ).resolves.toBeUndefined();
     expect(unpriced.hostInspect).not.toHaveBeenCalled();
-    expect(unpriced.mutations).toEqual(["recover-preparation", "recover-execution"]);
+    expect(unpriced.mutations).toEqual([
+      "recover-preparation",
+      "recover-execution",
+      "recover-pr-repair"
+    ]);
 
     const unhealthy = dependencies({ hostReasonCodes: ["systemd-run-identity-unverified"] });
     await expect(new FactoryWorkerOperator(unhealthy.value).execute({})).rejects.toThrow(
@@ -58,11 +66,13 @@ describe("FactoryWorkerOperator", () => {
     await expect(operator.materializePreparation({ taskId: "task" })).resolves.toBeUndefined();
     await expect(operator.admitExecution({ taskId: "task" })).resolves.toBeUndefined();
     await expect(operator.execute({ taskId: "task" })).resolves.toBeUndefined();
+    await expect(operator.executePullRequestRepair({ taskId: "task" })).resolves.toBeUndefined();
     expect(fixture.mutations).toEqual([
       "advance-preparation",
       "materialize-preparation",
       "admit-execution",
-      "execute"
+      "execute",
+      "execute-pr-repair"
     ]);
   });
 
@@ -125,7 +135,9 @@ function dependencies(
       materializer: { materialize: operation("materialize-preparation") },
       admission: { admit: operation("admit-execution") },
       execution: { execute: operation("execute") },
-      executionRecovery: { recover: operation("recover-execution") }
+      executionRecovery: { recover: operation("recover-execution") },
+      pullRequestRepair: { execute: operation("execute-pr-repair") },
+      pullRequestRepairRecovery: { recover: operation("recover-pr-repair") }
     }
   };
 }

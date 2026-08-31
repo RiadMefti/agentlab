@@ -3,24 +3,42 @@ import {
   factoryTimestampSchema,
   type FactoryAgentRunRequest,
   type FactoryExecutionEvent,
+  type FactoryExecutionRun,
   type FactoryTaskState,
   type Sha256Digest
 } from "@agentlab/contracts";
 import { z } from "zod";
 
-import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
 import type {
-  FactoryExecutionRepository,
-  FactoryExecutionSnapshot
+  CanonicalFactoryDocument,
+  FactoryDocumentCodec
+} from "../domain/factory-documents.js";
+import type {
+  FactoryExecutionJournalRepository,
+  FactoryExecutionJournalRun,
+  FactoryExecutionJournalSnapshot,
+  FactoryExecutionRepository
 } from "../domain/factory-execution-repository.js";
 import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
 
-export interface FactoryExecutionJournalDependencies {
-  readonly executions: FactoryExecutionRepository;
+export interface FactoryExecutionJournalDependencies<
+  Run extends FactoryExecutionJournalRun = FactoryExecutionRun
+> {
+  readonly executions: FactoryExecutionJournalRepository<Run>;
   readonly documents: FactoryDocumentCodec;
   readonly now: () => string;
   readonly createId: () => string;
   readonly controlPlaneActorId: string;
+}
+
+/** Minimum journal capability required by provider and deterministic-gate operations. */
+export interface FactoryExecutionOperationJournal {
+  startAgent(request: FactoryAgentRunRequest, requestDigest: Sha256Digest): Promise<void>;
+  startGate(gateId: string): Promise<string>;
+  finishOperation(
+    result: "succeeded" | "failed" | "timed-out" | "error",
+    recordDigest: Sha256Digest
+  ): Promise<void>;
 }
 
 type FinishedTaskState = Extract<
@@ -29,18 +47,22 @@ type FinishedTaskState = Extract<
 >;
 
 /** Serializes caller-owned execution coordinates into the durable journal before side effects. */
-export class FactoryExecutionJournalSession {
+export class FactoryExecutionJournalSession<
+  Run extends FactoryExecutionJournalRun = FactoryExecutionRun
+> implements FactoryExecutionOperationJournal {
   readonly #actor: FactoryExecutionEvent["actor"];
 
   private constructor(
-    private readonly dependencies: FactoryExecutionJournalDependencies,
-    private snapshotValue: FactoryExecutionSnapshot
+    private readonly dependencies: FactoryExecutionJournalDependencies<Run>,
+    private snapshotValue: FactoryExecutionJournalSnapshot<Run>
   ) {
     this.#actor = policyActor(dependencies.controlPlaneActorId);
   }
 
   public static async start(
-    dependencies: FactoryExecutionJournalDependencies,
+    dependencies: FactoryExecutionJournalDependencies & {
+      readonly executions: FactoryExecutionRepository;
+    },
     task: FactoryTaskSnapshot,
     correlationId: string
   ): Promise<FactoryExecutionJournalSession> {
@@ -59,6 +81,14 @@ export class FactoryExecutionJournalSession {
       createdAt,
       correlationId: parsedCorrelationId
     });
+    return FactoryExecutionJournalSession.register(dependencies, run, "execution-registered");
+  }
+
+  public static async register<RegisteredRun extends FactoryExecutionJournalRun>(
+    dependencies: FactoryExecutionJournalDependencies<RegisteredRun>,
+    run: CanonicalFactoryDocument<RegisteredRun>,
+    reasonCode: string
+  ): Promise<FactoryExecutionJournalSession<RegisteredRun>> {
     const registered = dependencies.documents.executionEvent({
       schemaVersion: "agentlab.execution-event.v1",
       eventId: uuid(dependencies),
@@ -72,23 +102,23 @@ export class FactoryExecutionJournalSession {
       from: null,
       to: "ready",
       actor: policyActor(dependencies.controlPlaneActorId),
-      occurredAt: createdAt,
-      reasonCode: "execution-registered",
+      occurredAt: run.value.createdAt,
+      reasonCode: factoryIdentifierSchema.parse(reasonCode),
       summary: null,
-      correlationId: parsedCorrelationId
+      correlationId: run.value.correlationId
     });
     const snapshot = await dependencies.executions.register(run, registered);
-    return new FactoryExecutionJournalSession(dependencies, snapshot);
+    return new FactoryExecutionJournalSession<RegisteredRun>(dependencies, snapshot);
   }
 
-  public static resume(
-    dependencies: FactoryExecutionJournalDependencies,
-    snapshot: FactoryExecutionSnapshot
-  ): FactoryExecutionJournalSession {
-    return new FactoryExecutionJournalSession(dependencies, snapshot);
+  public static resume<ResumedRun extends FactoryExecutionJournalRun>(
+    dependencies: FactoryExecutionJournalDependencies<ResumedRun>,
+    snapshot: FactoryExecutionJournalSnapshot<ResumedRun>
+  ): FactoryExecutionJournalSession<ResumedRun> {
+    return new FactoryExecutionJournalSession<ResumedRun>(dependencies, snapshot);
   }
 
-  public get snapshot(): FactoryExecutionSnapshot {
+  public get snapshot(): FactoryExecutionJournalSnapshot<Run> {
     return this.snapshotValue;
   }
 
@@ -264,10 +294,10 @@ function policyActor(id: string) {
   } as const;
 }
 
-function uuid(dependencies: FactoryExecutionJournalDependencies): string {
+function uuid(dependencies: Pick<FactoryExecutionJournalDependencies, "createId">): string {
   return z.uuid().parse(dependencies.createId());
 }
 
-function timestamp(dependencies: FactoryExecutionJournalDependencies): string {
+function timestamp(dependencies: Pick<FactoryExecutionJournalDependencies, "now">): string {
   return factoryTimestampSchema.parse(dependencies.now());
 }

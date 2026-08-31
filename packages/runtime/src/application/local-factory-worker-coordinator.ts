@@ -4,6 +4,8 @@ import type { FactoryExecutionAdmissionOutcome } from "./factory-execution-admis
 import type { FactoryExecutionRecoveryOutcome } from "./factory-execution-recovery-service.js";
 import type { FactoryExecutionOutcome } from "./factory-execution-service.js";
 import type { FactoryPreparationMaterializationResult } from "./factory-preparation-materializer.js";
+import type { FactoryPullRequestRepairExecutionOutcome } from "./factory-pull-request-repair-execution-service.js";
+import type { FactoryPullRequestRepairRecoveryOutcome } from "./factory-pull-request-repair-recovery-service.js";
 import type { FactoryWorkerOperator, FactoryWorkerPreflight } from "./factory-worker-operator.js";
 import type {
   FactoryWorkerTaskRunner,
@@ -23,6 +25,8 @@ export interface FactoryWorkerCommandPort {
   admitExecution(input: unknown): Promise<FactoryExecutionAdmissionOutcome>;
   execute(input: unknown): Promise<FactoryExecutionOutcome>;
   recoverExecution(input: unknown): Promise<FactoryExecutionRecoveryOutcome>;
+  executePullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairExecutionOutcome>;
+  recoverPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairRecoveryOutcome>;
   runTask(input: unknown): Promise<FactoryWorkerTaskRunReport>;
 }
 
@@ -80,6 +84,10 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
       admitExecution: (input) => this.#run(() => this.#operator.admitExecution(input)),
       execute: (input) => this.#run(() => this.#operator.execute(input)),
       recoverExecution: (input) => this.#run(() => this.#operator.recoverExecution(input)),
+      executePullRequestRepair: (input) =>
+        this.#run(() => this.#operator.executePullRequestRepair(input)),
+      recoverPullRequestRepair: (input) =>
+        this.#run(() => this.#operator.recoverPullRequestRepair(input)),
       runTask: (input) => this.#run(() => this.#taskRunner.run(input))
     };
   }

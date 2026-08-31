@@ -14,6 +14,7 @@ import {
   factoryPolicyEvaluationRecordSchema,
   factoryPullRequestObservationSchema,
   factoryPullRequestRepairAuthorizationSchema,
+  factoryPullRequestRepairRunSchema,
   factoryPullRequestProposalSchema,
   factoryPullRequestRecordSchema,
   factoryPullRequestDispatchEventSchema,
@@ -142,6 +143,10 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public pullRequestRepairAuthorization(input: unknown) {
     return encodeCanonicalDocument(factoryPullRequestRepairAuthorizationSchema.parse(input));
+  }
+
+  public pullRequestRepairRun(input: unknown) {
+    return encodeCanonicalDocument(factoryPullRequestRepairRunSchema.parse(input));
   }
 
   public pullRequestProposal(input: unknown) {

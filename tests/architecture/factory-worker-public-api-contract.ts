@@ -170,6 +170,8 @@ export type FactoryWorkerPublicApiAssertions = [
       | "admitExecution"
       | "execute"
       | "recoverExecution"
+      | "executePullRequestRepair"
+      | "recoverPullRequestRepair"
       | "runTask"
     >
   >,
