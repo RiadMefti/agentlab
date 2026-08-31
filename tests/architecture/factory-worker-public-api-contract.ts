@@ -7,6 +7,7 @@ import {
   type FactoryGateDefinition,
   type FactoryWorkerCommandPort,
   type FactoryWorkerPreflight,
+  type FactoryWorkerTaskRunReport,
   type LocalFactoryWorkerConfig,
   type LocalFactoryWorkerOptions,
   type LocalFactoryWorkerRuntime
@@ -84,6 +85,59 @@ interface ExpectedPreflight {
   readonly reasonCodes: readonly string[];
 }
 
+interface ExpectedTaskRunReport {
+  readonly schemaVersion: "agentlab.worker-task-run.v1";
+  readonly status: "ready-for-broker" | "already-advanced" | "stopped";
+  readonly taskId: string;
+  readonly correlationId: string;
+  readonly policyBundleDigest: Sha256Digest;
+  readonly preparationState:
+    | "registered"
+    | "qualifying"
+    | "qualified"
+    | "specifying"
+    | "specified"
+    | "planning"
+    | "planned"
+    | "prepared"
+    | "needs-human"
+    | "rejected"
+    | "failed"
+    | "cancelled"
+    | "expired";
+  readonly taskState:
+    | "intake"
+    | "qualified"
+    | "specified"
+    | "planned"
+    | "awaiting-execution-approval"
+    | "queued"
+    | "executing"
+    | "verifying"
+    | "reviewing"
+    | "repairing"
+    | "pr-proposed"
+    | "pr-open"
+    | "merge-ready"
+    | "awaiting-merge-approval"
+    | "merge-queued"
+    | "merged"
+    | "canary"
+    | "released"
+    | "observing"
+    | "completed"
+    | "needs-attention"
+    | "rejected"
+    | "cancelled"
+    | "expired"
+    | "failed"
+    | "quarantined"
+    | "rolled-back"
+    | null;
+  readonly contractDigest: Sha256Digest | null;
+  readonly reasonCodes: readonly string[];
+}
+
 type ExpectedConfigKeys =
   | "schemaVersion"
   | "databasePath"
@@ -103,6 +157,7 @@ export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<FactoryGateDefinition, ExpectedGateDefinition>>,
   Assert<Equal<LocalFactoryWorkerOptions, ExpectedOptions>>,
   Assert<Equal<FactoryWorkerPreflight, ExpectedPreflight>>,
+  Assert<Equal<FactoryWorkerTaskRunReport, ExpectedTaskRunReport>>,
   Assert<Equal<keyof LocalFactoryWorkerConfig, ExpectedConfigKeys>>,
   Assert<Equal<Extract<keyof LocalFactoryWorkerConfig, "githubApp" | "repositoryId">, never>>,
   Assert<
@@ -115,6 +170,7 @@ export type FactoryWorkerPublicApiAssertions = [
       | "admitExecution"
       | "execute"
       | "recoverExecution"
+      | "runTask"
     >
   >,
   Assert<Equal<keyof LocalFactoryWorkerRuntime, "commands" | "close">>,

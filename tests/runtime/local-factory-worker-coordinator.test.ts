@@ -162,6 +162,7 @@ function coordinator(
   });
   return new LocalFactoryWorkerCoordinator({
     operator,
+    taskRunner: { run: noResult },
     tasks: new RuntimeTaskOwner(),
     resources: options.resources ?? { closeAll: () => Promise.resolve() },
     repositories: options.repositories ?? new RuntimeRepositoryOwner(),

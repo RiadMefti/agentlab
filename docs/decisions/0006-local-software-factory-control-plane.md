@@ -216,8 +216,9 @@ to the compiled contract and pinned policy), and the preparation `prepared` mark
 deterministic gate claims are emitted only by the materializer, not by a worker. A forced late
 insert failure is tested to leave neither a partial task ledger nor a false prepared marker. These
 paths are reachable only through the separate credentialless worker composition. The Linux recovery
-adapter is exercised in the supported target-host CI lane, while no product CLI, scheduler, TUI, or
-authority issuer can invoke a live request.
+adapter is exercised in the supported target-host CI lane. A separate explicit, policy-pinned worker
+command may now invoke one already registered request; the scheduler, normal TUI, and authority
+issuer still cannot invoke execution.
 
 Execution admission is deterministic and separate from execution. Its command accepts only a task
 UUID. The service reloads the planned task and active conversation, obtains the current commit from
@@ -471,6 +472,16 @@ rather than cryptographic personhood. Live key/config provisioning plus successf
 activation work, not assumptions. An empty rate card both adds `cost-policy-unconfigured` to
 preflight and denies draft mutation itself.
 
+The separate `worker-run` command requires an exact task UUID, expected policy digest, and literal
+`--confirm-run`. It ignores only `scheduler-disabled` during manual readiness; cost, host,
+toolchain, storage, provider, gate, and policy drift remain blocking. A generated correlation UUID
+binds the complete attempt. The resumable runner first reconciles any in-flight preparation or
+execution journal, then sequences only the existing preparation, materialization, admission, and
+bounded execution services under the worker coordinator's one-writer queue. It rejects mismatched
+preparation/task/execution identities, stops on human, policy, or terminal outcomes, and ends at
+`pr-proposed`. Its composition and CLI closure remain mechanically unable to reach GitHub, broker
+credentials, authority mutation, merge, or release code.
+
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
 before the first remote side effect. Its five-event SQLite v8 journal is immutable and append-only:
@@ -605,8 +616,10 @@ process/repository/lease shutdown. Its public closure is mechanically barred fro
 tmux, terminal, interactive discovery, and every provider module except the explicit factory adapter
 allowlist. The default bundle remains empty. The normal TUI has no enable or PR action; the explicit
 non-interactive human command can change only the local broker switch, while the explicit draft
-command remains blocked by current governance and provisioning controls. No live authority change,
-agent task, PR, deployment, or publication has been performed through this code.
+command remains blocked by current governance and provisioning controls. The explicit worker task
+command now supplies the local request-to-proposal driver, but no live configuration has been
+provisioned or invoked. No live authority change, agent task, PR, deployment, or publication has
+been performed through this code.
 
 The pre-contract intake is now a fifth mechanically separate runtime entry,
 `@agentlab/runtime/factory-intake`. It loads an owner-only configuration plus separately protected
@@ -637,7 +650,8 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
    channels, cgroup CPU/memory/process enforcement, bounded logs, durable resource coordinates, and
    deterministic crash recovery. A separate credentialless worker composition now owns these ports,
-   serializes work, and retains its writer lease until cleanup is conclusive.
+   serializes work, retains its writer lease until cleanup is conclusive, and exposes one explicit
+   policy-pinned resumable task command that stops before remote writes.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
@@ -646,9 +660,11 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    fail-closed explicit draft command now exist. A separate governed intake composition now creates
    the immutable preparation root from an owner-confirmed feature or bug report, and a separate
    human-only authority composition owns atomic enable/disable without broker or scheduler
-   capability. Activation still requires the missing review protections, provisioned live key/config
-   and exact cost rules, passing live preflights, separate human execution of the authority
-   ceremony, and human merge. No scheduler, auto-merge, release, or protected-path write.
+   capability. The explicit worker task command now connects intake to the local broker-ready
+   proposal checkpoint without joining worker and broker authority. Activation still requires the
+   missing review protections, provisioned live key/config and exact cost rules, passing live
+   preflights, separate human execution of the authority ceremony, and human merge. No scheduler,
+   auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.

@@ -171,11 +171,14 @@ describe("architecture dependency rules", () => {
       ]),
       source("apps/tui/src/run-factory-worker-preflight.ts", [
         local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("apps/tui/src/run-factory-worker-task.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
       ])
     ]);
 
     const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
-    expect(violations).toHaveLength(6);
+    expect(violations).toHaveLength(7);
     expect(violations.map(({ message }) => message).join("\n")).toContain(
       "application/bridge.ts -> packages/runtime/src/infrastructure/providers/model.ts"
     );
@@ -193,6 +196,9 @@ describe("architecture dependency rules", () => {
     );
     expect(violations.map(({ source }) => source)).toContain(
       "apps/tui/src/run-factory-worker-preflight.ts"
+    );
+    expect(violations.map(({ source }) => source)).toContain(
+      "apps/tui/src/run-factory-worker-task.ts"
     );
   });
 

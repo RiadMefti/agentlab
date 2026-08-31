@@ -418,6 +418,11 @@ function compositionBoundaryViolations(
       forbidden: workerCommandForbidden
     },
     {
+      entry: "apps/tui/src/run-factory-worker-task.ts",
+      description: "worker task command",
+      forbidden: workerCommandForbidden
+    },
+    {
       entry: "apps/tui/src/run-factory-authority.ts",
       description: "human authority command",
       forbidden: authorityCommandForbidden

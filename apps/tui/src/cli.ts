@@ -19,6 +19,13 @@ export type CliAction =
     }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-worker-run";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+      readonly confirmation: "run-task";
+    }
   | { readonly kind: "factory-authority-status"; readonly configPath: string }
   | {
       readonly kind: "factory-broker-authority";
@@ -42,6 +49,32 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "worker-run" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--policy" &&
+    input[8] === "--confirm-run"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    const expectedPolicyBundleDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-worker-run",
+        configPath,
+        taskId,
+        expectedPolicyBundleDigest,
+        confirmation: "run-task"
+      };
+    }
   }
   if (
     input.length === 4 &&
@@ -172,7 +205,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|authority-status|broker-authority ...|broker-open-draft ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|authority-status|broker-authority ...|broker-open-draft ...]"
   );
 }
 
@@ -221,6 +254,8 @@ Factory authority:
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
+  agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run
+      Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
 
