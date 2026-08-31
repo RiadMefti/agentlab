@@ -29,6 +29,62 @@ export const factorySemanticVersionSchema = z
     "Expected a semantic version."
   );
 
+const exactCostModelIdSchema = modelIdSchema.refine(
+  (model) => !model.includes("*") && !model.includes("?"),
+  "Cost policy rules must name one exact model, not a pattern."
+);
+
+const factoryTokenRateAccountingSchema = z
+  .object({
+    mode: z.literal("token-rate"),
+    inputMicrousdPerMillionTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    outputMicrousdPerMillionTokens: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+  })
+  .strict();
+
+const factoryProviderReportedAccountingSchema = z
+  .object({
+    mode: z.literal("provider-reported")
+  })
+  .strict();
+
+export const factoryCostRuleSchema = z
+  .object({
+    provider: providerIdSchema,
+    model: exactCostModelIdSchema,
+    accounting: z.discriminatedUnion("mode", [
+      factoryTokenRateAccountingSchema,
+      factoryProviderReportedAccountingSchema
+    ])
+  })
+  .strict();
+export type FactoryCostRule = z.infer<typeof factoryCostRuleSchema>;
+
+/** Versioned exact-model billing rules pinned by the enclosing factory policy digest. */
+export const factoryCostPolicySchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.cost-policy.v1"),
+    id: factoryIdentifierSchema,
+    version: factorySemanticVersionSchema,
+    rules: z.array(factoryCostRuleSchema).max(512)
+  })
+  .strict()
+  .superRefine((policy, context) => {
+    const coordinates = new Set<string>();
+    for (const [index, rule] of policy.rules.entries()) {
+      const coordinate = `${rule.provider}\0${rule.model}`;
+      if (coordinates.has(coordinate)) {
+        context.addIssue({
+          code: "custom",
+          path: ["rules", index],
+          message: "Cost policy provider and model coordinates must be unique."
+        });
+      }
+      coordinates.add(coordinate);
+    }
+  });
+export type FactoryCostPolicy = z.infer<typeof factoryCostPolicySchema>;
+
 export const repositoryPathPatternSchema = z
   .string()
   .min(1)

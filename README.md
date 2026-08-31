@@ -147,9 +147,10 @@ The repository also contains a tested, staged software-factory safety kernel and
 is not connected to the interactive runtime, scheduled, or enabled. The only product-facing operator
 action is a separate, non-authorizing `agentlab factory broker-preflight --config <absolute-path>`
 command that makes no GitHub mutation; authority remains default-off, and the CLI cannot enable it
-or open a PR. Normal database migration creates only inert local ledger tables. See
-[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases.
+or open a PR. Provider-neutral per-run cost accounting is policy-pinned and fail-closed, but its
+shipped live rate card is intentionally empty. Normal database migration creates only inert local
+ledger tables. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
+implemented controls, activation blockers, and later phases.
 
 ## Development
 

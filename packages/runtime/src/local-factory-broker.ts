@@ -146,6 +146,7 @@ export function createLocalFactoryBroker(
     const operator = new FactoryBrokerOperator({
       repositoryId: options.repositoryId,
       policyBundleDigest: policyBundle.digest,
+      costPolicyConfigured: policyBundle.value.costPolicy.rules.length > 0,
       remote,
       controls: factory,
       pullRequests

@@ -132,6 +132,11 @@ export class FactoryPreparationService {
     ) {
       throw new Error(`Pinned provider cannot safely execute preparation phase ${phase}.`);
     }
+    this.dependencies.agents.preflight({
+      provider: profile.provider,
+      model: profile.model,
+      policyBundleDigest: snapshot.authority.policyBundleDigest
+    });
     const conversation = await this.dependencies.conversations.findById(
       snapshot.request.conversationId
     );
@@ -234,6 +239,7 @@ export class FactoryPreparationService {
       cleanupState = "workspace-owned";
       const output = await this.dependencies.agents.execute({
         request: runRequest.value,
+        policyBundleDigest: snapshot.authority.policyBundleDigest,
         executable: provider.executable,
         providerVersion: provider.version,
         workspace,

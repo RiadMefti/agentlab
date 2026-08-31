@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   factoryAgentRunRequestSchema,
+  factoryCostPolicySchema,
   factoryPreparationRunRequestSchema,
   type FactoryAgentRunRequest,
   type FactoryPreparationRunRequest
@@ -10,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 import type { FactoryWorkspace } from "../../packages/runtime/src/domain/factory-workspace.js";
 import type { FactoryProcessIsolator } from "../../packages/runtime/src/domain/factory-process-isolation.js";
+import { FactoryCostAccountant } from "../../packages/runtime/src/domain/factory-cost-accounting.js";
 import { claudeFactoryAgentAdapter } from "../../packages/runtime/src/infrastructure/providers/claude-factory-agent.js";
 import { codexFactoryAgentAdapter } from "../../packages/runtime/src/infrastructure/providers/codex-factory-agent.js";
 import { factoryAgentEnvironment } from "../../packages/runtime/src/infrastructure/providers/factory-agent-environment.js";
@@ -23,6 +25,7 @@ import { testDigest, testFactoryContract } from "../helpers/factory.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const prompt = "Implement only the immutable task contract.";
+const policyBundleDigest = testDigest("e");
 const workspace = fakeWorkspace();
 const resourceLimits = {
   maxProcesses: 64,
@@ -91,6 +94,7 @@ describe("factory agent adapters", () => {
     });
     const output = await executorWithTimes(runner).execute({
       request: codex,
+      policyBundleDigest,
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
@@ -133,7 +137,8 @@ describe("factory agent adapters", () => {
       providerSessionId: "thread-1",
       finalOutput: "Implemented and tested.",
       usage: { inputTokens: 100, outputTokens: 20, toolCalls: 1, agentTurns: 1 },
-      usageComplete: false
+      usageMeasurementsComplete: true,
+      reportedCostMicrousd: null
     });
 
     const claude = claudeFactoryAgentAdapter.parse({
@@ -142,21 +147,71 @@ describe("factory agent adapters", () => {
       harnessVersion: "claude-restricted-review-jsonl-v1",
       startedAt: "2026-08-30T12:00:00.000Z",
       finishedAt: "2026-08-30T12:00:03.000Z",
-      stdout: JSON.stringify({
-        type: "result",
-        is_error: false,
-        result: "No blocking findings.",
-        session_id: "session-1",
-        total_cost_usd: 0.012345,
-        usage: { input_tokens: 200, output_tokens: 30 }
-      }),
+      stdout: [
+        JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "tool_use", name: "Read" }] }
+        }),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "No blocking findings.",
+          session_id: "session-1",
+          num_turns: 2,
+          total_cost_usd: 0.012345,
+          modelUsage: {
+            "claude-sonnet-4-6": {
+              inputTokens: 200,
+              outputTokens: 30,
+              cacheReadInputTokens: 50,
+              cacheCreationInputTokens: 25
+            }
+          }
+        })
+      ].join("\n"),
       stderr: ""
     });
     expect(claude).toMatchObject({
       finalOutput: "No blocking findings.",
       providerSessionId: "session-1",
-      usage: { inputTokens: 200, outputTokens: 30, costMicrousd: 12_345 },
-      usageComplete: true
+      usage: { inputTokens: 275, outputTokens: 30, agentTurns: 2, toolCalls: 1 },
+      usageMeasurementsComplete: true,
+      reportedCostMicrousd: 12_345
+    });
+
+    const unknownCostBasis = claudeFactoryAgentAdapter.parse({
+      request: runRequest("claude", "reviewer"),
+      providerVersion: "2.3.4",
+      harnessVersion: "claude-restricted-review-jsonl-v1",
+      startedAt: "2026-08-30T12:00:00.000Z",
+      finishedAt: "2026-08-30T12:00:03.000Z",
+      stdout: [
+        JSON.stringify({ type: "assistant", message: { content: [] } }),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "No blocking findings.",
+          session_id: "session-1",
+          num_turns: 1,
+          total_cost_usd: 0.01,
+          modelUsage: {
+            "gateway-model": {
+              inputTokens: 10,
+              outputTokens: 2,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+              costBasis: "unknown"
+            }
+          }
+        })
+      ].join("\n"),
+      stderr: ""
+    });
+    expect(unknownCostBasis).toMatchObject({
+      usageMeasurementsComplete: true,
+      reportedCostMicrousd: null
     });
   });
 });
@@ -173,6 +228,7 @@ describe("LocalFactoryAgentExecutor", () => {
     const executor = executorWithTimes(runner);
     const output = await executor.execute({
       request: runRequest("codex", "implementer"),
+      policyBundleDigest,
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
@@ -180,7 +236,13 @@ describe("LocalFactoryAgentExecutor", () => {
       resourceLimits
     });
 
-    expect(output).toMatchObject({ status: "succeeded", exitCode: 0, errorCode: null });
+    expect(output).toMatchObject({
+      status: "succeeded",
+      exitCode: 0,
+      errorCode: null,
+      usageComplete: true,
+      usage: { costMicrousd: 20 }
+    });
     expect(output.isolation.limits.maxProcesses).toBe(32);
     expect(runner.calls[0]).toMatchObject({
       executable: "/opt/codex",
@@ -208,6 +270,7 @@ describe("LocalFactoryAgentExecutor", () => {
 
     await executor.execute({
       request: runRequest("codex", "implementer"),
+      policyBundleDigest,
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
@@ -238,6 +301,7 @@ describe("LocalFactoryAgentExecutor", () => {
     });
     const timedOut = await executorWithTimes(new FakeCommandRunner(timeout)).execute({
       request: runRequest("codex", "implementer"),
+      policyBundleDigest,
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
@@ -255,6 +319,7 @@ describe("LocalFactoryAgentExecutor", () => {
       new FakeCommandRunner({ stdout: "not json", stderr: "" })
     ).execute({
       request: runRequest("codex", "implementer"),
+      policyBundleDigest,
       executable: "/opt/codex",
       providerVersion: "1.2.3",
       workspace,
@@ -271,6 +336,83 @@ describe("LocalFactoryAgentExecutor", () => {
   it("advertises no unsafe OpenCode autonomous adapter", () => {
     const executor = executorWithTimes(new FakeCommandRunner({ stdout: "", stderr: "" }));
     expect(executor.capabilities().map(({ provider }) => provider)).toEqual(["codex", "claude"]);
+  });
+
+  it("rejects an unknown cost coordinate before process isolation or spawn", async () => {
+    let isolationCalls = 0;
+    const runner = new FakeCommandRunner({ stdout: "", stderr: "" });
+    const executor = new LocalFactoryAgentExecutor(runner, {
+      now: () => "2026-08-30T12:00:00.000Z",
+      processIsolator: {
+        isolate: (input) => {
+          isolationCalls += 1;
+          return passthroughProcessIsolator.isolate(input);
+        }
+      },
+      costAccountant: new FactoryCostAccountant(
+        policyBundleDigest,
+        factoryCostPolicySchema.parse({
+          schemaVersion: "agentlab.cost-policy.v1",
+          id: "agentlab/empty-test-costs",
+          version: "1.0.0",
+          rules: []
+        })
+      )
+    });
+
+    await expect(
+      executor.execute({
+        request: runRequest("codex", "implementer"),
+        policyBundleDigest,
+        executable: "/opt/codex",
+        providerVersion: "1.2.3",
+        workspace,
+        prompt,
+        resourceLimits
+      })
+    ).rejects.toThrow(/No exact cost rule/u);
+    expect(isolationCalls).toBe(0);
+    expect(runner.calls).toHaveLength(0);
+  });
+
+  it("records post-run accounting failures separately from malformed provider output", async () => {
+    const runner = new FakeCommandRunner({
+      stdout: JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 10, output_tokens: 5 }
+      }),
+      stderr: ""
+    });
+    const executor = new LocalFactoryAgentExecutor(runner, {
+      now: (() => {
+        const times = ["2026-08-30T12:00:00.000Z", "2026-08-30T12:00:02.000Z"];
+        return () => times.shift() ?? "2026-08-30T12:00:02.000Z";
+      })(),
+      processIsolator: passthroughProcessIsolator,
+      costAccountant: {
+        preflight: () => undefined,
+        account: () => {
+          throw new Error("test accounting failure");
+        }
+      }
+    });
+
+    await expect(
+      executor.execute({
+        request: runRequest("codex", "implementer"),
+        policyBundleDigest,
+        executable: "/opt/codex",
+        providerVersion: "1.2.3",
+        workspace,
+        prompt,
+        resourceLimits
+      })
+    ).resolves.toMatchObject({
+      status: "failed",
+      errorCode: "cost-accounting-invalid",
+      usageComplete: false
+    });
+    expect(runner.calls).toHaveLength(1);
   });
 });
 
@@ -303,8 +445,36 @@ function executorWithTimes(
   return new LocalFactoryAgentExecutor(runner, {
     now: () => times.shift() ?? "2026-08-30T12:00:02.000Z",
     processIsolator: passthroughProcessIsolator,
+    costAccountant: testCostAccountant(),
     ...(hostEnvironment === undefined ? {} : { hostEnvironment })
   });
+}
+
+function testCostAccountant(): FactoryCostAccountant {
+  return new FactoryCostAccountant(
+    policyBundleDigest,
+    factoryCostPolicySchema.parse({
+      schemaVersion: "agentlab.cost-policy.v1",
+      id: "agentlab/test-costs",
+      version: "1.0.0",
+      rules: [
+        {
+          provider: "codex",
+          model: "gpt-5.4",
+          accounting: {
+            mode: "token-rate",
+            inputMicrousdPerMillionTokens: 1_000_000,
+            outputMicrousdPerMillionTokens: 2_000_000
+          }
+        },
+        {
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          accounting: { mode: "provider-reported" }
+        }
+      ]
+    })
+  );
 }
 
 const passthroughProcessIsolator: FactoryProcessIsolator = {

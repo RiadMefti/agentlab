@@ -14,6 +14,7 @@ import {
 
 import {
   defaultFactoryPolicyBundle,
+  factoryPolicyBundleMediaType,
   FactoryPolicyEngine,
   type FactoryPolicyEvaluation
 } from "../../packages/runtime/src/domain/factory-policy.js";
@@ -44,6 +45,14 @@ const zeroUsage: FactoryBudgetUsage = {
 };
 
 describe("FactoryPolicyEngine", () => {
+  it("keeps live cost coordinates unconfigured until an operator pins them", () => {
+    expect(defaultFactoryPolicyBundle.schemaVersion).toBe("agentlab.factory-policy.v2");
+    expect(defaultFactoryPolicyBundle.costPolicy.rules).toEqual([]);
+    expect(factoryPolicyBundleMediaType(defaultFactoryPolicyBundle)).toBe(
+      "application/vnd.agentlab.factory-policy.v2+json"
+    );
+  });
+
   it("allows a fully evidenced R1 draft-PR proposal when the separate broker is enabled", () => {
     const input = r1PullRequestInput();
     const required = engine.evaluate(input).requiredGateIds;

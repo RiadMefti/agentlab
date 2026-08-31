@@ -27,6 +27,7 @@ import type {
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
 import {
+  factoryPolicyBundleMediaType,
   FactoryPolicyEngine,
   type FactoryPolicyBundle,
   type FactoryPolicyEvaluation
@@ -345,7 +346,7 @@ export class FactoryControlPlane {
           subjectDigest: this.dependencies.policyBundle.digest,
           artifact: {
             digest: policyArtifact.digest,
-            mediaType: "application/vnd.agentlab.factory-policy.v1+json",
+            mediaType: factoryPolicyBundleMediaType(this.dependencies.policyBundle.value),
             sizeBytes: policyArtifact.sizeBytes
           },
           producer: policyActor,

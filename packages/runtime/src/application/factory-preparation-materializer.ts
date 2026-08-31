@@ -17,7 +17,11 @@ import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
-import type { FactoryPolicyBundle, FactoryPolicyEngine } from "../domain/factory-policy.js";
+import {
+  factoryPolicyBundleMediaType,
+  type FactoryPolicyBundle,
+  type FactoryPolicyEngine
+} from "../domain/factory-policy.js";
 import {
   FactoryPreparationCompiler,
   type FactoryPreparationCompilation
@@ -225,7 +229,7 @@ export class FactoryPreparationMaterializer {
       ),
       this.#publishCanonical(
         this.dependencies.policyBundle,
-        "application/vnd.agentlab.factory-policy.v1+json"
+        factoryPolicyBundleMediaType(this.dependencies.policyBundle.value)
       )
     ]);
     if (

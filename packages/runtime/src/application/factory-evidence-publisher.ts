@@ -139,8 +139,15 @@ export class FactoryEvidencePublisher {
         claims: [
           { name: "execution-id", value: request.executionId },
           { name: "isolation-id", value: output.isolation.isolationId },
+          {
+            name: "policy-bundle-digest",
+            value: task.contract.gateProfile.policyDigest
+          },
           { name: "provider", value: request.provider },
-          { name: "status", value: output.status }
+          ...(request.model === null ? [] : [{ name: "model", value: request.model }]),
+          { name: "status", value: output.status },
+          { name: "usage-complete", value: String(output.usageComplete) },
+          { name: "cost-microusd", value: String(output.usage.costMicrousd) }
         ]
       }),
       evidenceItemSchema.parse({

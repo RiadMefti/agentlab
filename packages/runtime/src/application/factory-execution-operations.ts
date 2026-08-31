@@ -73,18 +73,23 @@ export class FactoryExecutionOperations {
     readonly patchProposalDigest?: Sha256Digest;
     readonly repairReview?: FactoryReviewResult;
   }): Promise<FactoryExecutedAgent> {
+    const capability = this.dependencies.agents
+      .capabilities()
+      .find(({ provider: id }) => id === input.profile.provider);
+    if (!capability?.roles.includes(input.role)) {
+      throw new Error(`Pinned provider cannot safely execute role ${input.role}.`);
+    }
+    this.dependencies.agents.preflight({
+      provider: input.profile.provider,
+      model: input.profile.model,
+      policyBundleDigest: input.task.contract.gateProfile.policyDigest
+    });
     const provider = await this.dependencies.providers.resolve(
       input.profile.provider,
       input.workspace.root
     );
     if (provider === null) {
       throw new Error(`Pinned provider ${input.profile.provider} is unavailable.`);
-    }
-    const capability = this.dependencies.agents
-      .capabilities()
-      .find(({ provider: id }) => id === input.profile.provider);
-    if (!capability?.roles.includes(input.role)) {
-      throw new Error(`Pinned provider cannot safely execute role ${input.role}.`);
     }
     const prompt = renderFactoryPrompt({
       role: input.role,
@@ -138,6 +143,7 @@ export class FactoryExecutionOperations {
     await input.journal.startAgent(request.value, request.digest);
     const output = await this.dependencies.agents.execute({
       request: request.value,
+      policyBundleDigest: input.task.contract.gateProfile.policyDigest,
       executable: provider.executable,
       providerVersion: provider.version,
       workspace: input.workspace,

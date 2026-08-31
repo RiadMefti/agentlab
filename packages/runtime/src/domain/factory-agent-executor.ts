@@ -6,7 +6,8 @@ import type {
   FactoryPreparationPhase,
   FactoryPreparationRunRequest,
   FactoryResourceLimits,
-  ProviderId
+  ProviderId,
+  Sha256Digest
 } from "@agentlab/contracts";
 
 import type { FactoryWorkspace } from "./factory-workspace.js";
@@ -15,6 +16,7 @@ export const factoryProcessCleanupUnconfirmedErrorCode = "process-cleanup-failed
 
 export interface FactoryAgentExecutionInput {
   readonly request: FactoryAgentRunRequest;
+  readonly policyBundleDigest: Sha256Digest;
   readonly executable: string;
   readonly providerVersion: string;
   readonly workspace: FactoryWorkspace;
@@ -27,6 +29,12 @@ export interface FactoryPreparationAgentExecutionInput extends Omit<
   "request"
 > {
   readonly request: FactoryPreparationRunRequest;
+}
+
+export interface FactoryAgentExecutionPreflight {
+  readonly provider: ProviderId;
+  readonly model: string | null;
+  readonly policyBundleDigest: Sha256Digest;
 }
 
 export interface FactoryAgentExecutionOutput {
@@ -58,11 +66,13 @@ export interface FactoryAgentExecutorCapability {
 
 export interface FactoryAgentExecutor {
   capabilities(): readonly FactoryAgentExecutorCapability[];
+  preflight(input: FactoryAgentExecutionPreflight): void;
   execute(input: FactoryAgentExecutionInput): Promise<FactoryAgentExecutionOutput>;
 }
 
 export interface FactoryPreparationAgentExecutor {
   capabilities(): readonly FactoryAgentExecutorCapability[];
+  preflight(input: FactoryAgentExecutionPreflight): void;
   execute(input: FactoryPreparationAgentExecutionInput): Promise<FactoryAgentExecutionOutput>;
 }
 

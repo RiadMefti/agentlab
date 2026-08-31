@@ -1,4 +1,5 @@
 import {
+  factoryCostPolicySchema,
   factoryTimestampSchema,
   type EvidenceItem,
   type EvidenceKind,
@@ -7,6 +8,7 @@ import {
   type FactoryApprovalStage,
   type FactoryBudgetUsage,
   type FactoryChangeSet,
+  type FactoryCostPolicy,
   type FactoryPolicyDecision,
   type FactoryPolicyOutcome,
   type FactoryResourceLimits,
@@ -57,13 +59,23 @@ export interface FactoryProtectedPathRule {
   readonly minimumRiskTier: FactoryRiskTier;
 }
 
-export interface FactoryPolicyBundle {
-  readonly schemaVersion: "agentlab.factory-policy.v1";
+interface FactoryPolicyBundleBase {
   readonly id: string;
   readonly version: string;
   readonly protectedPaths: readonly FactoryProtectedPathRule[];
   readonly profiles: Readonly<Record<FactoryRiskTier, FactoryRiskProfile>>;
 }
+
+export interface FactoryPolicyBundleV1 extends FactoryPolicyBundleBase {
+  readonly schemaVersion: "agentlab.factory-policy.v1";
+}
+
+export interface FactoryPolicyBundleV2 extends FactoryPolicyBundleBase {
+  readonly schemaVersion: "agentlab.factory-policy.v2";
+  readonly costPolicy: FactoryCostPolicy;
+}
+
+export type FactoryPolicyBundle = FactoryPolicyBundleV1 | FactoryPolicyBundleV2;
 
 export interface FactoryStageRequirements {
   readonly gateIds: readonly string[];
@@ -133,7 +145,15 @@ const releaseEvidence = [
   "sbom",
   "provenance"
 ] as const satisfies readonly EvidenceKind[];
-const baselinePolicyVersion = "1.3.0";
+const baselinePolicyVersion = "1.4.0";
+const baselineGateProfileVersion = "1.3.0";
+
+export const unconfiguredFactoryCostPolicy = factoryCostPolicySchema.parse({
+  schemaVersion: "agentlab.cost-policy.v1",
+  id: "agentlab/unconfigured-costs",
+  version: "1.0.0",
+  rules: []
+});
 
 function profile(input: {
   readonly tier: FactoryRiskTier;
@@ -151,7 +171,7 @@ function profile(input: {
   return {
     id: `baseline/${input.tier.toLowerCase()}`,
     tier: input.tier,
-    version: baselinePolicyVersion,
+    version: baselineGateProfileVersion,
     writeAllowed: input.writeAllowed,
     networkAllowlistAllowed: input.networkAllowlistAllowed,
     minimumIndependentReviews: input.minimumIndependentReviews,
@@ -189,10 +209,11 @@ function resourceLimits(
   };
 }
 
-export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
-  schemaVersion: "agentlab.factory-policy.v1",
+export const defaultFactoryPolicyBundle: FactoryPolicyBundleV2 = {
+  schemaVersion: "agentlab.factory-policy.v2",
   id: "agentlab/baseline",
   version: baselinePolicyVersion,
+  costPolicy: unconfiguredFactoryCostPolicy,
   protectedPaths: [
     { pattern: "apps/**", minimumRiskTier: "R2" },
     { pattern: "packages/*/src/**", minimumRiskTier: "R2" },
@@ -300,6 +321,11 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundle = {
     })
   }
 };
+
+export function factoryPolicyBundleMediaType(bundle: FactoryPolicyBundle): string {
+  const version = bundle.schemaVersion === "agentlab.factory-policy.v1" ? 1 : 2;
+  return `application/vnd.agentlab.factory-policy.v${String(version)}+json`;
+}
 
 /** Deterministic policy evaluator. It can deny or require humans; it never invokes a model. */
 export class FactoryPolicyEngine {

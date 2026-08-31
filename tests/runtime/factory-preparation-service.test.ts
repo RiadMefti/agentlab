@@ -21,6 +21,7 @@ import { FactoryPreparationService } from "../../packages/runtime/src/applicatio
 import { FactoryPreparationMaterializer } from "../../packages/runtime/src/application/factory-preparation-materializer.js";
 import type {
   FactoryAgentExecutionOutput,
+  FactoryAgentExecutionPreflight,
   FactoryPreparationAgentExecutionInput,
   FactoryPreparationAgentExecutor
 } from "../../packages/runtime/src/domain/factory-agent-executor.js";
@@ -75,6 +76,13 @@ describe("FactoryPreparationService", () => {
         "specify",
         "plan"
       ]);
+      expect(context.agents.preflights).toEqual(
+        context.agents.requests.map((request) => ({
+          provider: request.provider,
+          model: request.model,
+          policyBundleDigest: context.fixture.authority.policyBundleDigest
+        }))
+      );
       const events = await context.repository.listEvents(context.fixture.request.taskId);
       const successes = events.filter(({ kind }) => kind === "phase-succeeded");
       expect(successes).toHaveLength(3);
@@ -752,6 +760,7 @@ class MutableRecoveryReconciler implements FactoryPreparationRecoveryReconciler 
 class FakePreparationAgentExecutor implements FactoryPreparationAgentExecutor {
   public readonly requests: FactoryPreparationRunRequest[] = [];
   public readonly prompts: string[] = [];
+  public readonly preflights: FactoryAgentExecutionPreflight[] = [];
 
   public constructor(
     private readonly fixture: ReturnType<typeof testFactoryPreparationFixture>,
@@ -773,6 +782,10 @@ class FakePreparationAgentExecutor implements FactoryPreparationAgentExecutor {
         acceptsSecrets: false as const
       }
     ];
+  }
+
+  public preflight(input: FactoryAgentExecutionPreflight): void {
+    this.preflights.push(input);
   }
 
   public execute(

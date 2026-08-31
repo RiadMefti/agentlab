@@ -60,6 +60,22 @@ describe("FactoryBrokerOperator", () => {
     });
   });
 
+  it("blocks activation when no reviewed exact-model cost rule is configured", async () => {
+    const fixture = operatorFixture(strongGovernance, true, "riadmefti/agentlab", false);
+
+    await expect(fixture.operator.preflight()).resolves.toMatchObject({
+      status: "blocked",
+      authorityEnabled: true,
+      reasonCodes: ["cost-policy-unconfigured"]
+    });
+    await expect(fixture.operator.openDraft({ taskId: "test" })).resolves.toEqual({
+      status: "denied",
+      reasonCodes: ["cost-policy-unconfigured"],
+      decision: null
+    });
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the remote inspection returns another repository", async () => {
     const fixture = operatorFixture(strongGovernance, true, "riadmefti/another");
 
@@ -94,7 +110,8 @@ const strongGovernance: FactoryRepositoryGovernance = {
 function operatorFixture(
   governance: FactoryRepositoryGovernance,
   prBroker = false,
-  inspectedRepositoryId = "riadmefti/agentlab"
+  inspectedRepositoryId = "riadmefti/agentlab",
+  costPolicyConfigured = true
 ) {
   const repository: FactoryRemoteRepositorySnapshot = {
     repositoryId: inspectedRepositoryId,
@@ -112,6 +129,7 @@ function operatorFixture(
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
+    costPolicyConfigured,
     remote: { inspect },
     controls: { state },
     pullRequests: { openDraft }

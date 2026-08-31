@@ -85,7 +85,9 @@ operational failure. It cannot enable authority or open a PR. Trusted future bro
 a typed draft-PR port, but that port deliberately has no authority-switch command: broker and human
 enablement duties remain separate. All switches remain default-off, and every draft mutation still
 passes the existing control plane, policy, evidence, durable dispatch, and remote-governance
-recheck.
+recheck. The broker composition derives cost readiness from the canonical policy bundle. An empty
+rate card adds `cost-policy-unconfigured` to preflight and independently denies the typed draft-PR
+operation, so readiness is not merely advisory.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -119,6 +121,19 @@ post-cleanup proof that both process and Git/filesystem state are absent. Malfor
 symlinked, overlapping, locked, or otherwise ambiguous state remains in-flight and fails closed.
 Workspace creation failure and unconfirmed process-tree cleanup likewise leave the durable phase
 running.
+
+Cost admission is a domain policy boundary, not provider-adapter discretion. Factory policy bundle
+v2 embeds a strict `agentlab.cost-policy.v1` rate card whose rules bind one exact provider/model
+coordinate to either deterministic token rates or explicitly trusted provider-reported cost. There
+is no wildcard or fallback rate. The application calls the accounting preflight before persisting a
+run-start event, and the local executor repeats it before isolation or process spawn; a null/unknown
+model or mismatched policy digest fails closed. Adapters return raw measurements with zero authority
+over the final cost. The accountant validates usage and overwrites cost using integer micro-USD
+arithmetic rounded upward. Claude accounting uses its aggregate per-model usage, including cached
+input, and refuses an explicitly unknown pricing basis. Incomplete measurements or missing reported
+cost remain `usageComplete=false`, which policy already rejects. Execution evidence records the
+pinned policy digest, completeness, and final micro-USD amount without changing the immutable v1 run
+request/record schemas.
 
 The implementation/review path now applies the same crash invariant. One immutable execution-run
 header binds the task contract, repository/base commit, correlation ID, and contract-derived attempt
@@ -178,10 +193,12 @@ enable authority or open a PR. Current branch protection requires exact `verify`
 `factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
 and deletion. It still has zero required approvals, does not require approval of the latest push,
 and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
-blocked. Complete provider cost accounting and live broker credential provisioning are also
-activation prerequisites; an incomplete usage record already denies PR creation. No live agent task
-or PR has been created by this code. PR-head repair, scheduler/quotas, eval promotion, merge,
-release, canary, and incident automation remain later stages.
+blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
+the shipped cost policy intentionally contains no live provider/model rules. Reviewed rate-card
+provisioning and live broker credentials are activation prerequisites; an incomplete usage record
+already denies PR creation. No live agent task or PR has been created by this code. PR-head repair,
+scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
+stages.
 
 ## Dependency map
 
