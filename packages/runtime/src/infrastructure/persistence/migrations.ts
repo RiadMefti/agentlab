@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 14;
+export const latestSchemaVersion = 15;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -2731,6 +2731,357 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 14;
+      COMMIT;
+    `);
+  }
+
+  if (version < 15) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_canary_task_reservations (
+        reservation_id TEXT PRIMARY KEY CHECK (length(reservation_id) = 36),
+        reservation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(reservation_digest) = 71 AND substr(reservation_digest, 1, 7) = 'sha256:'
+        ),
+        cohort_id TEXT NOT NULL CHECK (length(cohort_id) = 36),
+        cohort_digest TEXT NOT NULL REFERENCES factory_canary_cohorts(cohort_digest),
+        approval_digest TEXT NOT NULL CHECK (
+          length(approval_digest) = 71 AND substr(approval_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL CHECK (
+          length(assessment_digest) = 71 AND substr(assessment_digest, 1, 7) = 'sha256:'
+        ),
+        attestation_digest TEXT NOT NULL REFERENCES factory_eval_attestations(attestation_digest),
+        role_identity_policy_digest TEXT NOT NULL CHECK (
+          length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        policy_bundle_digest TEXT NOT NULL CHECK (
+          length(policy_bundle_digest) = 71 AND substr(policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        task_id TEXT NOT NULL UNIQUE REFERENCES factory_preparations(task_id),
+        request_digest TEXT NOT NULL CHECK (
+          length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:'
+        ),
+        preparation_authority_digest TEXT NOT NULL CHECK (
+          length(preparation_authority_digest) = 71 AND
+          substr(preparation_authority_digest, 1, 7) = 'sha256:'
+        ),
+        maximum_risk_tier TEXT NOT NULL CHECK (maximum_risk_tier IN ('R0', 'R1')),
+        wall_clock_seconds INTEGER NOT NULL CHECK (wall_clock_seconds BETWEEN 1 AND 86400),
+        max_agent_turns INTEGER NOT NULL CHECK (max_agent_turns BETWEEN 1 AND 2000),
+        max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls BETWEEN 1 AND 20000),
+        max_input_tokens INTEGER NOT NULL CHECK (max_input_tokens BETWEEN 1 AND 100000000),
+        max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens BETWEEN 1 AND 10000000),
+        max_cost_microusd INTEGER NOT NULL CHECK (max_cost_microusd BETWEEN 0 AND 10000000000),
+        max_processes INTEGER NOT NULL CHECK (max_processes BETWEEN 1 AND 512),
+        max_output_bytes INTEGER NOT NULL CHECK (max_output_bytes BETWEEN 1 AND 1073741824),
+        max_workers INTEGER NOT NULL CHECK (max_workers BETWEEN 1 AND 32),
+        max_repair_attempts INTEGER NOT NULL CHECK (max_repair_attempts BETWEEN 0 AND 20),
+        max_changed_files INTEGER NOT NULL CHECK (max_changed_files BETWEEN 0 AND 10000),
+        max_changed_lines INTEGER NOT NULL CHECK (max_changed_lines BETWEEN 0 AND 1000000),
+        reserved_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        reservation_json TEXT NOT NULL CHECK (
+          length(reservation_json) BETWEEN 2 AND 2097152 AND json_valid(reservation_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_canary_task_reservations_cohort_idx
+        ON factory_canary_task_reservations(cohort_digest, reserved_at, reservation_id);
+
+      CREATE TRIGGER factory_canary_task_reservations_no_update
+      BEFORE UPDATE ON factory_canary_task_reservations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservations are immutable');
+      END;
+      CREATE TRIGGER factory_canary_task_reservations_no_delete
+      BEFORE DELETE ON factory_canary_task_reservations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservations are immutable');
+      END;
+      CREATE TRIGGER factory_canary_task_reservations_identity_guard
+      BEFORE INSERT ON factory_canary_task_reservations
+      WHEN
+        json_extract(NEW.reservation_json, '$.schemaVersion')
+          IS NOT 'agentlab.canary-task-reservation.v1' OR
+        json_extract(NEW.reservation_json, '$.reservationId') IS NOT NEW.reservation_id OR
+        json_extract(NEW.reservation_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.reservation_json, '$.cohortDigest') IS NOT NEW.cohort_digest OR
+        json_extract(NEW.reservation_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.reservation_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.reservation_json, '$.attestationDigest') IS NOT NEW.attestation_digest OR
+        json_extract(NEW.reservation_json, '$.roleIdentityPolicyDigest')
+          IS NOT NEW.role_identity_policy_digest OR
+        json_extract(NEW.reservation_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.reservation_json, '$.schedulePolicyDigest')
+          IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.reservation_json, '$.policyBundleDigest')
+          IS NOT NEW.policy_bundle_digest OR
+        json_extract(NEW.reservation_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.reservation_json, '$.repository.id') IS NOT NEW.repository_id OR
+        json_extract(NEW.reservation_json, '$.repository.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.reservation_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.reservation_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.reservation_json, '$.preparationAuthorityDigest')
+          IS NOT NEW.preparation_authority_digest OR
+        json_extract(NEW.reservation_json, '$.maximumRiskTier') IS NOT NEW.maximum_risk_tier OR
+        json_extract(NEW.reservation_json, '$.budget.wallClockSeconds')
+          IS NOT NEW.wall_clock_seconds OR
+        json_extract(NEW.reservation_json, '$.budget.maxAgentTurns') IS NOT NEW.max_agent_turns OR
+        json_extract(NEW.reservation_json, '$.budget.maxToolCalls') IS NOT NEW.max_tool_calls OR
+        json_extract(NEW.reservation_json, '$.budget.maxInputTokens') IS NOT NEW.max_input_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputTokens')
+          IS NOT NEW.max_output_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxCostMicrousd')
+          IS NOT NEW.max_cost_microusd OR
+        json_extract(NEW.reservation_json, '$.budget.maxProcesses') IS NOT NEW.max_processes OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputBytes') IS NOT NEW.max_output_bytes OR
+        json_extract(NEW.reservation_json, '$.budget.maxWorkers') IS NOT NEW.max_workers OR
+        json_extract(NEW.reservation_json, '$.budget.maxRepairAttempts')
+          IS NOT NEW.max_repair_attempts OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedFiles')
+          IS NOT NEW.max_changed_files OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedLines')
+          IS NOT NEW.max_changed_lines OR
+        json_extract(NEW.reservation_json, '$.reservedAt') IS NOT NEW.reserved_at OR
+        json_extract(NEW.reservation_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.reservation_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.reservation_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.reservation_json, '$.actor.id') IS NOT 'agentlab-canary-admission' OR
+        json_type(NEW.reservation_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.reservation_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.reservation_json, '$.release') IS NOT 0 OR
+        NEW.cohort_id IS NOT (
+          SELECT cohort_id FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.approval_digest IS NOT (
+          SELECT approval_digest FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.attestation_digest IS NOT (
+          SELECT attestation_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.role_identity_policy_digest IS NOT (
+          SELECT role_identity_policy_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        (SELECT json_extract(cohort_json, '$.schemaVersion') FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest) IS NOT 'agentlab.canary-cohort.v2' OR
+        NEW.request_digest IS NOT (
+          SELECT request_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.preparation_authority_digest IS NOT (
+          SELECT authority_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT repository_id FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.base_revision IS NOT (
+          SELECT base_revision FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT json_extract(request_json, '$.trigger') FROM factory_preparations
+          WHERE task_id = NEW.task_id) IS NOT 'scheduled' OR
+        NEW.policy_bundle_digest IS NOT (
+          SELECT json_extract(authority_json, '$.policyBundleDigest') FROM factory_preparations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.schedule_policy_digest IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.schedulePolicyDigest')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.policy_bundle_digest IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.policyBundleDigest')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.repositoryId')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.base_revision IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.baseRevision')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.maximum_risk_tier IS NOT (
+          SELECT json_extract(authority_json, '$.maximumRiskTier') FROM factory_preparations
+          WHERE task_id = NEW.task_id
+        ) OR
+        ((SELECT json_extract(cohort_json, '$.maximumRiskTier')
+          FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest) = 'R0' AND
+          NEW.maximum_risk_tier IS NOT 'R0') OR
+        NEW.wall_clock_seconds IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.wallClockSeconds')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_agent_turns IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxAgentTurns')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_tool_calls IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxToolCalls')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_input_tokens IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxInputTokens')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_output_tokens IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxOutputTokens')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_cost_microusd IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxCostMicrousd')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_processes IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxProcesses')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_output_bytes IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxOutputBytes')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_workers IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxWorkers')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_repair_attempts IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxRepairAttempts')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_changed_files IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxChangedFiles')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_changed_lines IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxChangedLines')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.reserved_at < (
+          SELECT issued_at FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.reserved_at < (
+          SELECT issued_at FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.reserved_at >= NEW.expires_at OR
+        NEW.expires_at > (
+          SELECT expires_at FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.expires_at > (
+          SELECT expires_at FROM factory_preparations WHERE task_id = NEW.task_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservation identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_task_reservations_capacity_guard
+      BEFORE INSERT ON factory_canary_task_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest) >= (
+            SELECT json_extract(cohort_json, '$.maximumTasks') FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.wall_clock_seconds > (
+            SELECT json_extract(cohort_json, '$.budget.wallClockSeconds')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_agent_turns > (
+            SELECT json_extract(cohort_json, '$.budget.maxAgentTurns')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_tool_calls > (
+            SELECT json_extract(cohort_json, '$.budget.maxToolCalls')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_input_tokens > (
+            SELECT json_extract(cohort_json, '$.budget.maxInputTokens')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_output_tokens > (
+            SELECT json_extract(cohort_json, '$.budget.maxOutputTokens')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_cost_microusd > (
+            SELECT json_extract(cohort_json, '$.budget.maxCostMicrousd')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_processes > (
+            SELECT json_extract(cohort_json, '$.budget.maxProcesses')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_output_bytes > (
+            SELECT json_extract(cohort_json, '$.budget.maxOutputBytes')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_workers > (
+            SELECT json_extract(cohort_json, '$.budget.maxWorkers')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_repair_attempts > (
+            SELECT json_extract(cohort_json, '$.budget.maxRepairAttempts')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_changed_files > (
+            SELECT json_extract(cohort_json, '$.budget.maxChangedFiles')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_changed_lines > (
+            SELECT json_extract(cohort_json, '$.budget.maxChangedLines')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort reservation capacity exceeded');
+      END;
+
+      PRAGMA user_version = 15;
       COMMIT;
     `);
   }

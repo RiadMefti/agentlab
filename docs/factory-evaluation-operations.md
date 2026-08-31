@@ -198,9 +198,24 @@ agentlab factory canary-authorize \
 The authority independently re-verifies the stored signature, run/assessment lineage, role-policy
 digest, and current validity window. Approval and cohort v2 bind the exact attestation and cannot
 outlive it. The result structurally fixes `autoMerge:false` and `release:false`. `read-only-shadow`
-requires R0; `local-proposal` and `brokered-draft-pr` require R1. No shipped component reads the
-cohort to execute work. Do not interpret issuance as a running canary or bypass intake, task policy,
-broker preflight, repository governance, or human merge controls.
+requires R0; `local-proposal` and `brokered-draft-pr` require R1. Issuance alone does not run work.
+
+An owner-only `agentlab.local-factory-canary-admission.v1` config pins the database, trusted public
+key and runner, role-policy digest, cohort, candidate, schedule policy, factory policy, and
+attestation timing limits. After a scheduled intake and preparation record exist, reserve one exact
+task:
+
+```text
+agentlab factory canary-reserve \
+  --config /absolute/private/release/canary-admission.json \
+  --task 00000000-0000-4000-8000-000000000000
+```
+
+Admission re-verifies the v2 signature and full lineage after every retry, rechecks freshness after
+verification, and atomically records the task's complete ceiling against cohort task and budget
+limits. Exact retries return the immutable reservation. It executes no model and grants no PR,
+merge, or release authority. Do not interpret a cohort or reservation as a running canary or bypass
+intake, task policy, broker preflight, repository governance, or human merge controls.
 
 ## Failure, recovery, and incident handling
 
@@ -223,11 +238,10 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 ## Activation gaps
 
-Before any cohort drives even shadow work, AgentLab still needs a sandboxed harness producer;
+Before a reservation drives even shadow work, AgentLab still needs a sandboxed harness producer;
 content-addressed grader artifacts; a brokered multi-account storage boundary for the shared ledger;
-stronger runner identity or hardware-backed key custody where required; a crash-durable cohort
-consumer that re-verifies the v2 attestation and role-policy pins, reserves aggregate usage, and
-binds every task; telemetry/control comparison; expiry/revocation enforcement; alerting; rollback
-drills; and incident automation. Brokered PR creation remains separately human-confirmed and blocked
-by repository governance and live cost-policy prerequisites in
+stronger runner identity or hardware-backed key custody where required; scheduler/worker consumption
+that requires the exact unexpired reservation; telemetry/control comparison; revocation enforcement;
+alerting; rollback drills; and incident automation. Brokered PR creation remains separately
+human-confirmed and blocked by repository governance and live cost-policy prerequisites in
 [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

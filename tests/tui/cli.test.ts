@@ -64,6 +64,7 @@ describe("terminal CLI", () => {
 
   it("requires exact eval and human canary authority coordinates", () => {
     const assessment = `sha256:${"a".repeat(64)}`;
+    const taskId = "10000000-0000-4000-8000-000000000001";
     expect(
       parseCliArguments([
         "factory",
@@ -148,6 +149,20 @@ describe("terminal CLI", () => {
       requestPath: "/private/agentlab/canary-request.json",
       confirmation: "authorize-canary"
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "canary-reserve",
+        "--config",
+        "/private/agentlab/canary-admission.json",
+        "--task",
+        taskId
+      ])
+    ).toEqual({
+      kind: "factory-canary-reserve",
+      configPath: "/private/agentlab/canary-admission.json",
+      taskId
+    });
     expect(() =>
       parseCliArguments([
         "factory",
@@ -169,6 +184,16 @@ describe("terminal CLI", () => {
         "--request",
         "/private/agentlab/canary-request.json",
         "--confirm-authorize-canary"
+      ])
+    ).toThrow(/Usage/u);
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "canary-reserve",
+        "--config",
+        "/private/agentlab/canary-admission.json",
+        "--task",
+        "not-a-task"
       ])
     ).toThrow(/Usage/u);
   });

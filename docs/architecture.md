@@ -18,14 +18,14 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use seven
+The interactive product is local-only and single-process. Optional factory operations use eight
 separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
 switch operator, a credential-bearing draft-PR broker, a credentialless governed intake operator, a
 credentialless deterministic evaluator/verifier, an isolated key-bearing eval attestor, and a
-separate human canary-authority operator. Only the broker may make explicit GitHub API calls; none
-is loaded into the interactive runtime. AgentLab has no HTTP server, WebSocket gateway, browser
-renderer, desktop shell, remote mode, app command language, MCP bridge, or provider-session
-translation layer.
+separate human canary-authority operator, plus a credentialless canary-admission operator. Only the
+broker may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has
+no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command
+language, MCP bridge, or provider-session translation layer.
 
 ## Two paths
 
@@ -244,8 +244,14 @@ budget capped by the evaluated suite and attestation lifetime. The only stages a
 `false`. SQLite version 14 atomically stores immutable run/assessment, verified-attestation, and
 approval/cohort records; v2 authority directly binds the attestation and role-policy digests. Legacy
 v1 authority remains readable but cannot be newly issued or consumed autonomously. No composition
-runs a canary, and no shipped consumer converts a cohort into task, scheduler, broker, merge, or
-release authority. See [ADR 0012](decisions/0012-attested-canary-authority.md) and
+runs a canary. The separate `@agentlab/runtime/factory-canary-admission` composition re-verifies an
+exact v2 cohort, signature, role-policy, evaluated candidate, schedule/policy/skill pins,
+repository, R0/R1 ceiling, preparation authority, and current validity before atomically reserving a
+scheduled task's complete budget. SQLite version 15 makes reservations immutable and enforces
+aggregate cohort task and budget ceilings inside the insert transaction. Admission has no model,
+process, GitHub, broker, merge, or release capability. Scheduler and worker execution do not consume
+the reservation yet. See [ADR 0012](decisions/0012-attested-canary-authority.md),
+[ADR 0013](decisions/0013-durable-canary-task-admission.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -436,10 +442,10 @@ intake configuration or task has been provisioned. No live agent task or PR has 
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
 and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
 reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Repository/day and organization/day quotas, a sandboxed harness producer, attestation-gated cohort
-consumption, telemetry-driven canary comparison, merge, release, rollback, and incident automation
-remain later stages. The deterministic assessment and bounded non-release cohort ledger exist but
-are dormant.
+Repository/day and organization/day quotas, a sandboxed harness producer, reservation-bound worker
+and scheduler execution, telemetry-driven canary comparison, merge, release, rollback, and incident
+automation remain later stages. Deterministic assessment, bounded non-release cohort authority, and
+durable admission now exist but remain unactivated.
 
 ## Dependency map
 
@@ -455,6 +461,7 @@ human operator ────▶ @agentlab/runtime/factory-authority ▶ local-fac
 eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ local-factory-evaluator composition
 eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
+canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
                                                          │              │
                                                          ▼              ▼
                                                    application     infrastructure
@@ -466,15 +473,15 @@ release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-fact
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                                               | May depend on workspace areas                  |
-| ------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                                          | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                                       | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                       | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                      | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, intake, worker, evaluator, human authorities, and broker construction | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                            | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff                              | launcher                                       |
+| Area                      | Owns                                                                                          | May depend on workspace areas                  |
+| ------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                                                     | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                                                  | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                  | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                 | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, evaluator, admission, human authorities, and broker construction | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                       | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                                         | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -483,8 +490,8 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, evaluator, eval-attestor, switch-authority, and canary-authority subpaths are
-  exact; every runtime deep import fails.
+  broker, worker, evaluator, eval-attestor, switch-authority, canary-authority, and canary-admission
+  subpaths are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
@@ -493,10 +500,11 @@ The product-source rules are executable and fail closed:
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
-- Evaluator, eval-attestor, and canary-authority closures have separate exact allowlists. None can
-  reach provider, process-execution, GitHub, broker, merge, release, tmux, terminal, or interactive
-  modules. The evaluator cannot reach signing or human canary issuance; the attestor cannot reach
-  the evaluator, SQLite, or any authority.
+- Evaluator, eval-attestor, canary-authority, and canary-admission closures have separate exact
+  allowlists. None can reach provider, process-execution, GitHub, broker, merge, release, tmux,
+  terminal, or interactive modules. The evaluator cannot reach signing or human canary issuance; the
+  attestor cannot reach the evaluator, SQLite, or any authority. Canary admission cannot issue human
+  authority or execute the task it reserves.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -535,6 +543,7 @@ never exclude workspace production source.
 | Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`        |
 | Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`    |
 | Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts` |
+| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts` |
 | Terminal rendering, input, or interaction state              | `apps/tui`                                               |
 | Installer, cache, or binary handoff                          | `packages/launcher`                                      |
 

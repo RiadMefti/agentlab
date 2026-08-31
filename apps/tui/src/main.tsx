@@ -82,6 +82,11 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-canary-reserve") {
+    const { runFactoryCanaryReserve } = await import("./run-factory-canary-admission.js");
+    process.exitCode = await runFactoryCanaryReserve(action.configPath, action.taskId);
+    return;
+  }
   if (action.kind === "factory-broker-preflight") {
     const { runFactoryBrokerPreflight } = await import("./run-factory-broker-preflight.js");
     process.exitCode = await runFactoryBrokerPreflight(action.configPath);

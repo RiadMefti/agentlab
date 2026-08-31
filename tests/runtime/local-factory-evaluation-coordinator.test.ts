@@ -2,6 +2,7 @@ import type { FactorySignedEvalAttestation } from "@agentlab/contracts";
 import { describe, expect, it } from "vitest";
 
 import { LocalFactoryCanaryAuthorityCoordinator } from "../../packages/runtime/src/application/local-factory-canary-authority-coordinator.js";
+import { LocalFactoryCanaryAdmissionCoordinator } from "../../packages/runtime/src/application/local-factory-canary-admission-coordinator.js";
 import { LocalFactoryEvalAttestorCoordinator } from "../../packages/runtime/src/application/local-factory-eval-attestor-coordinator.js";
 import { LocalFactoryEvaluatorCoordinator } from "../../packages/runtime/src/application/local-factory-evaluator-coordinator.js";
 import { RuntimeRepositoryOwner } from "../../packages/runtime/src/application/runtime-repository-owner.js";
@@ -11,6 +12,10 @@ import {
   testFactoryEvalAttestationSnapshot,
   testFactoryEvalDocuments
 } from "../helpers/factory-evaluation.js";
+import {
+  testFactoryCanaryAdmissionFixture,
+  testFactoryCanaryReservationDocument
+} from "../helpers/factory-canary-admission.js";
 
 describe("local factory evaluation coordinators", () => {
   it("bounds, serializes, and drains isolated eval signing", async () => {
@@ -92,6 +97,42 @@ describe("local factory evaluation coordinators", () => {
     await expect(closing).resolves.toBeUndefined();
     expect(events).toEqual(["repository", "lease"]);
     await expect(runtime.commands.authorize({})).rejects.toThrow(/runtime is closing/u);
+  });
+
+  it("drains canary admission before closing its reservation ledger and lease", async () => {
+    const fixture = testFactoryCanaryAdmissionFixture();
+    const reservation = testFactoryCanaryReservationDocument(fixture);
+    const result = {
+      schemaVersion: "agentlab.canary-admission-result.v1" as const,
+      status: "reserved" as const,
+      reservation: reservation.value,
+      reservationDigest: reservation.digest
+    };
+    const pending = deferred<typeof result>();
+    const events: string[] = [];
+    const repositories = new RuntimeRepositoryOwner();
+    repositories.track({ close: () => events.push("repository") });
+    const runtime = new LocalFactoryCanaryAdmissionCoordinator({
+      admission: { reserve: () => pending.promise },
+      tasks: new RuntimeTaskOwner(),
+      repositories,
+      writerLease: {
+        databasePath: "/tmp/canary-admission.sqlite",
+        close: () => events.push("lease")
+      },
+      maximumQueuedCommands: 1
+    });
+
+    const reserving = runtime.commands.reserve({});
+    await expect(runtime.commands.reserve({})).rejects.toThrow(/queue is full/u);
+    const closing = runtime.close();
+    await Promise.resolve();
+    expect(events).toEqual([]);
+    pending.resolve(result);
+    await expect(reserving).resolves.toEqual(result);
+    await expect(closing).resolves.toBeUndefined();
+    expect(events).toEqual(["repository", "lease"]);
+    await expect(runtime.commands.reserve({})).rejects.toThrow(/runtime is closing/u);
   });
 });
 

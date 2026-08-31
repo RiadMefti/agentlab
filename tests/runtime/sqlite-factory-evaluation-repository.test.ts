@@ -136,6 +136,7 @@ describe("SQLite factory evaluation repositories", () => {
     const legacy = new DatabaseSync(databasePath);
     try {
       legacy.exec(`
+        DROP TABLE factory_canary_task_reservations;
         DROP INDEX factory_canary_approvals_attestation_idx;
         DROP INDEX factory_canary_cohorts_attestation_idx;
         DROP TRIGGER factory_canary_approvals_identity_guard;
@@ -229,6 +230,7 @@ describe("SQLite factory evaluation repositories", () => {
     const legacy = new DatabaseSync(databasePath);
     try {
       legacy.exec(`
+        DROP TABLE factory_canary_task_reservations;
         DROP TABLE factory_eval_attestations;
         DROP TABLE factory_canary_cohorts;
         DROP TABLE factory_canary_approvals;

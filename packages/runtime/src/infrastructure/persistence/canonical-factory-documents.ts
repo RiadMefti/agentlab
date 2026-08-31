@@ -6,6 +6,7 @@ import {
   factoryAgentRunRecordSchema,
   factoryCanaryApprovalSchema,
   factoryCanaryCohortSchema,
+  factoryCanaryTaskReservationSchema,
   factoryConfigurationCandidateSchema,
   factoryControlEventSchema,
   factoryEvalAssessmentSchema,
@@ -150,6 +151,10 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public canaryCohort(input: unknown) {
     return encodeCanonicalDocument(factoryCanaryCohortSchema.parse(input));
+  }
+
+  public canaryTaskReservation(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryTaskReservationSchema.parse(input));
   }
 
   public executionRun(input: unknown) {

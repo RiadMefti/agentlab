@@ -157,8 +157,11 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   one immutable schema-13 append.
 - `agentlab factory canary-authorize --config ... --attestation ... --request ... --confirm-authorize-canary`
   requires a currently valid verified attestation and separate owner-only human request, then
-  records one attestation- and role-policy-bound non-executing cohort. No shipped component consumes
-  that cohort yet.
+  records one attestation- and role-policy-bound non-executing cohort.
+- `agentlab factory canary-reserve --config ... --task ...` re-verifies one exact v2 cohort and its
+  signed evaluation, then atomically reserves the scheduled task's complete ceiling against cohort
+  task and budget limits. The credentialless command executes no model, opens no PR, and grants no
+  merge or release authority; the worker and scheduler do not consume reservations yet.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
   reconciles one exact daily UTC slot from an owner-only worker v3 config. SQLite v11 durably claims
   each scheduled request before model work, while schedule-run v2 also pins the role-policy digest,

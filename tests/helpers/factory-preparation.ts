@@ -42,22 +42,34 @@ export interface FactoryPreparationFixtureOptions {
   readonly contractExpiresAt?: string;
   readonly maximumContractLifetimeSeconds?: number;
   readonly preparationMaxProcesses?: number;
+  readonly taskId?: string;
+  readonly deduplicationKey?: string;
+  readonly trigger?: "manual" | "scheduled" | "webhook";
 }
 
 export function testFactoryPreparationFixture(options: FactoryPreparationFixtureOptions = {}) {
   const documents = new NodeFactoryDocumentCodec();
   const policyDigest = encodeCanonicalDocument(defaultFactoryPolicyBundle).digest;
   const policy = new FactoryPolicyEngine(policyDigest);
+  const trigger = options.trigger ?? "manual";
   const request = factoryIntakeRequestSchema.parse({
     schemaVersion: "agentlab.intake-request.v1",
-    taskId: TEST_FACTORY_TASK_ID,
+    taskId: options.taskId ?? TEST_FACTORY_TASK_ID,
     conversationId: TEST_FACTORY_CONVERSATION_ID,
     createdAt: "2026-08-30T12:00:00.000Z",
-    deduplicationKey: testDigest("d"),
+    deduplicationKey: options.deduplicationKey ?? testDigest("d"),
     repository: { id: "agentlab", baseRevision: "a".repeat(40) },
     requestSources: [{ kind: "local", ref: "request-1" }],
-    trigger: "manual",
-    requester: { kind: "human", role: "requester", id: "maintainer", sessionId: null },
+    trigger,
+    requester:
+      trigger === "manual"
+        ? { kind: "human", role: "requester", id: "maintainer", sessionId: null }
+        : {
+            kind: "control-plane",
+            role: "requester",
+            id: "agentlab-scheduled-intake",
+            sessionId: null
+          },
     title: "Document the factory boundary",
     body: "Add a durable explanation of the governed request-to-contract boundary."
   });

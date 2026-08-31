@@ -10,6 +10,7 @@ import {
   createConfiguredLocalFactoryCanaryAuthority,
   createLocalFactoryCanaryAuthority
 } from "../../packages/runtime/src/local-factory-canary-authority.js";
+import { createLocalFactoryCanaryAdmission } from "../../packages/runtime/src/local-factory-canary-admission.js";
 import { createLocalFactoryEvalAttestor } from "../../packages/runtime/src/local-factory-eval-attestor.js";
 import {
   createConfiguredLocalFactoryEvaluator,
@@ -112,6 +113,22 @@ describe("local factory evaluation compositions", () => {
         maximumAttestationLifetimeSeconds: config.maximumAttestationLifetimeSeconds,
         roleIdentityPolicy,
         expectedRoleIdentityPolicyDigest: digest
+      })
+    ).toThrow(/trust coordinates/u);
+    expect(() =>
+      createLocalFactoryCanaryAdmission({
+        databasePath: config.databasePath,
+        runnerId: config.runnerId,
+        trustedPublicKeyPath: config.trustedPublicKeyPath,
+        trustedKeyId: testEvalDigest(902),
+        maximumIssuanceDelaySeconds: config.maximumIssuanceDelaySeconds,
+        maximumAttestationLifetimeSeconds: config.maximumAttestationLifetimeSeconds,
+        roleIdentityPolicy,
+        expectedRoleIdentityPolicyDigest: digest,
+        expectedCohortDigest: testEvalDigest(910),
+        expectedCandidateDigest: testEvalDigest(911),
+        expectedSchedulePolicyDigest: testEvalDigest(912),
+        expectedPolicyBundleDigest: testEvalDigest(913)
       })
     ).toThrow(/trust coordinates/u);
     expect(existsSync(config.databasePath)).toBe(false);

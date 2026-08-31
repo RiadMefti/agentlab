@@ -51,6 +51,11 @@ export type CliAction =
       readonly confirmation: "authorize-canary";
     }
   | {
+      readonly kind: "factory-canary-reserve";
+      readonly configPath: string;
+      readonly taskId: string;
+    }
+  | {
       readonly kind: "factory-scheduler-tick";
       readonly configPath: string;
       readonly expectedSchedulePolicyDigest: `sha256:${string}`;
@@ -138,6 +143,19 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const runPath = input[5];
     if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
       return { kind: "factory-eval-sign", configPath, runPath, confirmation: "sign-eval" };
+    }
+  }
+  if (
+    input.length === 6 &&
+    input[0] === "factory" &&
+    input[1] === "canary-reserve" &&
+    input[2] === "--config" &&
+    input[4] === "--task"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isFactoryTaskId(taskId)) {
+      return { kind: "factory-canary-reserve", configPath, taskId };
     }
   }
   if (
@@ -549,7 +567,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -609,6 +627,8 @@ Factory authority:
       Inspect compact metrics and policy reasons for one immutable assessment.
   agentlab factory canary-authorize --config <absolute-path> --attestation <sha256> --request <absolute-path> --confirm-authorize-canary
       Issue one human-reviewed, expiring R0/R1 cohort that structurally forbids merge and release.
+  agentlab factory canary-reserve --config <absolute-path> --task <uuid>
+      Re-verify the pinned attested cohort and reserve one exact scheduled task ceiling; execute nothing.
   agentlab factory authority-status --config <absolute-path>
       Inspect local scheduler and draft-PR authority plus both immutable event histories.
   agentlab factory scheduler-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-scheduler

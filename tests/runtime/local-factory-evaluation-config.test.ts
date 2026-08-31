@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryCanaryAuthorityConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-canary-authority-config.js";
+import { loadLocalFactoryCanaryAdmissionConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.js";
 import { loadLocalFactoryCanaryRequest } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-canary-request.js";
 import { loadLocalFactoryEvalRun } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.js";
 import { loadLocalFactoryEvalAttestorConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.js";
@@ -30,6 +31,7 @@ describe("local factory evaluation file boundaries", () => {
     const root = await temporaryRoot();
     const evaluatorPath = join(root, "evaluator.json");
     const canaryPath = join(root, "canary-authority.json");
+    const admissionPath = join(root, "canary-admission.json");
     const roleIdentityPolicyPath = join(root, "role-identities.json");
     const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
       keyId: testEvalDigest(901),
@@ -73,10 +75,26 @@ describe("local factory evaluation file boundaries", () => {
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: 3_600
     } as const;
+    const admission = {
+      schemaVersion: "agentlab.local-factory-canary-admission.v1",
+      databasePath: join(root, "agentlab.sqlite"),
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: join(root, "eval-public.pem"),
+      trustedKeyId: testEvalDigest(901),
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest,
+      expectedCohortDigest: testEvalDigest(910),
+      expectedCandidateDigest: testEvalDigest(911),
+      expectedSchedulePolicyDigest: testEvalDigest(912),
+      expectedPolicyBundleDigest: testEvalDigest(913),
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600
+    } as const;
     await writePrivateJson(evaluatorPath, evaluator);
     await writePrivateJson(attestorPath, attestor);
     await writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy);
     await writePrivateJson(canaryPath, canary);
+    await writePrivateJson(admissionPath, admission);
 
     await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).resolves.toEqual({
       ...evaluator,
@@ -90,6 +108,10 @@ describe("local factory evaluation file boundaries", () => {
       ...canary,
       roleIdentityPolicy
     });
+    await expect(loadLocalFactoryCanaryAdmissionConfig(admissionPath)).resolves.toEqual({
+      ...admission,
+      roleIdentityPolicy
+    });
 
     await writePrivateJson(evaluatorPath, { ...evaluator, githubToken: "forbidden" });
     await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).rejects.toThrow();
@@ -97,6 +119,8 @@ describe("local factory evaluation file boundaries", () => {
     await expect(loadLocalFactoryCanaryAuthorityConfig(canaryPath)).rejects.toThrow(
       /absolute path/u
     );
+    await writePrivateJson(admissionPath, { ...admission, githubToken: "forbidden" });
+    await expect(loadLocalFactoryCanaryAdmissionConfig(admissionPath)).rejects.toThrow();
   });
 
   it("loads strict self-describing eval reports and canary requests", async () => {

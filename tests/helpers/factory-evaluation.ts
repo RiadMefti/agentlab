@@ -111,19 +111,26 @@ export function testFactoryConfigurationCandidate(input: {
   readonly candidateId: string;
   readonly version?: string;
   readonly providerDigestIndex: number;
+  readonly repositoryId?: string;
+  readonly baseRevision?: string;
+  readonly policyBundleDigest?: Sha256Digest;
+  readonly schedulePolicyDigest?: Sha256Digest | null;
+  readonly skillPackageDigests?: readonly Sha256Digest[];
+  readonly createdAt?: string;
 }): FactoryConfigurationCandidate {
   return factoryConfigurationCandidateSchema.parse({
     schemaVersion: "agentlab.factory-candidate.v1",
     candidateId: input.candidateId,
     version: input.version ?? "1.0.0",
-    repositoryId: "agentlab",
-    baseRevision: "a".repeat(40),
-    policyBundleDigest: testEvalDigest(2),
-    schedulePolicyDigest: testEvalDigest(3),
+    repositoryId: input.repositoryId ?? "agentlab",
+    baseRevision: input.baseRevision ?? "a".repeat(40),
+    policyBundleDigest: input.policyBundleDigest ?? testEvalDigest(2),
+    schedulePolicyDigest:
+      input.schedulePolicyDigest === undefined ? testEvalDigest(3) : input.schedulePolicyDigest,
     harnessDigest: testEvalDigest(4),
     providerConfigurationDigest: testEvalDigest(input.providerDigestIndex),
-    skillPackageDigests: [testEvalDigest(7), testEvalDigest(8)],
-    createdAt: "2026-08-30T10:00:00.000Z"
+    skillPackageDigests: input.skillPackageDigests ?? [testEvalDigest(7), testEvalDigest(8)],
+    createdAt: input.createdAt ?? "2026-08-30T10:00:00.000Z"
   });
 }
 

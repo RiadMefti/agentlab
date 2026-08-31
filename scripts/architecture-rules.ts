@@ -105,6 +105,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-canary-authority.ts",
         default: "./dist/local-factory-canary-authority.js",
         types: "./dist/local-factory-canary-authority.d.ts"
+      },
+      "./factory-canary-admission": {
+        source: "packages/runtime/src/local-factory-canary-admission.ts",
+        default: "./dist/local-factory-canary-admission.js",
+        types: "./dist/local-factory-canary-admission.d.ts"
       }
     }
   }
@@ -382,6 +387,7 @@ function compositionBoundaryViolations(
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -397,6 +403,7 @@ function compositionBoundaryViolations(
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
     {
@@ -410,6 +417,7 @@ function compositionBoundaryViolations(
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -440,6 +448,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-canary-authority.ts",
       description: "human canary authority composition",
       forbidden: canaryAuthorityCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-canary-admission.ts",
+      description: "credentialless canary admission composition",
+      forbidden: canaryAdmissionCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -490,6 +503,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-canary-authority.ts",
       description: "human canary authority command",
       forbidden: canaryAuthorityCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-canary-admission.ts",
+      description: "credentialless canary admission command",
+      forbidden: canaryAdmissionCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -536,6 +554,7 @@ function brokerCommandForbidden(path: string): boolean {
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -551,6 +570,7 @@ function workerCommandForbidden(path: string): boolean {
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -638,7 +658,8 @@ function intakeCommandForbidden(path: string): boolean {
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
-    isFactoryCanaryAuthorityModule(path)
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -659,7 +680,8 @@ function authorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
-    isFactoryCanaryAuthorityModule(path)
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -717,7 +739,8 @@ function evaluatorCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
     isFactoryEvalAttestorModule(path) ||
-    isFactoryCanaryAuthorityModule(path)
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -766,7 +789,8 @@ function evalAttestorCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
     isFactoryEvaluatorModule(path) ||
-    isFactoryCanaryAuthorityModule(path)
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -826,7 +850,8 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-authority.ts" ||
     (isFactoryEvaluatorModule(path) &&
       path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
-    isFactoryEvalAttestorModule(path)
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -835,6 +860,67 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
   }
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryCanaryAuthorityInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryCanaryAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-canary-admission-service.ts",
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
+  "packages/runtime/src/application/local-factory-canary-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryCanaryAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-reservation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryCanaryAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-canary-admission.ts" ||
+    path === "packages/runtime/src/application/factory-canary-admission-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-canary-admission-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.ts"
+  );
+}
+
+function canaryAdmissionCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    (isFactoryEvaluatorModule(path) &&
+      path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAuthorityModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryCanaryAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryCanaryAdmissionInfrastructureModules.has(path);
   }
   return false;
 }
@@ -853,7 +939,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-evaluator.ts" ||
     path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
-    path === "packages/runtime/src/local-factory-canary-authority.ts"
+    path === "packages/runtime/src/local-factory-canary-authority.ts" ||
+    path === "packages/runtime/src/local-factory-canary-admission.ts"
   ) {
     return "runtime-composition";
   }

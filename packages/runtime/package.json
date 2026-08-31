@@ -35,6 +35,10 @@
     "./factory-canary-authority": {
       "types": "./dist/local-factory-canary-authority.d.ts",
       "default": "./dist/local-factory-canary-authority.js"
+    },
+    "./factory-canary-admission": {
+      "types": "./dist/local-factory-canary-admission.d.ts",
+      "default": "./dist/local-factory-canary-admission.js"
     }
   },
   "files": [

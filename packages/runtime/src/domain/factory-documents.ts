@@ -3,6 +3,7 @@ import type {
   FactoryControlEvent,
   FactoryCanaryApproval,
   FactoryCanaryCohort,
+  FactoryCanaryTaskReservation,
   FactoryConfigurationCandidate,
   FactoryEvalAssessment,
   FactoryEvalAttestationRecord,
@@ -86,6 +87,7 @@ export interface FactoryDocumentCodec {
   evalAttestationRecord(input: unknown): CanonicalFactoryDocument<FactoryEvalAttestationRecord>;
   canaryApproval(input: unknown): CanonicalFactoryDocument<FactoryCanaryApproval>;
   canaryCohort(input: unknown): CanonicalFactoryDocument<FactoryCanaryCohort>;
+  canaryTaskReservation(input: unknown): CanonicalFactoryDocument<FactoryCanaryTaskReservation>;
   executionRun(input: unknown): CanonicalFactoryDocument<FactoryExecutionRun>;
   executionEvent(input: unknown): CanonicalFactoryDocument<FactoryExecutionEvent>;
   policyDecision(input: unknown): CanonicalFactoryDocument<FactoryPolicyDecision>;
