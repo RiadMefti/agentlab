@@ -185,9 +185,12 @@ trusted construction boundary and is absent from agent output. It rejects unreso
 substitutions, permits only narrowing, raises risk from the complete prospective scope, derives
 gates/reviews/approvals from policy, and emits the existing immutable task contract. One SQLite
 transaction creates that contract, the complete `intake → qualified → specified → planned` task
-history, initial preparation evidence, and the preparation `prepared` marker. A late failure rolls
-all of them back; a lost response can be retried idempotently. Model output never authors identity,
-timestamps, digests, authority, policy, ledger events, evidence assertions, or approvals.
+history, initial preparation evidence, deterministic `contract-validation`, `scope-validation`, and
+`policy-validation` gate claims, and the preparation `prepared` marker. Those gate claims are
+derived by the trusted compiler/materializer and are never accepted from model output. A late
+failure rolls all of them back; a lost response can be retried idempotently. Model output never
+authors identity, timestamps, digests, authority, policy, ledger events, evidence assertions, or
+approvals.
 
 This path is not composed into `local-runtime.ts`, scheduled, deployed, published, or enabled.
 Normal database migration creates only its inert local ledger tables. A separate broker composition,

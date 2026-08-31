@@ -329,6 +329,41 @@ describe("FactoryPreparationService", () => {
           "provenance"
         ])
       );
+      expect(
+        evidence[0]?.bundle.items
+          .filter(({ producer }) => producer.id === "agentlab-local-gates")
+          .flatMap(({ claims }) =>
+            claims.filter(({ name }) => name === "gate-id").map(({ value }) => value)
+          )
+          .sort()
+      ).toEqual(["contract-validation", "policy-validation", "scope-validation"]);
+
+      const executionAdmission = context.fixture.policy.evaluate({
+        contract: {
+          value: result.task.contract,
+          digest: result.task.contractDigest,
+          json: context.fixture.documents.taskContract(result.task.contract).json
+        },
+        stage: "execution",
+        approvalSubjectDigest: result.task.contractDigest,
+        now: "2026-08-30T12:09:00.000Z",
+        currentBaseRevision: result.task.contract.repository.baseRevision,
+        changeSet: {
+          baseRevision: result.task.contract.repository.baseRevision,
+          headRevision: null,
+          changedPaths: [],
+          binaryPaths: [],
+          changedFiles: 0,
+          changedLines: 0
+        },
+        usage: zeroUsage(),
+        usageComplete: true,
+        evidence: evidence[0]?.bundle.items ?? [],
+        approvals: [],
+        authority: { scheduler: false, prBroker: false },
+        scheduled: false
+      });
+      expect(executionAdmission).toMatchObject({ outcome: "allow", reasonCodes: [] });
 
       const replay = await materializer.materialize(command(5));
       expect(replay.task.contractDigest).toBe(result.task.contractDigest);
@@ -539,7 +574,7 @@ describe("FactoryPreparationService", () => {
         now: () => "2026-08-30T12:08:00.000Z",
         createId: () => {
           idCalls += 1;
-          return idCalls === 15 ? conflictingBundleId : uuid(identifier++);
+          return idCalls === 18 ? conflictingBundleId : uuid(identifier++);
         },
         controlPlaneActorId: "local/factory-control-plane"
       });
@@ -927,6 +962,23 @@ function successfulUsage(finalOutput: string): FactoryBudgetUsage {
     processes: 1,
     outputBytes: Buffer.byteLength(finalOutput, "utf8"),
     workers: 1,
+    repairAttempts: 0,
+    changedFiles: 0,
+    changedLines: 0
+  };
+}
+
+function zeroUsage(): FactoryBudgetUsage {
+  return {
+    wallClockSeconds: 0,
+    agentTurns: 0,
+    toolCalls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    costMicrousd: 0,
+    processes: 0,
+    outputBytes: 0,
+    workers: 0,
     repairAttempts: 0,
     changedFiles: 0,
     changedLines: 0
