@@ -72,10 +72,13 @@ App key nor installation token crosses into a model-bearing process. The exact
 `@agentlab/runtime/factory-broker` package subpath is the only public composition entry for this
 authority plane; the interactive `@agentlab/runtime` entry does not re-export it. Its strict
 owner-only configuration points to a canonical owner-only App-key file and pins the trusted GitHub
-App ID for each required `verify` and `factory-sandbox` context. A matching name from another App
-does not count. Both files reject symlinks, hard links, non-owner permissions, unstable metadata,
-non-canonical paths, and oversized input. Each key read returns fresh mutable bytes that the signer
-erases after one signature.
+App ID for each required `verify` and `factory-sandbox` context. Config v1 remains compatible and
+cost-blocked. Config v2 additionally points to a separate canonical owner-only cost-policy file so
+future broker and worker processes can load the same rate card without sharing credentials. The
+loader strictly parses `agentlab.cost-policy.v1` before runtime construction. A matching check name
+from another App does not count. Config, cost policy, and key reject symlinks, hard links, non-owner
+permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
+fresh mutable bytes that the signer erases after one signature.
 
 The product CLI exposes only `agentlab factory broker-preflight --config <absolute-path>`. It loads
 the separate broker runtime, reads local authority state, inspects the exact GitHub repository and
@@ -194,11 +197,11 @@ enable authority or open a PR. Current branch protection requires exact `verify`
 and deletion. It still has zero required approvals, does not require approval of the latest push,
 and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
 blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the shipped cost policy intentionally contains no live provider/model rules. Reviewed rate-card
-provisioning and live broker credentials are activation prerequisites; an incomplete usage record
-already denies PR creation. No live agent task or PR has been created by this code. PR-head repair,
-scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
-stages.
+the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
+owner-only rate card; actual rate and broker-key provisioning remain activation prerequisites. An
+incomplete usage record already denies PR creation. No live agent task or PR has been created by
+this code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
+automation remain later stages.
 
 ## Dependency map
 

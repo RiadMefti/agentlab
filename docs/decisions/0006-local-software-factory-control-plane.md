@@ -424,6 +424,14 @@ owner-only regular files with one link; reads are bounded and reject metadata ch
 owner drains admitted work, clears cached credentials, closes all three SQLite repositories in
 reverse order, and releases the writer lease only after repository closure is confirmed.
 
+The v1 broker config remains supported and deliberately cost-blocked. The additive
+`agentlab.local-factory-broker.v2` form requires a canonical absolute `costPolicyPath`. Before any
+runtime object is built, the same owner-only stable-file reader loads and strictly validates that
+separate `agentlab.cost-policy.v1` document. This gives future isolated worker and broker processes
+one shared rate-card artifact without giving a model-bearing process broker credentials. A changed
+file produces a changed enclosing policy digest; tasks pinned to another digest fail closed. No live
+rates are committed in this repository.
+
 The only factory-authority CLI command is the non-authorizing
 `agentlab factory broker-preflight --config <absolute-path>`. It reports exact repository
 governance, policy digest, local authority state, and sorted blocker codes as one JSON line. It does
@@ -557,8 +565,10 @@ append, and task-ledger transition, and an exact-repository GitHub App installat
 exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
 non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
 The provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also
-exist behind dormant execution ports, while the default rate card remains empty. The normal TUI has
-no enable or PR command. No live agent task or PR has been created by this code.
+exist behind dormant execution ports. Owner-only config v2 now provisions the broker's canonical
+copy of the rate card; the future worker composition will reuse the same loader and file. V1 and the
+default bundle remain empty. The normal TUI has no enable or PR command. No live agent task or PR
+has been created by this code.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4

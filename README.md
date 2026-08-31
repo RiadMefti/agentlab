@@ -148,9 +148,11 @@ is not connected to the interactive runtime, scheduled, or enabled. The only pro
 action is a separate, non-authorizing `agentlab factory broker-preflight --config <absolute-path>`
 command that makes no GitHub mutation; authority remains default-off, and the CLI cannot enable it
 or open a PR. Provider-neutral per-run cost accounting is policy-pinned and fail-closed, but its
-shipped live rate card is intentionally empty. Normal database migration creates only inert local
-ledger tables. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
-implemented controls, activation blockers, and later phases.
+shipped live rate card is intentionally empty. Owner-only broker config v2 can reference a separate
+strict cost-policy file without exposing broker credentials to future workers. Normal database
+migration creates only inert local ledger tables. See
+[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
+activation blockers, and later phases.
 
 ## Development
 

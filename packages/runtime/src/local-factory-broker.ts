@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { factoryCostPolicySchema, type FactoryCostPolicy } from "@agentlab/contracts";
+
 import { FactoryBrokerOperator } from "./application/factory-broker-operator.js";
 import {
   LocalFactoryBrokerCoordinator,
@@ -45,6 +47,7 @@ export interface LocalFactoryBrokerOptions {
   readonly repositoryNumericId: number;
   readonly brokerId: string;
   readonly gitExecutable: string;
+  readonly costPolicy?: FactoryCostPolicy;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;
@@ -74,7 +77,10 @@ export function createLocalFactoryBroker(
       new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
-    const policyBundle = encodeCanonicalDocument(defaultFactoryPolicyBundle);
+    const costPolicy = factoryCostPolicySchema.parse(
+      options.costPolicy ?? defaultFactoryPolicyBundle.costPolicy
+    );
+    const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
     const controlPlaneCredential = createFactoryEvidenceCredential();
     const brokerCredential = createFactoryEvidenceCredential();
@@ -185,6 +191,9 @@ export function createConfiguredLocalFactoryBroker(
     repositoryNumericId: config.repositoryNumericId,
     brokerId: config.brokerId,
     gitExecutable: config.gitExecutable,
+    ...(config.schemaVersion === "agentlab.local-factory-broker.v2"
+      ? { costPolicy: config.costPolicy }
+      : {}),
     githubApp: {
       clientId: config.githubApp.clientId,
       installationId: config.githubApp.installationId,
