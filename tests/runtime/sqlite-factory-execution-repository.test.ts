@@ -167,6 +167,8 @@ describe("SqliteFactoryExecutionRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TABLE factory_pull_request_dispatch_events;
+        DROP TABLE factory_pull_request_dispatches;
         DROP TABLE factory_execution_events;
         DROP TABLE factory_execution_runs;
         PRAGMA user_version = 6;

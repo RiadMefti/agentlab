@@ -108,6 +108,25 @@ lock, verifies repository/base identity, removes only the derived workspace, and
 checks. Proven interruption becomes an append-only abandonment plus a safe terminal task transition;
 uncertain host state remains active for a later recovery pass.
 
+Draft-PR authority now has its own crash-durable boundary as well. SQLite version 8 stores one
+immutable dispatch containing the exact canonical proposal and configured broker identity, followed
+by an append-only chain:
+
+```text
+ready → dispatch-active → remote-open → evidence-recorded → completed
+```
+
+The proposal is durable before a branch push or GitHub API write. Recovery replays those exact bytes
+and timestamps, so the deterministic commit SHA is unchanged. The GitHub adapter may reuse only the
+exact derived branch head and exact matching open draft; an existing different branch, PR, base,
+title, body, or head fails closed. A branch left after a crash between push and PR creation is
+reused without another push, and a PR whose successful create response was lost is found through
+bounded readback. The remote record, authenticated evidence bundle, and exact `pr-open` task event
+are then recorded as separate checkpoints. A crash after any one of them resumes at the next
+checkpoint without creating a second PR or manufacturing completion. A checkpoint that observes
+broker revocation performs no new write. If revocation races an already in-flight remote call, its
+exact result is journaled but the task cannot advance; the dispatch remains recoverable.
+
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or
 substitutions, permits only narrowing, raises risk from the complete prospective scope, derives

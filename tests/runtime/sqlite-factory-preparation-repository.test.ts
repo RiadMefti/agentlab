@@ -188,6 +188,8 @@ describe("SqliteFactoryPreparationRepository", () => {
     const historical = new DatabaseSync(databasePath);
     try {
       historical.exec(`
+        DROP TABLE factory_pull_request_dispatch_events;
+        DROP TABLE factory_pull_request_dispatches;
         DROP TABLE factory_execution_events;
         DROP TABLE factory_execution_runs;
         DROP TABLE factory_preparation_events;

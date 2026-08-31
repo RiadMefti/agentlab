@@ -1,84 +1,46 @@
-import {
-  factoryPullRequestRecordSchema,
-  type EvidenceItem,
-  type FactoryPolicyDecision,
-  type FactoryPullRequestRecord,
-  type FactoryTaskUsageRecord
-} from "@agentlab/contracts";
+import { type EvidenceItem, type FactoryTaskUsageRecord } from "@agentlab/contracts";
 import { z } from "zod";
 
-import type { ConversationRepository } from "../domain/conversation-repository.js";
-import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
-import type {
-  CanonicalFactoryDocument,
-  FactoryDocumentCodec
-} from "../domain/factory-documents.js";
-import type {
-  FactoryDraftPullRequestBroker,
-  FactoryRepositoryGovernance
-} from "../domain/factory-pull-request-broker.js";
-import type {
-  FactoryControlRepository,
-  FactoryEvidenceRepository,
-  FactoryTaskRepository,
-  FactoryTaskSnapshot
-} from "../domain/factory-task-repository.js";
-import { isFactoryTaskTransitionAllowed } from "../domain/factory-task-state.js";
+import type { CanonicalFactoryDocument } from "../domain/factory-documents.js";
+import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
 import type { FactoryControlPlane } from "./factory-control-plane.js";
-import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
 import {
-  FactoryEvidencePublisher,
-  type FactoryEvidencePublisherCredentials
-} from "./factory-evidence-publisher.js";
+  FactoryPullRequestDispatchService,
+  type FactoryPullRequestDispatchServiceDependencies,
+  type FactoryPullRequestOutcome
+} from "./factory-pull-request-dispatch-service.js";
+import {
+  factoryRepositoryGovernanceDenials,
+  requireExactPolicyItem
+} from "./factory-pull-request-policy.js";
 
-const brokerInputSchema = z.object({ taskId: z.uuid() }).strict();
+const brokerInputSchema = z
+  .object({ taskId: z.uuid(), correlationId: z.uuid().optional() })
+  .strict();
 const maximumPullRequestBodyCharacters = 16_384;
 
-export interface FactoryPullRequestServiceDependencies {
-  readonly tasks: Pick<FactoryTaskRepository, "findById">;
-  readonly evidence: Pick<FactoryEvidenceRepository, "listEvidence" | "latestEvidence">;
-  readonly controls: Pick<FactoryControlRepository, "state">;
-  readonly conversations: Pick<ConversationRepository, "findById">;
+export type FactoryPullRequestServiceDependencies = Omit<
+  FactoryPullRequestDispatchServiceDependencies,
+  "controlPlane"
+> & {
   readonly controlPlane: Pick<FactoryControlPlane, "evaluatePolicy" | "transition">;
-  readonly evidenceIngress: FactoryEvidenceIngress;
-  readonly evidenceCredentials: Pick<FactoryEvidencePublisherCredentials, "prBroker">;
-  readonly artifacts: FactoryArtifactStore;
-  readonly documents: FactoryDocumentCodec;
-  readonly remote: FactoryDraftPullRequestBroker;
-  readonly now: () => string;
-  readonly createId: () => string;
-}
+};
 
-export type FactoryPullRequestOutcome =
-  | {
-      readonly status: "opened";
-      readonly record: FactoryPullRequestRecord;
-      readonly decision: FactoryPolicyDecision;
-    }
-  | {
-      readonly status: "denied" | "needs-human";
-      readonly reasonCodes: readonly string[];
-      readonly decision: FactoryPolicyDecision | null;
-    };
+export type { FactoryPullRequestOutcome } from "./factory-pull-request-dispatch-service.js";
 
-/** Revalidates exact local evidence and remote governance before invoking the sole write broker. */
+/** Authorizes an exact proposal before delegating its durable remote lifecycle. */
 export class FactoryPullRequestService {
-  readonly #publisher: FactoryEvidencePublisher;
+  readonly #dispatch: FactoryPullRequestDispatchService;
 
   public constructor(private readonly dependencies: FactoryPullRequestServiceDependencies) {
-    this.#publisher = new FactoryEvidencePublisher({
-      evidenceIngress: dependencies.evidenceIngress,
-      credentials: { prBroker: dependencies.evidenceCredentials.prBroker },
-      artifacts: dependencies.artifacts,
-      documents: dependencies.documents,
-      now: dependencies.now,
-      createId: dependencies.createId
-    });
+    this.#dispatch = new FactoryPullRequestDispatchService(dependencies);
   }
 
   public async openDraft(input: unknown): Promise<FactoryPullRequestOutcome> {
     const command = brokerInputSchema.parse(input);
-    let task = await this.#requireTask(command.taskId);
+    const task = await this.#requireTask(command.taskId);
+    const existing = await this.dependencies.dispatches.findByTaskId(command.taskId);
+    if (existing !== null) return this.#dispatch.resume(task, existing);
     if (task.state !== "pr-proposed") {
       throw new Error("Draft PR creation requires a reviewed PR proposal.");
     }
@@ -95,22 +57,19 @@ export class FactoryPullRequestService {
     const repositoryRoot =
       conversation?.lifecycleState === "active" ? conversation.workspacePath : null;
     if (repositoryRoot === null) throw new Error("PR broker requires its active local repository.");
+    if (this.#dispatch.identity.repositoryId !== task.contract.repository.id) {
+      throw new Error("PR broker identity is not bound to the task repository.");
+    }
 
     const bundles = await this.dependencies.evidence.listEvidence(task.contract.taskId);
-    const patch = await this.#readLatestPatch(
-      task,
-      bundles.flatMap(({ bundle }) => bundle.items)
-    );
-    const usage = await this.#readUsage(
-      task,
-      patch.digest,
-      bundles.flatMap(({ bundle }) => bundle.items)
-    );
+    const items = bundles.flatMap(({ bundle }) => bundle.items);
+    const patch = await this.#readLatestPatch(task, items);
+    const usage = await this.#readUsage(task, patch.digest, items);
     const remote = await this.dependencies.remote.inspect(task.contract.repository.id);
     if (remote.repositoryId !== task.contract.repository.id) {
       throw new Error("PR broker returned another repository identity.");
     }
-    const governanceReasons = governanceDenials(remote.governance);
+    const governanceReasons = factoryRepositoryGovernanceDenials(remote.governance);
     if (governanceReasons.length > 0) {
       return { status: "denied", reasonCodes: governanceReasons, decision: null };
     }
@@ -133,7 +92,7 @@ export class FactoryPullRequestService {
         decision: policy.decision
       };
     }
-    const policyItem = exactPolicyItem(policy.evidence.bundle.items, patch.digest);
+    const policyItem = requireExactPolicyItem(policy.evidence.bundle.items, patch.digest);
     const proposal = this.dependencies.documents.pullRequestProposal({
       schemaVersion: "agentlab.pull-request-proposal.v1",
       taskId: task.contract.taskId,
@@ -156,79 +115,11 @@ export class FactoryPullRequestService {
     if (storedProposal.digest !== proposal.digest) {
       throw new Error("PR proposal digest changed in immutable storage.");
     }
-    const patchText = await this.dependencies.artifacts.readText(
-      patch.value.patchArtifact.digest,
-      Math.max(1, patch.value.patchArtifact.sizeBytes + 1)
+    return this.#dispatch.start(
+      task,
+      proposal,
+      command.correlationId ?? z.uuid().parse(this.dependencies.createId())
     );
-    if (!(await this.dependencies.controls.state()).prBroker) {
-      return {
-        status: "denied",
-        reasonCodes: ["pr-broker-disabled-after-policy"],
-        decision: policy.decision
-      };
-    }
-
-    let opened: Awaited<ReturnType<FactoryDraftPullRequestBroker["openDraft"]>> | null = null;
-    try {
-      opened = await this.dependencies.remote.openDraft({
-        proposal: proposal.value,
-        patch: patchText,
-        repositoryRoot
-      });
-      const record = validateBrokerRecord(opened.record, proposal.digest, proposal.value);
-      if (!(await this.dependencies.controls.state()).prBroker) {
-        throw new Error("PR broker authority was revoked during remote creation.");
-      }
-      await this.#publisher.pullRequest({
-        task,
-        proposal,
-        record,
-        authorizingPolicyItem: policyItem
-      });
-      const latest = await this.dependencies.evidence.latestEvidence(task.contract.taskId);
-      task = await this.dependencies.controlPlane.transition({
-        taskId: task.contract.taskId,
-        expectedState: "pr-proposed",
-        nextState: "pr-open",
-        actor: {
-          kind: "broker",
-          role: "pr-broker",
-          id: record.brokerId,
-          sessionId: null
-        },
-        reasonCode: "draft-pr-opened",
-        evidenceBundleDigest: latest?.digest ?? null
-      });
-      return { status: "opened", record, decision: policy.decision };
-    } catch (error: unknown) {
-      if (opened?.created === true) {
-        try {
-          await this.dependencies.remote.closeDraft(opened.record, "AgentLab broker rollback");
-        } catch (compensationError: unknown) {
-          if (isFactoryTaskTransitionAllowed(task.state, "quarantined")) {
-            try {
-              await this.dependencies.controlPlane.transition({
-                taskId: task.contract.taskId,
-                expectedState: task.state,
-                nextState: "quarantined",
-                actor: brokerActor,
-                reasonCode: "pr-compensation-failed"
-              });
-            } catch (transitionError: unknown) {
-              throw new AggregateError(
-                [error, compensationError, transitionError],
-                "PR creation, compensation, and quarantine recording failed."
-              );
-            }
-          }
-          throw new AggregateError(
-            [error, compensationError],
-            "PR creation failed and the draft could not be closed."
-          );
-        }
-      }
-      throw error;
-    }
   }
 
   async #readLatestPatch(task: FactoryTaskSnapshot, items: readonly EvidenceItem[]) {
@@ -297,54 +188,6 @@ export class FactoryPullRequestService {
   }
 }
 
-function governanceDenials(governance: FactoryRepositoryGovernance): readonly string[] {
-  const reasons: string[] = [];
-  if (!governance.requiresPullRequest) reasons.push("repository-pr-rule-missing");
-  if (governance.requiredApprovals < 1) reasons.push("repository-approval-rule-too-weak");
-  if (!governance.dismissesStaleReviews) reasons.push("repository-stale-review-rule-missing");
-  if (!governance.requiresLastPushApproval) reasons.push("repository-last-push-rule-missing");
-  if (!governance.enforcesAdmins) reasons.push("repository-admin-bypass-enabled");
-  if (governance.allowsForcePushes) reasons.push("repository-force-push-enabled");
-  if (governance.allowsDeletions) reasons.push("repository-branch-deletion-enabled");
-  if (!governance.requiredStatusChecks.includes("verify")) {
-    reasons.push("repository-verify-check-missing");
-  }
-  return reasons.sort();
-}
-
-function exactPolicyItem(items: readonly EvidenceItem[], subjectDigest: string): EvidenceItem {
-  const item = items.find(
-    (candidate) =>
-      candidate.kind === "policy" &&
-      candidate.result === "pass" &&
-      candidate.subjectDigest === subjectDigest &&
-      candidate.producer.kind === "control-plane" &&
-      candidate.producer.role === "policy-engine"
-  );
-  if (item === undefined) throw new Error("Policy allow evidence is missing from its own bundle.");
-  return item;
-}
-
-function validateBrokerRecord(
-  input: unknown,
-  proposalDigest: string,
-  proposal: ReturnType<FactoryDocumentCodec["pullRequestProposal"]>["value"]
-): FactoryPullRequestRecord {
-  const record = factoryPullRequestRecordSchema.parse(input);
-  if (
-    record.taskId !== proposal.taskId ||
-    record.contractDigest !== proposal.contractDigest ||
-    record.proposalDigest !== proposalDigest ||
-    record.repositoryId !== proposal.repositoryId ||
-    record.baseRevision !== proposal.baseRevision ||
-    record.branchName !== proposal.branchName ||
-    record.headRevision === record.baseRevision
-  ) {
-    throw new Error("PR broker result does not match the authorized proposal.");
-  }
-  return record;
-}
-
 function pullRequestTitle(objective: string): string {
   const firstLine = replaceAsciiControls(objective.split("\n", 1)[0] ?? "", " ", false)
     .replace(/\s+/gu, " ")
@@ -407,10 +250,3 @@ function parseJson(json: string): unknown {
     throw new Error("Stored factory artifact is invalid JSON.", { cause: error });
   }
 }
-
-const brokerActor = {
-  kind: "broker",
-  role: "pr-broker",
-  id: "agentlab-pr-broker",
-  sessionId: null
-} as const;

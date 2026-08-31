@@ -12,9 +12,11 @@ import { z } from "zod";
 import type { FactoryDocumentCodec } from "../../domain/factory-documents.js";
 import type {
   FactoryDraftPullRequestBroker,
+  FactoryPullRequestBrokerIdentity,
   FactoryRemoteRepositorySnapshot,
   OpenFactoryDraftPullRequestInput,
-  OpenFactoryDraftPullRequestResult
+  OpenFactoryDraftPullRequestResult,
+  VerifyFactoryDraftPullRequestInput
 } from "../../domain/factory-pull-request-broker.js";
 import type { CommandRunner } from "../process/command-runner.js";
 import { GitBrokerWorkspace, type PreparedGitBrokerCommit } from "./git-broker-workspace.js";
@@ -104,6 +106,10 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     });
   }
 
+  public identity(): FactoryPullRequestBrokerIdentity {
+    return { brokerId: this.#brokerId, repositoryId: this.#repositoryId };
+  }
+
   public async inspect(repositoryId: string): Promise<FactoryRemoteRepositorySnapshot> {
     this.#assertRepository(repositoryId);
     const repository = repositorySchema.parse(
@@ -172,6 +178,26 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     }
   }
 
+  public async verifyDraft(input: VerifyFactoryDraftPullRequestInput): Promise<void> {
+    const proposal = factoryPullRequestProposalSchema.parse(input.proposal);
+    const record = factoryPullRequestRecordSchema.parse(input.record);
+    this.#assertRepository(proposal.repositoryId);
+    assertRecordMatchesProposal(record, proposal, this.#brokerId, this.options.documents);
+    const [reference, pullRequest] = await Promise.all([
+      this.#branchReference(record.branchName),
+      this.#pullRequest(record.number)
+    ]);
+    if (
+      reference?.object.sha !== record.headRevision ||
+      pullRequest.number !== record.number ||
+      pullRequest.html_url !== record.url ||
+      new Date(pullRequest.created_at).toISOString() !== record.createdAt ||
+      !matchesProposal(pullRequest, proposal, record.headRevision)
+    ) {
+      throw new Error("Remote draft PR no longer matches its exact broker record and proposal.");
+    }
+  }
+
   public async closeDraft(recordInput: FactoryPullRequestRecord, reason: string): Promise<void> {
     const record = factoryPullRequestRecordSchema.parse(recordInput);
     this.#assertRepository(record.repositoryId);
@@ -209,11 +235,13 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
   ): Promise<OpenFactoryDraftPullRequestResult> {
     const headRevision = prepared.headRevision;
     if (headRevision === null) throw new Error("Broker commit preparation returned no head.");
+    const priorReference = await this.#branchReference(proposal.branchName);
     const existing = await this.#pullRequestsForBranch(proposal.branchName);
     if (existing.length > 1) throw new Error("Broker branch maps to multiple pull requests.");
     const prior = existing[0];
     if (prior !== undefined) {
       if (
+        priorReference?.object.sha !== headRevision ||
         prior.state !== "open" ||
         !prior.draft ||
         prior.title !== proposal.title ||
@@ -227,17 +255,17 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
       }
       return { record: this.#record(prior, proposal), created: false };
     }
-    if ((await this.#branchReference(proposal.branchName)) !== null) {
-      throw new Error("Broker branch already exists without its exact pull request.");
+    if (priorReference === null) {
+      const token = validateToken(await this.options.tokenSource.token(this.#repositoryId));
+      const authorizationHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
+      await prepared.push({
+        repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
+        branchName: proposal.branchName,
+        authorizationHeader
+      });
+    } else if (priorReference.object.sha !== headRevision) {
+      throw new Error("Broker branch exists with a different head revision.");
     }
-
-    const token = validateToken(await this.options.tokenSource.token(this.#repositoryId));
-    const authorizationHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-    await prepared.push({
-      repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
-      branchName: proposal.branchName,
-      authorizationHeader
-    });
     let created: z.infer<typeof pullRequestSchema>;
     try {
       created = pullRequestSchema.parse(
@@ -260,38 +288,22 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
           "GitHub PR creation status is unknown; the broker branch was retained for recovery."
         );
       }
-      const created = found.find(({ head }) => head.sha === headRevision);
-      if (created !== undefined) {
-        await this.#compensateCreated(created.number, proposal.branchName, headRevision).catch(
-          (compensationError: unknown) => {
-            throw new AggregateError(
-              [error, compensationError],
-              "GitHub PR creation failed and compensation was incomplete."
-            );
-          }
-        );
-      } else {
-        await this.#deleteBranchIfExact(proposal.branchName, headRevision).catch(
-          (compensationError: unknown) => {
-            throw new AggregateError(
-              [error, compensationError],
-              "GitHub PR creation failed and its branch could not be removed."
-            );
-          }
+      if (found.length > 1) {
+        throw new AggregateError(
+          [error, new Error("Broker branch maps to multiple pull requests.")],
+          "GitHub PR creation status is ambiguous; the exact branch was retained for recovery."
         );
       }
-      throw error;
+      const recovered = found[0];
+      if (recovered !== undefined && matchesProposal(recovered, proposal, headRevision)) {
+        return { record: this.#record(recovered, proposal), created: false };
+      }
+      throw new Error(
+        "GitHub PR creation was not confirmed; the exact broker branch was retained for recovery.",
+        { cause: error }
+      );
     }
-    if (
-      created.state !== "open" ||
-      !created.draft ||
-      created.title !== proposal.title ||
-      created.body !== proposal.body ||
-      created.base.ref !== proposal.baseBranch ||
-      created.base.sha !== proposal.baseRevision ||
-      created.head.ref !== proposal.branchName ||
-      created.head.sha !== headRevision
-    ) {
+    if (!matchesProposal(created, proposal, headRevision)) {
       const mismatch = new Error(
         "GitHub created a PR that does not match the exact broker proposal."
       );
@@ -438,6 +450,43 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
       throw new Error("GitHub broker is not authorized for this repository.");
     }
   }
+}
+
+function assertRecordMatchesProposal(
+  record: FactoryPullRequestRecord,
+  proposal: FactoryPullRequestProposal,
+  brokerId: string,
+  documents: Pick<FactoryDocumentCodec, "pullRequestProposal">
+): void {
+  if (
+    record.taskId !== proposal.taskId ||
+    record.contractDigest !== proposal.contractDigest ||
+    record.proposalDigest !== documents.pullRequestProposal(proposal).digest ||
+    record.repositoryId !== proposal.repositoryId ||
+    record.baseRevision !== proposal.baseRevision ||
+    record.branchName !== proposal.branchName ||
+    record.brokerId !== brokerId ||
+    record.headRevision === record.baseRevision
+  ) {
+    throw new Error("Draft PR record does not match its exact broker proposal.");
+  }
+}
+
+function matchesProposal(
+  pullRequest: z.infer<typeof pullRequestSchema>,
+  proposal: FactoryPullRequestProposal,
+  headRevision: string
+): boolean {
+  return (
+    pullRequest.state === "open" &&
+    pullRequest.draft &&
+    pullRequest.title === proposal.title &&
+    pullRequest.body === proposal.body &&
+    pullRequest.base.ref === proposal.baseBranch &&
+    pullRequest.base.sha === proposal.baseRevision &&
+    pullRequest.head.ref === proposal.branchName &&
+    pullRequest.head.sha === headRevision
+  );
 }
 
 function assertRemoteStillAuthorized(

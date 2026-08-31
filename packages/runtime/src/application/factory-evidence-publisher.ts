@@ -24,7 +24,10 @@ import type {
 } from "../domain/factory-documents.js";
 import type { FactoryGateExecutionOutput } from "../domain/factory-gate.js";
 import type { ResolvedFactorySkill } from "../domain/factory-skill.js";
-import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
+import type {
+  FactoryTaskSnapshot,
+  StoredEvidenceBundle
+} from "../domain/factory-task-repository.js";
 import type { FactoryWorkspacePatch } from "../domain/factory-workspace.js";
 import type {
   FactoryEvidenceCredential,
@@ -457,7 +460,7 @@ export class FactoryEvidencePublisher {
     readonly proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>;
     readonly record: FactoryPullRequestRecord;
     readonly authorizingPolicyItem: EvidenceItem;
-  }): Promise<void> {
+  }): Promise<StoredEvidenceBundle> {
     if (
       input.authorizingPolicyItem.kind !== "policy" ||
       input.authorizingPolicyItem.result !== "pass" ||
@@ -474,7 +477,7 @@ export class FactoryEvidencePublisher {
       recordDocument,
       "application/vnd.agentlab.pull-request-record.v1+json"
     );
-    await this.#append(this.#credential("prBroker"), input.task, [
+    return this.#append(this.#credential("prBroker"), input.task, [
       evidenceItemSchema.parse({
         ...input.authorizingPolicyItem,
         id: this.dependencies.createId()
@@ -527,8 +530,8 @@ export class FactoryEvidencePublisher {
     credential: FactoryEvidenceCredential,
     task: FactoryTaskSnapshot,
     items: readonly EvidenceItem[]
-  ): Promise<void> {
-    await this.dependencies.evidenceIngress.append(credential, {
+  ): Promise<StoredEvidenceBundle> {
+    return this.dependencies.evidenceIngress.append(credential, {
       taskId: task.contract.taskId,
       contractDigest: task.contractDigest,
       items

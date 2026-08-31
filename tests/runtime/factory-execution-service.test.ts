@@ -7,6 +7,7 @@ import {
   immutableTaskContractSchema,
   type FactoryAgentRunRequest,
   type FactoryBudgetUsage,
+  type FactoryPullRequestDispatchEvent,
   type FactoryResourceLimits,
   type FactorySkillPackage,
   type ImmutableTaskContract
@@ -37,8 +38,11 @@ import type {
 import type {
   FactoryDraftPullRequestBroker,
   FactoryRepositoryGovernance,
-  OpenFactoryDraftPullRequestInput
+  OpenFactoryDraftPullRequestInput,
+  VerifyFactoryDraftPullRequestInput
 } from "../../packages/runtime/src/domain/factory-pull-request-broker.js";
+import type { FactoryPullRequestDispatchRepository } from "../../packages/runtime/src/domain/factory-pull-request-dispatch-repository.js";
+import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain/factory-documents.js";
 import {
   defaultFactoryPolicyBundle,
   FactoryPolicyEngine
@@ -61,6 +65,7 @@ import {
 } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { MemoryConversationRepository } from "../helpers/fakes.js";
 import {
   TEST_FACTORY_CONVERSATION_ID,
@@ -295,6 +300,10 @@ describe("FactoryPullRequestService", () => {
       await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
         state: "pr-open"
       });
+      await expect(fixture.dispatches.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "completed",
+        record: { number: 42 }
+      });
       const latest = await fixture.repository.latestEvidence(TEST_FACTORY_TASK_ID);
       expect(latest?.bundle.items.map(({ kind }) => kind)).toEqual(["policy", "pull-request"]);
     } finally {
@@ -329,6 +338,89 @@ describe("FactoryPullRequestService", () => {
       fixture.close();
     }
   });
+
+  it.each(["remote-observed", "evidence-recorded", "task-recorded"] as const)(
+    "resumes the exact proposal after a %s journal crash without creating another PR",
+    async (checkpoint) => {
+      const fixture = await executionFixture({ dispatchAppendFailure: checkpoint });
+      try {
+        await fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID });
+        await fixture.controlPlane.setAuthority({
+          control: "pr-broker",
+          enabled: true,
+          actor: requester,
+          reason: "Test durable draft-PR recovery."
+        });
+        const remote = new FakePullRequestBroker(strongGovernance);
+        const broker = fixture.pullRequests(remote);
+
+        await expect(broker.openDraft({ taskId: TEST_FACTORY_TASK_ID })).rejects.toThrow(
+          /Injected dispatch append failure/u
+        );
+        const firstProposal = remote.opened[0]?.proposal;
+        const evidenceAfterFailure = await fixture.repository.listEvidence(TEST_FACTORY_TASK_ID);
+        if (checkpoint === "task-recorded") {
+          await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+            state: "pr-open"
+          });
+        }
+
+        await expect(broker.openDraft({ taskId: TEST_FACTORY_TASK_ID })).resolves.toMatchObject({
+          status: "opened",
+          record: { number: 42 }
+        });
+        expect(remote.createdPullRequests).toBe(1);
+        expect(firstProposal).toBeDefined();
+        expect(remote.opened.map(({ proposal }) => proposal)).toEqual(
+          remote.opened.map(() => firstProposal)
+        );
+        if (checkpoint === "evidence-recorded") {
+          await expect(fixture.repository.listEvidence(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(
+            evidenceAfterFailure.length
+          );
+        }
+        await expect(fixture.dispatches.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+          state: "completed",
+          sequence: 5
+        });
+      } finally {
+        fixture.close();
+      }
+    }
+  );
+
+  it("rechecks repository governance before retrying a recoverable remote dispatch", async () => {
+    const fixture = await executionFixture({ dispatchAppendFailure: "remote-observed" });
+    try {
+      await fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID });
+      await fixture.controlPlane.setAuthority({
+        control: "pr-broker",
+        enabled: true,
+        actor: requester,
+        reason: "Test recovery governance revocation."
+      });
+      const governance = { ...strongGovernance };
+      const remote = new FakePullRequestBroker(governance);
+      const broker = fixture.pullRequests(remote);
+
+      await expect(broker.openDraft({ taskId: TEST_FACTORY_TASK_ID })).rejects.toThrow(
+        /Injected dispatch append failure/u
+      );
+      governance.requiredApprovals = 0;
+
+      await expect(broker.openDraft({ taskId: TEST_FACTORY_TASK_ID })).resolves.toMatchObject({
+        status: "denied",
+        reasonCodes: ["repository-approval-rule-too-weak"],
+        decision: { outcome: "allow" }
+      });
+      expect(remote.opened).toHaveLength(1);
+      await expect(fixture.dispatches.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "dispatch-active"
+      });
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 async function executionFixture(
@@ -340,6 +432,10 @@ async function executionFixture(
     readonly gateWallClockSeconds?: number;
     readonly agentCleanupUnconfirmed?: boolean;
     readonly recoveryUncertain?: boolean;
+    readonly dispatchAppendFailure?: Extract<
+      FactoryPullRequestDispatchEvent["kind"],
+      "remote-observed" | "evidence-recorded" | "task-recorded"
+    >;
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-execution-test-"));
@@ -353,6 +449,10 @@ async function executionFixture(
   const databasePath = join(root, "agentlab.sqlite");
   const repository = new SqliteFactoryRepository(databasePath);
   const executions = new SqliteFactoryExecutionRepository(databasePath);
+  const dispatches = new FailOnceDispatchRepository(
+    new SqliteFactoryPullRequestDispatchRepository(databasePath),
+    options.dispatchAppendFailure
+  );
   const conversations = new MemoryConversationRepository();
   conversations.conversations.push(
     storedConversationSchema.parse({
@@ -511,6 +611,7 @@ async function executionFixture(
   });
   const pullRequests = (remote: FactoryDraftPullRequestBroker) =>
     new FactoryPullRequestService({
+      dispatches,
       tasks: repository,
       evidence: repository,
       controls: repository,
@@ -527,6 +628,7 @@ async function executionFixture(
   return {
     repository,
     executions,
+    dispatches,
     controlPlane,
     service,
     pullRequests,
@@ -537,6 +639,7 @@ async function executionFixture(
     recovery,
     task,
     close: () => {
+      dispatches.close();
       executions.close();
       repository.close();
     }
@@ -696,8 +799,15 @@ class FakeGateExecutor implements FactoryGateExecutor {
 class FakePullRequestBroker implements FactoryDraftPullRequestBroker {
   public readonly opened: OpenFactoryDraftPullRequestInput[] = [];
   public readonly closed: string[] = [];
+  public createdPullRequests = 0;
+  public verifiedDrafts = 0;
+  #proposal: OpenFactoryDraftPullRequestInput["proposal"] | null = null;
 
   public constructor(private readonly governance: FactoryRepositoryGovernance) {}
+
+  public identity() {
+    return { brokerId: "test-pr-broker", repositoryId: "agentlab" };
+  }
 
   public inspect(repositoryId: string) {
     return Promise.resolve({
@@ -710,9 +820,20 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker {
 
   public openDraft(input: OpenFactoryDraftPullRequestInput) {
     this.opened.push(input);
+    if (
+      this.#proposal !== null &&
+      JSON.stringify(this.#proposal) !== JSON.stringify(input.proposal)
+    ) {
+      return Promise.reject(new Error("Retry changed the durable proposal."));
+    }
+    const created = this.#proposal === null;
+    if (created) {
+      this.#proposal = input.proposal;
+      this.createdPullRequests += 1;
+    }
     const proposalDigest = encodeCanonicalDocument(input.proposal).digest;
     return Promise.resolve({
-      created: true,
+      created,
       record: {
         schemaVersion: "agentlab.pull-request-record.v1" as const,
         taskId: input.proposal.taskId,
@@ -731,9 +852,62 @@ class FakePullRequestBroker implements FactoryDraftPullRequestBroker {
     });
   }
 
+  public verifyDraft(input: VerifyFactoryDraftPullRequestInput) {
+    if (
+      this.#proposal === null ||
+      JSON.stringify(input.proposal) !== JSON.stringify(this.#proposal) ||
+      input.record.number !== 42 ||
+      input.record.brokerId !== "test-pr-broker"
+    ) {
+      return Promise.reject(new Error("Remote draft differs from its exact durable proposal."));
+    }
+    this.verifiedDrafts += 1;
+    return Promise.resolve();
+  }
+
   public closeDraft(record: { readonly url: string }) {
     this.closed.push(record.url);
     return Promise.resolve();
+  }
+}
+
+class FailOnceDispatchRepository implements FactoryPullRequestDispatchRepository {
+  #failed = false;
+
+  public constructor(
+    private readonly delegate: FactoryPullRequestDispatchRepository,
+    private readonly failureKind?: Extract<
+      FactoryPullRequestDispatchEvent["kind"],
+      "remote-observed" | "evidence-recorded" | "task-recorded"
+    >
+  ) {}
+
+  public register(...args: Parameters<FactoryPullRequestDispatchRepository["register"]>) {
+    return this.delegate.register(...args);
+  }
+
+  public findByTaskId(taskId: string) {
+    return this.delegate.findByTaskId(taskId);
+  }
+
+  public listRecoverable(limit: number) {
+    return this.delegate.listRecoverable(limit);
+  }
+
+  public listEvents(taskId: string) {
+    return this.delegate.listEvents(taskId);
+  }
+
+  public append(event: CanonicalFactoryDocument<FactoryPullRequestDispatchEvent>) {
+    if (!this.#failed && event.value.kind === this.failureKind) {
+      this.#failed = true;
+      throw new Error(`Injected dispatch append failure at ${event.value.kind}.`);
+    }
+    return this.delegate.append(event);
+  }
+
+  public close(): void {
+    this.delegate.close();
   }
 }
 
