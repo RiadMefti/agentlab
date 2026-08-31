@@ -18,7 +18,9 @@ project / conversation
     └── ...
 ```
 
-The product is local-only and single-process. It has no HTTP server, WebSocket gateway, browser
+The interactive product is local-only and single-process. The optional factory authority entry is a
+separate, short-lived local process and may make explicit GitHub API calls; it is never loaded into
+the model-bearing interactive runtime. AgentLab has no HTTP server, WebSocket gateway, browser
 renderer, desktop shell, remote mode, app command language, MCP bridge, or provider-session
 translation layer.
 
@@ -66,9 +68,24 @@ requests an installation token for one configured numeric repository ID with onl
 and `pull_requests:write`. The response must name that exact selected repository, must not widen the
 permission map, and must expire within the bounded installation-token window. Tokens coalesce in
 memory, refresh before expiry, and are invalidated on authentication or push failure. Neither the
-App key nor installation token crosses into a model-bearing process. The adapter remains dormant
-until an operator-facing composition boundary can provision the key to a separate broker process and
-all activation policy is satisfied.
+App key nor installation token crosses into a model-bearing process. The exact
+`@agentlab/runtime/factory-broker` package subpath is the only public composition entry for this
+authority plane; the interactive `@agentlab/runtime` entry does not re-export it. Its strict
+owner-only configuration points to a canonical owner-only App-key file and pins the trusted GitHub
+App ID for each required `verify` and `factory-sandbox` context. A matching name from another App
+does not count. Both files reject symlinks, hard links, non-owner permissions, unstable metadata,
+non-canonical paths, and oversized input. Each key read returns fresh mutable bytes that the signer
+erases after one signature.
+
+The product CLI exposes only `agentlab factory broker-preflight --config <absolute-path>`. It loads
+the separate broker runtime, reads local authority state, inspects the exact GitHub repository and
+branch protection, emits one deterministically ordered non-secret JSON record, closes
+credentials/repositories/lease, and exits with 0 for ready, 2 for policy-blocked, or 1 for an
+operational failure. It cannot enable authority or open a PR. Trusted future broker-process code has
+a typed draft-PR port, but that port deliberately has no authority-switch command: broker and human
+enablement duties remain separate. All switches remain default-off, and every draft mutation still
+passes the existing control plane, policy, evidence, durable dispatch, and remote-governance
+recheck.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -136,13 +153,14 @@ checkpoint without creating a second PR or manufacturing completion. A checkpoin
 broker revocation performs no new write. If revocation races an already in-flight remote call, its
 exact result is journaled but the task cannot advance; the dispatch remains recoverable.
 
-The supported Linux-host preflight is a distinct `factory-sandbox` CI job. It executes the live
-systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash recovery, and
-a Bubblewrap probe that proves the source checkout is hidden, dependencies are read-only, the
-worktree remains writable, and the child occupies a distinct network namespace. Activation must make
-this exact job a required repository check; ordinary unit tests do not satisfy the host proof. The
-credentialless ephemeral CI runner explicitly permits unprivileged user namespaces; production hosts
-must meet the same Bubblewrap precondition through their governed host configuration.
+The supported Linux-host preflight is a distinct required `factory-sandbox` CI job. It executes the
+live systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash
+recovery, and a Bubblewrap probe that proves the source checkout is hidden, dependencies are
+read-only, the worktree remains writable, and the child occupies a distinct network namespace.
+Branch protection requires this exact GitHub Actions check alongside `verify`; ordinary unit tests
+do not satisfy the host proof. The credentialless ephemeral CI runner explicitly permits
+unprivileged user namespaces; production hosts must meet the same Bubblewrap precondition through
+their governed host configuration.
 
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or
@@ -153,17 +171,17 @@ history, initial preparation evidence, and the preparation `prepared` marker. A 
 all of them back; a lost response can be retried idempotently. Model output never authors identity,
 timestamps, digests, authority, policy, ledger events, evidence assertions, or approvals.
 
-This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled, deployed, or
-enabled. Normal database migration creates only its inert local ledger tables. The repository
-currently lacks the approval and last-push protections required by the broker, so the adapter fails
-closed even if a future composition supplies credentials. The concrete recovery reconciler is also
-still an internal Linux adapter; preparation and multi-operation execution recovery pass live on the
-current Linux development host but have not run in the supported target-host CI lane. Complete
-provider cost accounting, target-host sandbox/recovery preflight, an isolated short-lived broker
-identity, and protected-path ownership remain activation prerequisites. Public composition and
-operator commands, PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and
-incident automation remain later stages. Until an explicit activation change meets ADR 0006's
-prerequisites, user-visible behavior and the product network boundary remain unchanged.
+This path is not composed into `local-runtime.ts`, scheduled, deployed, published, or enabled.
+Normal database migration creates only its inert local ledger tables. A separate broker composition,
+owner-only key source, and non-authorizing operator preflight now exist, but the normal TUI cannot
+enable authority or open a PR. Current branch protection requires exact `verify` and
+`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
+and deletion. It still has zero required approvals, does not require approval of the latest push,
+and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
+blocked. Complete provider cost accounting and live broker credential provisioning are also
+activation prerequisites; an incomplete usage record already denies PR creation. No live agent task
+or PR has been created by this code. PR-head repair, scheduler/quotas, eval promotion, merge,
+release, canary, and incident automation remain later stages.
 
 ## Dependency map
 
@@ -171,31 +189,28 @@ Arrows are compile-time dependencies. Runtime control flow may travel in the opp
 through an injected port.
 
 ```text
-apps/tui ───────────────▶ @agentlab/runtime public API
-   │                                  │
-   └──────────────▶ contracts         ▼
-                              local-runtime composition
-                                   │          │
-                                   ▼          ▼
-                             application   infrastructure
-                                   │          │
-                                   └────▶ domain ◀────┘
-                                           │
-                                           ▼
-                                       contracts
+interactive TUI ──▶ @agentlab/runtime ───────────────▶ local-runtime composition
+broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
+                                                        │              │
+                                                        ▼              ▼
+                                                  application     infrastructure
+                                                        └────▶ domain ◀────┘
+                                                                │
+                                                                ▼
+                                                            contracts
 
 launcher (distribution only; independent source graph)
 ```
 
-| Area                       | Owns                                                          | May depend on workspace areas                   |
-| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------- |
-| `packages/contracts`       | Zod schemas and stable shared data shapes                     | contracts                                       |
-| `runtime/domain`           | Invariants, value objects, errors, and ports                  | domain, contracts                               |
-| `runtime/application`      | Typed use cases, validated commands, coordination, ownership  | application, domain, contracts                  |
-| `runtime/infrastructure`   | SQLite, filesystem, provider, process, tmux, and PTY adapters | infrastructure, domain, contracts               |
-| `runtime/local-runtime.ts` | The local composition root and public runtime API             | runtime layers, contracts                       |
-| `apps/tui`                 | Rendering, input, dialogs, and presentation state             | TUI, contracts, public `@agentlab/runtime` only |
-| `packages/launcher`        | Binary acquisition, verification, and process handoff         | launcher                                        |
+| Area                      | Owns                                                          | May depend on workspace areas                  |
+| ------------------------- | ------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                     | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                  | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership  | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive runtime and isolated factory-broker construction  | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation       | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff         | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -203,7 +218,10 @@ The product-source rules are executable and fail closed:
   imports.
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
-- The TUI sees the runtime only through `@agentlab/runtime`.
+- TUI and CLI code see runtime modules only through registered package entry points. The broker
+  subpath is exact; every other runtime deep import fails.
+- The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
+  modules; the interactive composition closure cannot reach broker or GitHub authority modules.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -228,15 +246,16 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                |
-| ------------------------------------------------------------ | --------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                    |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`           |
-| Product use case or coordination policy                      | `packages/runtime/src/application`      |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`   |
-| Concrete object construction and resource lifetime           | `packages/runtime/src/local-runtime.ts` |
-| Terminal rendering, input, or interaction state              | `apps/tui`                              |
-| Installer, cache, or binary handoff                          | `packages/launcher`                     |
+| Change                                                       | Location                                       |
+| ------------------------------------------------------------ | ---------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                           |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                  |
+| Product use case or coordination policy                      | `packages/runtime/src/application`             |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`          |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`        |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                     |
+| Installer, cache, or binary handoff                          | `packages/launcher`                            |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

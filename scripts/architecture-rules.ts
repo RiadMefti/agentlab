@@ -17,11 +17,16 @@ interface WorkspaceRegistration {
   readonly directory: string;
   readonly packageName: string;
   readonly sourceRoot: string;
-  readonly publicSourceEntry: string | null;
-  readonly expectedExport?: {
-    readonly default: string;
-    readonly types: string;
-  };
+  readonly publicExports: Readonly<
+    Record<
+      string,
+      {
+        readonly source: string;
+        readonly default: string;
+        readonly types: string;
+      }
+    >
+  >;
   readonly expectedBin?: Readonly<Record<string, string>>;
 }
 
@@ -35,30 +40,42 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
     directory: "apps/tui",
     packageName: "@agentlab/tui",
     sourceRoot: "apps/tui/src",
-    publicSourceEntry: null
+    publicExports: {}
   },
   {
     directory: "packages/contracts",
     packageName: "@agentlab/contracts",
     sourceRoot: "packages/contracts/src",
-    publicSourceEntry: "packages/contracts/src/index.ts",
-    expectedExport: { default: "./dist/index.js", types: "./dist/index.d.ts" }
+    publicExports: {
+      ".": {
+        source: "packages/contracts/src/index.ts",
+        default: "./dist/index.js",
+        types: "./dist/index.d.ts"
+      }
+    }
   },
   {
     directory: "packages/launcher",
     packageName: "agentlab",
     sourceRoot: "packages/launcher/src",
-    publicSourceEntry: null,
+    publicExports: {},
     expectedBin: { agentlab: "dist/agentlab.js" }
   },
   {
     directory: "packages/runtime",
     packageName: "@agentlab/runtime",
     sourceRoot: "packages/runtime/src",
-    publicSourceEntry: "packages/runtime/src/local-runtime.ts",
-    expectedExport: {
-      default: "./dist/local-runtime.js",
-      types: "./dist/local-runtime.d.ts"
+    publicExports: {
+      ".": {
+        source: "packages/runtime/src/local-runtime.ts",
+        default: "./dist/local-runtime.js",
+        types: "./dist/local-runtime.d.ts"
+      },
+      "./factory-broker": {
+        source: "packages/runtime/src/local-factory-broker.ts",
+        default: "./dist/local-factory-broker.js",
+        types: "./dist/local-factory-broker.d.ts"
+      }
     }
   }
 ] as const;
@@ -71,9 +88,10 @@ const registrationByPackage = new Map(
 );
 const packageEntries = new Map(
   architectureRegistry.flatMap((registration) =>
-    registration.publicSourceEntry === null
-      ? []
-      : ([[registration.packageName, registration.publicSourceEntry]] as const)
+    Object.entries(registration.publicExports).map(
+      ([exportName, entry]) =>
+        [packageSpecifier(registration.packageName, exportName), entry.source] as const
+    )
   )
 );
 
@@ -92,6 +110,7 @@ export interface ArchitectureModule {
 
 export type ArchitectureViolationKind =
   | "cycle"
+  | "composition-boundary"
   | "deep-package-import"
   | "external-capability"
   | "layer-dependency"
@@ -247,11 +266,7 @@ export function validateArchitecture(
     for (const dependency of module.dependencies) {
       const location = dependencyLocation(module.path, dependency);
       const workspaceImport = workspaceImportRegistration(dependency.specifier);
-      if (
-        workspaceImport !== null &&
-        (dependency.specifier !== workspaceImport.packageName ||
-          workspaceImport.publicSourceEntry === null)
-      ) {
+      if (workspaceImport !== null && !packageEntries.has(dependency.specifier)) {
         violations.push(
           violation(
             "deep-package-import",
@@ -317,8 +332,65 @@ export function validateArchitecture(
     }
   }
 
+  violations.push(...compositionBoundaryViolations(moduleByPath));
   violations.push(...cycleViolations(modules, moduleByPath));
   return sortViolations(violations);
+}
+
+function compositionBoundaryViolations(
+  moduleByPath: ReadonlyMap<string, ArchitectureModule>
+): readonly ArchitectureViolation[] {
+  const rules = [
+    {
+      entry: "packages/runtime/src/local-factory-broker.ts",
+      description: "broker composition",
+      forbidden: (path: string) =>
+        path === "packages/runtime/src/local-runtime.ts" ||
+        path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+        path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+        path.startsWith("packages/runtime/src/infrastructure/tmux/")
+    },
+    {
+      entry: "packages/runtime/src/local-runtime.ts",
+      description: "interactive composition",
+      forbidden: (path: string) =>
+        path === "packages/runtime/src/local-factory-broker.ts" ||
+        path.startsWith("packages/runtime/src/infrastructure/github/")
+    }
+  ] as const;
+  const violations: ArchitectureViolation[] = [];
+  for (const rule of rules) {
+    if (!moduleByPath.has(rule.entry)) continue;
+    const pending: string[][] = [[rule.entry]];
+    const visited = new Set<string>([rule.entry]);
+    while (pending.length > 0) {
+      const path = pending.shift();
+      if (path === undefined) continue;
+      const current = path.at(-1);
+      if (current === undefined) continue;
+      const module = moduleByPath.get(current);
+      if (module === undefined) continue;
+      for (const dependency of module.dependencies) {
+        const target = dependency.local ? dependency.target : null;
+        if (target === null || !moduleByPath.has(target) || visited.has(target)) continue;
+        const nextPath = [...path, target];
+        visited.add(target);
+        if (rule.forbidden(target)) {
+          violations.push({
+            kind: "composition-boundary",
+            source: rule.entry,
+            target,
+            message: `${rule.description} reaches forbidden module ${target}: ${nextPath.join(
+              " -> "
+            )}.`
+          });
+          continue;
+        }
+        pending.push(nextPath);
+      }
+    }
+  }
+  return violations;
 }
 
 export function architectureLayer(path: string): ArchitectureLayer | null {
@@ -327,7 +399,12 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/runtime/src/domain/")) return "runtime-domain";
   if (path.startsWith("packages/runtime/src/application/")) return "runtime-application";
   if (path.startsWith("packages/runtime/src/infrastructure/")) return "runtime-infrastructure";
-  if (path === "packages/runtime/src/local-runtime.ts") return "runtime-composition";
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts"
+  ) {
+    return "runtime-composition";
+  }
   if (path.startsWith("apps/tui/src/")) return "tui";
   return null;
 }
@@ -483,14 +560,16 @@ async function inspectProductionSourceInventory(
         );
       }
     }
-    if (registration.publicSourceEntry !== null && !compiled.has(registration.publicSourceEntry)) {
-      violations.push(
-        violation(
-          "workspace-inventory",
-          configPath,
-          `${registration.publicSourceEntry} is the public source entry but is not compiled by ${configPath}.`
-        )
-      );
+    for (const { source } of Object.values(registration.publicExports)) {
+      if (!compiled.has(source)) {
+        violations.push(
+          violation(
+            "workspace-inventory",
+            configPath,
+            `${source} is a public source entry but is not compiled by ${configPath}.`
+          )
+        );
+      }
     }
   }
 
@@ -739,9 +818,10 @@ async function inspectManifestAgreement(
   violations.push(...workspaceCycleViolations(manifestEdges));
 
   for (const registration of architectureRegistry) {
-    for (const path of [registration.sourceRoot, registration.publicSourceEntry].filter(
-      (value): value is string => value !== null
-    )) {
+    for (const path of [
+      registration.sourceRoot,
+      ...Object.values(registration.publicExports).map(({ source }) => source)
+    ]) {
       if (!(await pathExists(resolve(projectRoot, path)))) {
         violations.push(
           violation(
@@ -762,23 +842,35 @@ function validatePublicEntry(
   manifestPath: string,
   violations: ArchitectureViolation[]
 ): void {
-  if (registration.expectedExport !== undefined) {
+  const expectedExports = registration.publicExports;
+  if (Object.keys(expectedExports).length > 0) {
     const exportsRecord = asRecord(manifest.exports);
-    const rootExport = asRecord(exportsRecord?.["."]);
-    if (
-      exportsRecord === null ||
-      Object.keys(exportsRecord).length !== 1 ||
-      rootExport?.default !== registration.expectedExport.default ||
-      rootExport.types !== registration.expectedExport.types ||
-      Object.keys(rootExport).length !== 2
-    ) {
+    const actualNames = exportsRecord === null ? [] : Object.keys(exportsRecord).sort();
+    const expectedNames = Object.keys(expectedExports).sort();
+    if (JSON.stringify(actualNames) !== JSON.stringify(expectedNames)) {
       violations.push(
         violation(
           "manifest-export",
           manifestPath,
-          `${manifestPath} root export must map exactly to ${registration.expectedExport.default} and ${registration.expectedExport.types}.`
+          `${manifestPath} exports must match the registered public entries exactly.`
         )
       );
+    }
+    for (const [exportName, expected] of Object.entries(expectedExports)) {
+      const actual = asRecord(exportsRecord?.[exportName]);
+      if (
+        actual?.default !== expected.default ||
+        actual.types !== expected.types ||
+        Object.keys(actual).length !== 2
+      ) {
+        violations.push(
+          violation(
+            "manifest-export",
+            manifestPath,
+            `${manifestPath} export ${exportName} must map exactly to ${expected.default} and ${expected.types}.`
+          )
+        );
+      }
     }
   } else if (manifest.exports !== undefined) {
     violations.push(
@@ -1359,6 +1451,10 @@ function workspaceImportRegistration(specifier: string): WorkspaceRegistration |
     }
   }
   return null;
+}
+
+function packageSpecifier(packageName: string, exportName: string): string {
+  return exportName === "." ? packageName : `${packageName}${exportName.slice(1)}`;
 }
 
 function externalCapability(specifier: string): string {

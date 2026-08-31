@@ -8,6 +8,7 @@ export interface FactoryRepositoryGovernance {
   readonly requiresPullRequest: boolean;
   readonly requiredApprovals: number;
   readonly dismissesStaleReviews: boolean;
+  readonly requiresCodeOwnerReviews: boolean;
   readonly requiresLastPushApproval: boolean;
   readonly enforcesAdmins: boolean;
   readonly allowsForcePushes: boolean;

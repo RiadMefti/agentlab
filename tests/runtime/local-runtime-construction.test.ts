@@ -35,4 +35,13 @@ describe("failed local runtime construction", () => {
     expect(cleanupFailedRuntimeConstruction(null, writerLease, false)).toEqual([]);
     expect(writerLease.close).not.toHaveBeenCalled();
   });
+
+  it("retains the writer lease when an owned composite closes but a later database open is ambiguous", () => {
+    const repository = { close: vi.fn() };
+    const writerLease = { databasePath: "/work/agentlab.sqlite", close: vi.fn() };
+
+    expect(cleanupFailedRuntimeConstruction(repository, writerLease, false)).toEqual([]);
+    expect(repository.close).toHaveBeenCalledOnce();
+    expect(writerLease.close).not.toHaveBeenCalled();
+  });
 });

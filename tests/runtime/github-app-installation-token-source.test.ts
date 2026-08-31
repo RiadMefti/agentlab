@@ -109,11 +109,15 @@ describe("GitHubAppInstallationTokenSource", () => {
 describe("GitHub App JWT boundary", () => {
   it("issues an RS256 JWT with the bounded GitHub App claims", async () => {
     const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2_048 });
+    const keyMaterial = Buffer.from(
+      privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      "utf8"
+    );
     let keyLoads = 0;
     const signer = new NodeGitHubAppJwtSigner({
       load: () => {
         keyLoads += 1;
-        return Promise.resolve(privateKey.export({ type: "pkcs8", format: "pem" }).toString());
+        return Promise.resolve(keyMaterial);
       }
     });
 
@@ -136,7 +140,22 @@ describe("GitHub App JWT boundary", () => {
       )
     ).toBe(true);
     expect(keyLoads).toBe(1);
+    expect(keyMaterial.every((byte) => byte === 0)).toBe(true);
   });
+
+  it.each([Buffer.alloc(63, 1), Buffer.alloc(128, 1)])(
+    "erases rejected private-key material",
+    async (keyMaterial) => {
+      const signer = new NodeGitHubAppJwtSigner({
+        load: () => Promise.resolve(keyMaterial)
+      });
+
+      await expect(signer.sign(Buffer.from("agentlab", "utf8"))).rejects.toThrow(
+        /private-key|private key/u
+      );
+      expect(keyMaterial.every((byte) => byte === 0)).toBe(true);
+    }
+  );
 
   it("rejects malformed installation requests before opening a network connection", async () => {
     expect(() => new GitHubAppInstallationRestClient({ userAgent: "bad user agent\r\n" })).toThrow(

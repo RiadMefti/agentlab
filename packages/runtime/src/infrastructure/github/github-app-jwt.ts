@@ -5,7 +5,8 @@ export interface GitHubAppJwtSigner {
 }
 
 export interface GitHubAppPrivateKeySource {
-  load(): Promise<string | Uint8Array>;
+  /** Returns a fresh mutable buffer whose contents the signer erases after one use. */
+  load(): Promise<Uint8Array>;
 }
 
 /** Loads a PEM only for one signature and never exposes it to the broker or agent process. */
@@ -17,9 +18,13 @@ export class NodeGitHubAppJwtSigner implements GitHubAppJwtSigner {
       throw new Error("GitHub App JWT signing input is invalid.");
     }
     const loaded = await this.privateKeys.load();
-    const material = typeof loaded === "string" ? Buffer.from(loaded, "utf8") : Buffer.from(loaded);
+    if (!(loaded instanceof Uint8Array)) {
+      throw new Error("GitHub App private-key source returned invalid material.");
+    }
+    const material = Buffer.from(loaded);
     if (material.byteLength < 64 || material.byteLength > 64 * 1_024) {
       material.fill(0);
+      loaded.fill(0);
       throw new Error("GitHub App private-key material has an invalid size.");
     }
     try {
@@ -35,6 +40,7 @@ export class NodeGitHubAppJwtSigner implements GitHubAppJwtSigner {
       throw new Error("GitHub App private key could not sign an RS256 JWT.", { cause: error });
     } finally {
       material.fill(0);
+      loaded.fill(0);
     }
   }
 }
