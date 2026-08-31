@@ -267,6 +267,50 @@ describe("FactoryControlPlane", () => {
           ]
         })
       ).rejects.toThrow(/does not match/u);
+      const repairRun = fixture.documents.pullRequestRepairRun({
+        schemaVersion: "agentlab.pull-request-repair-run.v1",
+        runId: fixture.nextId(),
+        taskId: TEST_FACTORY_TASK_ID,
+        contractDigest: snapshot.contractDigest,
+        policyBundleDigest: snapshot.contract.gateProfile.policyDigest,
+        authorizationId: fixture.nextId(),
+        authorizationDigest: testDigest("a"),
+        observationDigest: testDigest("b"),
+        priorPatchProposalDigest: testDigest("c"),
+        repository: snapshot.contract.repository,
+        contractRepairAttempt: 1,
+        maximumAttempts: 1,
+        createdAt: now,
+        correlationId: fixture.nextId()
+      });
+      await fixture.artifacts.putText(repairRun.json);
+      await expect(
+        fixture.evidenceIngress.append(fixture.controlPlaneCredential, {
+          taskId: TEST_FACTORY_TASK_ID,
+          contractDigest: snapshot.contractDigest,
+          items: [
+            evidenceItemSchema.parse({
+              id: fixture.nextId(),
+              kind: "execution",
+              result: "informational",
+              subjectDigest: repairRun.value.authorizationDigest,
+              artifact: {
+                digest: repairRun.digest,
+                mediaType: "application/vnd.agentlab.pull-request-repair-run.v1+json",
+                sizeBytes: Buffer.byteLength(repairRun.json)
+              },
+              producer: policyActor,
+              createdAt: repairRun.value.createdAt,
+              claims: [
+                { name: "repair-run-digest", value: repairRun.digest },
+                { name: "authorization-id", value: repairRun.value.authorizationId },
+                { name: "authorization-digest", value: testDigest("d") },
+                { name: "contract-repair-attempt", value: "1" }
+              ]
+            })
+          ]
+        })
+      ).rejects.toThrow(/does not match/u);
       await expect(fixture.repository.listEvidence(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(1);
     } finally {
       fixture.repository.close();

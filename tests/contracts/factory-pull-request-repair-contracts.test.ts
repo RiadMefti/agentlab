@@ -1,4 +1,7 @@
-import { factoryPullRequestRepairAuthorizationSchema } from "@agentlab/contracts";
+import {
+  factoryPullRequestRepairAuthorizationSchema,
+  factoryPullRequestRepairRunSchema
+} from "@agentlab/contracts";
 import { describe, expect, it } from "vitest";
 
 describe("factory pull-request repair authorization contracts", () => {
@@ -28,6 +31,31 @@ describe("factory pull-request repair authorization contracts", () => {
         ...authorization,
         selectedReviewIds: ["500", "500"]
       }).success
+    ).toBe(false);
+  });
+
+  it("binds a repair run to one exact authorization and cumulative attempt", () => {
+    const authorization = validAuthorization();
+    const run = {
+      schemaVersion: "agentlab.pull-request-repair-run.v1" as const,
+      runId: "44444444-4444-4444-8444-444444444444",
+      taskId: authorization.taskId,
+      contractDigest: authorization.contractDigest,
+      policyBundleDigest: authorization.policyBundleDigest,
+      authorizationId: authorization.authorizationId,
+      authorizationDigest: digest("8"),
+      observationDigest: authorization.observationDigest,
+      priorPatchProposalDigest: authorization.priorPatchProposalDigest,
+      repository: { id: authorization.repositoryId, baseRevision: "b".repeat(40) },
+      contractRepairAttempt: 1,
+      maximumAttempts: 1,
+      createdAt: "2026-08-30T12:05:00.000Z",
+      correlationId: authorization.correlationId
+    };
+
+    expect(factoryPullRequestRepairRunSchema.parse(run)).toEqual(run);
+    expect(
+      factoryPullRequestRepairRunSchema.safeParse({ ...run, maximumAttempts: 2 }).success
     ).toBe(false);
   });
 });

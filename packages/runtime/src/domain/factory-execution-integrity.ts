@@ -1,9 +1,17 @@
-import type { FactoryExecutionEvent, FactoryExecutionRun } from "@agentlab/contracts";
+import type {
+  FactoryExecutionEvent,
+  FactoryExecutionRun,
+  FactoryPullRequestRepairRun
+} from "@agentlab/contracts";
 
 import type { CanonicalFactoryDocument } from "./factory-documents.js";
+import type {
+  FactoryExecutionJournalRun,
+  FactoryExecutionJournalSnapshot
+} from "./factory-execution-repository.js";
 
 export function assertFactoryExecutionRegistration(
-  run: CanonicalFactoryDocument<FactoryExecutionRun>,
+  run: CanonicalFactoryDocument<FactoryExecutionRun | FactoryPullRequestRepairRun>,
   event: CanonicalFactoryDocument<FactoryExecutionEvent>
 ): void {
   if (
@@ -23,7 +31,7 @@ export function assertFactoryExecutionRegistration(
 }
 
 export function assertFactoryExecutionEvent(
-  run: CanonicalFactoryDocument<FactoryExecutionRun>,
+  run: CanonicalFactoryDocument<FactoryExecutionRun | FactoryPullRequestRepairRun>,
   event: CanonicalFactoryDocument<FactoryExecutionEvent>,
   history: readonly CanonicalFactoryDocument<FactoryExecutionEvent>[]
 ): void {
@@ -57,8 +65,9 @@ export function assertFactoryExecutionEvent(
   if (event.value.kind === "attempt-started") {
     const starts = history.filter(({ value }) => value.kind === "attempt-started");
     const workspaceId = event.value.workspaceId;
+    const firstAttempt = "contractRepairAttempt" in run.value ? run.value.contractRepairAttempt : 1;
     if (
-      event.value.attempt !== starts.length + 1 ||
+      event.value.attempt !== firstAttempt + starts.length ||
       event.value.attempt > run.value.maximumAttempts ||
       starts.some(({ value }) =>
         value.kind === "attempt-started" ? value.workspaceId === workspaceId : false
@@ -138,6 +147,25 @@ export function activeFactoryExecutionCoordinates(
     attempt: attempt.attempt,
     workspaceId: attempt.workspaceId,
     operationId: operation?.kind === "operation-started" ? operation.operationId : null
+  };
+}
+
+export function activeFactoryExecutionSnapshotCoordinates<Run extends FactoryExecutionJournalRun>(
+  snapshot: FactoryExecutionJournalSnapshot<Run>
+): ActiveFactoryExecutionCoordinates | null {
+  if (snapshot.state === "ready") return null;
+  const event = snapshot.lastEvent;
+  if (
+    event.kind !== "attempt-started" &&
+    event.kind !== "operation-started" &&
+    event.kind !== "operation-finished"
+  ) {
+    throw new Error("Recoverable execution has no exact active resource coordinates.");
+  }
+  return {
+    attempt: event.attempt,
+    workspaceId: event.workspaceId,
+    operationId: event.kind === "operation-started" ? event.operationId : null
   };
 }
 

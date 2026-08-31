@@ -130,6 +130,19 @@ export class FactoryEvidenceIngress {
         if (patchContent.byteLength !== patch.patchArtifact.sizeBytes) {
           throw new ConflictError("Patch artifact has the wrong size.");
         }
+      } else if (item.kind === "execution" && policyActor(item)) {
+        const json = await this.dependencies.artifacts.readText(
+          item.artifact.digest,
+          Math.max(1, item.artifact.sizeBytes + 1)
+        );
+        this.#assertPullRequestRepairRunRecord(item, json, {
+          taskId: task.contract.taskId,
+          contractDigest: task.contractDigest,
+          policyBundleDigest: task.contract.gateProfile.policyDigest,
+          repositoryId: task.contract.repository.id,
+          baseRevision: task.contract.repository.baseRevision,
+          maximumRepairAttempts: task.contract.budget.maxRepairAttempts
+        });
       }
     }
     const latest = await this.dependencies.evidence.latestEvidence(input.taskId);
@@ -232,6 +245,43 @@ export class FactoryEvidenceIngress {
     }
     return record.value;
   }
+
+  #assertPullRequestRepairRunRecord(
+    item: EvidenceItem,
+    json: string,
+    expected: {
+      readonly taskId: string;
+      readonly contractDigest: Sha256Digest;
+      readonly policyBundleDigest: Sha256Digest;
+      readonly repositoryId: string;
+      readonly baseRevision: string;
+      readonly maximumRepairAttempts: number;
+    }
+  ): void {
+    if (item.artifact.mediaType !== "application/vnd.agentlab.pull-request-repair-run.v1+json") {
+      throw new ConflictError("PR repair-run evidence has the wrong media type.");
+    }
+    const run = this.dependencies.documents.pullRequestRepairRun(parseJson(json));
+    if (
+      run.digest !== item.artifact.digest ||
+      run.value.taskId !== expected.taskId ||
+      run.value.contractDigest !== expected.contractDigest ||
+      run.value.policyBundleDigest !== expected.policyBundleDigest ||
+      run.value.repository.id !== expected.repositoryId ||
+      run.value.repository.baseRevision !== expected.baseRevision ||
+      run.value.contractRepairAttempt > expected.maximumRepairAttempts ||
+      run.value.maximumAttempts !== run.value.contractRepairAttempt ||
+      item.subjectDigest !== run.value.authorizationDigest ||
+      item.result !== "informational" ||
+      item.createdAt !== run.value.createdAt ||
+      claimValue(item, "repair-run-digest") !== run.digest ||
+      claimValue(item, "authorization-id") !== run.value.authorizationId ||
+      claimValue(item, "authorization-digest") !== run.value.authorizationDigest ||
+      claimValue(item, "contract-repair-attempt") !== String(run.value.contractRepairAttempt)
+    ) {
+      throw new ConflictError("PR repair-run evidence does not match its authenticated record.");
+    }
+  }
 }
 
 export function createFactoryEvidenceCredential(): FactoryEvidenceCredential {
@@ -256,6 +306,7 @@ function assertChannelMayPublish(binding: FactoryEvidenceBinding, item: Evidence
 
 function controlPlaneItem(item: EvidenceItem): boolean {
   if (item.kind === "policy") return policyActor(item);
+  if (item.kind === "execution") return policyActor(item);
   return (
     (item.kind === "skill" ||
       item.kind === "patch" ||

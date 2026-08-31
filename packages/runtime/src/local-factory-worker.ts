@@ -14,6 +14,8 @@ import { FactoryExecutionRecoveryService } from "./application/factory-execution
 import { FactoryExecutionService } from "./application/factory-execution-service.js";
 import { FactoryPreparationMaterializer } from "./application/factory-preparation-materializer.js";
 import { FactoryPreparationService } from "./application/factory-preparation-service.js";
+import { FactoryPullRequestRepairExecutionService } from "./application/factory-pull-request-repair-execution-service.js";
+import { FactoryPullRequestRepairRecoveryService } from "./application/factory-pull-request-repair-recovery-service.js";
 import {
   FactoryWorkerOperator,
   validateFactoryWorkerInventory
@@ -42,6 +44,8 @@ import {
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
+import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryTaskMaterializer } from "./infrastructure/persistence/sqlite-factory-task-materializer.js";
@@ -117,6 +121,12 @@ export function createLocalFactoryWorker(
     );
     const executions = repositories.track(
       new SqliteFactoryExecutionRepository(databasePath, { documents })
+    );
+    const pullRequestDispatches = repositories.track(
+      new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
+    );
+    const pullRequestRepairs = repositories.track(
+      new SqliteFactoryPullRequestRepairExecutionRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
@@ -276,6 +286,44 @@ export function createLocalFactoryWorker(
       createId,
       controlPlaneActorId
     });
+    const pullRequestRepairRecovery = new FactoryPullRequestRepairRecoveryService({
+      executions: pullRequestRepairs,
+      tasks: factory,
+      evidence: factory,
+      conversations,
+      controlPlane,
+      workspaces: workspaceRecovery,
+      documents,
+      now,
+      createId,
+      controlPlaneActorId
+    });
+    const pullRequestRepair = new FactoryPullRequestRepairExecutionService({
+      executions: pullRequestRepairs,
+      recovery: pullRequestRepairRecovery,
+      dispatches: pullRequestDispatches,
+      tasks: factory,
+      evidence: factory,
+      conversations,
+      controlPlane,
+      evidenceIngress,
+      evidenceCredentials: {
+        controlPlane: controlPlaneCredential,
+        executionObserver: executionObserverCredential,
+        gateObserver: gateObserverCredential
+      },
+      artifacts,
+      documents,
+      policy,
+      skills,
+      workspaces,
+      agents,
+      providers,
+      gates,
+      now,
+      createId,
+      controlPlaneActorId
+    });
     const host = new LocalFactoryWorkerHostInspector(runner, {
       workingDirectory: dirname(databasePath),
       artifactRoot: options.artifactRoot,
@@ -304,7 +352,9 @@ export function createLocalFactoryWorker(
       materializer,
       admission,
       execution,
-      executionRecovery
+      executionRecovery,
+      pullRequestRepair,
+      pullRequestRepairRecovery
     });
     const taskRunner = new FactoryWorkerTaskRunner({
       policyBundleDigest: policyBundle.digest,
@@ -360,6 +410,7 @@ export type {
 } from "./application/local-factory-worker-coordinator.js";
 export type { FactoryWorkerPreflight } from "./application/factory-worker-operator.js";
 export type { FactoryWorkerTaskRunReport } from "./application/factory-worker-task-runner.js";
+export type { FactoryPullRequestRepairExecutionOutcome } from "./application/factory-pull-request-repair-execution-service.js";
 export type { FactoryGateDefinition } from "./domain/factory-gate.js";
 export {
   loadLocalFactoryWorkerConfig,

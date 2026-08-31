@@ -10,6 +10,26 @@ import {
 
 type FailedCheck = FactoryPullRequestRepairAuthorization["failedChecks"][number];
 
+export interface FactoryPullRequestRepairFeedback {
+  readonly formalReviews: readonly {
+    readonly reviewId: string;
+    readonly authorLogin: string;
+    readonly authorAssociation: string;
+    readonly submittedAt: string | null;
+    readonly untrustedBody: string;
+  }[];
+  readonly reviewComments: readonly {
+    readonly commentId: string;
+    readonly reviewId: string;
+    readonly authorLogin: string;
+    readonly path: string;
+    readonly line: number | null;
+    readonly side: "left" | "right" | null;
+    readonly untrustedBody: string;
+  }[];
+  readonly failedChecks: FactoryPullRequestRepairAuthorization["failedChecks"];
+}
+
 export type FactoryPullRequestRepairSelection =
   | {
       readonly status: "selected";

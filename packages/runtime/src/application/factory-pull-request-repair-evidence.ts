@@ -1,8 +1,10 @@
 import type {
   EvidenceItem,
+  FactoryPatchProposal,
   FactoryPullRequestObservation,
   FactoryPullRequestRecord,
   FactoryPullRequestRepairAuthorization,
+  FactoryPullRequestRepairRun,
   FactoryTaskUsageRecord,
   Sha256Digest
 } from "@agentlab/contracts";
@@ -16,10 +18,24 @@ import type {
   FactoryTaskSnapshot,
   StoredEvidenceBundle
 } from "../domain/factory-task-repository.js";
+import type { FactoryPullRequestDispatchSnapshot } from "../domain/factory-pull-request-dispatch-repository.js";
+import {
+  selectFactoryPullRequestRepair,
+  type FactoryPullRequestRepairFeedback
+} from "../domain/factory-pull-request-repair.js";
+import type { FactoryWorkspacePatch } from "../domain/factory-workspace.js";
 
 const observationMediaType = "application/vnd.agentlab.pull-request-observation.v1+json";
 const authorizationMediaType = "application/vnd.agentlab.pull-request-repair-authorization.v1+json";
 const usageMediaType = "application/vnd.agentlab.task-usage-record.v1+json";
+const patchProposalMediaType = "application/vnd.agentlab.patch-proposal.v1+json";
+const repairRunMediaType = "application/vnd.agentlab.pull-request-repair-run.v1+json";
+const utf8Encoder = new TextEncoder();
+
+export interface FactoryPriorPatch {
+  readonly proposal: CanonicalFactoryDocument<FactoryPatchProposal>;
+  readonly workspacePatch: FactoryWorkspacePatch;
+}
 
 export interface FactoryPullRequestObservedEvidence {
   readonly observation: CanonicalFactoryDocument<FactoryPullRequestObservation>;
@@ -145,6 +161,194 @@ export class FactoryPullRequestRepairEvidenceReader {
     return documents;
   }
 
+  public async exactAuthorization(input: {
+    readonly bundles: readonly StoredEvidenceBundle[];
+    readonly expectedDigest: Sha256Digest;
+    readonly task: FactoryTaskSnapshot;
+    readonly record: CanonicalFactoryDocument<FactoryPullRequestRecord>;
+    readonly proposalDigest: Sha256Digest;
+    readonly priorPatchProposalDigest: Sha256Digest;
+  }): Promise<CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>> {
+    const authorizations = await this.authorizations(input);
+    const authorization = authorizations.find(({ digest }) => digest === input.expectedDigest);
+    if (authorization === undefined) {
+      throw new Error("Factory worker requires the exact stored PR repair authorization.");
+    }
+    return authorization;
+  }
+
+  public async repairRuns(input: {
+    readonly bundles: readonly StoredEvidenceBundle[];
+    readonly task: FactoryTaskSnapshot;
+    readonly authorizations: readonly CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>[];
+  }): Promise<readonly CanonicalFactoryDocument<FactoryPullRequestRepairRun>[]> {
+    const authorizationByDigest = new Map(
+      input.authorizations.map((authorization) => [authorization.digest, authorization] as const)
+    );
+    const runs: CanonicalFactoryDocument<FactoryPullRequestRepairRun>[] = [];
+    for (const { bundle } of input.bundles) {
+      for (const item of bundle.items) {
+        if (item.kind !== "execution" || item.artifact.mediaType !== repairRunMediaType) continue;
+        const run = this.dependencies.documents.pullRequestRepairRun(
+          parseJson(
+            await this.dependencies.artifacts.readText(
+              item.artifact.digest,
+              item.artifact.sizeBytes + 1
+            )
+          )
+        );
+        const authorization = authorizationByDigest.get(run.value.authorizationDigest);
+        if (
+          authorization === undefined ||
+          run.digest !== item.artifact.digest ||
+          run.value.taskId !== input.task.contract.taskId ||
+          run.value.contractDigest !== input.task.contractDigest ||
+          run.value.policyBundleDigest !== input.task.contract.gateProfile.policyDigest ||
+          run.value.authorizationId !== authorization.value.authorizationId ||
+          run.value.observationDigest !== authorization.value.observationDigest ||
+          run.value.priorPatchProposalDigest !== authorization.value.priorPatchProposalDigest ||
+          run.value.repository.id !== input.task.contract.repository.id ||
+          run.value.repository.baseRevision !== input.task.contract.repository.baseRevision ||
+          run.value.contractRepairAttempt !== authorization.value.contractRepairAttempt ||
+          run.value.maximumAttempts !== authorization.value.contractRepairAttempt ||
+          run.value.createdAt < authorization.value.createdAt ||
+          run.value.createdAt >= authorization.value.expiresAt ||
+          item.subjectDigest !== authorization.digest ||
+          item.result !== "informational" ||
+          item.createdAt !== run.value.createdAt ||
+          item.producer.kind !== "control-plane" ||
+          item.producer.role !== "policy-engine" ||
+          item.producer.id !== "agentlab-policy" ||
+          claim(item, "repair-run-digest") !== run.digest ||
+          claim(item, "authorization-id") !== run.value.authorizationId ||
+          claim(item, "authorization-digest") !== authorization.digest ||
+          claim(item, "contract-repair-attempt") !== String(run.value.contractRepairAttempt)
+        ) {
+          throw new Error("Stored PR repair run failed identity validation.");
+        }
+        runs.push(run);
+      }
+    }
+    if (
+      new Set(runs.map(({ value }) => value.authorizationDigest)).size !== runs.length ||
+      new Set(runs.map(({ value }) => value.contractRepairAttempt)).size !== runs.length
+    ) {
+      throw new Error("PR repair-run evidence reuses an authorization or repair attempt.");
+    }
+    return runs;
+  }
+
+  public async priorPatch(input: {
+    readonly bundles: readonly StoredEvidenceBundle[];
+    readonly expectedDigest: Sha256Digest;
+    readonly task: FactoryTaskSnapshot;
+  }): Promise<FactoryPriorPatch> {
+    const item = input.bundles
+      .flatMap(({ bundle }) => bundle.items)
+      .find(
+        (candidate) =>
+          candidate.kind === "patch" &&
+          candidate.subjectDigest === input.expectedDigest &&
+          candidate.artifact.mediaType === patchProposalMediaType
+      );
+    if (item === undefined) throw new Error("PR repair requires its exact prior patch proposal.");
+    const proposal = this.dependencies.documents.patchProposal(
+      parseJson(
+        await this.dependencies.artifacts.readText(
+          item.artifact.digest,
+          item.artifact.sizeBytes + 1
+        )
+      )
+    );
+    if (
+      proposal.digest !== input.expectedDigest ||
+      proposal.digest !== item.artifact.digest ||
+      proposal.value.taskId !== input.task.contract.taskId ||
+      proposal.value.contractDigest !== input.task.contractDigest ||
+      proposal.value.baseRevision !== input.task.contract.repository.baseRevision ||
+      proposal.value.changeSet.baseRevision !== input.task.contract.repository.baseRevision ||
+      proposal.value.patchArtifact.mediaType !== "text/x-diff; charset=utf-8" ||
+      proposal.value.patchArtifact.sizeBytes > input.task.contract.budget.maxOutputBytes ||
+      item.result !== "pass" ||
+      item.createdAt !== proposal.value.createdAt ||
+      item.producer.kind !== "control-plane" ||
+      item.producer.role !== "gate-runner" ||
+      item.producer.id !== "agentlab-local-gates" ||
+      claim(item, "patch-digest") !== proposal.value.patchArtifact.digest ||
+      claim(item, "base-revision") !== proposal.value.baseRevision ||
+      claim(item, "execution-id") !== proposal.value.executionId
+    ) {
+      throw new Error("Prior PR patch evidence failed identity validation.");
+    }
+    const patch = await this.dependencies.artifacts.readText(
+      proposal.value.patchArtifact.digest,
+      proposal.value.patchArtifact.sizeBytes + 1
+    );
+    if (utf8Encoder.encode(patch).byteLength !== proposal.value.patchArtifact.sizeBytes) {
+      throw new Error("Prior PR patch artifact has the wrong size.");
+    }
+    return {
+      proposal,
+      workspacePatch: { patch, changeSet: proposal.value.changeSet }
+    };
+  }
+
+  public repairFeedback(input: {
+    readonly authorization: FactoryPullRequestRepairAuthorization;
+    readonly observation: FactoryPullRequestObservation;
+  }): FactoryPullRequestRepairFeedback {
+    const selection = selectFactoryPullRequestRepair(input.observation);
+    if (
+      selection.status !== "selected" ||
+      !sameValues(selection.reasonCodes, input.authorization.reasonCodes) ||
+      !sameValues(selection.selectedReviewIds, input.authorization.selectedReviewIds) ||
+      !sameValues(
+        selection.selectedReviewCommentIds,
+        input.authorization.selectedReviewCommentIds
+      ) ||
+      JSON.stringify(selection.failedChecks) !== JSON.stringify(input.authorization.failedChecks)
+    ) {
+      throw new Error(
+        "PR repair authorization no longer matches deterministic feedback selection."
+      );
+    }
+    const reviewById = new Map(
+      input.observation.reviews.map((review) => [review.reviewId, review])
+    );
+    const commentById = new Map(
+      input.observation.reviewComments.map((comment) => [comment.commentId, comment])
+    );
+    return {
+      formalReviews: input.authorization.selectedReviewIds.map((reviewId) => {
+        const review = reviewById.get(reviewId);
+        if (review === undefined) throw new Error(`Authorized review ${reviewId} is missing.`);
+        return {
+          reviewId,
+          authorLogin: review.author.login,
+          authorAssociation: review.author.association,
+          submittedAt: review.submittedAt,
+          untrustedBody: review.untrustedBody
+        };
+      }),
+      reviewComments: input.authorization.selectedReviewCommentIds.map((commentId) => {
+        const comment = commentById.get(commentId);
+        if (comment?.reviewId === null || comment === undefined) {
+          throw new Error(`Authorized review comment ${commentId} is missing.`);
+        }
+        return {
+          commentId,
+          reviewId: comment.reviewId,
+          authorLogin: comment.author.login,
+          path: comment.path,
+          line: comment.line,
+          side: comment.side,
+          untrustedBody: comment.untrustedBody
+        };
+      }),
+      failedChecks: input.authorization.failedChecks
+    };
+  }
+
   public async initialUsage(input: {
     readonly bundles: readonly StoredEvidenceBundle[];
     readonly task: FactoryTaskSnapshot;
@@ -229,4 +433,41 @@ function parseJson(json: string): unknown {
   } catch (error: unknown) {
     throw new Error("Stored factory artifact is invalid JSON.", { cause: error });
   }
+}
+
+function sameValues(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Revalidates the completed initial PR dispatch before any repair stage trusts its coordinates. */
+export function requireFactoryPullRequestRepairDispatch(
+  task: FactoryTaskSnapshot,
+  dispatch: FactoryPullRequestDispatchSnapshot | null,
+  documents: FactoryDocumentCodec
+): {
+  readonly dispatch: FactoryPullRequestDispatchSnapshot;
+  readonly record: CanonicalFactoryDocument<FactoryPullRequestRecord>;
+} {
+  if (dispatch?.state !== "completed" || dispatch.record === null) {
+    throw new Error("PR repair requires a completed durable dispatch record.");
+  }
+  const record = documents.pullRequestRecord(dispatch.record);
+  if (
+    dispatch.run.taskId !== task.contract.taskId ||
+    dispatch.run.contractDigest !== task.contractDigest ||
+    dispatch.run.proposal.taskId !== task.contract.taskId ||
+    dispatch.run.proposal.contractDigest !== task.contractDigest ||
+    dispatch.run.proposal.repositoryId !== task.contract.repository.id ||
+    dispatch.run.proposal.baseRevision !== task.contract.repository.baseRevision ||
+    record.value.taskId !== task.contract.taskId ||
+    record.value.contractDigest !== task.contractDigest ||
+    record.value.proposalDigest !== dispatch.run.proposalDigest ||
+    record.value.repositoryId !== task.contract.repository.id ||
+    record.value.baseRevision !== task.contract.repository.baseRevision ||
+    record.value.branchName !== dispatch.run.proposal.branchName ||
+    record.value.brokerId !== dispatch.run.brokerId
+  ) {
+    throw new Error("PR repair dispatch does not match its immutable task contract.");
+  }
+  return { dispatch, record };
 }

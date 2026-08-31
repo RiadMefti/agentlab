@@ -56,6 +56,41 @@ export function factoryUsageFits(usage: FactoryBudgetUsage, budget: FactoryBudge
   );
 }
 
+/** Returns the still-spendable cumulative budget, or null once any positive counter is exhausted. */
+export function remainingFactoryBudget(
+  budget: FactoryBudget,
+  usage: FactoryBudgetUsage
+): FactoryBudget | null {
+  if (!factoryUsageFits(usage, budget)) return null;
+  const remaining = {
+    wallClockSeconds: budget.wallClockSeconds - usage.wallClockSeconds,
+    maxAgentTurns: budget.maxAgentTurns - usage.agentTurns,
+    maxToolCalls: budget.maxToolCalls - usage.toolCalls,
+    maxInputTokens: budget.maxInputTokens - usage.inputTokens,
+    maxOutputTokens: budget.maxOutputTokens - usage.outputTokens,
+    maxCostMicrousd: budget.maxCostMicrousd - usage.costMicrousd,
+    maxProcesses: budget.maxProcesses - usage.processes,
+    maxOutputBytes: budget.maxOutputBytes - usage.outputBytes,
+    // Worker and diff limits are instantaneous/latest-patch ceilings, not cumulative spend.
+    maxWorkers: budget.maxWorkers,
+    maxRepairAttempts: budget.maxRepairAttempts - usage.repairAttempts,
+    maxChangedFiles: budget.maxChangedFiles,
+    maxChangedLines: budget.maxChangedLines
+  };
+  if (
+    remaining.wallClockSeconds < 1 ||
+    remaining.maxAgentTurns < 1 ||
+    remaining.maxToolCalls < 1 ||
+    remaining.maxInputTokens < 1 ||
+    remaining.maxOutputTokens < 1 ||
+    remaining.maxProcesses < 1 ||
+    remaining.maxOutputBytes < 1
+  ) {
+    return null;
+  }
+  return remaining;
+}
+
 export function mergeFactoryCapabilities(
   left: FactoryCapabilityGrant,
   right: FactoryCapabilityGrant

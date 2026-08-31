@@ -15,6 +15,7 @@ import {
 } from "../domain/factory-agent-executor.js";
 import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
 import { FactoryBudgetMeter } from "../domain/factory-budget-meter.js";
+import { minimumFactoryBudget } from "../domain/factory-authority-limits.js";
 import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
@@ -22,6 +23,7 @@ import type {
 import type { FactoryGateExecutor } from "../domain/factory-gate.js";
 import type { FactoryPolicyEngine } from "../domain/factory-policy.js";
 import { narrowFactoryResourceLimits } from "../domain/factory-process-isolation.js";
+import type { FactoryPullRequestRepairFeedback } from "../domain/factory-pull-request-repair.js";
 import { selectFactorySkills, type ResolvedFactorySkill } from "../domain/factory-skill.js";
 import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
 import type {
@@ -29,7 +31,7 @@ import type {
   FactoryWorkspaceManager,
   FactoryWorkspacePatch
 } from "../domain/factory-workspace.js";
-import type { FactoryExecutionJournalSession } from "./factory-execution-journal.js";
+import type { FactoryExecutionOperationJournal } from "./factory-execution-journal.js";
 import {
   FactoryEvidencePublisher,
   type PublishedFactoryAgentRun
@@ -69,9 +71,11 @@ export class FactoryExecutionOperations {
     readonly skills: readonly ResolvedFactorySkill[];
     readonly budget: ImmutableTaskContract["budget"];
     readonly attempt: number;
-    readonly journal: FactoryExecutionJournalSession;
+    readonly journal: FactoryExecutionOperationJournal;
     readonly patchProposalDigest?: Sha256Digest;
     readonly repairReview?: FactoryReviewResult;
+    readonly repairAuthorizationDigest?: Sha256Digest;
+    readonly pullRequestFeedback?: FactoryPullRequestRepairFeedback;
   }): Promise<FactoryExecutedAgent> {
     const capability = this.dependencies.agents
       .capabilities()
@@ -100,7 +104,13 @@ export class FactoryExecutionOperations {
       ...(input.patchProposalDigest === undefined
         ? {}
         : { patchProposalDigest: input.patchProposalDigest }),
-      ...(input.repairReview === undefined ? {} : { repairReview: input.repairReview })
+      ...(input.repairReview === undefined ? {} : { repairReview: input.repairReview }),
+      ...(input.repairAuthorizationDigest === undefined
+        ? {}
+        : { repairAuthorizationDigest: input.repairAuthorizationDigest }),
+      ...(input.pullRequestFeedback === undefined
+        ? {}
+        : { pullRequestFeedback: input.pullRequestFeedback })
     });
     const storedPrompt = await this.dependencies.artifacts.putText(prompt);
     const request = this.dependencies.documents.agentRunRequest(
@@ -178,7 +188,7 @@ export class FactoryExecutionOperations {
     expectedPatch: FactoryWorkspacePatch,
     meter: FactoryBudgetMeter,
     repairs: number,
-    journal: FactoryExecutionJournalSession
+    journal: FactoryExecutionOperationJournal
   ): Promise<{
     readonly passed: boolean;
     readonly reason: string;
@@ -281,7 +291,8 @@ export class FactoryExecutionOperations {
     readonly resolvedSkills: readonly ResolvedFactorySkill[];
     readonly attempt: number;
     readonly meter: FactoryBudgetMeter;
-    readonly journal: FactoryExecutionJournalSession;
+    readonly repairAttempts: number;
+    readonly journal: FactoryExecutionOperationJournal;
   }): Promise<{
     readonly passed: boolean;
     readonly reason: string;
@@ -324,13 +335,26 @@ export class FactoryExecutionOperations {
         phase: "review",
         provider: profile.provider
       });
+      const remainingBudget = input.meter.remaining(
+        input.task.contract.budget,
+        input.expectedPatch.changeSet,
+        input.repairAttempts
+      );
+      if (remainingBudget === null) {
+        return {
+          passed: false,
+          reason: "task-budget-exhausted",
+          disposition: "attention",
+          reviews
+        };
+      }
       const reviewer = await this.runAgent({
         task: input.task,
         workspace: input.workspace,
         role: "reviewer",
         profile,
         skills: selection.skills,
-        budget: selection.budget,
+        budget: minimumFactoryBudget(selection.budget, remainingBudget),
         attempt: input.attempt,
         journal: input.journal,
         patchProposalDigest: input.patch.digest

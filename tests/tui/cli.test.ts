@@ -182,6 +182,48 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires an exact repair authorization, policy pin, and worker confirmation", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const authorization = `sha256:${"d".repeat(64)}`;
+    const policy = `sha256:${"e".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "worker-repair-pr",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--task",
+        taskId,
+        "--authorization",
+        authorization,
+        "--policy",
+        policy,
+        "--confirm-repair"
+      ])
+    ).toEqual({
+      kind: "factory-worker-repair-pr",
+      configPath: "/private/agentlab/worker.json",
+      taskId,
+      authorizationDigest: authorization,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "repair-pr"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "worker-repair-pr",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--task",
+        taskId,
+        "--authorization",
+        authorization,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires an exact task, policy pin, and confirmation for PR observation", () => {
     const taskId = "0198f005-4ec4-7000-8000-000000000001";
     const policy = `sha256:${"c".repeat(64)}`;

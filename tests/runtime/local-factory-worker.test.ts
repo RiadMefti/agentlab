@@ -27,10 +27,12 @@ describe("local factory worker composition", () => {
       "admitExecution",
       "advancePreparation",
       "execute",
+      "executePullRequestRepair",
       "materializePreparation",
       "preflight",
       "recoverExecution",
       "recoverPreparation",
+      "recoverPullRequestRepair",
       "runTask"
     ]);
     await expect(runtime.commands.preflight()).resolves.toMatchObject({

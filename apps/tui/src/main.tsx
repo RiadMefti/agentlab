@@ -59,6 +59,17 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-worker-repair-pr") {
+    const { runFactoryWorkerRepairPullRequest } = await import("./run-factory-worker-repair-pr.js");
+    process.exitCode = await runFactoryWorkerRepairPullRequest(
+      action.configPath,
+      action.taskId,
+      action.authorizationDigest,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-authority-status") {
     const { runFactoryAuthorityStatus } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryAuthorityStatus(action.configPath);

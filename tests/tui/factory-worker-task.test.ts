@@ -163,6 +163,8 @@ function runnerDependencies(
       admitExecution: noResult,
       execute: noResult,
       recoverExecution: noResult,
+      executePullRequestRepair: noResult,
+      recoverPullRequestRepair: noResult,
       runTask
     },
     close

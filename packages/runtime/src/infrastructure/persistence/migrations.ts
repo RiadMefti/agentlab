@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 8;
+export const latestSchemaVersion = 9;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -1274,6 +1274,398 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 8;
+      COMMIT;
+    `);
+  }
+
+  if (version < 9) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_pull_request_repair_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL REFERENCES factory_task_contracts(task_id),
+        contract_digest TEXT NOT NULL CHECK (
+          length(contract_digest) = 71 AND substr(contract_digest, 1, 7) = 'sha256:'
+        ),
+        policy_bundle_digest TEXT NOT NULL CHECK (
+          length(policy_bundle_digest) = 71 AND substr(policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_id TEXT NOT NULL UNIQUE CHECK (length(authorization_id) = 36),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        observation_digest TEXT NOT NULL CHECK (
+          length(observation_digest) = 71 AND substr(observation_digest, 1, 7) = 'sha256:'
+        ),
+        prior_patch_proposal_digest TEXT NOT NULL CHECK (
+          length(prior_patch_proposal_digest) = 71 AND
+          substr(prior_patch_proposal_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        contract_repair_attempt INTEGER NOT NULL CHECK (contract_repair_attempt BETWEEN 1 AND 20),
+        maximum_attempts INTEGER NOT NULL CHECK (maximum_attempts BETWEEN 1 AND 20),
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 1048576 AND json_valid(run_json)
+        ),
+        UNIQUE(task_id, contract_repair_attempt)
+      ) STRICT;
+      CREATE INDEX factory_pull_request_repair_runs_recoverable_idx
+        ON factory_pull_request_repair_runs(created_at, task_id, contract_repair_attempt);
+
+      CREATE TABLE factory_pull_request_repair_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_pull_request_repair_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL,
+        contract_digest TEXT NOT NULL CHECK (
+          length(contract_digest) = 71 AND substr(contract_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 10000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'attempt-started', 'operation-started', 'operation-finished',
+          'attempt-closed', 'execution-finished', 'execution-abandoned'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'operation-active', 'completed', 'abandoned'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'operation-active', 'completed', 'abandoned'
+        )),
+        attempt INTEGER CHECK (attempt IS NULL OR attempt BETWEEN 1 AND 20),
+        workspace_id TEXT CHECK (workspace_id IS NULL OR length(workspace_id) = 36),
+        operation_id TEXT CHECK (operation_id IS NULL OR length(operation_id) = 36),
+        operation_kind TEXT CHECK (operation_kind IS NULL OR operation_kind IN ('agent', 'gate')),
+        execution_role TEXT CHECK (
+          execution_role IS NULL OR execution_role IN ('implementer', 'repairer', 'reviewer')
+        ),
+        gate_id TEXT CHECK (gate_id IS NULL OR length(gate_id) BETWEEN 1 AND 128),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        result TEXT CHECK (
+          result IS NULL OR result IN ('succeeded', 'failed', 'timed-out', 'error')
+        ),
+        record_digest TEXT CHECK (
+          record_digest IS NULL OR
+          (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')
+        ),
+        disposition TEXT CHECK (
+          disposition IS NULL OR disposition IN ('continue', 'finish')
+        ),
+        task_state TEXT CHECK (
+          task_state IS NULL OR task_state IN (
+            'pr-proposed', 'needs-attention', 'failed', 'quarantined'
+          )
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 2097152 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_pull_request_repair_events_run_idx
+        ON factory_pull_request_repair_events(run_id, sequence);
+      CREATE INDEX factory_pull_request_repair_events_task_idx
+        ON factory_pull_request_repair_events(task_id, sequence);
+      CREATE INDEX factory_pull_request_repair_events_operation_idx
+        ON factory_pull_request_repair_events(operation_id)
+        WHERE operation_id IS NOT NULL;
+      CREATE UNIQUE INDEX factory_pull_request_repair_events_workspace_start_idx
+        ON factory_pull_request_repair_events(workspace_id)
+        WHERE kind = 'attempt-started';
+      CREATE UNIQUE INDEX factory_pull_request_repair_events_operation_start_idx
+        ON factory_pull_request_repair_events(operation_id)
+        WHERE kind = 'operation-started';
+
+      CREATE TRIGGER factory_pull_request_repair_runs_no_update
+      BEFORE UPDATE ON factory_pull_request_repair_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair runs are immutable');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_runs_no_delete
+      BEFORE DELETE ON factory_pull_request_repair_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair runs are immutable');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_runs_contract_guard
+      BEFORE INSERT ON factory_pull_request_repair_runs
+      WHEN
+        NEW.contract_digest != (
+          SELECT contract_digest FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.repository_id != (
+          SELECT repository_id FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.base_revision != (
+          SELECT base_revision FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.policy_bundle_digest != json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.gateProfile.policyDigest') OR
+        NEW.created_at < (
+          SELECT created_at FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.created_at >= (
+          SELECT expires_at FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.maximum_attempts != NEW.contract_repair_attempt OR
+        NEW.contract_repair_attempt > CAST(json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.budget.maxRepairAttempts') AS INTEGER) OR
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.run_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.run_json, '$.policyBundleDigest') IS NOT NEW.policy_bundle_digest OR
+        json_extract(NEW.run_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.run_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.run_json, '$.observationDigest') IS NOT NEW.observation_digest OR
+        json_extract(NEW.run_json, '$.priorPatchProposalDigest') IS NOT NEW.prior_patch_proposal_digest OR
+        json_extract(NEW.run_json, '$.repository.id') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.repository.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.run_json, '$.contractRepairAttempt') IS NOT NEW.contract_repair_attempt OR
+        json_extract(NEW.run_json, '$.maximumAttempts') IS NOT NEW.maximum_attempts OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair run contract mismatch');
+      END;
+
+      CREATE TRIGGER factory_pull_request_repair_events_no_update
+      BEFORE UPDATE ON factory_pull_request_repair_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair events are append-only');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_no_delete
+      BEFORE DELETE ON factory_pull_request_repair_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair events are append-only');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_identity_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        NEW.run_digest != (
+          SELECT run_digest FROM factory_pull_request_repair_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.task_id != (
+          SELECT task_id FROM factory_pull_request_repair_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.contract_digest != (
+          SELECT contract_digest FROM factory_pull_request_repair_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id != (
+          SELECT correlation_id FROM factory_pull_request_repair_runs WHERE run_id = NEW.run_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair event identity mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_sequence_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_pull_request_repair_events WHERE run_id = NEW.run_id
+      ), 1)
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair event sequence mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_chain_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.previous_event_digest IS NOT NULL) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_pull_request_repair_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair event digest chain mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_from_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.from_state IS NOT NULL) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_pull_request_repair_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair previous state mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_transition_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'attempt-started' AND
+          NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'operation-started' AND
+          NEW.from_state = 'workspace-active' AND NEW.to_state = 'operation-active') OR
+        (NEW.kind = 'operation-finished' AND
+          NEW.from_state = 'operation-active' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'attempt-closed' AND
+          NEW.from_state = 'workspace-active' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'execution-finished' AND
+          NEW.from_state = 'ready' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'execution-abandoned' AND
+          NEW.from_state IN ('ready', 'workspace-active', 'operation-active') AND
+          NEW.to_state = 'abandoned')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory PR repair transition');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_fields_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND
+          NEW.attempt IS NULL AND NEW.workspace_id IS NULL AND NEW.operation_id IS NULL AND
+          NEW.operation_kind IS NULL AND NEW.execution_role IS NULL AND NEW.gate_id IS NULL AND
+          NEW.request_digest IS NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NULL) OR
+        (NEW.kind = 'attempt-started' AND
+          NEW.attempt IS NOT NULL AND NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NULL AND
+          NEW.operation_kind IS NULL AND NEW.execution_role IS NULL AND NEW.gate_id IS NULL AND
+          NEW.request_digest IS NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NULL) OR
+        (NEW.kind = 'operation-started' AND
+          NEW.attempt IS NOT NULL AND NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NOT NULL AND
+          NEW.operation_kind IS NOT NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NULL AND (
+            (NEW.operation_kind = 'agent' AND NEW.execution_role IS NOT NULL AND
+              NEW.gate_id IS NULL AND NEW.request_digest IS NOT NULL) OR
+            (NEW.operation_kind = 'gate' AND NEW.execution_role IS NULL AND
+              NEW.gate_id IS NOT NULL AND NEW.request_digest IS NULL)
+          )) OR
+        (NEW.kind = 'operation-finished' AND
+          NEW.attempt IS NOT NULL AND NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NOT NULL AND
+          NEW.operation_kind IS NOT NULL AND NEW.result IS NOT NULL AND NEW.record_digest IS NOT NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NULL AND (
+            (NEW.operation_kind = 'agent' AND NEW.execution_role IS NOT NULL AND
+              NEW.gate_id IS NULL AND NEW.request_digest IS NOT NULL) OR
+            (NEW.operation_kind = 'gate' AND NEW.execution_role IS NULL AND
+              NEW.gate_id IS NOT NULL AND NEW.request_digest IS NULL)
+          )) OR
+        (NEW.kind = 'attempt-closed' AND
+          NEW.attempt IS NOT NULL AND NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NULL AND
+          NEW.operation_kind IS NULL AND NEW.execution_role IS NULL AND NEW.gate_id IS NULL AND
+          NEW.request_digest IS NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NOT NULL AND NEW.task_state IS NULL) OR
+        (NEW.kind = 'execution-finished' AND
+          NEW.attempt IS NULL AND NEW.workspace_id IS NULL AND NEW.operation_id IS NULL AND
+          NEW.operation_kind IS NULL AND NEW.execution_role IS NULL AND NEW.gate_id IS NULL AND
+          NEW.request_digest IS NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NOT NULL) OR
+        (NEW.kind = 'execution-abandoned' AND
+          NEW.operation_kind IS NULL AND NEW.execution_role IS NULL AND NEW.gate_id IS NULL AND
+          NEW.request_digest IS NULL AND NEW.result IS NULL AND NEW.record_digest IS NULL AND
+          NEW.disposition IS NULL AND NEW.task_state IS NULL AND (
+            (NEW.from_state = 'ready' AND NEW.attempt IS NULL AND
+              NEW.workspace_id IS NULL AND NEW.operation_id IS NULL) OR
+            (NEW.from_state = 'workspace-active' AND NEW.attempt IS NOT NULL AND
+              NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NULL) OR
+            (NEW.from_state = 'operation-active' AND NEW.attempt IS NOT NULL AND
+              NEW.workspace_id IS NOT NULL AND NEW.operation_id IS NOT NULL)
+          ))
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair event fields mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_attempt_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        (NEW.attempt IS NOT NULL AND NEW.attempt != (
+          SELECT contract_repair_attempt FROM factory_pull_request_repair_runs
+          WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.kind = 'attempt-started' AND 0 != (
+          SELECT COUNT(*) FROM factory_pull_request_repair_events
+          WHERE run_id = NEW.run_id AND kind = 'attempt-started'
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair attempt mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_coordinates_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        (NEW.kind IN ('operation-started', 'operation-finished', 'attempt-closed') AND (
+          NEW.attempt IS NOT (
+            SELECT attempt FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.workspace_id IS NOT (
+            SELECT workspace_id FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          )
+        )) OR
+        (NEW.kind = 'operation-finished' AND (
+          NEW.operation_id IS NOT (
+            SELECT operation_id FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.operation_kind IS NOT (
+            SELECT operation_kind FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.execution_role IS NOT (
+            SELECT execution_role FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.gate_id IS NOT (
+            SELECT gate_id FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.request_digest IS NOT (
+            SELECT request_digest FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          )
+        )) OR
+        (NEW.kind = 'execution-abandoned' AND NEW.from_state != 'ready' AND (
+          NEW.attempt IS NOT (
+            SELECT attempt FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.workspace_id IS NOT (
+            SELECT workspace_id FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          ) OR
+          NEW.operation_id IS NOT (
+            SELECT operation_id FROM factory_pull_request_repair_events
+            WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+          )
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair resource coordinates mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_repair_events_timestamp_guard
+      BEFORE INSERT ON factory_pull_request_repair_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at != (
+          SELECT created_at FROM factory_pull_request_repair_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_pull_request_repair_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory PR repair timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 9;
       COMMIT;
     `);
   }
