@@ -25,7 +25,7 @@ export function assessFactoryPullRequestObservation(
   }
   if (unsafe.length > 0) return assessment("unsafe", unsafe);
 
-  const latestReviews = latestExactHeadReviews(observation);
+  const latestReviews = latestExactHeadFactoryPullRequestReviews(observation);
   const changesRequested = latestReviews.some((review) => review.decision === "changes-requested");
   const failingCheck = observation.trustedChecks.some(
     (check) => check.status === "completed" && !passingConclusions.has(check.conclusion)
@@ -55,7 +55,9 @@ export function assessFactoryPullRequestObservation(
   return assessment("clear", []);
 }
 
-function latestExactHeadReviews(observation: FactoryPullRequestObservation) {
+export function latestExactHeadFactoryPullRequestReviews(
+  observation: FactoryPullRequestObservation
+) {
   const latest = new Map<
     string,
     {

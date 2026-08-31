@@ -120,6 +120,20 @@ remain explicitly untrusted fields inside the content-addressed artifact, while 
 counts, revisions, digests, and a deterministic facts-only disposition. The command cannot update
 the branch, invoke a provider, transition into repair, merge, or release.
 
+The separate `broker-authorize-repair` command adds an explicit local admission boundary after
+observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
+literal `--confirm-repair`. The application revalidates the task, completed dispatch, canonical PR
+record, broker-authenticated observation evidence, deterministic actionable disposition, and
+complete initial usage. It then reserves at most one remaining `maxRepairAttempts` slot in canonical
+`agentlab.pull-request-repair-authorization.v1` evidence. The artifact contains only immutable
+coordinates, selected review/comment IDs from trusted human repository associations, and exact
+failing check identities; raw bodies remain only in the separately bound untrusted observation
+artifact. An existing exact authorization is replayed idempotently, while another outstanding
+authorization blocks a second reservation. This broker composition still has no
+provider/model/process port, and admission neither changes task state nor updates the PR. A later
+credentialless worker must consume the authorization in a fresh isolation and repeat all gates and
+independent review before a separate broker update can exist.
+
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
 policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
 manual-work denial; every other preflight reason remains blocking. Under the worker's existing

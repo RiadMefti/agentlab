@@ -106,7 +106,12 @@ export type FactoryBrokerPublicApiAssertions = [
   Assert<Equal<LocalFactoryBrokerConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryBrokerOptions, ExpectedOptions>>,
   Assert<Equal<FactoryBrokerPreflight, ExpectedPreflight>>,
-  Assert<Equal<keyof FactoryBrokerCommandPort, "preflight" | "openDraft" | "observePullRequest">>,
+  Assert<
+    Equal<
+      keyof FactoryBrokerCommandPort,
+      "preflight" | "openDraft" | "observePullRequest" | "admitPullRequestRepair"
+    >
+  >,
   Assert<Equal<keyof LocalFactoryBrokerRuntime, "commands" | "close">>,
   Assert<Equal<ReturnType<GitHubAppPrivateKeySource["load"]>, Promise<Uint8Array>>>,
   Assert<

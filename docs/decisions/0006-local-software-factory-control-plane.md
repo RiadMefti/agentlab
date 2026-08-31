@@ -516,9 +516,16 @@ transition; the dispatch remains recoverable for operator action.
 
 PR CI observation now binds the actual head SHA, exact check context and App ID, bounded formal
 reviews, inline comments, conversation comments, the durable PR record digest, and one authenticated
-evidence bundle. A later failure-handling stage may create a bounded repair attempt in a fresh
-isolated worker; it cannot silently widen scope. The repaired patch must repeat all gates and
-independent review. Exhausted budget becomes `needs-attention`.
+evidence bundle. A separate confirmed admission command now creates an immutable
+`agentlab.pull-request-repair-authorization.v1` only for the exact latest actionable observation. It
+selects formal exact-head changes-requested reviews from trusted human repository associations,
+their linked inline comments, and failed checks from pinned producers by IDs, never by interpreting
+or copying raw feedback. Complete initial usage determines the next remaining contract repair slot;
+an outstanding authorization prevents a second reservation. Admission is idempotent and performs no
+model execution, task transition, or remote write. The later worker stage must consume it in a fresh
+isolation without widening the original contract, and the repaired patch must repeat all gates and
+independent review before a separate broker update. Exhausted budget becomes `needs-attention`; that
+execution/update path is not yet implemented.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
 stale-review dismissal, last-push approval, CODEOWNERS for protected paths, linear history, and a
