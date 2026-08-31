@@ -24,6 +24,17 @@ describe("terminal CLI", () => {
     expect(
       parseCliArguments([
         "factory",
+        "intake-preflight",
+        "--config",
+        "/private/agentlab/intake.json"
+      ])
+    ).toEqual({
+      kind: "factory-intake-preflight",
+      configPath: "/private/agentlab/intake.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
         "broker-preflight",
         "--config",
         "/private/agentlab/broker.json"
@@ -49,6 +60,41 @@ describe("terminal CLI", () => {
       kind: "factory-worker-preflight",
       configPath: "/private/agentlab/worker.json"
     });
+  });
+
+  it("requires exact request, policy pin, and confirmation for factory intake", () => {
+    const policy = `sha256:${"a".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "intake-register",
+        "--config",
+        "/private/agentlab/intake.json",
+        "--request",
+        "/private/agentlab/request.json",
+        "--policy",
+        policy,
+        "--confirm-register"
+      ])
+    ).toEqual({
+      kind: "factory-intake-register",
+      configPath: "/private/agentlab/intake.json",
+      requestPath: "/private/agentlab/request.json",
+      expectedPolicyBundleDigest: policy,
+      confirmation: "register-request"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "intake-register",
+        "--config",
+        "/private/agentlab/intake.json",
+        "--request",
+        "/private/agentlab/request.json",
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
   });
 
   it("requires an exact task, policy pin, and confirmation for draft creation", () => {
@@ -168,6 +214,8 @@ describe("terminal CLI", () => {
 
   it("documents explicit factory commands and the child-mouse emergency kill switch", () => {
     expect(helpText).toContain("factory broker-preflight --config");
+    expect(helpText).toContain("factory intake-preflight --config");
+    expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory broker-open-draft --config");
     expect(helpText).toContain("factory authority-status --config");

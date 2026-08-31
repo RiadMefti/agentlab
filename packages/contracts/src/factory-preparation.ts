@@ -69,6 +69,23 @@ const requestBodySchema = z
     "Request body contains a control character."
   );
 
+/** Owner-authored local feature or bug report before trusted task identity is assigned. */
+export const factoryIntakeSubmissionSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.intake-submission.v1"),
+    kind: z.enum(["feature", "bug"]),
+    sourceRef: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2_040)
+      .refine((value) => !hasAsciiControl(value), "Request source contains a control character."),
+    title: requestTitleSchema,
+    body: requestBodySchema
+  })
+  .strict();
+export type FactoryIntakeSubmission = z.infer<typeof factoryIntakeSubmissionSchema>;
+
 const requestSourceSchema = z
   .object({
     kind: z.enum(["local", "github-issue", "github-pull-request", "other"]),

@@ -24,6 +24,21 @@ async function main(): Promise<void> {
     process.stdout.write(`${appVersion}\n`);
     return;
   }
+  if (action.kind === "factory-intake-preflight") {
+    const { runFactoryIntakePreflight } = await import("./run-factory-intake-preflight.js");
+    process.exitCode = await runFactoryIntakePreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-intake-register") {
+    const { runFactoryIntakeRegister } = await import("./run-factory-intake-register.js");
+    process.exitCode = await runFactoryIntakeRegister(
+      action.configPath,
+      action.requestPath,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-broker-preflight") {
     const { runFactoryBrokerPreflight } = await import("./run-factory-broker-preflight.js");
     process.exitCode = await runFactoryBrokerPreflight(action.configPath);

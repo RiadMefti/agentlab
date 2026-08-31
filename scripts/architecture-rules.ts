@@ -85,6 +85,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-authority.ts",
         default: "./dist/local-factory-authority.js",
         types: "./dist/local-factory-authority.d.ts"
+      },
+      "./factory-intake": {
+        source: "packages/runtime/src/local-factory-intake.ts",
+        default: "./dist/local-factory-intake.js",
+        types: "./dist/local-factory-intake.d.ts"
       }
     }
   }
@@ -357,6 +362,7 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-runtime.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
+        isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -368,6 +374,7 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-factory-broker.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
+        isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -377,6 +384,7 @@ function compositionBoundaryViolations(
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-runtime.ts" ||
         path === "packages/runtime/src/local-factory-broker.ts" ||
+        isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -388,6 +396,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-authority.ts",
       description: "human authority composition",
       forbidden: authorityCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-intake.ts",
+      description: "intake composition",
+      forbidden: intakeCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -408,6 +421,16 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-authority.ts",
       description: "human authority command",
       forbidden: authorityCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-intake-preflight.ts",
+      description: "intake preflight command",
+      forbidden: intakeCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-intake-register.ts",
+      description: "intake registration command",
+      forbidden: intakeCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -449,6 +472,7 @@ function brokerCommandForbidden(path: string): boolean {
   return (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
+    isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -460,6 +484,7 @@ function workerCommandForbidden(path: string): boolean {
   return (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
+    isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -497,11 +522,73 @@ function isFactoryAuthorityModule(path: string): boolean {
   );
 }
 
+const factoryIntakeApplicationModules = new Set([
+  "packages/runtime/src/application/factory-intake-operator.ts",
+  "packages/runtime/src/application/factory-preparation-intake-service.ts",
+  "packages/runtime/src/application/factory-skill-package-publisher.ts",
+  "packages/runtime/src/application/local-factory-intake-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryIntakeInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-intake-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-intake-submission.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-intake-deduplicator.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts"
+]);
+
+function isFactoryIntakeModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/application/factory-intake-operator.ts" ||
+    path === "packages/runtime/src/application/local-factory-intake-coordinator.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/local-factory-intake-config.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/local-factory-intake-submission.ts"
+  );
+}
+
+function intakeCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    isFactoryAuthorityModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryIntakeApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryIntakeInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 function authorityCommandForbidden(path: string): boolean {
   if (
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
-    path === "packages/runtime/src/local-factory-worker.ts"
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts"
   ) {
     return true;
   }
@@ -524,7 +611,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
-    path === "packages/runtime/src/local-factory-authority.ts"
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts"
   ) {
     return "runtime-composition";
   }

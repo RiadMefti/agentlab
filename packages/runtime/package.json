@@ -19,6 +19,10 @@
     "./factory-authority": {
       "types": "./dist/local-factory-authority.d.ts",
       "default": "./dist/local-factory-authority.js"
+    },
+    "./factory-intake": {
+      "types": "./dist/local-factory-intake.d.ts",
+      "default": "./dist/local-factory-intake.js"
     }
   },
   "files": [
