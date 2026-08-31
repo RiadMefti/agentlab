@@ -1,11 +1,12 @@
-import { factoryAgentRunRequestSchema, type FactoryAgentRunRequest } from "@agentlab/contracts";
-
 import type { FactoryWorkspace } from "../../domain/factory-workspace.js";
 import {
   emptyFactoryBudgetUsage,
+  isFactoryPreparationRunRequest,
+  parseFactoryProviderRunRequest,
   type FactoryAgentAdapter,
   type FactoryAgentCommand,
-  type FactoryAgentParseInput
+  type FactoryAgentParseInput,
+  type FactoryProviderRunRequest
 } from "./factory-agent-adapter.js";
 import {
   assertFactoryExecutable,
@@ -20,16 +21,20 @@ export const codexFactoryAgentAdapter: FactoryAgentAdapter = {
   capability: {
     provider: "codex",
     roles: ["implementer", "repairer", "reviewer"],
+    preparationPhases: ["qualify", "specify", "plan"],
     maximumToolFilesystemAccess: "workspace-write",
     toolNetwork: "off",
     acceptsCommandAllowlist: false,
     acceptsSecrets: false
   },
   build(requestInput, executable, workspace, prompt) {
-    const request = factoryAgentRunRequestSchema.parse(requestInput);
+    const request = parseFactoryProviderRunRequest(requestInput);
     assertCodexRequest(request, workspace);
     assertFactoryExecutable(executable);
-    const sandbox = request.role === "reviewer" ? "read-only" : "workspace-write";
+    const sandbox =
+      isFactoryPreparationRunRequest(request) || request.role === "reviewer"
+        ? "read-only"
+        : "workspace-write";
     const args = [
       "--ask-for-approval",
       "never",
@@ -71,7 +76,7 @@ export const codexFactoryAgentAdapter: FactoryAgentAdapter = {
   }
 };
 
-function assertCodexRequest(request: FactoryAgentRunRequest, workspace: FactoryWorkspace): void {
+function assertCodexRequest(request: FactoryProviderRunRequest, workspace: FactoryWorkspace): void {
   if (request.provider !== "codex") throw new Error("Codex adapter received another provider.");
   if (
     request.taskId !== workspace.taskId ||
@@ -89,8 +94,9 @@ function assertCodexRequest(request: FactoryAgentRunRequest, workspace: FactoryW
   ) {
     throw new Error("Codex factory adapter cannot enforce the requested capabilities.");
   }
-  const expectedFilesystem = request.role === "reviewer" ? "read" : "workspace-write";
-  const expectedGit = request.role === "reviewer" ? "read" : "worktree-write";
+  const readOnly = isFactoryPreparationRunRequest(request) || request.role === "reviewer";
+  const expectedFilesystem = readOnly ? "read" : "workspace-write";
+  const expectedGit = readOnly ? "read" : "worktree-write";
   if (
     request.capabilities.filesystem !== expectedFilesystem ||
     request.capabilities.git !== expectedGit

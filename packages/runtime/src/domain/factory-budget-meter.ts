@@ -6,6 +6,7 @@ import {
 } from "@agentlab/contracts";
 
 import type { FactoryAgentExecutionOutput } from "./factory-agent-executor.js";
+import { factoryUsageFits } from "./factory-authority-limits.js";
 import type { FactoryGateExecutionOutput } from "./factory-gate.js";
 
 /** Accumulates observed task resource use; incomplete measurements remain fail-closed. */
@@ -42,20 +43,7 @@ export class FactoryBudgetMeter {
     repairAttempts: number
   ): boolean {
     const usage = this.finish(changeSet, repairAttempts);
-    return (
-      usage.wallClockSeconds > budget.wallClockSeconds ||
-      usage.agentTurns > budget.maxAgentTurns ||
-      usage.toolCalls > budget.maxToolCalls ||
-      usage.inputTokens > budget.maxInputTokens ||
-      usage.outputTokens > budget.maxOutputTokens ||
-      usage.costMicrousd > budget.maxCostMicrousd ||
-      usage.processes > budget.maxProcesses ||
-      usage.outputBytes > budget.maxOutputBytes ||
-      usage.workers > budget.maxWorkers ||
-      usage.repairAttempts > budget.maxRepairAttempts ||
-      usage.changedFiles > budget.maxChangedFiles ||
-      usage.changedLines > budget.maxChangedLines
-    );
+    return !factoryUsageFits(usage, budget);
   }
 
   public get complete(): boolean {

@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { factoryAgentRunRequestSchema, type FactoryAgentRunRequest } from "@agentlab/contracts";
+import {
+  factoryAgentRunRequestSchema,
+  factoryPreparationRunRequestSchema,
+  type FactoryAgentRunRequest,
+  type FactoryPreparationRunRequest
+} from "@agentlab/contracts";
 import { describe, expect, it } from "vitest";
 
 import type { FactoryWorkspace } from "../../packages/runtime/src/domain/factory-workspace.js";
@@ -15,6 +20,7 @@ import type {
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { testDigest, testFactoryContract } from "../helpers/factory.js";
+import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const prompt = "Implement only the immutable task contract.";
 const workspace = fakeWorkspace();
@@ -62,7 +68,41 @@ describe("factory agent adapters", () => {
         workspace,
         prompt
       )
-    ).toThrow(/read-only review only/u);
+    ).toThrow(/read-only review and preparation only/u);
+  });
+
+  it("uses the same hardened provider harness for read-only preparation", async () => {
+    const codex = preparationRunRequest("codex");
+    const codexInvocation = codexFactoryAgentAdapter.build(codex, "/opt/codex", workspace, prompt);
+    expect(codexInvocation.command.args).toContain("read-only");
+
+    const claude = preparationRunRequest("claude");
+    const claudeInvocation = claudeFactoryAgentAdapter.build(
+      claude,
+      "/opt/claude",
+      workspace,
+      prompt
+    );
+    expect(claudeInvocation.command.args).toContain("Read,Glob,Grep");
+
+    const runner = new FakeCommandRunner({
+      stdout: JSON.stringify({ type: "turn.completed", usage: {} }),
+      stderr: ""
+    });
+    const output = await executorWithTimes(runner).execute({
+      request: codex,
+      executable: "/opt/codex",
+      providerVersion: "1.2.3",
+      workspace,
+      prompt,
+      resourceLimits
+    });
+    expect(output.status).toBe("succeeded");
+    expect(
+      executorWithTimes(runner)
+        .capabilities()
+        .find(({ provider }) => provider === "codex")?.preparationPhases
+    ).toEqual(["qualify", "specify", "plan"]);
   });
 
   it("parses provider JSONL without treating it as authority", () => {
@@ -315,6 +355,45 @@ function runRequest(
       secretRefs: []
     },
     budget: contract.budget
+  });
+}
+
+function preparationRunRequest(provider: "codex" | "claude"): FactoryPreparationRunRequest {
+  const fixture = testFactoryPreparationFixture();
+  const request = fixture.documents.intakeRequest(fixture.request);
+  const authority = fixture.documents.preparationAuthority(fixture.authority);
+  const skill = fixture.authority.skills.find(({ phase }) => phase === "qualify");
+  const profile = fixture.authority.preparationProfiles.find(({ phase }) => phase === "qualify");
+  if (skill === undefined || profile === undefined || skill.manifest.outputSchemaDigest === null) {
+    throw new Error("Preparation fixture is incomplete.");
+  }
+  return factoryPreparationRunRequestSchema.parse({
+    schemaVersion: "agentlab.preparation-run-request.v1",
+    executionId: "33333333-3333-4333-8333-333333333333",
+    taskId: fixture.request.taskId,
+    requestDigest: request.digest,
+    authorityDigest: authority.digest,
+    phase: "qualify",
+    attempt: 1,
+    provider,
+    model: provider === "codex" ? "gpt-5.4" : "claude-sonnet-4-6",
+    reasoning: "high",
+    repository: fixture.request.repository,
+    skillId: skill.manifest.id,
+    skillPackageDigest: skill.manifest.packageDigest,
+    promptArtifact: {
+      digest: digestOf(prompt),
+      mediaType: "text/plain",
+      sizeBytes: Buffer.byteLength(prompt)
+    },
+    inputArtifactDigests: [request.digest],
+    outputSchemaDigest: skill.manifest.outputSchemaDigest,
+    capabilities: {
+      ...profile.capabilities,
+      process: provider === "claude" ? "none" : "sandboxed",
+      commandAllowlist: []
+    },
+    budget: profile.budget
   });
 }
 

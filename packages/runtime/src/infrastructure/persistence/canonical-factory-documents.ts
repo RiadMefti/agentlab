@@ -13,6 +13,9 @@ import {
   factoryPullRequestRecordSchema,
   factoryPreparationAuthoritySchema,
   factoryPreparationBundleSchema,
+  factoryPreparationEventSchema,
+  factoryPreparationRunRecordSchema,
+  factoryPreparationRunRequestSchema,
   factoryQualificationSchema,
   factoryReviewResultSchema,
   factoryResourceIsolationRecordSchema,
@@ -52,6 +55,18 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public preparationBundle(input: unknown) {
     return encodeCanonicalDocument(factoryPreparationBundleSchema.parse(input));
+  }
+
+  public preparationEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryPreparationEventSchema.parse(input));
+  }
+
+  public preparationRunRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryPreparationRunRequestSchema.parse(input));
+  }
+
+  public preparationRunRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryPreparationRunRecordSchema.parse(input));
   }
 
   public taskContract(input: unknown) {

@@ -41,6 +41,7 @@ export interface FactoryPreparationFixtureOptions {
   readonly reviewerCount?: 1 | 2;
   readonly contractExpiresAt?: string;
   readonly maximumContractLifetimeSeconds?: number;
+  readonly preparationMaxProcesses?: number;
 }
 
 export function testFactoryPreparationFixture(options: FactoryPreparationFixtureOptions = {}) {
@@ -95,8 +96,13 @@ export function testFactoryPreparationFixture(options: FactoryPreparationFixture
         ]
       : [])
   ];
+  const preparationProfiles = [
+    preparationProfile("qualify", options.preparationMaxProcesses),
+    preparationProfile("specify", options.preparationMaxProcesses),
+    preparationProfile("plan", options.preparationMaxProcesses)
+  ];
   const authority = factoryPreparationAuthoritySchema.parse({
-    schemaVersion: "agentlab.preparation-authority.v1",
+    schemaVersion: "agentlab.preparation-authority.v2",
     authorityId: "local/repository-policy",
     version: "1.0.0",
     taskId: request.taskId,
@@ -112,6 +118,7 @@ export function testFactoryPreparationFixture(options: FactoryPreparationFixture
     protectedPaths: [".github/**"],
     maximumRiskTier: options.maximumRiskTier ?? "R1",
     skills,
+    preparationProfiles,
     workerProfiles,
     capabilityCeiling,
     budgetCeiling: authorityBudget,
@@ -122,6 +129,7 @@ export function testFactoryPreparationFixture(options: FactoryPreparationFixture
       merge: ["maintainer", "security-owner"],
       release: ["release-owner", "security-owner"]
     },
+    maximumPreparationAttempts: 2,
     maximumContractLifetimeSeconds: options.maximumContractLifetimeSeconds ?? 86_400
   });
   const authorityDocument = documents.preparationAuthority(authority);
@@ -170,7 +178,7 @@ export function testFactoryPreparationFixture(options: FactoryPreparationFixture
   });
   const planDocument = documents.plan(plan);
   const bundle = factoryPreparationBundleSchema.parse({
-    schemaVersion: "agentlab.preparation-bundle.v1",
+    schemaVersion: "agentlab.preparation-bundle.v2",
     taskId: request.taskId,
     requestDigest: requestDocument.digest,
     authorityDigest: authorityDocument.digest,
@@ -350,9 +358,14 @@ function preparationRun(
     plan: ["2026-08-30T12:06:00.000Z", "2026-08-30T12:07:00.000Z"]
   } as const;
   return {
+    executionId: `${digestCharacter.repeat(8)}-${digestCharacter.repeat(4)}-4${digestCharacter.repeat(3)}-8${digestCharacter.repeat(3)}-${digestCharacter.repeat(12)}`,
     phase,
     skillId,
     skillPackageDigest: testDigest(digestCharacter),
+    workerProfileId: `preparation/${phase}-worker`,
+    provider: "codex" as const,
+    model: "gpt-5.4",
+    reasoning: "high",
     actor: {
       kind: "agent" as const,
       role: phasePolicy[phase].role,
@@ -361,7 +374,38 @@ function preparationRun(
     },
     startedAt: times[phase][0],
     finishedAt: times[phase][1],
+    runRecordDigest: testDigest(phase === "qualify" ? "a" : phase === "specify" ? "b" : "c"),
     outputDigest
+  };
+}
+
+function preparationProfile(phase: "qualify" | "specify" | "plan", maximumProcesses = 8) {
+  return {
+    id: `preparation/${phase}-worker`,
+    phase,
+    skillId: `preparation/${phase}`,
+    provider: "codex" as const,
+    model: "gpt-5.4",
+    reasoning: "high",
+    capabilities: readCapabilities(),
+    budget: preparationBudget(maximumProcesses)
+  };
+}
+
+function preparationBudget(maximumProcesses = 8): FactoryBudget {
+  return {
+    wallClockSeconds: 600,
+    maxAgentTurns: 20,
+    maxToolCalls: 100,
+    maxInputTokens: 100_000,
+    maxOutputTokens: 20_000,
+    maxCostMicrousd: 1_000_000,
+    maxProcesses: maximumProcesses,
+    maxOutputBytes: 1_000_000,
+    maxWorkers: 1,
+    maxRepairAttempts: 0,
+    maxChangedFiles: 0,
+    maxChangedLines: 0
   };
 }
 
@@ -386,10 +430,10 @@ function readCapabilities(): FactoryCapabilityGrant {
   return {
     filesystem: "read",
     git: "read",
-    remoteRepository: "read",
+    remoteRepository: "none",
     process: "sandboxed",
     network: { mode: "off" },
-    commandAllowlist: ["git", "rg"],
+    commandAllowlist: [],
     secretRefs: []
   };
 }

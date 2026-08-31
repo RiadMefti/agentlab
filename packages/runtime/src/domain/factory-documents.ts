@@ -11,6 +11,9 @@ import type {
   FactoryPullRequestRecord,
   FactoryPreparationAuthority,
   FactoryPreparationBundle,
+  FactoryPreparationEvent,
+  FactoryPreparationRunRecord,
+  FactoryPreparationRunRequest,
   FactoryQualification,
   FactoryReviewResult,
   FactoryResourceIsolationRecord,
@@ -37,6 +40,9 @@ export interface FactoryDocumentCodec {
   plan(input: unknown): CanonicalFactoryDocument<FactoryPlan>;
   preparationAuthority(input: unknown): CanonicalFactoryDocument<FactoryPreparationAuthority>;
   preparationBundle(input: unknown): CanonicalFactoryDocument<FactoryPreparationBundle>;
+  preparationEvent(input: unknown): CanonicalFactoryDocument<FactoryPreparationEvent>;
+  preparationRunRequest(input: unknown): CanonicalFactoryDocument<FactoryPreparationRunRequest>;
+  preparationRunRecord(input: unknown): CanonicalFactoryDocument<FactoryPreparationRunRecord>;
   taskContract(input: unknown): CanonicalFactoryDocument<ImmutableTaskContract>;
   taskEvent(input: unknown): CanonicalFactoryDocument<TaskEvent>;
   evidenceBundle(input: unknown): CanonicalFactoryDocument<EvidenceBundle>;

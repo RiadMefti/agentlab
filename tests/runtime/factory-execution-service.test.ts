@@ -497,6 +497,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
       {
         provider: "codex" as const,
         roles: ["implementer" as const, "repairer" as const],
+        preparationPhases: ["qualify" as const, "specify" as const, "plan" as const],
         maximumToolFilesystemAccess: "workspace-write" as const,
         toolNetwork: "off" as const,
         acceptsCommandAllowlist: false,
@@ -505,6 +506,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
       {
         provider: "claude" as const,
         roles: ["reviewer" as const],
+        preparationPhases: ["qualify" as const, "specify" as const, "plan" as const],
         maximumToolFilesystemAccess: "read-only" as const,
         toolNetwork: "off" as const,
         acceptsCommandAllowlist: false,
