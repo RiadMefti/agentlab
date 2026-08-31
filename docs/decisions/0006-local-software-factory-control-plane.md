@@ -608,6 +608,17 @@ non-interactive human command can change only the local broker switch, while the
 command remains blocked by current governance and provisioning controls. No live authority change,
 agent task, PR, deployment, or publication has been performed through this code.
 
+The pre-contract intake is now a fifth mechanically separate runtime entry,
+`@agentlab/runtime/factory-intake`. It loads an owner-only configuration plus separately protected
+cost policy, repository authority grant, and exact canonical skill packages. A strict owner-authored
+feature/bug submission cannot assert task, actor, base revision, timestamps, policy, digest, or
+authority. Preflight observes the active conversation and Git commit and proves an R1-only,
+worker-supported, fully cost-accounted grant. Registration requires the reviewed policy digest and
+literal confirmation, publishes all pinned packages, then atomically appends the immutable request,
+authority, and initial event. Repository/kind/source deduplication makes exact retries safe while
+changed content or authority fails closed. This composition has no provider, execution, control
+switch, GitHub, broker, or release path. No live intake configuration or task has been created.
+
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
 activation remains blocked by zero required approvals, missing latest-push approval, missing
@@ -632,11 +643,12 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
    recovery/sandbox CI, credentialless worker composition, isolated exact-repository credential
    adapter, broker-only composition, owner-only key provisioning boundary, operator preflights, and
-   fail-closed explicit draft command now exist. A separate human-only authority composition now
-   owns atomic enable/disable without broker or scheduler capability. Activation still requires the
-   missing review protections, provisioned live key/config and exact cost rules, passing live
-   preflights, separate human execution of the authority ceremony, and human merge. No scheduler,
-   auto-merge, release, or protected-path write.
+   fail-closed explicit draft command now exist. A separate governed intake composition now creates
+   the immutable preparation root from an owner-confirmed feature or bug report, and a separate
+   human-only authority composition owns atomic enable/disable without broker or scheduler
+   capability. Activation still requires the missing review protections, provisioned live key/config
+   and exact cost rules, passing live preflights, separate human execution of the authority
+   ceremony, and human merge. No scheduler, auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.

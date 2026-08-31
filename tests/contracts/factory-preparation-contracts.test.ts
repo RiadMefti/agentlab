@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   factoryIntakeRequestSchema,
+  factoryIntakeSubmissionSchema,
   factoryPlanSchema,
   factoryPreparationAuthoritySchema,
   factoryPreparationBundleSchema,
@@ -14,6 +15,27 @@ import {
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 describe("factory preparation contracts", () => {
+  it("strictly bounds owner-authored feature and bug submissions", () => {
+    const submission = {
+      schemaVersion: "agentlab.intake-submission.v1",
+      kind: "bug",
+      sourceRef: "local/bug-17",
+      title: "Repair deterministic retry",
+      body: "The same report must resolve to the same immutable preparation."
+    };
+
+    expect(factoryIntakeSubmissionSchema.parse(submission)).toEqual(submission);
+    expect(factoryIntakeSubmissionSchema.safeParse({ ...submission, kind: "task" }).success).toBe(
+      false
+    );
+    expect(
+      factoryIntakeSubmissionSchema.safeParse({ ...submission, sourceRef: "bad\u0000ref" }).success
+    ).toBe(false);
+    expect(
+      factoryIntakeSubmissionSchema.safeParse({ ...submission, authorityId: "forged" }).success
+    ).toBe(false);
+  });
+
   it("strictly validates intake and rejects control characters", () => {
     const { request } = testFactoryPreparationFixture();
 

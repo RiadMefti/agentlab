@@ -39,6 +39,19 @@ describe("SqliteFactoryPreparationRepository", () => {
         sequence: 1,
         lastEventDigest: registered.digest
       });
+      await expect(
+        repository.findByDeduplicationKey(
+          request.value.repository.id,
+          request.value.deduplicationKey
+        )
+      ).resolves.toMatchObject({
+        requestDigest: request.digest,
+        authorityDigest: authority.digest,
+        state: "registered"
+      });
+      await expect(
+        repository.findByDeduplicationKey("another/repository", request.value.deduplicationKey)
+      ).resolves.toBeNull();
 
       const qualify1 = phaseStarted(registered, "qualify", 1, [request.digest], "1");
       await expect(repository.append(qualify1)).resolves.toMatchObject({ state: "qualifying" });

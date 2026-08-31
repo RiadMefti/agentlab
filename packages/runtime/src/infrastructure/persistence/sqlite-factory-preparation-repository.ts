@@ -5,6 +5,7 @@ import type {
   FactoryPreparationAuthority,
   FactoryPreparationEvent
 } from "@agentlab/contracts";
+import { factoryIdentifierSchema, sha256DigestSchema } from "@agentlab/contracts";
 
 import type {
   CanonicalFactoryDocument,
@@ -165,6 +166,30 @@ export class SqliteFactoryPreparationRepository implements FactoryPreparationRep
     const events = this.#readEventDocuments(preparation);
     const last = events.at(-1);
     if (last === undefined) throw new Error(`Factory preparation ${taskId} has no initial event.`);
+    return Promise.resolve(snapshotFrom(preparation.request, preparation.authority, last));
+  }
+
+  public findByDeduplicationKey(
+    repositoryIdInput: string,
+    deduplicationKeyInput: string
+  ): Promise<FactoryPreparationSnapshot | null> {
+    const repositoryId = factoryIdentifierSchema.parse(repositoryIdInput);
+    const deduplicationKey = sha256DigestSchema.parse(deduplicationKeyInput);
+    const row = this.#database
+      .prepare(
+        `SELECT ${PREPARATION_COLUMNS}
+         FROM factory_preparations
+         WHERE repository_id = ? AND deduplication_key = ?`
+      )
+      .get(repositoryId, deduplicationKey) as PreparationRow | undefined;
+    if (row === undefined) return Promise.resolve(null);
+    const preparation = this.#preparationFromRow(row);
+    const last = this.#readEventDocuments(preparation).at(-1);
+    if (last === undefined) {
+      throw new Error(
+        `Factory preparation ${preparation.request.value.taskId} has no initial event.`
+      );
+    }
     return Promise.resolve(snapshotFrom(preparation.request, preparation.authority, last));
   }
 

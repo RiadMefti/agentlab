@@ -124,6 +124,28 @@ skill packages/DAG, read-only preparation profiles, execution worker profiles, i
 allowlist, protected paths, maximum risk, capability/budget ceilings, attempt count, evidence floor,
 approval roles, and validity window.
 
+The production entry for that boundary is the separate `@agentlab/runtime/factory-intake`
+composition. Its strict owner-only `agentlab.local-factory-intake.v1` config pins a durable
+database, content-addressed artifact root, canonical repository root and identity, active
+conversation, operator, fixed Git/flock executables, separately reviewed cost policy and preparation
+grant, exact skill-package files, and authority lifetime. The owner-authored request is a separate
+strict `agentlab.intake-submission.v1` document containing only `feature|bug`, a stable source
+reference, title, and body. The boundary—not the request—derives UUIDs, timestamps, human actor,
+current Git commit, policy digest, deduplication key, and task-scoped authority. Stable
+repository/kind/source identity makes retry idempotent; changed report text or current authority
+conflicts rather than silently creating or rewriting a task. Exact retries return the original
+pinned base even if HEAD has since advanced.
+
+Before registration, intake requires an active conversation whose workspace exactly matches the
+configured repository, an R1-only grant supported by the credentialless worker, an exact cost rule
+for every preparation and execution provider/model, and a one-to-one match between every grant
+manifest and canonical skill-package digest. Packages, request, and authority are published to the
+immutable artifact store; the request, authority, and first event are then inserted atomically under
+the SQLite writer lease. CLI registration requires a prior policy digest and literal
+`--confirm-register`. Intake has no provider/model adapter, GitHub credential, broker, scheduler
+switch, gate executor, tmux, terminal, or interactive-runtime path; executable closure allowlists
+enforce that separation.
+
 The dormant preparation application advances exactly one `qualify`, `specify`, or `plan` checkpoint
 at a time through a provider-neutral execution port. Codex and Claude adapters advertise these
 phases only as local, offline, no-secret, read-only work. A phase-start event and canonical run
@@ -244,8 +266,9 @@ blocked for those controls and `cost-policy-unconfigured`. The cost-accounting m
 the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
 owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
 prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
-refuses a blocked preflight or unexpected policy digest. No live agent task or PR has been created
-by this code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
+refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
+intake configuration or task has been provisioned. No live agent task or PR has been created by this
+code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
 automation remain later stages.
 
 ## Dependency map
@@ -255,6 +278,7 @@ through an injected port.
 
 ```text
 interactive TUI ──▶ @agentlab/runtime ───────────────▶ local-runtime composition
+intake operator ───▶ @agentlab/runtime/factory-intake ▶ local-factory-intake composition
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
 human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
@@ -269,15 +293,15 @@ human operator ────▶ @agentlab/runtime/factory-authority ▶ local-fac
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                          | May depend on workspace areas                  |
-| ------------------------- | ------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                     | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                  | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership  | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, worker, human-authority, and broker construction | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation       | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff         | launcher                                       |
+| Area                      | Owns                                                                  | May depend on workspace areas                  |
+| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                             | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                          | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership          | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters         | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, human-authority, and broker construction | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation               | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                 | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -285,14 +309,16 @@ The product-source rules are executable and fail closed:
   imports.
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
-- TUI and CLI code see runtime modules only through registered package entry points. The broker,
-  worker, and human-authority subpaths are exact; every runtime deep import fails.
+- TUI and CLI code see runtime modules only through registered package entry points. The intake,
+  broker, worker, and human-authority subpaths are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
   interactive closure cannot reach any factory composition or GitHub authority modules. The human
   authority closure has an explicit application/infrastructure allowlist and cannot reach remote,
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
+- Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
+  fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -327,6 +353,7 @@ never exclude workspace production source.
 | Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`    |
 | Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`    |
 | Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts` |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`    |
 | Terminal rendering, input, or interaction state              | `apps/tui`                                        |
 | Installer, cache, or binary handoff                          | `packages/launcher`                               |
 

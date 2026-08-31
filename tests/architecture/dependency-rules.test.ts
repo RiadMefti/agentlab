@@ -82,11 +82,13 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-authority",
           "packages/runtime/src/local-factory-authority.ts"
-        )
+        ),
+        local("@agentlab/runtime/factory-intake", "packages/runtime/src/local-factory-intake.ts")
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
       source("packages/runtime/src/local-factory-worker.ts"),
-      source("packages/runtime/src/local-factory-authority.ts")
+      source("packages/runtime/src/local-factory-authority.ts"),
+      source("packages/runtime/src/local-factory-intake.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -633,6 +635,10 @@ function architectureFixture(): string {
       "./factory-authority": {
         default: "./dist/local-factory-authority.js",
         types: "./dist/local-factory-authority.d.ts"
+      },
+      "./factory-intake": {
+        default: "./dist/local-factory-intake.js",
+        types: "./dist/local-factory-intake.d.ts"
       }
     }
   });
@@ -641,6 +647,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-broker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-worker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-intake.ts", "export {};\n");
   return root;
 }
 

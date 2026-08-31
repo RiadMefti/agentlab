@@ -9,6 +9,14 @@ export type CliAction =
   | { readonly kind: "help" }
   | { readonly kind: "version" }
   | { readonly kind: "run" }
+  | { readonly kind: "factory-intake-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-intake-register";
+      readonly configPath: string;
+      readonly requestPath: string;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+      readonly confirmation: "register-request";
+    }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-authority-status"; readonly configPath: string }
@@ -34,6 +42,43 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "intake-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-intake-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "intake-register" &&
+    input[2] === "--config" &&
+    input[4] === "--request" &&
+    input[6] === "--policy" &&
+    input[8] === "--confirm-register"
+  ) {
+    const configPath = input[3];
+    const requestPath = input[5];
+    const expectedPolicyBundleDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isNormalizedAbsolutePath(requestPath) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-intake-register",
+        configPath,
+        requestPath,
+        expectedPolicyBundleDigest,
+        confirmation: "register-request"
+      };
+    }
   }
   if (
     input.length === 4 &&
@@ -127,7 +172,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory broker-preflight|worker-preflight|authority-status|broker-authority ...|broker-open-draft ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|authority-status|broker-authority ...|broker-open-draft ...]"
   );
 }
 
@@ -164,6 +209,10 @@ export const helpText = `agentlab
 Open the local terminal UI, then choose or add a project folder.
 
 Factory authority:
+  agentlab factory intake-preflight --config <absolute-path>
+      Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
+  agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register
+      Register one owner-authored feature or bug report under the exact reviewed policy.
   agentlab factory authority-status --config <absolute-path>
       Inspect local scheduler and draft-PR authority plus recent broker authority events.
   agentlab factory broker-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-draft-broker

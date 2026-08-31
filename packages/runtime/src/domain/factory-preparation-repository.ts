@@ -27,6 +27,10 @@ export interface FactoryPreparationRepository {
     initialEvent: CanonicalFactoryDocument<FactoryPreparationEvent>
   ): Promise<FactoryPreparationSnapshot>;
   findById(taskId: string): Promise<FactoryPreparationSnapshot | null>;
+  findByDeduplicationKey(
+    repositoryId: string,
+    deduplicationKey: Sha256Digest
+  ): Promise<FactoryPreparationSnapshot | null>;
   listForConversation(
     conversationId: string,
     limit: number
