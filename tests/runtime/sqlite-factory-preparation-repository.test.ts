@@ -169,6 +169,31 @@ describe("SqliteFactoryPreparationRepository", () => {
     }
   });
 
+  it("lists only eligible scheduled work in oldest-first order", async () => {
+    const repository = new SqliteFactoryPreparationRepository(":memory:");
+    try {
+      const later = await registerTriggeredPreparation(
+        repository,
+        "scheduled",
+        "3",
+        "2026-08-30T11:00:00.000Z"
+      );
+      await registerTriggeredPreparation(repository, "manual", "2", "2026-08-30T09:00:00.000Z");
+      const earlier = await registerTriggeredPreparation(
+        repository,
+        "scheduled",
+        "1",
+        "2026-08-30T10:00:00.000Z"
+      );
+
+      await expect(repository.listScheduled(10)).resolves.toEqual([earlier, later]);
+      await expect(repository.listScheduled(1)).resolves.toEqual([earlier]);
+      expect(() => repository.listScheduled(0)).toThrow(/limit/u);
+    } finally {
+      repository.close();
+    }
+  });
+
   it("enforces immutable preparation rows at the SQLite boundary", async () => {
     const databasePath = temporaryDatabase("agentlab-preparation-journal-");
     const fixture = testFactoryPreparationFixture();
@@ -201,6 +226,8 @@ describe("SqliteFactoryPreparationRepository", () => {
     const historical = new DatabaseSync(databasePath);
     try {
       historical.exec(`
+        DROP TABLE factory_schedule_events;
+        DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
         DROP TABLE factory_pull_request_repair_events;
@@ -280,6 +307,47 @@ function registrationEvent(requestDigest: string, authorityDigest: string) {
     summary: null,
     correlationId: correlationId()
   });
+}
+
+async function registerTriggeredPreparation(
+  repository: SqliteFactoryPreparationRepository,
+  trigger: "manual" | "scheduled",
+  id: string,
+  createdAt: string
+) {
+  const fixture = testFactoryPreparationFixture();
+  const taskId = `${id.repeat(8)}-${id.repeat(4)}-4${id.repeat(3)}-8${id.repeat(3)}-${id.repeat(12)}`;
+  const request = codec.intakeRequest({
+    ...fixture.request,
+    taskId,
+    createdAt,
+    deduplicationKey: testDigest(id),
+    requestSources: [{ kind: "local", ref: `request-${id}` }],
+    trigger
+  });
+  const authority = codec.preparationAuthority({
+    ...fixture.authority,
+    taskId,
+    requestDigest: request.digest
+  });
+  const event = codec.preparationEvent({
+    schemaVersion: "agentlab.preparation-event.v1",
+    eventId: `${id.repeat(8)}-${id.repeat(4)}-4${id.repeat(3)}-9${id.repeat(3)}-${id.repeat(12)}`,
+    taskId,
+    sequence: 1,
+    requestDigest: request.digest,
+    authorityDigest: authority.digest,
+    previousEventDigest: null,
+    kind: "registered",
+    from: null,
+    to: "registered",
+    actor: controlPlaneActor(),
+    occurredAt: authority.value.issuedAt,
+    reasonCode: "request-registered",
+    summary: null,
+    correlationId: correlationId()
+  });
+  return repository.register(request, authority, event);
 }
 
 function phaseStarted(

@@ -38,17 +38,54 @@ const brokerAuthorityCommandSchema = z
     }
   });
 
+const schedulerAuthorityCommandSchema = z
+  .object({
+    expectedEnabled: z.boolean(),
+    enabled: z.boolean(),
+    reason: z.string().trim().min(1).max(500),
+    confirmation: z.enum(["enable-scheduler", "disable-scheduler"])
+  })
+  .strict()
+  .superRefine((command, context) => {
+    if (command.expectedEnabled === command.enabled) {
+      context.addIssue({
+        code: "custom",
+        path: ["expectedEnabled"],
+        message: "Authority change must transition from the expected opposite state."
+      });
+    }
+    const expectedConfirmation = command.enabled ? "enable-scheduler" : "disable-scheduler";
+    if (command.confirmation !== expectedConfirmation) {
+      context.addIssue({
+        code: "custom",
+        path: ["confirmation"],
+        message: "Scheduler confirmation does not match the requested state."
+      });
+    }
+  });
+
 export type FactoryBrokerAuthorityCommand = z.infer<typeof brokerAuthorityCommandSchema>;
+export type FactorySchedulerAuthorityCommand = z.infer<typeof schedulerAuthorityCommandSchema>;
 
 export interface FactoryAuthorityInspection {
-  readonly schemaVersion: "agentlab.authority-inspection.v1";
+  readonly schemaVersion: "agentlab.authority-inspection.v2";
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly recentSchedulerEvents: readonly FactoryControlEvent[];
   readonly recentBrokerEvents: readonly FactoryControlEvent[];
 }
 
 export interface FactoryBrokerAuthorityChange {
   readonly schemaVersion: "agentlab.authority-change-result.v1";
+  readonly changed: true;
+  readonly schedulerEnabled: boolean;
+  readonly prBrokerEnabled: boolean;
+  readonly event: FactoryControlEvent;
+  readonly eventDigest: Sha256Digest;
+}
+
+export interface FactorySchedulerAuthorityChange {
+  readonly schemaVersion: "agentlab.scheduler-authority-change-result.v1";
   readonly changed: true;
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
@@ -73,11 +110,47 @@ export class FactoryAuthorityOperator {
   }
 
   public async inspect(): Promise<FactoryAuthorityInspection> {
-    const [state, recentBrokerEvents] = await Promise.all([
+    const [state, recentSchedulerEvents, recentBrokerEvents] = await Promise.all([
       this.dependencies.controls.state(),
+      this.dependencies.controls.history("scheduler", 20),
       this.dependencies.controls.history("pr-broker", 20)
     ]);
-    return inspection(state, recentBrokerEvents);
+    return inspection(state, recentSchedulerEvents, recentBrokerEvents);
+  }
+
+  public async setSchedulerAuthority(input: unknown): Promise<FactorySchedulerAuthorityChange> {
+    const command = schedulerAuthorityCommandSchema.parse(input);
+    const event = this.dependencies.documents.controlEvent({
+      schemaVersion: "agentlab.control-event.v1",
+      eventId: this.dependencies.createId(),
+      control: "scheduler",
+      enabled: command.enabled,
+      actor: {
+        kind: "human",
+        role: "requester",
+        id: this.#operatorId,
+        sessionId: null
+      },
+      occurredAt: this.dependencies.now(),
+      reason: command.reason
+    });
+    const state = await this.dependencies.controls.record(event, command.expectedEnabled);
+    if (state === null) {
+      throw new ConflictError(
+        "Factory scheduler authority changed concurrently; inspect state before retrying."
+      );
+    }
+    if (state.scheduler !== command.enabled) {
+      throw new Error("Factory scheduler authority repository returned an inconsistent state.");
+    }
+    return {
+      schemaVersion: "agentlab.scheduler-authority-change-result.v1",
+      changed: true,
+      schedulerEnabled: state.scheduler,
+      prBrokerEnabled: state.prBroker,
+      event: event.value,
+      eventDigest: event.digest
+    };
   }
 
   public async setBrokerAuthority(input: unknown): Promise<FactoryBrokerAuthorityChange> {
@@ -118,12 +191,14 @@ export class FactoryAuthorityOperator {
 
 function inspection(
   state: FactoryAuthorityState,
+  recentSchedulerEvents: readonly FactoryControlEvent[],
   recentBrokerEvents: readonly FactoryControlEvent[]
 ): FactoryAuthorityInspection {
   return {
-    schemaVersion: "agentlab.authority-inspection.v1",
+    schemaVersion: "agentlab.authority-inspection.v2",
     schedulerEnabled: state.scheduler,
     prBrokerEnabled: state.prBroker,
+    recentSchedulerEvents,
     recentBrokerEvents
   };
 }

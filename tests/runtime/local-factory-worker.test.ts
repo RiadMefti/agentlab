@@ -6,9 +6,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  createConfiguredLocalFactoryWorker,
   createLocalFactoryWorker,
+  type LocalFactoryWorkerConfig,
   type LocalFactoryWorkerOptions
 } from "../../packages/runtime/src/local-factory-worker.js";
+import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const executableContent =
   "#!/bin/sh\nif [ \"$1\" = \"--user\" ]; then printf '261\\n'; else printf 'systemd 261\\n'; fi\n";
@@ -33,18 +36,23 @@ describe("local factory worker composition", () => {
       "recoverExecution",
       "recoverPreparation",
       "recoverPullRequestRepair",
+      "runScheduledTick",
       "runTask"
     ]);
     await expect(runtime.commands.preflight()).resolves.toMatchObject({
-      schemaVersion: "agentlab.worker-preflight.v1",
+      schemaVersion: "agentlab.worker-preflight.v2",
       status: "blocked",
+      schedulePolicyDigest: null,
       schedulerEnabled: false,
       costPolicyConfigured: true,
       hostReady: true,
       configuredProviders: ["codex"],
       gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-      reasonCodes: ["scheduler-disabled"]
+      reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
     });
+    await expect(runtime.commands.runScheduledTick({})).rejects.toThrow(
+      /scheduler policy is not configured/u
+    );
     await runtime.close();
 
     const reopened = createLocalFactoryWorker(fixture.options);
@@ -56,6 +64,18 @@ describe("local factory worker composition", () => {
     expect(() =>
       createLocalFactoryWorker({ ...fixture.options, databasePath: ":memory:" })
     ).toThrow(/durable SQLite database/u);
+  });
+
+  it("does not let a forged v1 configured runtime attach scheduler policy", () => {
+    const fixture = workerOptions();
+    expect(() =>
+      createConfiguredLocalFactoryWorker({
+        ...fixture.options,
+        schemaVersion: "agentlab.local-factory-worker.v1",
+        costPolicyPath: "/private/agentlab/cost-policy.json",
+        schedulePolicy: testFactorySchedulePolicy()
+      } as unknown as LocalFactoryWorkerConfig)
+    ).toThrow(/v1 configuration cannot attach/u);
   });
 
   it("rejects overlapping owned roots before acquiring persistence authority", () => {

@@ -50,7 +50,10 @@ export async function runFactoryWorkerRepairPullRequest(
   try {
     preflight = await runtime.commands.preflight();
     reasonCodes = [
-      ...preflight.reasonCodes.filter((reasonCode) => reasonCode !== "scheduler-disabled"),
+      ...preflight.reasonCodes.filter(
+        (reasonCode) =>
+          reasonCode !== "scheduler-disabled" && reasonCode !== "schedule-policy-unconfigured"
+      ),
       ...(preflight.policyBundleDigest === expectedPolicyBundleDigest
         ? []
         : ["policy-bundle-digest-mismatch"])

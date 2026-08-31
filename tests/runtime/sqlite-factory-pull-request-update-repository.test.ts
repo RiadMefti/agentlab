@@ -142,6 +142,8 @@ describe("SqliteFactoryPullRequestUpdateRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TABLE factory_schedule_events;
+        DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
         PRAGMA user_version = 9;

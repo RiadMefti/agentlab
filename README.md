@@ -134,9 +134,15 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   `@agentlab/runtime/factory-broker`; and `local-factory-worker.ts` is a credentialless execution
   composition exported only through `@agentlab/runtime/factory-worker`. `local-factory-authority.ts`
   is a human-only local control composition exported only through
-  `@agentlab/runtime/factory-authority`; it has no scheduler, provider, process, or GitHub port. The
-  separate `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local
-  feature or bug reports under repository-owned policy; it has no model or remote authority.
+  `@agentlab/runtime/factory-authority`; it can compare-and-set scheduler and broker switches but
+  has no scheduler execution, provider, process, or GitHub port. The separate
+  `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local feature or
+  bug reports under repository-owned policy; it has no model or remote authority.
+- `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
+  reconciles one exact daily UTC slot from an owner-only worker v2 config. SQLite v11 durably claims
+  each scheduled request before model work, reuses that correlation after interruption, reserves the
+  request's complete budget ceiling against the tick quota, and completes the slot once. It cannot
+  open a PR, mutate authority, merge, or release.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -176,27 +182,30 @@ multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
 The repository also contains a tested, staged software-factory safety kernel, governed local intake,
-credentialless local worker composition, human-only authority composition, and draft-PR broker. None
-is connected to the interactive runtime, scheduled, deployed, published, or enabled. Intake accepts
-a strict owner-only `feature` or `bug` submission, derives task identity and the current Git base
-itself, verifies every pinned skill package and exact-model cost rule, and registers an immutable
-preparation journal only after literal confirmation and an operator-pinned policy digest. The worker
-has a bounded serialized command port and read-only host preflight covering its pinned toolchain and
-owner-only storage roots, but no GitHub or authority-control capability. Its explicit policy-pinned
-task runner and authorization-bound PR repair runner are crash-resumable and stop before remote
-writes. Separate CLI commands inspect intake and local authority and report broker and worker
-readiness. The two remote-write commands require an exact task UUID, an operator-pinned policy
-digest, and literal confirmation: one opens the initial draft and one advances an
-authorization-bound repaired branch. Both invoke only the broker after a clean preflight, and their
-inner services recheck policy, evidence, base revision, governance, and the kill switch. A separate
-owner-only human CLI can atomically compare-and-set only the broker switch with an explicit reason
-and matching confirmation; it cannot enable scheduling or contact GitHub. Authority remains
-default-off. Provider-neutral per-run cost accounting is policy-pinned and fail-closed, and the
-shipped live rate card is intentionally empty. Owner-only worker and broker config can load the same
-separate strict cost-policy file without sharing broker credentials. The current repository
-governance blocks the write commands. No live factory task or PR has been created. See
+credentialless local worker composition, human-only authority composition, bounded daily scheduler,
+and draft-PR broker. None is connected to the interactive runtime. No live schedule policy, timer,
+worker, broker, or authority configuration is provisioned or enabled. Intake accepts a strict
+owner-only `feature` or `bug` submission, derives task identity and the current Git base itself,
+verifies every pinned skill package and exact-model cost rule, and registers an immutable
+preparation journal only after literal confirmation and an operator-pinned policy digest. A distinct
+`--confirm-register-scheduled` confirmation marks requests eligible for scheduler selection. The
+worker has a bounded serialized command port and read-only host preflight covering its pinned
+toolchain, schedule-policy digest, and owner-only storage roots, but no GitHub or authority-control
+capability. Its manual task runner, daily scheduler, and authorization-bound PR repair runner are
+crash-resumable and stop before remote writes. Separate CLI commands inspect local authority and
+compare-and-set the scheduler and broker switches independently; that human-only process cannot run
+agents or contact GitHub. The two remote-write commands require an exact task UUID, an
+operator-pinned policy digest, and literal confirmation: one opens the initial draft and one
+advances an authorization-bound repaired branch. Both invoke only the broker after a clean
+preflight, and their inner services recheck policy, evidence, base revision, governance, and the
+broker kill switch. Both switches remain default-off. Provider-neutral per-run and per-tick
+reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
+intentionally empty. Owner-only worker and broker config can load the same separate strict
+cost-policy file without sharing broker credentials. The current repository governance blocks the
+write commands. No live factory task or PR has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases.
+activation blockers, and later phases. The dormant scheduler ceremony and exact limitations are in
+[Local factory scheduler operations](docs/factory-operations.md).
 
 ## Development
 

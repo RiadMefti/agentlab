@@ -169,7 +169,8 @@ function runnerDependencies(
       recoverExecution: noResult,
       executePullRequestRepair: executeRepair,
       recoverPullRequestRepair: noResult,
-      runTask: noResult
+      runTask: noResult,
+      runScheduledTick: noResult
     },
     close
   };
@@ -197,15 +198,16 @@ function runnerDependencies(
 
 function preflight(): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v1",
+    schemaVersion: "agentlab.worker-preflight.v2",
     status: "blocked",
     policyBundleDigest,
+    schedulePolicyDigest: null,
     schedulerEnabled: false,
     costPolicyConfigured: true,
     hostReady: true,
     configuredProviders: ["codex"],
     gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-    reasonCodes: ["scheduler-disabled"]
+    reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
   };
 }
 

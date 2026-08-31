@@ -15,10 +15,16 @@ export type CliAction =
       readonly configPath: string;
       readonly requestPath: string;
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
-      readonly confirmation: "register-request";
+      readonly confirmation: "register-request" | "register-scheduled-request";
     }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-scheduler-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
   | {
       readonly kind: "factory-worker-run";
       readonly configPath: string;
@@ -42,6 +48,14 @@ export type CliAction =
       readonly enabled: boolean;
       readonly reason: string;
       readonly confirmation: "enable-draft-broker" | "disable-draft-broker";
+    }
+  | {
+      readonly kind: "factory-scheduler-authority";
+      readonly configPath: string;
+      readonly expectedEnabled: boolean;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly confirmation: "enable-scheduler" | "disable-scheduler";
     }
   | {
       readonly kind: "factory-broker-open-draft";
@@ -80,6 +94,30 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "scheduler-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedFactoryPolicyBundleDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-scheduler-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
   }
   if (
     input.length === 11 &&
@@ -241,7 +279,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     input[2] === "--config" &&
     input[4] === "--request" &&
     input[6] === "--policy" &&
-    input[8] === "--confirm-register"
+    (input[8] === "--confirm-register" || input[8] === "--confirm-register-scheduled")
   ) {
     const configPath = input[3];
     const requestPath = input[5];
@@ -256,7 +294,10 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         configPath,
         requestPath,
         expectedPolicyBundleDigest,
-        confirmation: "register-request"
+        confirmation:
+          input[8] === "--confirm-register-scheduled"
+            ? "register-scheduled-request"
+            : "register-request"
       };
     }
   }
@@ -269,6 +310,38 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const configPath = input[3];
     if (isNormalizedAbsolutePath(configPath)) {
       return { kind: "factory-broker-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
+    input[1] === "scheduler-authority" &&
+    input[2] === "--config" &&
+    input[4] === "--expected" &&
+    input[6] === "--to" &&
+    input[8] === "--reason"
+  ) {
+    const configPath = input[3];
+    const expectedEnabled = authorityState(input[5]);
+    const enabled = authorityState(input[7]);
+    const reason = input[9];
+    const confirmation = schedulerAuthorityConfirmation(input[10], enabled);
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      expectedEnabled !== null &&
+      enabled !== null &&
+      expectedEnabled !== enabled &&
+      isFactoryAuthorityReason(reason) &&
+      confirmation !== null
+    ) {
+      return {
+        kind: "factory-scheduler-authority",
+        configPath,
+        expectedEnabled,
+        enabled,
+        reason,
+        confirmation
+      };
     }
   }
   if (
@@ -352,7 +425,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|authority-status|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -375,6 +448,15 @@ function authorityConfirmation(
   return null;
 }
 
+function schedulerAuthorityConfirmation(
+  value: string | undefined,
+  enabled: boolean | null
+): "enable-scheduler" | "disable-scheduler" | null {
+  if (enabled === true && value === "--confirm-enable-scheduler") return "enable-scheduler";
+  if (enabled === false && value === "--confirm-disable-scheduler") return "disable-scheduler";
+  return null;
+}
+
 export function assertSupportedTerminalRuntime(
   platform: NodeJS.Platform,
   environment: NodeJS.ProcessEnv
@@ -391,16 +473,20 @@ Open the local terminal UI, then choose or add a project folder.
 Factory authority:
   agentlab factory intake-preflight --config <absolute-path>
       Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
-  agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register
-      Register one owner-authored feature or bug report under the exact reviewed policy.
+  agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register[-scheduled]
+      Register one owner-authored feature or bug report for explicit or autonomous execution.
   agentlab factory authority-status --config <absolute-path>
-      Inspect local scheduler and draft-PR authority plus recent broker authority events.
+      Inspect local scheduler and draft-PR authority plus both immutable event histories.
+  agentlab factory scheduler-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-scheduler
+      Compare-and-set only the local autonomous scheduler switch; never executes work or contacts GitHub.
   agentlab factory broker-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-draft-broker
       Compare-and-set only the local draft-PR switch; never enables scheduling or contacts GitHub.
   agentlab factory broker-preflight --config <absolute-path>
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
+  agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --policy <sha256>
+      Run or reconcile one bounded daily UTC slot; stop all tasks before remote writes.
   agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory worker-repair-pr --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-repair

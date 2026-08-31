@@ -1,13 +1,15 @@
-import type { FactoryCostPolicy, Sha256Digest } from "@agentlab/contracts";
+import type { FactoryCostPolicy, FactorySchedulePolicy, Sha256Digest } from "@agentlab/contracts";
 import {
   createConfiguredLocalFactoryWorker,
   createLocalFactoryWorker,
   loadLocalFactoryWorkerConfig,
+  loadLocalFactorySchedulePolicy,
   type FactoryAgentProviderBinding,
   type FactoryGateDefinition,
   type FactoryWorkerCommandPort,
   type FactoryWorkerPreflight,
   type FactoryWorkerTaskRunReport,
+  type FactorySchedulerTickReport,
   type LocalFactoryWorkerConfig,
   type LocalFactoryWorkerOptions,
   type LocalFactoryWorkerRuntime
@@ -68,15 +70,17 @@ interface ExpectedOptions {
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
 
 interface ExpectedPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v1";
+  readonly schemaVersion: "agentlab.worker-preflight.v2";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -138,6 +142,35 @@ interface ExpectedTaskRunReport {
   readonly reasonCodes: readonly string[];
 }
 
+interface ExpectedSchedulerTickReport {
+  readonly schemaVersion: "agentlab.scheduler-tick-result.v1";
+  readonly status: "completed" | "already-completed" | "missed-deadline" | "blocked";
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly scheduledFor: string;
+  readonly deadlineAt: string;
+  readonly runId: string | null;
+  readonly runDigest: Sha256Digest | null;
+  readonly tasksClaimed: number;
+  readonly tasksFinished: number;
+  readonly tasksSkipped: number;
+  readonly reservedUsage: {
+    readonly wallClockSeconds: number;
+    readonly agentTurns: number;
+    readonly toolCalls: number;
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly costMicrousd: number;
+    readonly processes: number;
+    readonly outputBytes: number;
+    readonly workers: number;
+    readonly repairAttempts: number;
+    readonly changedFiles: number;
+    readonly changedLines: number;
+  };
+  readonly reasonCodes: readonly string[];
+}
+
 type ExpectedConfigKeys =
   | "schemaVersion"
   | "databasePath"
@@ -150,7 +183,8 @@ type ExpectedConfigKeys =
   | "sandbox"
   | "providers"
   | "gates"
-  | "costPolicy";
+  | "costPolicy"
+  | "schedulePolicy";
 
 export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<FactoryAgentProviderBinding, ExpectedProviderBinding>>,
@@ -158,6 +192,7 @@ export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<LocalFactoryWorkerOptions, ExpectedOptions>>,
   Assert<Equal<FactoryWorkerPreflight, ExpectedPreflight>>,
   Assert<Equal<FactoryWorkerTaskRunReport, ExpectedTaskRunReport>>,
+  Assert<Equal<FactorySchedulerTickReport, ExpectedSchedulerTickReport>>,
   Assert<Equal<keyof LocalFactoryWorkerConfig, ExpectedConfigKeys>>,
   Assert<Equal<Extract<keyof LocalFactoryWorkerConfig, "githubApp" | "repositoryId">, never>>,
   Assert<
@@ -173,6 +208,7 @@ export type FactoryWorkerPublicApiAssertions = [
       | "executePullRequestRepair"
       | "recoverPullRequestRepair"
       | "runTask"
+      | "runScheduledTick"
     >
   >,
   Assert<Equal<keyof LocalFactoryWorkerRuntime, "commands" | "close">>,
@@ -192,6 +228,12 @@ export type FactoryWorkerPublicApiAssertions = [
     Equal<
       typeof loadLocalFactoryWorkerConfig,
       (pathInput: string) => Promise<LocalFactoryWorkerConfig>
+    >
+  >,
+  Assert<
+    Equal<
+      typeof loadLocalFactorySchedulePolicy,
+      (pathInput: string) => Promise<FactorySchedulePolicy>
     >
   >
 ];

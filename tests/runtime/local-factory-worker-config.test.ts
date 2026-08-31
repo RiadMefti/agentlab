@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryWorkerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-worker-config.js";
+import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const temporaryRoots: string[] = [];
 
@@ -25,6 +26,32 @@ describe("local factory worker configuration boundary", () => {
     await writePrivateJson(path, config);
 
     await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({ ...config, costPolicy });
+  });
+
+  it("loads v2 only with a separate owner-only schedule policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v2" as const,
+      schedulePolicyPath
+    };
+    await writePrivateJson(costPolicyPath, costPolicy);
+    await writePrivateJson(schedulePolicyPath, schedulePolicy);
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy
+    });
+
+    await chmod(schedulePolicyPath, 0o644);
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/owner-only/u);
   });
 
   it("rejects unknown fields, overlapping roots, unsafe runtime roots, and malformed JSON", async () => {

@@ -32,6 +32,9 @@ import {
   factoryQualificationSchema,
   factoryReviewResultSchema,
   factoryResourceIsolationRecordSchema,
+  factoryScheduleEventSchema,
+  factorySchedulePolicySchema,
+  factoryScheduleRunSchema,
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
   factoryIntakeRequestSchema,
@@ -132,6 +135,18 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public resourceIsolation(input: unknown) {
     return encodeCanonicalDocument(factoryResourceIsolationRecordSchema.parse(input));
+  }
+
+  public schedulePolicy(input: unknown) {
+    return encodeCanonicalDocument(factorySchedulePolicySchema.parse(input));
+  }
+
+  public scheduleRun(input: unknown) {
+    return encodeCanonicalDocument(factoryScheduleRunSchema.parse(input));
+  }
+
+  public scheduleEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryScheduleEventSchema.parse(input));
   }
 
   public patchProposal(input: unknown) {

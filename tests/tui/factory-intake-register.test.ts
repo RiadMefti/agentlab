@@ -77,6 +77,7 @@ describe("factory intake registration CLI runner", () => {
     expect(register).toHaveBeenCalledWith({
       submission: submission(),
       expectedPolicyBundleDigest: policyBundleDigest,
+      trigger: "manual",
       confirmation: "register-request"
     });
     expect(events).toEqual(["closed", "written"]);
@@ -86,6 +87,28 @@ describe("factory intake registration CLI runner", () => {
       registration: { taskId: result().taskId, requestKind: "feature" }
     });
     expect(writes[0]).not.toContain(submission().body);
+  });
+
+  it("maps the distinct scheduled confirmation to a scheduled immutable request", async () => {
+    const register = vi.fn(() => Promise.resolve(result()));
+    const runtime = intakeRuntime(Promise.resolve(preflight()), register);
+
+    await expect(
+      runFactoryIntakeRegister(
+        configPath,
+        requestPath,
+        policyBundleDigest,
+        "register-scheduled-request",
+        runnerDependencies(runtime, vi.fn())
+      )
+    ).resolves.toBe(0);
+
+    expect(register).toHaveBeenCalledWith({
+      submission: submission(),
+      expectedPolicyBundleDigest: policyBundleDigest,
+      trigger: "scheduled",
+      confirmation: "register-scheduled-request"
+    });
   });
 
   it("does not register when readiness or the operator policy pin is blocked", async () => {

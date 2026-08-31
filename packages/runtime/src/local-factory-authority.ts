@@ -77,7 +77,9 @@ export type {
 export type {
   FactoryAuthorityInspection,
   FactoryBrokerAuthorityCommand,
-  FactoryBrokerAuthorityChange
+  FactoryBrokerAuthorityChange,
+  FactorySchedulerAuthorityCommand,
+  FactorySchedulerAuthorityChange
 } from "./application/factory-authority-operator.js";
 export {
   loadLocalFactoryAuthorityConfig,

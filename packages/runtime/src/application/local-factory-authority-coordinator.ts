@@ -2,7 +2,8 @@ import type { WriterLease } from "../domain/writer-lease.js";
 import type {
   FactoryAuthorityInspection,
   FactoryAuthorityOperator,
-  FactoryBrokerAuthorityChange
+  FactoryBrokerAuthorityChange,
+  FactorySchedulerAuthorityChange
 } from "./factory-authority-operator.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
@@ -10,6 +11,7 @@ import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
 export interface FactoryAuthorityCommandPort {
   inspect(): Promise<FactoryAuthorityInspection>;
   setBrokerAuthority(input: unknown): Promise<FactoryBrokerAuthorityChange>;
+  setSchedulerAuthority(input: unknown): Promise<FactorySchedulerAuthorityChange>;
 }
 
 export interface LocalFactoryAuthorityRuntime {
@@ -42,7 +44,9 @@ export class LocalFactoryAuthorityCoordinator implements LocalFactoryAuthorityRu
     this.commands = {
       inspect: () => this.#tasks.run(() => dependencies.operator.inspect()),
       setBrokerAuthority: (input) =>
-        this.#tasks.run(() => dependencies.operator.setBrokerAuthority(input))
+        this.#tasks.run(() => dependencies.operator.setBrokerAuthority(input)),
+      setSchedulerAuthority: (input) =>
+        this.#tasks.run(() => dependencies.operator.setSchedulerAuthority(input))
     };
   }
 

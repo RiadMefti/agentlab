@@ -6,6 +6,7 @@ import { RuntimeRepositoryOwner } from "../../packages/runtime/src/application/r
 import { RuntimeTaskOwner } from "../../packages/runtime/src/application/runtime-task-owner.js";
 
 const policyBundleDigest = `sha256:${"b".repeat(64)}` as const;
+const schedulePolicyDigest = `sha256:${"c".repeat(64)}` as const;
 const gateIds = ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"];
 
 describe("LocalFactoryWorkerCoordinator", () => {
@@ -147,6 +148,7 @@ function coordinator(
   const noResult = () => Promise.resolve(undefined as never);
   const operator = new FactoryWorkerOperator({
     policyBundleDigest,
+    schedulePolicyDigest,
     costPolicyConfigured: true,
     configuredProviders: ["codex"],
     gateIds,
@@ -165,6 +167,7 @@ function coordinator(
   return new LocalFactoryWorkerCoordinator({
     operator,
     taskRunner: { run: noResult },
+    scheduler: null,
     tasks: new RuntimeTaskOwner(),
     resources: options.resources ?? { closeAll: () => Promise.resolve() },
     repositories: options.repositories ?? new RuntimeRepositoryOwner(),

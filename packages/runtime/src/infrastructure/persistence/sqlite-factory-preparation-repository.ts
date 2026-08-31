@@ -221,6 +221,51 @@ export class SqliteFactoryPreparationRepository implements FactoryPreparationRep
     );
   }
 
+  public listScheduled(limit: number): Promise<readonly FactoryPreparationSnapshot[]> {
+    assertListLimit(limit);
+    const rows = this.#database
+      .prepare(
+        `SELECT ${PREPARATION_COLUMNS}
+         FROM factory_preparations AS preparation
+         WHERE json_extract(preparation.request_json, '$.trigger') = 'scheduled'
+           AND (
+             SELECT event.to_state
+             FROM factory_preparation_events AS event
+             WHERE event.task_id = preparation.task_id
+             ORDER BY event.sequence DESC LIMIT 1
+           ) IN (
+             'registered', 'qualifying', 'qualified', 'specifying', 'specified', 'planning',
+             'planned', 'prepared'
+           )
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM factory_task_contracts AS contract
+               WHERE contract.task_id = preparation.task_id
+             ) OR (
+               SELECT task_event.to_state
+               FROM factory_task_events AS task_event
+               WHERE task_event.task_id = preparation.task_id
+               ORDER BY task_event.sequence DESC LIMIT 1
+             ) IN ('planned', 'queued', 'executing', 'verifying', 'reviewing', 'repairing')
+           )
+         ORDER BY preparation.created_at, preparation.task_id
+         LIMIT ?`
+      )
+      .all(limit) as unknown as PreparationRow[];
+    return Promise.resolve(
+      rows.map((row) => {
+        const preparation = this.#preparationFromRow(row);
+        const last = this.#readEventDocuments(preparation).at(-1);
+        if (last === undefined) {
+          throw new Error(
+            `Factory preparation ${preparation.request.value.taskId} has no initial event.`
+          );
+        }
+        return snapshotFrom(preparation.request, preparation.authority, last);
+      })
+    );
+  }
+
   public listEvents(taskId: string): Promise<readonly FactoryPreparationEvent[]> {
     const preparation = this.#findPreparation(taskId);
     if (preparation === null) return Promise.resolve([]);

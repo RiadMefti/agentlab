@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FactoryWorkerOperator } from "../../packages/runtime/src/application/factory-worker-operator.js";
 
 const policyBundleDigest = `sha256:${"a".repeat(64)}` as const;
+const schedulePolicyDigest = `sha256:${"b".repeat(64)}` as const;
 const gateIds = ["format", "architecture", "typecheck", "lint", "test", "build", "secret-scan"];
 
 describe("FactoryWorkerOperator", () => {
@@ -15,9 +16,10 @@ describe("FactoryWorkerOperator", () => {
     const operator = new FactoryWorkerOperator(fixture.value);
 
     await expect(operator.preflight()).resolves.toEqual({
-      schemaVersion: "agentlab.worker-preflight.v1",
+      schemaVersion: "agentlab.worker-preflight.v2",
       status: "blocked",
       policyBundleDigest,
+      schedulePolicyDigest,
       schedulerEnabled: false,
       costPolicyConfigured: false,
       hostReady: false,
@@ -76,6 +78,16 @@ describe("FactoryWorkerOperator", () => {
     ]);
   });
 
+  it("fails autonomous readiness closed without a pinned schedule policy", async () => {
+    const fixture = dependencies({ schedulePolicyConfigured: false });
+
+    await expect(new FactoryWorkerOperator(fixture.value).preflight()).resolves.toMatchObject({
+      status: "blocked",
+      schedulePolicyDigest: null,
+      reasonCodes: ["schedule-policy-unconfigured"]
+    });
+  });
+
   it("rejects an incomplete gate set or duplicate provider binding", () => {
     const fixture = dependencies();
     expect(
@@ -99,6 +111,7 @@ function dependencies(
   options: {
     readonly scheduler?: boolean;
     readonly costPolicyConfigured?: boolean;
+    readonly schedulePolicyConfigured?: boolean;
     readonly hostReasonCodes?: readonly string[];
   } = {}
 ) {
@@ -123,6 +136,8 @@ function dependencies(
     hostInspect,
     value: {
       policyBundleDigest,
+      schedulePolicyDigest:
+        options.schedulePolicyConfigured === false ? null : schedulePolicyDigest,
       costPolicyConfigured: options.costPolicyConfigured ?? true,
       configuredProviders: ["codex", "claude"] as const,
       gateIds,

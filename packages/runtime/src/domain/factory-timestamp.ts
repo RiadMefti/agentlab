@@ -31,6 +31,17 @@ export function factoryTimestampAddSeconds(timestamp: string, seconds: number): 
   if (!Number.isSafeInteger(seconds) || seconds < 0) {
     throw new Error("Factory timestamp offset must be a non-negative safe integer.");
   }
+  return factoryTimestampOffsetSeconds(timestamp, seconds);
+}
+
+export function factoryTimestampSubtractSeconds(timestamp: string, seconds: number): string {
+  if (!Number.isSafeInteger(seconds) || seconds < 0) {
+    throw new Error("Factory timestamp subtraction must be a non-negative safe integer.");
+  }
+  return factoryTimestampOffsetSeconds(timestamp, -seconds);
+}
+
+function factoryTimestampOffsetSeconds(timestamp: string, seconds: number): string {
   const milliseconds = factoryTimestampMilliseconds(timestamp) + seconds * 1_000;
   if (!Number.isSafeInteger(milliseconds)) {
     throw new Error("Factory timestamp offset exceeds the safe timestamp range.");

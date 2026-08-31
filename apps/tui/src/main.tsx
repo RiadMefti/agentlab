@@ -49,6 +49,15 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryWorkerPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-scheduler-tick") {
+    const { runFactorySchedulerTick } = await import("./run-factory-scheduler-tick.js");
+    process.exitCode = await runFactorySchedulerTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-worker-run") {
     const { runFactoryWorkerTask } = await import("./run-factory-worker-task.js");
     process.exitCode = await runFactoryWorkerTask(
@@ -78,6 +87,17 @@ async function main(): Promise<void> {
   if (action.kind === "factory-broker-authority") {
     const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryBrokerAuthority(
+      action.configPath,
+      action.expectedEnabled,
+      action.enabled,
+      action.reason,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-scheduler-authority") {
+    const { runFactorySchedulerAuthority } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactorySchedulerAuthority(
       action.configPath,
       action.expectedEnabled,
       action.enabled,
