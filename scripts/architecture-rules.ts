@@ -375,6 +375,21 @@ function compositionBoundaryViolations(
         path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
         (path.startsWith("packages/runtime/src/infrastructure/providers/") &&
           !factoryWorkerProviderModules.has(path))
+    },
+    {
+      entry: "apps/tui/src/run-factory-broker-preflight.ts",
+      description: "broker preflight command",
+      forbidden: brokerCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-broker-open-draft.ts",
+      description: "broker draft command",
+      forbidden: brokerCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-worker-preflight.ts",
+      description: "worker preflight command",
+      forbidden: workerCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -410,6 +425,28 @@ function compositionBoundaryViolations(
     }
   }
   return violations;
+}
+
+function brokerCommandForbidden(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  );
+}
+
+function workerCommandForbidden(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
+    (path.startsWith("packages/runtime/src/infrastructure/providers/") &&
+      !factoryWorkerProviderModules.has(path))
+  );
 }
 
 export function architectureLayer(path: string): ArchitectureLayer | null {

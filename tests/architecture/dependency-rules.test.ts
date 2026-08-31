@@ -121,11 +121,17 @@ describe("architecture dependency rules", () => {
       ]),
       source(
         "packages/runtime/src/infrastructure/providers/catalog-factory-agent-provider-resolver.ts"
-      )
+      ),
+      source("apps/tui/src/run-factory-broker-open-draft.ts", [
+        local("@agentlab/runtime/factory-worker", "packages/runtime/src/local-factory-worker.ts")
+      ]),
+      source("apps/tui/src/run-factory-worker-preflight.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      ])
     ]);
 
     const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
-    expect(violations).toHaveLength(4);
+    expect(violations).toHaveLength(6);
     expect(violations.map(({ message }) => message).join("\n")).toContain(
       "application/bridge.ts -> packages/runtime/src/infrastructure/providers/model.ts"
     );
@@ -138,6 +144,12 @@ describe("architecture dependency rules", () => {
     expect(
       violations.filter(({ source }) => source === "packages/runtime/src/local-factory-worker.ts")
     ).toHaveLength(2);
+    expect(violations.map(({ source }) => source)).toContain(
+      "apps/tui/src/run-factory-broker-open-draft.ts"
+    );
+    expect(violations.map(({ source }) => source)).toContain(
+      "apps/tui/src/run-factory-worker-preflight.ts"
+    );
   });
 
   it("detects cycles and unresolved local imports", () => {

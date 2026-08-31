@@ -80,17 +80,17 @@ from another App does not count. Config, cost policy, and key reject symlinks, h
 permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
 fresh mutable bytes that the signer erases after one signature.
 
-The product CLI exposes only `agentlab factory broker-preflight --config <absolute-path>`. It loads
-the separate broker runtime, reads local authority state, inspects the exact GitHub repository and
-branch protection, emits one deterministically ordered non-secret JSON record, closes
-credentials/repositories/lease, and exits with 0 for ready, 2 for policy-blocked, or 1 for an
-operational failure. It cannot enable authority or open a PR. Trusted future broker-process code has
-a typed draft-PR port, but that port deliberately has no authority-switch command: broker and human
-enablement duties remain separate. All switches remain default-off, and every draft mutation still
-passes the existing control plane, policy, evidence, durable dispatch, and remote-governance
-recheck. The broker composition derives cost readiness from the canonical policy bundle. An empty
-rate card adds `cost-policy-unconfigured` to preflight and independently denies the typed draft-PR
-operation, so readiness is not merely advisory.
+The product CLI exposes separate broker and worker preflight commands. Each loads only its exact
+runtime, emits one deterministically ordered non-secret JSON record after clean shutdown, and exits
+with 0 for ready, 2 for policy-blocked, or 1 for an operational failure. The explicit
+`broker-open-draft` command additionally requires a task UUID, the operator's expected policy
+digest, and the literal `--confirm-draft`. It never calls the write port unless broker preflight is
+clean and the digest matches. The service then rechecks the exact task, policy, evidence, complete
+usage, base revision, remote governance, and kill switch around its durable idempotent dispatch. The
+CLI cannot enable authority; the broker command port deliberately has no authority-switch command,
+so broker and human enablement duties remain separate. All switches remain default-off. An empty
+rate card adds `cost-policy-unconfigured` to preflight and independently denies draft mutation, so
+readiness is not merely advisory.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -217,15 +217,16 @@ commands execute serially against one SQLite writer lease. Recovery remains call
 work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
 repositories and the lease are released. The port exposes no intake-authority issuer, control
 switch, GitHub adapter, or broker credential. A separate broker composition, owner-only key source,
-and non-authorizing operator preflight also exist, but the normal TUI cannot enable authority or
-open a PR. Current branch protection requires exact `verify` and `factory-sandbox` checks, dismisses
-stale reviews, enforces administrators, and forbids force-push and deletion. It still has zero
-required approvals, does not require approval of the latest push, and has neither a CODEOWNERS
-policy nor required code-owner review. Preflight therefore reports blocked for those controls and
-`cost-policy-unconfigured`. The cost-accounting mechanism exists, but the repository ships no live
-config or provider/model rates. Config v2 can now provision a reviewed owner-only rate card; actual
-rate and broker-key provisioning remain activation prerequisites. An incomplete usage record already
-denies PR creation. No live agent task or PR has been created by this code. PR-head repair,
+readiness command, and explicit draft-only command also exist, but the normal TUI cannot enable
+authority or invoke them. Current branch protection requires exact `verify` and `factory-sandbox`
+checks, dismisses stale reviews, enforces administrators, and forbids force-push and deletion. It
+still has zero required approvals, does not require approval of the latest push, and has neither a
+CODEOWNERS policy nor required code-owner review. Preflight therefore reports blocked for those
+controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but the repository
+ships no live config or provider/model rates. Config v2 can now provision a reviewed owner-only rate
+card; actual rate and broker-key provisioning remain activation prerequisites. An incomplete usage
+record already denies PR creation, and the explicit write command refuses a blocked preflight or
+unexpected policy digest. No live agent task or PR has been created by this code. PR-head repair,
 scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
 stages.
 

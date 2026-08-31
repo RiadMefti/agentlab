@@ -29,6 +29,21 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryBrokerPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-worker-preflight") {
+    const { runFactoryWorkerPreflight } = await import("./run-factory-worker-preflight.js");
+    process.exitCode = await runFactoryWorkerPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-broker-open-draft") {
+    const { runFactoryBrokerOpenDraft } = await import("./run-factory-broker-open-draft.js");
+    process.exitCode = await runFactoryBrokerOpenDraft(
+      action.configPath,
+      action.taskId,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
   if (invocation.kind === "direct") {
