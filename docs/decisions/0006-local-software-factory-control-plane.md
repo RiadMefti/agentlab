@@ -12,12 +12,12 @@ terminal cleanup, provider adapters, executable dependency rules, comprehensive 
 release chain with pinned Actions, checksums, SBOMs, attestations, immutable releases, and OIDC npm
 publishing.
 
-Those controls are necessary but not sufficient for a software factory. The current captain prompt
-can ask workers to act, but prompts are not durable authority. AgentLab has no immutable unit of
-work, skill provenance, isolated Git workspace per attempt, append-only task ledger, deterministic
-risk policy, evidence bundle, independent-review proof, repair loop, scheduler, PR broker, or
-bounded merge/release authority. Giving the current captain a long-lived GitHub token would turn a
-useful local orchestrator into an unauditable privileged actor.
+Those controls were necessary but not sufficient for a software factory. At the time of this
+decision, the captain prompt could ask workers to act, but prompts were not durable authority.
+AgentLab had no immutable unit of work, skill provenance, isolated Git workspace per attempt,
+append-only task ledger, deterministic risk policy, evidence bundle, independent-review proof,
+repair loop, scheduler, PR broker, or bounded merge/release authority. Giving the captain a
+long-lived GitHub token would turn a useful local orchestrator into an unauditable privileged actor.
 
 The goal is a workflow in which a feature request, bug report, PR, or scheduled maintenance signal
 is improved, specified, planned, implemented, verified, independently reviewed, proposed as a PR,
@@ -40,6 +40,10 @@ API:
 - OpenAI's reported internal harness uses isolated worktrees, repo-local legibility, self-review,
   separate targeted reviews, repair loops, and recurring small maintenance changes. See
   [Harness engineering](https://openai.com/index/harness-engineering/).
+- OpenAI's current model guidance says to define autonomy and approval boundaries, expose only
+  relevant tools, specify output/evidence plus concurrency, retry, and stopping limits, and compare
+  representative evals on task success, completeness, evidence, tokens, latency, and cost. See
+  [Model guidance](https://developers.openai.com/api/docs/guides/latest-model).
 - Anthropic separates an agent's replaceable “brain” from stable “hands,” persists an append-only
   session log, and treats sandboxing as a capability boundary. Its long-running-agent guidance uses
   explicit progress artifacts across context windows; its eval guidance combines deterministic,
@@ -76,6 +80,12 @@ API:
   isolation. See [source requirements](https://slsa.dev/spec/v1.2/source-requirements),
   [build track](https://slsa.dev/spec/v1.2/build-track-basics), and
   [verifying artifacts](https://slsa.dev/spec/v1.2/verifying-artifacts).
+- Kubernetes documents that scheduled jobs may be missed or duplicated and therefore must be
+  idempotent; its starting deadline and concurrency policy are explicit admission controls. See
+  [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/).
+- Google SRE recommends reproducible automated small releases, peer review, canary evaluation
+  against service objectives, and automated rollback. See
+  [Canarying releases](https://sre.google/workbook/canarying-releases/).
 - NIST's AI RMF makes governance, role accountability, inventory, continuous measurement,
   third-party monitoring, incident response, and recovery ongoing functions. The
   [NIST AI RMF Playbook](https://airc.nist.gov/airmf-resources/airmf/5-sec-core/) and the
@@ -217,8 +227,8 @@ deterministic gate claims are emitted only by the materializer, not by a worker.
 insert failure is tested to leave neither a partial task ledger nor a false prepared marker. These
 paths are reachable only through the separate credentialless worker composition. The Linux recovery
 adapter is exercised in the supported target-host CI lane. A separate explicit, policy-pinned worker
-command may now invoke one already registered request; the scheduler, normal TUI, and authority
-issuer still cannot invoke execution.
+command or its bounded scheduler may now invoke one already registered request; the normal TUI and
+authority issuer still cannot invoke execution.
 
 Execution admission is deterministic and separate from execution. Its command accepts only a task
 UUID. The service reloads the planned task and active conversation, obtains the current commit from
@@ -463,14 +473,14 @@ evidence and complete usage, base revision, governance, authority, and policy ar
 idempotent dispatch. The authority switch still defaults off, and no broker or worker command can
 change it. The separate `@agentlab/runtime/factory-authority` entry is the local human
 administration boundary. Its owner-only v1 config pins only the durable ledger and operator ID; its
-port can inspect controls and atomically compare-and-set only `pr-broker` while appending one
-canonical human event. Exact expected state, opposite desired state, bounded reason, and matching
-literal confirmation are mandatory. It has no scheduler mutation, worker, provider, process, GitHub,
-broker, tmux, terminal, or interactive capability, and architecture fitness tests enforce that
-closure. OS account/file ownership authorizes the local operation; operator ID is audit metadata
-rather than cryptographic personhood. Live key/config provisioning plus successful preflights are
-activation work, not assumptions. An empty rate card both adds `cost-policy-unconfigured` to
-preflight and denies draft mutation itself.
+port can inspect controls and atomically compare-and-set `scheduler` or `pr-broker` through distinct
+commands while appending one canonical human event. Exact expected state, opposite desired state,
+bounded reason, and the matching control-specific literal confirmation are mandatory. It has no
+scheduler execution, worker, provider, process, GitHub, broker, tmux, terminal, or interactive
+capability, and architecture fitness tests enforce that closure. OS account/file ownership
+authorizes the local operation; operator ID is audit metadata rather than cryptographic personhood.
+Live key/config provisioning plus successful preflights are activation work, not assumptions. An
+empty rate card both adds `cost-policy-unconfigured` to preflight and denies draft mutation itself.
 
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
@@ -493,14 +503,30 @@ classification, but cannot interpret text, widen scope, update a branch, start r
 task state.
 
 The separate `worker-run` command requires an exact task UUID, expected policy digest, and literal
-`--confirm-run`. It ignores only `scheduler-disabled` during manual readiness; cost, host,
-toolchain, storage, provider, gate, and policy drift remain blocking. A generated correlation UUID
-binds the complete attempt. The resumable runner first reconciles any in-flight preparation or
-execution journal, then sequences only the existing preparation, materialization, admission, and
-bounded execution services under the worker coordinator's one-writer queue. It rejects mismatched
-preparation/task/execution identities, stops on human, policy, or terminal outcomes, and ends at
-`pr-proposed`. Its composition and CLI closure remain mechanically unable to reach GitHub, broker
-credentials, authority mutation, merge, or release code.
+`--confirm-run`. It ignores only `scheduler-disabled` and `schedule-policy-unconfigured` during
+manual readiness; cost, host, toolchain, storage, provider, gate, and policy drift remain blocking.
+A generated correlation UUID binds the complete attempt. The resumable runner first reconciles any
+in-flight preparation or execution journal, then sequences only the existing preparation,
+materialization, admission, and bounded execution services under the worker coordinator's one-writer
+queue. It rejects mismatched preparation/task/execution identities, stops on human, policy, or
+terminal outcomes, and ends at `pr-proposed`. Its composition and CLI closure remain mechanically
+unable to reach GitHub, broker credentials, authority mutation, merge, or release code.
+
+Bounded scheduler admission is now implemented as a one-shot command inside that same credentialless
+worker closure. Strict `agentlab.schedule-policy.v1` fixes one daily UTC time, a start deadline,
+candidate/task limits, and an aggregate tick budget. Owner-only worker config v2 loads the policy
+from a separate canonical file; v1 remains valid for manual work and cannot smuggle in a schedule.
+The command requires both the exact schedule-policy digest and factory-policy digest. It admits only
+immutably `scheduled` intake, requires clean host/cost readiness plus the human scheduler switch,
+and reserves each task's complete authority budget ceiling before model work. SQLite v11 stores one
+immutable run per stable schedule ID/slot and the append-only sequence
+`registered → task-claimed → task-finished`, with bounded `task-skipped` events before one
+`completed` event. A claim containing the request/authority digests and task correlation is durable
+before the existing task runner starts. An ambiguous crash therefore retries the exact correlation
+and its existing journals; a duplicate tick for a completed slot is side-effect free. A new run
+after its start deadline is refused, while an existing active run remains recoverable. The scheduler
+cannot mutate controls, reach broker credentials, open or update a PR, merge, release, or install
+its own timer. No live policy, timer, or scheduler authority is provisioned.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -574,9 +600,11 @@ one distinct reviewer, 45 minutes, two repair attempts, 500 tool calls per worke
 ceiling per day. R2 increases require an explicit repository profile; R3 write work is
 human-approved; R4 never writes.
 
-Per-run accounting is now implemented. Repository/day and organization/day reservations and
-scheduler admission are still phase-5 work; post-run task policy alone is not represented as a
-provider-side hard spending guarantee.
+Per-run accounting and one scheduler tick's conservative reservation are implemented. Before a task
+claim, the scheduler adds the task authority's complete budget ceiling—not an optimistic estimate—to
+the slot's recorded reserved usage and skips candidates that would exceed any tick dimension.
+Repository/day and organization/day ledgers are not implemented, and neither task nor tick policy is
+a provider-side hard spending guarantee.
 
 Any secret access/exfiltration signal, remote-write attempt from an execution worker, protected-path
 bypass, attestation mismatch, policy tampering, or critical sandbox failure immediately quarantines
@@ -585,10 +613,14 @@ after two rollbacks in a rolling ten-task window or a gate-failure rate above 30
 Thresholds are policy versions, not prompt text. A human may resume only by recording a new decision
 and contract.
 
-Scheduling uses a bounded per-repository queue, deduplication keys, minimum intervals, blackout
-windows, global concurrency/cost limits, and a kill switch. Daily maintenance starts in read-only
-inventory mode. It may propose small R1 tasks only after the repository's eval and canary policy
-permits that class; it does not invent R2-R4 scope.
+Current scheduling uses deduplicated owner-confirmed intake, one exact daily UTC slot, a bounded
+candidate list, task count, start deadline, per-tick reservation ceiling, SQLite single-writer
+lease, prior-day open-run reconciliation, and a separate human kill switch. Multiple open runs or
+policy drift on an open run fail closed before a new slot. It does not yet implement blackout
+windows, repository/day or organization/day quotas, global concurrency/cost coordination, or
+autonomous maintenance discovery. The scheduler runs only already-authorized R1 requests and stops
+at a local proposal; it does not invent R2-R4 scope. Future maintenance discovery must start in
+read-only inventory/shadow mode and advance only through the eval and canary policy.
 
 ## Evaluation, canary, rollback, and incidents
 
@@ -648,37 +680,42 @@ deterministic branch/PR reconciliation, injected recovery tests spanning remote 
 append, and task-ledger transition, and an exact-repository GitHub App installation-token source. An
 exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
 non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
-The separate owner-only human authority composition now supplies status plus atomic compare-and-set
-enable/disable of only the draft-PR switch. It records canonical append-only events under a pinned
-operator ID and is mechanically isolated from the broker, GitHub, providers, execution, and the
-scheduler. The broker cannot self-enable, and the authority process cannot perform a remote write.
-The provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also
-exist behind the separate worker port. Owner-only config v2 provisions the broker's canonical copy
-of the rate card, and the worker composition loads the same separate owner-only document without
-receiving broker credentials. The worker has a read-only fixed-argv host preflight that also proves
-canonical owner-only artifact and worktree roots, an exact provider/gate inventory, a globally
-serialized 32-command queue, recovery access under normal-work blockers, and retryable
-process/repository/lease shutdown. Its public closure is mechanically barred from GitHub, broker,
-tmux, terminal, interactive discovery, and every provider module except the explicit factory adapter
-allowlist. The default bundle remains empty. The normal TUI has no enable or PR action; the explicit
-non-interactive human command can change only the local broker switch, while the explicit draft
-command remains blocked by current governance and provisioning controls. The explicit worker task
-command now supplies the local request-to-proposal driver, and the authorization-bound repair
-command has its own immutable SQLite v9 journal, fresh isolation, cumulative budgets, repeated
-gates, distinct review, and deterministic crash recovery. No live configuration has been provisioned
-or invoked. No live authority change, agent task, PR, deployment, or publication has been performed
-through this code.
+The separate owner-only human authority composition now supplies status plus distinct atomic
+compare-and-set enable/disable commands for the scheduler and draft-PR switches. It records
+canonical append-only events under a pinned operator ID and is mechanically isolated from the
+broker, GitHub, providers, execution, and scheduler execution. The broker and worker cannot
+self-enable, and the authority process cannot run work or perform a remote write. The
+provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also exist
+behind the separate worker port. Owner-only config v2 provisions the broker's canonical copy of the
+rate card, and the worker composition loads the same separate owner-only document without receiving
+broker credentials. The worker has a read-only fixed-argv host preflight that also proves canonical
+owner-only artifact and worktree roots, an exact provider/gate inventory, a globally serialized
+32-command queue, recovery access under normal-work blockers, and retryable process/repository/lease
+shutdown. Its public closure is mechanically barred from GitHub, broker, tmux, terminal, interactive
+discovery, and every provider module except the explicit factory adapter allowlist. The default
+bundle remains empty. The normal TUI has no enable or PR action; explicit non-interactive human
+commands can change only one named local switch at a time, while the explicit draft command remains
+blocked by current governance and provisioning controls. The explicit worker task command now
+supplies the local request-to-proposal driver, and the authorization-bound repair command has its
+own immutable SQLite v9 journal, fresh isolation, cumulative budgets, repeated gates, distinct
+review, and deterministic crash recovery. A one-shot daily scheduler now adds a strict owner-only
+policy, exact dual-digest pins, full-ceiling tick reservations, scheduled-only selection, a distinct
+human switch, and an immutable SQLite v11 claim/recovery journal. Duplicate and interrupted ticks
+are tested, but AgentLab installs no timer. No live configuration has been provisioned or invoked.
+No live authority change, agent task, PR, deployment, or publication has been performed through this
+code.
 
 The pre-contract intake is now a fifth mechanically separate runtime entry,
 `@agentlab/runtime/factory-intake`. It loads an owner-only configuration plus separately protected
 cost policy, repository authority grant, and exact canonical skill packages. A strict owner-authored
 feature/bug submission cannot assert task, actor, base revision, timestamps, policy, digest, or
 authority. Preflight observes the active conversation and Git commit and proves an R1-only,
-worker-supported, fully cost-accounted grant. Registration requires the reviewed policy digest and
-literal confirmation, publishes all pinned packages, then atomically appends the immutable request,
-authority, and initial event. Repository/kind/source deduplication makes exact retries safe while
-changed content or authority fails closed. This composition has no provider, execution, control
-switch, GitHub, broker, or release path. No live intake configuration or task has been created.
+worker-supported, fully cost-accounted grant. Registration requires the reviewed policy digest and a
+trigger-specific literal confirmation, publishes all pinned packages, then atomically appends the
+immutable request, authority, and initial event. Repository/kind/source deduplication makes exact
+retries safe while changed content or authority fails closed. This composition has no provider,
+execution, control switch, GitHub, broker, or release path. No live intake configuration or task has
+been created.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
@@ -707,22 +744,24 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    adapter, broker-only composition, owner-only key provisioning boundary, operator preflights, and
    fail-closed explicit draft command now exist. A separate governed intake composition now creates
    the immutable preparation root from an owner-confirmed feature or bug report, and a separate
-   human-only authority composition owns atomic enable/disable without broker or scheduler
-   capability. The explicit worker task command now connects intake to the local broker-ready
-   proposal checkpoint without joining worker and broker authority. A separate bounded read command
-   records exact-head trusted checks and untrusted review feedback. A separate admission command
-   selects actionable facts, and the credentialless repair command consumes one immutable
-   authorization in a fresh worktree, repeats all gates and independent review, and stops before a
-   remote branch update. A separate confirmed broker command now advances only that exact repaired
-   draft through a deterministic non-force child commit, crash-durable journal, authenticated
-   evidence, and re-observable head lineage. Activation still requires the missing review
-   protections, provisioned live key/config and exact cost rules, passing live preflights, separate
-   human execution of the authority ceremony, and human merge. No scheduler, auto-merge, release, or
-   protected-path write.
+   human-only authority composition owns atomic switch enable/disable without broker or scheduler
+   execution capability. The explicit worker task command now connects intake to the local
+   broker-ready proposal checkpoint without joining worker and broker authority. A separate bounded
+   read command records exact-head trusted checks and untrusted review feedback. A separate
+   admission command selects actionable facts, and the credentialless repair command consumes one
+   immutable authorization in a fresh worktree, repeats all gates and independent review, and stops
+   before a remote branch update. A separate confirmed broker command now advances only that exact
+   repaired draft through a deterministic non-force child commit, crash-durable journal,
+   authenticated evidence, and re-observable head lineage. Activation still requires the missing
+   review protections, provisioned live key/config and exact cost rules, passing live preflights,
+   separate human execution of the authority ceremony, and human merge. No scheduler, auto-merge,
+   release, or protected-path write is live; the local scheduler code stops before the broker.
 5. **CI repair and operations:** credential rotation/monitoring, CODEOWNERS/last-push/approval
    rules, dashboards, alerts, quotas, and incident tooling. Deterministic feedback qualification,
    bounded fresh repair execution, brokered repaired-branch update, and exact-head re-observation
-   now exist.
+   now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick reservation
+   ceiling now exist; cross-repository/day quotas, timer provisioning, alerting, and incident
+   automation do not.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
    provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new

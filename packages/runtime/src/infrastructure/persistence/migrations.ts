@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 10;
+export const latestSchemaVersion = 11;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -1969,6 +1969,240 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 10;
+      COMMIT;
+    `);
+  }
+
+  if (version < 11) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_schedule_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_id TEXT NOT NULL CHECK (length(schedule_policy_id) BETWEEN 1 AND 128),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        factory_policy_bundle_digest TEXT NOT NULL CHECK (
+          length(factory_policy_bundle_digest) = 71 AND
+          substr(factory_policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 1048576 AND json_valid(run_json)
+        ),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at),
+        UNIQUE(schedule_policy_id, scheduled_for)
+      ) STRICT;
+      CREATE INDEX factory_schedule_runs_slot_idx
+        ON factory_schedule_runs(scheduled_for, schedule_policy_id);
+
+      CREATE TABLE factory_schedule_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_schedule_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 1000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'task-claimed', 'task-finished', 'task-skipped', 'completed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'task-active', 'completed')
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN ('ready', 'task-active', 'completed')),
+        task_id TEXT CHECK (task_id IS NULL OR length(task_id) = 36),
+        task_correlation_id TEXT CHECK (
+          task_correlation_id IS NULL OR length(task_correlation_id) = 36
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 2097152 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_schedule_events_run_idx
+        ON factory_schedule_events(run_id, sequence);
+      CREATE UNIQUE INDEX factory_schedule_events_task_selection_idx
+        ON factory_schedule_events(run_id, task_id)
+        WHERE kind IN ('task-claimed', 'task-skipped');
+
+      CREATE TRIGGER factory_schedule_runs_no_update
+      BEFORE UPDATE ON factory_schedule_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule runs are immutable');
+      END;
+      CREATE TRIGGER factory_schedule_runs_no_delete
+      BEFORE DELETE ON factory_schedule_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule runs are immutable');
+      END;
+      CREATE TRIGGER factory_schedule_runs_identity_guard
+      BEFORE INSERT ON factory_schedule_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.schedulePolicy.id') IS NOT NEW.schedule_policy_id OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.factoryPolicyBundleDigest') IS NOT NEW.factory_policy_bundle_digest OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_schedule_events_no_update
+      BEFORE UPDATE ON factory_schedule_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule events are append-only');
+      END;
+      CREATE TRIGGER factory_schedule_events_no_delete
+      BEFORE DELETE ON factory_schedule_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule events are append-only');
+      END;
+      CREATE TRIGGER factory_schedule_events_identity_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.taskCorrelationId') IS NOT NEW.task_correlation_id OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event identity mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_sequence_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_schedule_events WHERE run_id = NEW.run_id
+      ), 1)
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event sequence mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_chain_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event chain mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_transition_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'task-claimed' AND NEW.from_state = 'ready' AND NEW.to_state = 'task-active') OR
+        (NEW.kind = 'task-finished' AND NEW.from_state = 'task-active' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'task-skipped' AND NEW.from_state = 'ready' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'ready' AND NEW.to_state = 'completed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory schedule transition');
+      END;
+      CREATE TRIGGER factory_schedule_events_fields_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'completed') AND
+          NEW.task_id IS NULL AND NEW.task_correlation_id IS NULL) OR
+        (NEW.kind IN ('task-claimed', 'task-finished') AND
+          NEW.task_id IS NOT NULL AND NEW.task_correlation_id IS NOT NULL) OR
+        (NEW.kind = 'task-skipped' AND
+          NEW.task_id IS NOT NULL AND NEW.task_correlation_id IS NULL)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event fields mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_task_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind IN ('task-claimed', 'task-skipped') AND (
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT authority_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract((
+          SELECT request_json FROM factory_preparations WHERE task_id = NEW.task_id
+        ), '$.trigger') IS NOT 'scheduled' OR
+        json_extract((
+          SELECT authority_json FROM factory_preparations WHERE task_id = NEW.task_id
+        ), '$.policyBundleDigest') IS NOT (
+          SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule task identity mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ) OR
+        NEW.task_correlation_id IS NOT (
+          SELECT task_correlation_id FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ) OR
+        (SELECT kind FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1) IS NOT 'task-claimed'
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule task finish mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_timestamp_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 11;
       COMMIT;
     `);
   }

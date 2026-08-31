@@ -13,17 +13,42 @@ const now = "2026-08-31T12:00:00.000Z";
 const eventId = "0198f005-4ec4-7000-8000-000000000001";
 
 describe("FactoryAuthorityOperator", () => {
-  it("inspects local state and its bounded recent broker audit history", async () => {
+  it("inspects local state and bounded scheduler and broker audit history", async () => {
     const controls = new MemoryControls({ scheduler: false, prBroker: true });
     const operator = createOperator(controls);
 
     await expect(operator.inspect()).resolves.toEqual({
-      schemaVersion: "agentlab.authority-inspection.v1",
+      schemaVersion: "agentlab.authority-inspection.v2",
       schedulerEnabled: false,
       prBrokerEnabled: true,
+      recentSchedulerEvents: [],
       recentBrokerEvents: []
     });
-    expect(controls.historyCalls).toEqual([{ control: "pr-broker", limit: 20 }]);
+    expect(controls.historyCalls).toEqual([
+      { control: "scheduler", limit: 20 },
+      { control: "pr-broker", limit: 20 }
+    ]);
+  });
+
+  it("records scheduler authority independently through compare-and-set", async () => {
+    const controls = new MemoryControls();
+    const operator = createOperator(controls);
+
+    await expect(
+      operator.setSchedulerAuthority({
+        expectedEnabled: false,
+        enabled: true,
+        reason: "Approved bounded daily maintenance.",
+        confirmation: "enable-scheduler"
+      })
+    ).resolves.toMatchObject({
+      schemaVersion: "agentlab.scheduler-authority-change-result.v1",
+      schedulerEnabled: true,
+      prBrokerEnabled: false,
+      event: { control: "scheduler", enabled: true }
+    });
+    expect(controls.stateValue).toEqual({ scheduler: true, prBroker: false });
+    expect(controls.expectedStates).toEqual([false]);
   });
 
   it("records one pinned human event through compare-and-set without changing scheduler", async () => {
@@ -141,12 +166,17 @@ class MemoryControls implements FactoryControlRepository {
     if (expectedEnabled !== undefined) this.expectedStates.push(expectedEnabled);
     if (
       this.forceConflict ||
-      (expectedEnabled !== undefined && this.stateValue.prBroker !== expectedEnabled)
+      (expectedEnabled !== undefined &&
+        this.stateValue[event.value.control === "scheduler" ? "scheduler" : "prBroker"] !==
+          expectedEnabled)
     ) {
       return Promise.resolve(null);
     }
     this.events.unshift(event.value);
-    this.stateValue = { ...this.stateValue, prBroker: event.value.enabled };
+    this.stateValue =
+      event.value.control === "scheduler"
+        ? { ...this.stateValue, scheduler: event.value.enabled }
+        : { ...this.stateValue, prBroker: event.value.enabled };
     return Promise.resolve(this.stateValue);
   }
 

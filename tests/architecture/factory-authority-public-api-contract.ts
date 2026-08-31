@@ -7,6 +7,8 @@ import {
   type FactoryAuthorityInspection,
   type FactoryBrokerAuthorityChange,
   type FactoryBrokerAuthorityCommand,
+  type FactorySchedulerAuthorityChange,
+  type FactorySchedulerAuthorityCommand,
   type LocalFactoryAuthorityConfig,
   type LocalFactoryAuthorityOptions,
   type LocalFactoryAuthorityRuntime
@@ -50,9 +52,10 @@ interface ExpectedCommand {
 }
 
 interface ExpectedInspection {
-  readonly schemaVersion: "agentlab.authority-inspection.v1";
+  readonly schemaVersion: "agentlab.authority-inspection.v2";
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly recentSchedulerEvents: readonly FactoryControlEvent[];
   readonly recentBrokerEvents: readonly FactoryControlEvent[];
 }
 
@@ -65,13 +68,36 @@ interface ExpectedChange {
   readonly eventDigest: Sha256Digest;
 }
 
+interface ExpectedSchedulerCommand {
+  expectedEnabled: boolean;
+  enabled: boolean;
+  reason: string;
+  confirmation: "enable-scheduler" | "disable-scheduler";
+}
+
+interface ExpectedSchedulerChange {
+  readonly schemaVersion: "agentlab.scheduler-authority-change-result.v1";
+  readonly changed: true;
+  readonly schedulerEnabled: boolean;
+  readonly prBrokerEnabled: boolean;
+  readonly event: FactoryControlEvent;
+  readonly eventDigest: Sha256Digest;
+}
+
 export type FactoryAuthorityPublicApiAssertions = [
   Assert<Equal<LocalFactoryAuthorityConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryAuthorityOptions, ExpectedOptions>>,
   Assert<Equal<FactoryBrokerAuthorityCommand, ExpectedCommand>>,
+  Assert<Equal<FactorySchedulerAuthorityCommand, ExpectedSchedulerCommand>>,
   Assert<Equal<FactoryAuthorityInspection, ExpectedInspection>>,
   Assert<Equal<FactoryBrokerAuthorityChange, ExpectedChange>>,
-  Assert<Equal<keyof FactoryAuthorityCommandPort, "inspect" | "setBrokerAuthority">>,
+  Assert<Equal<FactorySchedulerAuthorityChange, ExpectedSchedulerChange>>,
+  Assert<
+    Equal<
+      keyof FactoryAuthorityCommandPort,
+      "inspect" | "setBrokerAuthority" | "setSchedulerAuthority"
+    >
+  >,
   Assert<Equal<keyof LocalFactoryAuthorityRuntime, "commands" | "close">>,
   Assert<
     Equal<

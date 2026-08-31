@@ -28,10 +28,15 @@ describe("local factory authority composition", () => {
       createId: () => "0198f005-4ec4-7000-8000-000000000001"
     });
 
-    expect(Object.keys(runtime.commands).sort()).toEqual(["inspect", "setBrokerAuthority"]);
+    expect(Object.keys(runtime.commands).sort()).toEqual([
+      "inspect",
+      "setBrokerAuthority",
+      "setSchedulerAuthority"
+    ]);
     await expect(runtime.commands.inspect()).resolves.toMatchObject({
       schedulerEnabled: false,
       prBrokerEnabled: false,
+      recentSchedulerEvents: [],
       recentBrokerEvents: []
     });
     await expect(

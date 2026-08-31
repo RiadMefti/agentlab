@@ -1,6 +1,7 @@
 import type {
   FactoryAuthorityInspection,
   FactoryBrokerAuthorityChange,
+  FactorySchedulerAuthorityChange,
   LocalFactoryAuthorityConfig,
   LocalFactoryAuthorityRuntime
 } from "@agentlab/runtime/factory-authority";
@@ -9,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   runFactoryAuthorityStatus,
   runFactoryBrokerAuthority,
+  runFactorySchedulerAuthority,
   type FactoryAuthorityRunnerDependencies
 } from "../../apps/tui/src/run-factory-authority.js";
 
@@ -54,6 +56,36 @@ describe("factory authority CLI runner", () => {
     expect(JSON.parse(writes[0] ?? "")).toEqual(change());
   });
 
+  it("uses a distinct compare-and-set command for scheduler authority", async () => {
+    const writes: string[] = [];
+    const setSchedulerAuthority = vi.fn(() => Promise.resolve(schedulerChange()));
+    const dependencies = runnerDependencies(
+      vi.fn(() => Promise.resolve()),
+      writes,
+      undefined,
+      setSchedulerAuthority
+    );
+
+    await expect(
+      runFactorySchedulerAuthority(
+        configPath,
+        false,
+        true,
+        "Approved bounded daily maintenance.",
+        "enable-scheduler",
+        dependencies
+      )
+    ).resolves.toBe(0);
+
+    expect(setSchedulerAuthority).toHaveBeenCalledWith({
+      expectedEnabled: false,
+      enabled: true,
+      reason: "Approved bounded daily maintenance.",
+      confirmation: "enable-scheduler"
+    });
+    expect(JSON.parse(writes[0] ?? "")).toEqual(schedulerChange());
+  });
+
   it("closes on operation failure and suppresses output when cleanup also fails", async () => {
     const writes: string[] = [];
     const operationFailure = new Error("authority conflict");
@@ -82,12 +114,19 @@ function runnerDependencies(
   close: () => Promise<void>,
   writes: string[],
   setBrokerAuthority: (input: unknown) => Promise<FactoryBrokerAuthorityChange> = () =>
-    Promise.resolve(change())
+    Promise.resolve(change()),
+  setSchedulerAuthority: (input: unknown) => Promise<FactorySchedulerAuthorityChange> = () =>
+    Promise.resolve(schedulerChange())
 ): FactoryAuthorityRunnerDependencies {
   return {
     loadConfig: vi.fn(() => Promise.resolve(config())),
     createRuntime: vi.fn(() =>
-      authorityRuntime(Promise.resolve(inspection()), close, setBrokerAuthority)
+      authorityRuntime(
+        Promise.resolve(inspection()),
+        close,
+        setBrokerAuthority,
+        setSchedulerAuthority
+      )
     ),
     write: (message) => writes.push(message)
   };
@@ -97,20 +136,47 @@ function authorityRuntime(
   inspect: Promise<FactoryAuthorityInspection>,
   close: () => Promise<void>,
   setBrokerAuthority: (input: unknown) => Promise<FactoryBrokerAuthorityChange> = () =>
-    Promise.resolve(change())
+    Promise.resolve(change()),
+  setSchedulerAuthority: (input: unknown) => Promise<FactorySchedulerAuthorityChange> = () =>
+    Promise.resolve(schedulerChange())
 ): LocalFactoryAuthorityRuntime {
   return {
-    commands: { inspect: () => inspect, setBrokerAuthority },
+    commands: { inspect: () => inspect, setBrokerAuthority, setSchedulerAuthority },
     close
   };
 }
 
 function inspection(): FactoryAuthorityInspection {
   return {
-    schemaVersion: "agentlab.authority-inspection.v1",
+    schemaVersion: "agentlab.authority-inspection.v2",
     schedulerEnabled: false,
     prBrokerEnabled: false,
+    recentSchedulerEvents: [],
     recentBrokerEvents: []
+  };
+}
+
+function schedulerChange(): FactorySchedulerAuthorityChange {
+  return {
+    schemaVersion: "agentlab.scheduler-authority-change-result.v1",
+    changed: true,
+    schedulerEnabled: true,
+    prBrokerEnabled: false,
+    event: {
+      schemaVersion: "agentlab.control-event.v1",
+      eventId: "0198f005-4ec4-7000-8000-000000000003",
+      control: "scheduler",
+      enabled: true,
+      actor: {
+        kind: "human",
+        role: "requester",
+        id: "maintainer/riad",
+        sessionId: null
+      },
+      occurredAt: "2026-08-31T12:00:00.000Z",
+      reason: "Approved bounded daily maintenance."
+    },
+    eventDigest: `sha256:${"b".repeat(64)}`
   };
 }
 

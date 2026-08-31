@@ -18,12 +18,12 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use three
+The interactive product is local-only and single-process. Optional factory operations use four
 separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
-authority operator, and a credential-bearing draft-PR broker. Only the broker may make explicit
-GitHub API calls; none is loaded into the interactive runtime. AgentLab has no HTTP server,
-WebSocket gateway, browser renderer, desktop shell, remote mode, app command language, MCP bridge,
-or provider-session translation layer.
+authority operator, a credential-bearing draft-PR broker, and a credentialless governed intake
+operator. Only the broker may make explicit GitHub API calls; none is loaded into the interactive
+runtime. AgentLab has no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote
+mode, app command language, MCP bridge, or provider-session translation layer.
 
 ## Two paths
 
@@ -50,19 +50,19 @@ attempts remain workers beneath that conversation's single captain, and provider
 stays behind ports. Deterministic code—not captain instructions—owns task state, capabilities,
 budgets, gates, evidence, and remote authority.
 
-The source tree now contains the dormant stages 1–4 safety path: strict contracts; an immutable
-SQLite task/evidence ledger; deterministic risk policy and kill switches; content-addressed
-artifacts; exact-base disposable worktrees; bounded provider-native implement, repair, and
-independent-review adapters; sandboxed deterministic gates; authenticated evidence channels; and a
-separate GitHub adapter that can reconstruct one exact patch and request only a draft PR after
-rechecking repository governance. Factory policy 1.3 conservatively classifies the complete allowed
-write scope before execution, binds preparation evidence to the compiled contract, and pins per-tier
-process-tree limits. Every agent or gate executor requires an injected OS isolator; the Linux
-adapter creates a unique transient systemd user scope with cgroup CPU, memory, swap, and task
-ceilings and has no unbounded fallback. The wrapper strips its user-manager environment before
-starting the target. Deterministic gates run Bubblewrap inside that scope. The model-bearing
-subprocess environment is allowlisted and excludes repository, cloud, and package credentials. The
-broker credential is acquired only at the separate broker boundary.
+The source tree now contains the dormant stages 1–4 safety path plus bounded local scheduler
+admission: strict contracts; an immutable SQLite task/evidence ledger; deterministic risk policy and
+kill switches; content-addressed artifacts; exact-base disposable worktrees; bounded provider-native
+implement, repair, and independent-review adapters; sandboxed deterministic gates; authenticated
+evidence channels; and a separate GitHub adapter that can reconstruct one exact patch and request
+only a draft PR after rechecking repository governance. Factory policy 1.3 conservatively classifies
+the complete allowed write scope before execution, binds preparation evidence to the compiled
+contract, and pins per-tier process-tree limits. Every agent or gate executor requires an injected
+OS isolator; the Linux adapter creates a unique transient systemd user scope with cgroup CPU,
+memory, swap, and task ceilings and has no unbounded fallback. The wrapper strips its user-manager
+environment before starting the target. Deterministic gates run Bubblewrap inside that scope. The
+model-bearing subprocess environment is allowlisted and excludes repository, cloud, and package
+credentials. The broker credential is acquired only at the separate broker boundary.
 
 That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
 requests an installation token for one configured numeric repository ID with only `checks:read`,
@@ -84,30 +84,32 @@ fresh mutable bytes that the signer erases after one signature.
 Human enablement is a fourth exact runtime package entry, `@agentlab/runtime/factory-authority`. Its
 strict owner-only `agentlab.local-factory-authority.v1` config contains only a durable database path
 and a pinned operator identifier. The composition can inspect both switches and atomically
-compare-and-set only `pr-broker`, recording a canonical append-only human control event. It exposes
-no scheduler mutation, task execution, process runner, provider, GitHub, tmux, terminal, broker, or
-interactive runtime capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the
-expected-state check and append one transaction. OS file ownership is the local authorization
-boundary; the configured operator identifier is audit metadata, not independent proof of a person,
-so production use requires a dedicated non-shared operating-system account.
+compare-and-set `scheduler` or `pr-broker` through distinct commands and confirmations, recording a
+canonical append-only human control event for either switch. It exposes no scheduler execution, task
+execution, process runner, provider, GitHub, tmux, terminal, broker, or interactive runtime
+capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the expected-state check and
+append one transaction. OS file ownership is the local authorization boundary; the configured
+operator identifier is audit metadata, not independent proof of a person, so production use requires
+a dedicated non-shared operating-system account.
 
-The product CLI exposes separate authority inspection, broker and worker preflight, a manual worker
-task command, and broker authority compare-and-set commands. Each loads only its exact runtime,
-emits one deterministically ordered non-secret JSON record after clean shutdown, and exits with 0
-for success/ready, 2 for a policy-blocked preflight, or 1 for an operational failure. Authority
-mutation requires the exact expected and desired opposite states, a bounded reason, and the matching
-literal enable/disable confirmation. The explicit `broker-open-draft` command additionally requires
-a task UUID, the operator's expected policy digest, and the literal `--confirm-draft`. It never
-calls the write port unless broker preflight is clean and the digest matches. The service then
-rechecks the exact task, policy, evidence, complete usage, base revision, remote governance, and
-kill switch around its durable idempotent dispatch. The broker command port deliberately has no
-authority-switch command, and the authority port has no remote-write command, so broker and human
-enablement duties remain separate. Scheduler has no CLI enable path. All switches remain
-default-off. An empty rate card adds `cost-policy-unconfigured` to preflight and independently
-denies draft mutation, so readiness is not merely advisory. The safe manual ceremony is: inspect;
-require broker preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the
-exact draft command; then compare-and-set disable even when the draft attempt fails. The broker's
-immediate preflight and inner rechecks remain authoritative throughout.
+The product CLI exposes separate authority inspection, broker and worker preflight, manual and
+scheduled worker commands, and independent scheduler/broker authority compare-and-set commands. Each
+loads only its exact runtime, emits one deterministically ordered non-secret JSON record after clean
+shutdown, and exits with 0 for success/ready, 2 for a policy-blocked preflight, or 1 for an
+operational failure. Authority mutation requires the exact expected and desired opposite states, a
+bounded reason, and the matching literal enable/disable confirmation. The explicit
+`broker-open-draft` command additionally requires a task UUID, the operator's expected policy
+digest, and the literal `--confirm-draft`. It never calls the write port unless broker preflight is
+clean and the digest matches. The service then rechecks the exact task, policy, evidence, complete
+usage, base revision, remote governance, and kill switch around its durable idempotent dispatch. The
+broker command port deliberately has no authority-switch command, and the authority port has no
+remote-write command, so broker and human enablement duties remain separate. Scheduler authority has
+its own exact CLI path, but that runtime cannot execute work. All switches remain default-off. An
+empty rate card adds `cost-policy-unconfigured` to preflight and independently denies draft
+mutation, so readiness is not merely advisory. The safe manual ceremony is: inspect; require broker
+preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the exact draft
+command; then compare-and-set disable even when the draft attempt fails. The broker's immediate
+preflight and inner rechecks remain authoritative throughout.
 
 The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
 clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
@@ -166,14 +168,44 @@ only `pr-proposed → pr-open`, and makes later observation and repair admission
 The model-bearing worker never receives the GitHub credential; the broker cannot run a provider.
 
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
-policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
-manual-work denial; every other preflight reason remains blocking. Under the worker's existing
-single-writer queue, a resumable application runner reconciles interrupted preparation and execution
-journals, advances the bounded qualify/specify/plan chain, atomically materializes the contract,
-rechecks execution admission, and invokes the existing implement/gate/review/repair service. Durable
-identity disagreement fails closed. The command stops at `pr-proposed`, emits only a compact
-non-secret report, and cannot reach GitHub, broker credentials, control mutation, merge, or release
-capability.
+policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled and an
+unconfigured schedule policy are not manual-work denials; every other preflight reason remains
+blocking. Under the worker's existing single-writer queue, a resumable application runner reconciles
+interrupted preparation and execution journals, advances the bounded qualify/specify/plan chain,
+atomically materializes the contract, rechecks execution admission, and invokes the existing
+implement/gate/review/repair service. Durable identity disagreement fails closed. The command stops
+at `pr-proposed`, emits only a compact non-secret report, and cannot reach GitHub, broker
+credentials, control mutation, merge, or release capability.
+
+The `scheduler-tick` command is a one-shot local reconciliation operation, not an embedded daemon.
+It requires the exact loaded schedule-policy digest and factory-policy digest. The scheduler
+resolves the latest daily UTC slot, refuses to create a run beyond its bounded start deadline, but
+may resume an already-created run after that deadline. Before resolving a new slot, it reconciles
+the single oldest open run even across a UTC day boundary. More than one open run is an integrity
+failure, and an open run pinned to different schedule or factory policy blocks new work for operator
+recovery. A wall clock behind the open run or its latest event also blocks before worker execution.
+SQLite version 11 gives each stable schedule ID/slot pair one immutable run and this append-only
+chain:
+
+```text
+registered/ready
+  ├─ task-skipped ───────────────────────────────┐
+  └─ task-claimed/task-active → task-finished ──┤
+                                                 └─ completed
+```
+
+Only intake requests whose immutable trigger is `scheduled` are eligible. Before selection,
+preflight requires the scheduler switch, exact schedule and factory policy pins, complete cost
+policy, and a healthy isolated worker host. Each claim durably binds the request and authority
+digests, reserves the task's complete authority budget ceiling against the per-tick aggregate quota,
+and records a fresh task correlation before any model work. A crash or lost result leaves
+`task-active`; retry invokes the existing journal-aware task runner with that same correlation.
+Duplicate ticks read the completed slot without selecting or running work again. The single SQLite
+writer lease prevents overlapping local schedulers, and database uniqueness remains the final
+idempotency guard. The scheduler has no broker, remote credential, authority mutation, merge, or
+release capability and stops every successful task at `pr-proposed`. AgentLab does not install a
+timer; an owner-governed system timer must invoke this one-shot command with the reviewed digests.
+See [Local factory scheduler operations](factory-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -208,9 +240,10 @@ for every preparation and execution provider/model, and a one-to-one match betwe
 manifest and canonical skill-package digest. Packages, request, and authority are published to the
 immutable artifact store; the request, authority, and first event are then inserted atomically under
 the SQLite writer lease. CLI registration requires a prior policy digest and literal
-`--confirm-register`. Intake has no provider/model adapter, GitHub credential, broker, scheduler
-switch, gate executor, tmux, terminal, or interactive-runtime path; executable closure allowlists
-enforce that separation.
+`--confirm-register` for manual work or `--confirm-register-scheduled` for scheduler-eligible work;
+the trigger is immutable and participates in exact-retry identity. Intake has no provider/model
+adapter, GitHub credential, broker, scheduler switch, gate executor, tmux, terminal, or
+interactive-runtime path; executable closure allowlists enforce that separation.
 
 The dormant preparation application advances exactly one `qualify`, `specify`, or `plan` checkpoint
 at a time through a provider-neutral execution port. Codex and Claude adapters advertise these
@@ -320,30 +353,35 @@ evaluates the execution stage with zero pre-execution usage and an empty change 
 allowed R1 task, and otherwise leaves the task planned with the denial recorded as evidence.
 Already-queued work is idempotent. The service cannot enable scheduler or broker authority.
 
-The worker's local configuration is a separate owner-only v1 document. It pins the database,
-artifact/worktree roots, hardened Git tools, systemd isolation identity, Bubblewrap/runtime mounts,
-the exact seven external R1 gate commands and evidence kinds, and one or more supported provider
-executables by canonical path, SHA-256 digest, and exact `--version` output. Its separately
-protected cost policy is loaded through the same fail-closed rate-card boundary as broker config v2.
-Provider resolution rechecks file identity/digest and version for each use under a fixed environment
-that contains no GitHub, package-registry, or cloud credential variables. The schema has no GitHub
-App, remote-repository, or authority-control field, and the sandbox refuses `/` as a runtime mount.
+The worker's local configuration remains backward-compatible as an owner-only v1 document. It pins
+the database, artifact/worktree roots, hardened Git tools, systemd isolation identity,
+Bubblewrap/runtime mounts, the exact seven external R1 gate commands and evidence kinds, and one or
+more supported provider executables by canonical path, SHA-256 digest, and exact `--version` output.
+Its separately protected cost policy is loaded through the same fail-closed rate-card boundary as
+broker config v2. Owner-only worker config v2 adds one canonical separately protected
+`agentlab.schedule-policy.v1` file. That policy fixes the daily UTC time, bounded start deadline,
+candidate and task limits, and aggregate reservation ceiling for one tick; it contains no command,
+credential, merge, or release field. Provider resolution rechecks file identity/digest and version
+for each use under a fixed environment that contains no GitHub, package-registry, or cloud
+credential variables. The schema has no GitHub App, remote-repository, or authority-control field,
+and the sandbox refuses `/` as a runtime mount.
 
 The worker path is now composed only through the separate `@agentlab/runtime/factory-worker`
-subpath; it is not reachable from `local-runtime.ts`, scheduled, deployed, published, or enabled.
-Its read-only host preflight revalidates canonical executable and runtime paths, owner-only
-artifact/worktree roots, exact systemd/provider identities, credentialless fixed-argv probes, cost
-readiness, user-manager reachability, and the observed scheduler switch. A maximum of 32 admitted
-commands execute serially against one SQLite writer lease. Recovery remains callable when normal
-work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
-repositories and the lease are released. The port exposes no intake-authority issuer, control
-switch, GitHub adapter, or broker credential. An explicit policy-pinned `worker-run` command can
-resume one already registered task through those existing services and stops at broker readiness; it
-does not enable the scheduler or perform a remote write. The authorization-bound `worker-repair-pr`
-command uses the same closure for one fresh post-PR attempt, repeats the gate/review floor, and
-stops at a new local proposal. A separate broker composition, owner-only key source, readiness
-command, and explicit draft-only command also exist. The isolated human authority composition and
-non-interactive CLI can change only the broker switch; the normal TUI cannot invoke factory
+subpath; it is not reachable from `local-runtime.ts`. No live v2 config, schedule policy, timer, or
+scheduler authority is provisioned, deployed, or enabled. Its read-only host preflight revalidates
+canonical executable and runtime paths, owner-only artifact/worktree roots, exact systemd/provider
+identities, credentialless fixed-argv probes, cost readiness, user-manager reachability, the
+schedule-policy digest, and the observed scheduler switch. A maximum of 32 admitted commands execute
+serially against one SQLite writer lease. Recovery remains callable when normal work is cost- or
+host-blocked, and close drains admitted work and proves process cleanup before repositories and the
+lease are released. The port exposes no intake-authority issuer, control switch, GitHub adapter, or
+broker credential. An explicit policy-pinned `worker-run` command can resume one already registered
+task through those existing services and stops at broker readiness; it does not enable the scheduler
+or perform a remote write. The authorization-bound `worker-repair-pr` command uses the same closure
+for one fresh post-PR attempt, repeats the gate/review floor, and stops at a new local proposal. A
+separate broker composition, owner-only key source, readiness command, and explicit draft-only
+command also exist. The isolated human authority composition and non-interactive CLI can change only
+the scheduler or broker switch through distinct methods; the normal TUI cannot invoke factory
 authority, worker, or broker commands. Current branch protection requires exact `verify` and
 `factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
 and deletion. It still has zero required approvals, does not require approval of the latest push,
@@ -357,8 +395,8 @@ intake configuration or task has been provisioned. No live agent task or PR has 
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
 and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
 reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
-stages.
+Repository/day and organization/day quotas, eval promotion, merge, release, canary, and incident
+automation remain later stages.
 
 ## Dependency map
 

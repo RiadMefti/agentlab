@@ -83,6 +83,25 @@ describe("terminal CLI", () => {
       expectedPolicyBundleDigest: policy,
       confirmation: "register-request"
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "intake-register",
+        "--config",
+        "/private/agentlab/intake.json",
+        "--request",
+        "/private/agentlab/request.json",
+        "--policy",
+        policy,
+        "--confirm-register-scheduled"
+      ])
+    ).toEqual({
+      kind: "factory-intake-register",
+      configPath: "/private/agentlab/intake.json",
+      requestPath: "/private/agentlab/request.json",
+      expectedPolicyBundleDigest: policy,
+      confirmation: "register-scheduled-request"
+    });
     expect(() =>
       parseCliArguments([
         "factory",
@@ -93,6 +112,40 @@ describe("terminal CLI", () => {
         "/private/agentlab/request.json",
         "--policy",
         policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
+  it("requires exact schedule and factory policy pins for one scheduler tick", () => {
+    const schedulePolicy = `sha256:${"1".repeat(64)}`;
+    const factoryPolicy = `sha256:${"2".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "scheduler-tick",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--schedule-policy",
+        schedulePolicy,
+        "--policy",
+        factoryPolicy
+      ])
+    ).toEqual({
+      kind: "factory-scheduler-tick",
+      configPath: "/private/agentlab/worker.json",
+      expectedSchedulePolicyDigest: schedulePolicy,
+      expectedFactoryPolicyBundleDigest: factoryPolicy
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "scheduler-tick",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--schedule-policy",
+        "not-a-digest",
+        "--policy",
+        factoryPolicy
       ])
     ).toThrow(/Usage/u);
   });
@@ -410,18 +463,60 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("keeps scheduler authority on its own exact compare-and-set command", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "scheduler-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Approved bounded daily maintenance.",
+        "--confirm-enable-scheduler"
+      ])
+    ).toEqual({
+      kind: "factory-scheduler-authority",
+      configPath: "/private/agentlab/authority.json",
+      expectedEnabled: false,
+      enabled: true,
+      reason: "Approved bounded daily maintenance.",
+      confirmation: "enable-scheduler"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "scheduler-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Wrong confirmation.",
+        "--confirm-disable-scheduler"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("documents explicit factory commands and the child-mouse emergency kill switch", () => {
     expect(helpText).toContain("factory broker-preflight --config");
     expect(helpText).toContain("factory intake-preflight --config");
     expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory worker-run --config");
+    expect(helpText).toContain("factory scheduler-tick --config");
     expect(helpText).toContain("factory broker-open-draft --config");
     expect(helpText).toContain("factory broker-update-draft --config");
     expect(helpText).toContain("factory broker-observe-pr --config");
     expect(helpText).toContain("factory broker-authorize-repair --config");
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
+    expect(helpText).toContain("factory scheduler-authority --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
     expect(helpText).toContain("--confirm-update");

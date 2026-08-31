@@ -37,9 +37,21 @@ const registerCommandSchema = z
   .object({
     submission: factoryIntakeSubmissionSchema,
     expectedPolicyBundleDigest: sha256DigestSchema,
-    confirmation: z.literal("register-request")
+    trigger: z.enum(["manual", "scheduled"]).default("manual"),
+    confirmation: z.enum(["register-request", "register-scheduled-request"])
   })
-  .strict();
+  .strict()
+  .superRefine((command, context) => {
+    const expected =
+      command.trigger === "scheduled" ? "register-scheduled-request" : "register-request";
+    if (command.confirmation !== expected) {
+      context.addIssue({
+        code: "custom",
+        path: ["confirmation"],
+        message: "Factory intake confirmation does not match its execution trigger."
+      });
+    }
+  });
 
 export interface FactoryIntakePreflight {
   readonly schemaVersion: "agentlab.intake-preflight.v1";
@@ -188,7 +200,7 @@ export class FactoryIntakeOperator {
       deduplicationKey
     );
     if (existing !== null) {
-      this.#assertExistingMatches(existing, command.submission, deduplicationKey);
+      this.#assertExistingMatches(existing, command.submission, deduplicationKey, command.trigger);
       await this.dependencies.skills.publish();
       return this.#result("existing", command.submission.kind, existing);
     }
@@ -205,7 +217,7 @@ export class FactoryIntakeOperator {
         baseRevision: readiness.repository.baseRevision
       },
       requestSources: [localSource(command.submission)],
-      trigger: "manual" as const,
+      trigger: command.trigger,
       requester: {
         kind: "human" as const,
         role: "requester" as const,
@@ -250,7 +262,8 @@ export class FactoryIntakeOperator {
   #assertExistingMatches(
     existing: FactoryPreparationSnapshot,
     submission: FactoryIntakeSubmission,
-    deduplicationKey: Sha256Digest
+    deduplicationKey: Sha256Digest,
+    trigger: "manual" | "scheduled"
   ): void {
     const request = existing.request;
     const expectedSource = localSource(submission);
@@ -262,7 +275,7 @@ export class FactoryIntakeOperator {
       request.requestSources.length !== 1 ||
       actualSource?.kind !== expectedSource.kind ||
       actualSource.ref !== expectedSource.ref ||
-      request.trigger !== "manual" ||
+      request.trigger !== trigger ||
       request.requester.kind !== "human" ||
       request.requester.role !== "requester" ||
       request.requester.id !== this.#operatorId ||

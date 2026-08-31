@@ -41,9 +41,10 @@ const requiredGateIds = [
 type WorkerProviderId = Extract<ProviderId, "codex" | "claude">;
 
 export interface FactoryWorkerPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v1";
+  readonly schemaVersion: "agentlab.worker-preflight.v2";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -54,6 +55,7 @@ export interface FactoryWorkerPreflight {
 
 export interface FactoryWorkerOperatorDependencies {
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
   readonly costPolicyConfigured: boolean;
   readonly configuredProviders: readonly WorkerProviderId[];
   readonly gateIds: readonly string[];
@@ -90,12 +92,14 @@ export class FactoryWorkerOperator {
     const reasonCodes = [
       ...host.reasonCodes,
       ...(this.dependencies.costPolicyConfigured ? [] : ["cost-policy-unconfigured"]),
+      ...(this.dependencies.schedulePolicyDigest === null ? ["schedule-policy-unconfigured"] : []),
       ...(authority.scheduler ? [] : ["scheduler-disabled"])
     ];
     return {
-      schemaVersion: "agentlab.worker-preflight.v1",
+      schemaVersion: "agentlab.worker-preflight.v2",
       status: reasonCodes.length === 0 ? "ready" : "blocked",
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      schedulePolicyDigest: this.dependencies.schedulePolicyDigest,
       schedulerEnabled: authority.scheduler,
       costPolicyConfigured: this.dependencies.costPolicyConfigured,
       hostReady: host.status === "ready",

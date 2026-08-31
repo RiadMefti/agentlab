@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
-import { factoryCostPolicySchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  factoryCostPolicySchema,
+  factorySchedulePolicySchema,
+  type FactoryCostPolicy,
+  type FactorySchedulePolicy
+} from "@agentlab/contracts";
 
 import { ArtifactFactorySkillSource } from "./application/artifact-factory-skill-source.js";
 import { FactoryControlPlane } from "./application/factory-control-plane.js";
@@ -16,6 +21,7 @@ import { FactoryPreparationMaterializer } from "./application/factory-preparatio
 import { FactoryPreparationService } from "./application/factory-preparation-service.js";
 import { FactoryPullRequestRepairExecutionService } from "./application/factory-pull-request-repair-execution-service.js";
 import { FactoryPullRequestRepairRecoveryService } from "./application/factory-pull-request-repair-recovery-service.js";
+import { FactorySchedulerService } from "./application/factory-scheduler-service.js";
 import {
   FactoryWorkerOperator,
   validateFactoryWorkerInventory
@@ -49,6 +55,7 @@ import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastruct
 import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
+import { SqliteFactoryScheduleRepository } from "./infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import { SqliteFactoryTaskMaterializer } from "./infrastructure/persistence/sqlite-factory-task-materializer.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 import { BubblewrapFactoryGateSandbox } from "./infrastructure/process/bubblewrap-factory-gate-sandbox.js";
@@ -85,6 +92,7 @@ export interface LocalFactoryWorkerOptions {
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
@@ -97,6 +105,10 @@ export function createLocalFactoryWorker(
   const costPolicy = factoryCostPolicySchema.parse(
     options.costPolicy ?? defaultFactoryPolicyBundle.costPolicy
   );
+  const schedulePolicy =
+    options.schedulePolicy === undefined
+      ? null
+      : factorySchedulePolicySchema.parse(options.schedulePolicy);
   if (factoryPathsOverlap(options.artifactRoot, options.workspaceRoot)) {
     throw new Error("Factory artifact and worktree roots must not overlap.");
   }
@@ -111,6 +123,8 @@ export function createLocalFactoryWorker(
       throw new Error("The local factory worker requires a durable SQLite database.");
     }
     const documents = new NodeFactoryDocumentCodec();
+    const schedulePolicyDocument =
+      schedulePolicy === null ? null : documents.schedulePolicy(schedulePolicy);
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
@@ -131,6 +145,9 @@ export function createLocalFactoryWorker(
     );
     const pullRequestUpdates = repositories.track(
       new SqliteFactoryPullRequestUpdateRepository(databasePath, { documents })
+    );
+    const schedules = repositories.track(
+      new SqliteFactoryScheduleRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
@@ -348,6 +365,7 @@ export function createLocalFactoryWorker(
     });
     const operator = new FactoryWorkerOperator({
       policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       costPolicyConfigured: costPolicy.rules.length > 0,
       configuredProviders: options.providers.map(({ provider }) => provider),
       gateIds: gates.availableGateIds(),
@@ -368,9 +386,24 @@ export function createLocalFactoryWorker(
       executions,
       worker: operator
     });
+    const scheduler =
+      schedulePolicyDocument === null
+        ? null
+        : new FactorySchedulerService({
+            schedulePolicy: schedulePolicyDocument,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            schedules,
+            preparations,
+            worker: operator,
+            taskRunner,
+            documents,
+            now,
+            createId
+          });
     return new LocalFactoryWorkerCoordinator({
       operator,
       taskRunner,
+      scheduler,
       tasks: new RuntimeTaskOwner(),
       resources,
       repositories,
@@ -395,6 +428,18 @@ export function createLocalFactoryWorker(
 export function createConfiguredLocalFactoryWorker(
   config: LocalFactoryWorkerConfig
 ): LocalFactoryWorkerRuntime {
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v1" &&
+    config.schedulePolicy !== undefined
+  ) {
+    throw new Error("Factory worker v1 configuration cannot attach a schedule policy.");
+  }
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v2" &&
+    config.schedulePolicy === undefined
+  ) {
+    throw new Error("Factory worker v2 configuration requires its loaded schedule policy.");
+  }
   return createLocalFactoryWorker({
     databasePath: config.databasePath,
     artifactRoot: config.artifactRoot,
@@ -405,7 +450,8 @@ export function createConfiguredLocalFactoryWorker(
     sandbox: config.sandbox,
     providers: config.providers,
     gates: config.gates,
-    costPolicy: config.costPolicy
+    costPolicy: config.costPolicy,
+    ...(config.schedulePolicy === undefined ? {} : { schedulePolicy: config.schedulePolicy })
   });
 }
 
@@ -415,10 +461,12 @@ export type {
 } from "./application/local-factory-worker-coordinator.js";
 export type { FactoryWorkerPreflight } from "./application/factory-worker-operator.js";
 export type { FactoryWorkerTaskRunReport } from "./application/factory-worker-task-runner.js";
+export type { FactorySchedulerTickReport } from "./application/factory-scheduler-service.js";
 export type { FactoryPullRequestRepairExecutionOutcome } from "./application/factory-pull-request-repair-execution-service.js";
 export type { FactoryGateDefinition } from "./domain/factory-gate.js";
 export {
   loadLocalFactoryWorkerConfig,
   type LocalFactoryWorkerConfig
 } from "./infrastructure/filesystem/local-factory-worker-config.js";
+export { loadLocalFactorySchedulePolicy } from "./infrastructure/filesystem/local-factory-schedule-policy.js";
 export type { FactoryAgentProviderBinding } from "./infrastructure/providers/pinned-factory-agent-provider-resolver.js";

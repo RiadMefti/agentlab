@@ -1,12 +1,17 @@
 import { isAbsolute, parse, resolve } from "node:path";
 
-import { sha256DigestSchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  sha256DigestSchema,
+  type FactoryCostPolicy,
+  type FactorySchedulePolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import type { FactoryGateDefinition } from "../../domain/factory-gate.js";
 import type { FactoryAgentProviderBinding } from "../providers/pinned-factory-agent-provider-resolver.js";
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
+import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -57,9 +62,8 @@ const gateDefinitionSchema = z
     maximumOutputBytes: z.number().int().min(1).max(1_073_741_824)
   })
   .strict();
-const configSchema = z
+const commonConfigSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.local-factory-worker.v1"),
     databasePath: absolutePathSchema,
     artifactRoot: nonRootAbsolutePathSchema,
     workspaceRoot: nonRootAbsolutePathSchema,
@@ -83,34 +87,20 @@ const configSchema = z
     providers: z.array(providerBindingSchema).min(1).max(2),
     gates: z.array(gateDefinitionSchema).length(7)
   })
-  .strict()
-  .superRefine((config, context) => {
-    uniqueBy(config.providers, ({ provider }) => provider, context, ["providers"], "provider IDs");
-    uniqueBy(config.gates, ({ id }) => id, context, ["gates"], "gate IDs");
-    uniqueBy(
-      config.sandbox.runtimeRoots,
-      (value) => value,
-      context,
-      ["sandbox", "runtimeRoots"],
-      "runtime roots"
-    );
-    if (factoryPathsOverlap(config.artifactRoot, config.workspaceRoot)) {
-      context.addIssue({
-        code: "custom",
-        path: ["workspaceRoot"],
-        message: "Factory artifact and worktree roots must not overlap."
-      });
-    }
-    for (const gate of config.gates) {
-      if (gate.evidenceKind !== requiredGateEvidence[gate.id]) {
-        context.addIssue({
-          code: "custom",
-          path: ["gates"],
-          message: `Factory gate ${gate.id} has the wrong evidence kind.`
-        });
-      }
-    }
-  });
+  .strict();
+
+const configV1Schema = commonConfigSchema
+  .extend({ schemaVersion: z.literal("agentlab.local-factory-worker.v1") })
+  .superRefine(validateWorkerConfig);
+
+const configV2Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v2"),
+    schedulePolicyPath: absolutePathSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configSchema = z.union([configV1Schema, configV2Schema]);
 
 const requiredGateEvidence = {
   format: "test",
@@ -122,9 +112,41 @@ const requiredGateEvidence = {
   "secret-scan": "security"
 } as const;
 
+function validateWorkerConfig(
+  config: z.infer<typeof commonConfigSchema>,
+  context: z.RefinementCtx
+): void {
+  uniqueBy(config.providers, ({ provider }) => provider, context, ["providers"], "provider IDs");
+  uniqueBy(config.gates, ({ id }) => id, context, ["gates"], "gate IDs");
+  uniqueBy(
+    config.sandbox.runtimeRoots,
+    (value) => value,
+    context,
+    ["sandbox", "runtimeRoots"],
+    "runtime roots"
+  );
+  if (factoryPathsOverlap(config.artifactRoot, config.workspaceRoot)) {
+    context.addIssue({
+      code: "custom",
+      path: ["workspaceRoot"],
+      message: "Factory artifact and worktree roots must not overlap."
+    });
+  }
+  for (const gate of config.gates) {
+    if (gate.evidenceKind !== requiredGateEvidence[gate.id]) {
+      context.addIssue({
+        code: "custom",
+        path: ["gates"],
+        message: `Factory gate ${gate.id} has the wrong evidence kind.`
+      });
+    }
+  }
+}
+
 type ParsedLocalFactoryWorkerConfig = z.infer<typeof configSchema>;
 export type LocalFactoryWorkerConfig = ParsedLocalFactoryWorkerConfig & {
   readonly costPolicy: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
 };
@@ -146,7 +168,13 @@ export async function loadLocalFactoryWorkerConfig(
     content.fill(0);
   }
   const costPolicy = await loadLocalFactoryCostPolicy(config.costPolicyPath);
-  return { ...config, costPolicy };
+  const schedulePolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v2"
+      ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+      : undefined;
+  return schedulePolicy === undefined
+    ? { ...config, costPolicy }
+    : { ...config, costPolicy, schedulePolicy };
 }
 
 function uniqueBy<Value>(

@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   factoryTimestampAddSeconds,
   factoryTimestampDifferenceSeconds,
-  factoryTimestampMilliseconds
+  factoryTimestampMilliseconds,
+  factoryTimestampSubtractSeconds
 } from "../../packages/runtime/src/domain/factory-timestamp.js";
 
 describe("factory timestamp arithmetic", () => {
@@ -22,6 +23,15 @@ describe("factory timestamp arithmetic", () => {
     );
   });
 
+  it("subtracts across ordinary and leap-day boundaries without ambient time", () => {
+    expect(factoryTimestampSubtractSeconds("2026-03-01T00:00:00.000Z", 86_400)).toBe(
+      "2026-02-28T00:00:00.000Z"
+    );
+    expect(factoryTimestampSubtractSeconds("2028-03-01T00:00:00.000Z", 86_400)).toBe(
+      "2028-02-29T00:00:00.000Z"
+    );
+  });
+
   it("round-trips its exact second offset", () => {
     const start = "2026-08-30T12:08:00.000Z";
     const end = factoryTimestampAddSeconds(start, 604_800);
@@ -36,6 +46,9 @@ describe("factory timestamp arithmetic", () => {
       "non-negative safe integer"
     );
     expect(() => factoryTimestampAddSeconds("2026-08-30T12:08:00.000Z", 0.5)).toThrow(
+      "non-negative safe integer"
+    );
+    expect(() => factoryTimestampSubtractSeconds("2026-08-30T12:08:00.000Z", -1)).toThrow(
       "non-negative safe integer"
     );
   });
