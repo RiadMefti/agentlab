@@ -41,8 +41,8 @@ recovery remains available without granting new execution.
 Every signed eval predicate now includes `roleIdentityPolicyDigest`. The independent evaluator
 recomputes its policy copy, matches the trusted runner/key coordinates, pins that exact digest in
 both the verification service and immutable repository reads, and rejects a valid signature made
-under any other policy. A future canary consumer must require the same digest as its scheduled
-worker before granting brokered draft-PR authority.
+under any other policy. ADR 0012 carries the same digest into every new human cohort; a future
+canary consumer must match it to its scheduled worker before granting brokered draft-PR authority.
 
 ## Consequences and remaining boundary
 

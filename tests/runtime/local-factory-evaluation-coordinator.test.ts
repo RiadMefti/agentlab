@@ -8,6 +8,7 @@ import { RuntimeRepositoryOwner } from "../../packages/runtime/src/application/r
 import { RuntimeTaskOwner } from "../../packages/runtime/src/application/runtime-task-owner.js";
 import {
   testFactoryCanaryDocuments,
+  testFactoryEvalAttestationSnapshot,
   testFactoryEvalDocuments
 } from "../helpers/factory-evaluation.js";
 
@@ -61,9 +62,10 @@ describe("local factory evaluation coordinators", () => {
 
   it("drains human canary issuance before releasing its local authority lease", async () => {
     const evaluation = testFactoryEvalDocuments().snapshot;
-    const authority = testFactoryCanaryDocuments(evaluation);
+    const attestation = testFactoryEvalAttestationSnapshot(evaluation);
+    const authority = testFactoryCanaryDocuments(evaluation, { attestation });
     const result = {
-      schemaVersion: "agentlab.canary-authority-result.v1" as const,
+      schemaVersion: "agentlab.canary-authority-result.v2" as const,
       status: "authorized" as const,
       approval: authority.approval.value,
       approvalDigest: authority.approval.digest,

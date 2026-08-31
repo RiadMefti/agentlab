@@ -781,6 +781,7 @@ function evalAttestorCommandForbidden(path: string): boolean {
 
 const factoryCanaryAuthorityApplicationModules = new Set([
   "packages/runtime/src/application/factory-canary-authority-service.ts",
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
   "packages/runtime/src/application/local-factory-canary-authority-coordinator.ts",
   "packages/runtime/src/application/local-runtime-construction.ts",
   "packages/runtime/src/application/runtime-repository-owner.ts",
@@ -788,14 +789,19 @@ const factoryCanaryAuthorityApplicationModules = new Set([
 ]);
 
 const factoryCanaryAuthorityInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
   "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-canary-authority-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-canary-request.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
@@ -818,7 +824,8 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
-    isFactoryEvaluatorModule(path) ||
+    (isFactoryEvaluatorModule(path) &&
+      path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
     isFactoryEvalAttestorModule(path)
   ) {
     return true;

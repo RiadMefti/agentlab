@@ -23,6 +23,7 @@ import {
 } from "../../apps/tui/src/run-factory-evaluator.js";
 import {
   testFactoryCanaryDocuments,
+  testFactoryEvalAttestationSnapshot,
   testFactoryEvalDocuments,
   testFactoryEvalRun
 } from "../helpers/factory-evaluation.js";
@@ -196,9 +197,10 @@ describe("factory evaluation CLI runners", () => {
 describe("factory canary authority CLI runner", () => {
   it("passes an exact owner-authored request and emits structural non-release facts", async () => {
     const evaluation = testFactoryEvalDocuments().snapshot;
-    const authority = testFactoryCanaryDocuments(evaluation);
+    const attestation = testFactoryEvalAttestationSnapshot(evaluation);
+    const authority = testFactoryCanaryDocuments(evaluation, { attestation });
     const result = {
-      schemaVersion: "agentlab.canary-authority-result.v1" as const,
+      schemaVersion: "agentlab.canary-authority-result.v2" as const,
       status: "authorized" as const,
       approval: authority.approval.value,
       approvalDigest: authority.approval.digest,
@@ -228,7 +230,7 @@ describe("factory canary authority CLI runner", () => {
     await expect(
       runFactoryCanaryAuthorize(
         "/private/canary.json",
-        evaluation.assessmentDigest,
+        attestation.attestationDigest,
         "/private/canary-request.json",
         "authorize-canary",
         {
@@ -241,13 +243,17 @@ describe("factory canary authority CLI runner", () => {
     ).resolves.toBe(0);
 
     expect(authorize).toHaveBeenCalledWith({
-      assessmentDigest: evaluation.assessmentDigest,
+      attestationDigest: attestation.attestationDigest,
       request,
       confirmation: "authorize-canary"
     });
     expect(JSON.parse(String(write.mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: "agentlab.canary-authority-command-result.v1",
+      schemaVersion: "agentlab.canary-authority-command-result.v2",
       status: "authorized",
+      approval: {
+        attestationDigest: attestation.attestationDigest,
+        roleIdentityPolicyDigest: `sha256:${"9".repeat(64)}`
+      },
       cohort: { autoMerge: false, release: false }
     });
     expect(close).toHaveBeenCalledTimes(1);
@@ -301,9 +307,18 @@ function testRoleIdentityPolicy() {
 }
 
 function canaryConfig(): LocalFactoryCanaryAuthorityConfig {
+  const roleIdentityPolicy = testRoleIdentityPolicy();
   return {
-    schemaVersion: "agentlab.local-factory-canary-authority.v1",
+    schemaVersion: "agentlab.local-factory-canary-authority.v2",
     databasePath: "/private/agentlab.sqlite",
-    operatorId: "release-controller"
+    operatorId: "release-controller",
+    runnerId: "trusted-eval-runner",
+    trustedPublicKeyPath: "/private/eval-public.pem",
+    trustedKeyId: `sha256:${"a".repeat(64)}`,
+    roleIdentityPolicyPath: "/private/role-identities.json",
+    expectedRoleIdentityPolicyDigest: `sha256:${"b".repeat(64)}`,
+    maximumIssuanceDelaySeconds: 300,
+    maximumAttestationLifetimeSeconds: 3_600,
+    roleIdentityPolicy
   };
 }

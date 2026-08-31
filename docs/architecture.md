@@ -235,15 +235,17 @@ does not ship the harness that proves trials were honestly executed. Each predic
 role-policy digest, and the evaluator independently pins it; this prevents a valid signer key from
 silently authenticating a different signer/worker deployment.
 
-The distinct `@agentlab/runtime/factory-canary-authority` composition resolves only a passing
-assessment and one strict owner-only human request. It can issue one expiring cohort for exactly one
-repository, R0/R1, a bounded task count, and a complete aggregate budget capped by the evaluated
-suite. The only stages are `read-only-shadow`, `local-proposal`, and `brokered-draft-pr`;
-`autoMerge` and `release` are literal `false`. SQLite version 13 atomically stores immutable
-run/assessment and approval/cohort pairs plus one assessment-bound verified attestation per run and
-rejects update or deletion. No composition runs a canary. Canary authority still resolves the
-assessment rather than requiring the attestation, and no shipped consumer converts a cohort into
-task, scheduler, broker, merge, or release authority. See
+The distinct `@agentlab/runtime/factory-canary-authority` composition accepts only an exact verified
+attestation digest and one strict owner-only human request. Config v2 independently pins and
+re-verifies the public key, runner, timing limits, and role-identity policy before it can issue one
+expiring cohort for exactly one repository, R0/R1, a bounded task count, and a complete aggregate
+budget capped by the evaluated suite and attestation lifetime. The only stages are
+`read-only-shadow`, `local-proposal`, and `brokered-draft-pr`; `autoMerge` and `release` are literal
+`false`. SQLite version 14 atomically stores immutable run/assessment, verified-attestation, and
+approval/cohort records; v2 authority directly binds the attestation and role-policy digests. Legacy
+v1 authority remains readable but cannot be newly issued or consumed autonomously. No composition
+runs a canary, and no shipped consumer converts a cohort into task, scheduler, broker, merge, or
+release authority. See [ADR 0012](decisions/0012-attested-canary-authority.md) and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object

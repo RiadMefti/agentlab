@@ -768,10 +768,10 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick reservation
    ceiling now exist; cross-repository/day quotas, timer provisioning, alerting, and incident
    automation do not.
-6. **Eval and canary program:** deterministic matched-trial assessment and bounded human cohort
-   issuance now exist. Golden-suite execution, attested grader artifacts, a cohort consumer, shadow
-   scheduling, production sampling, provider/model/skill promotion, daily R0 then selected R1
-   scheduling, and rollback drills remain.
+6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
+   attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
+   execution, attested grader artifacts, a cohort consumer, shadow scheduling, production sampling,
+   provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills remain.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
    explicit ADR/policy approval; higher-risk human controls remain.
 

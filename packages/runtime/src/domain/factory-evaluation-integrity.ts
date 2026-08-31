@@ -8,6 +8,7 @@ import type {
 } from "@agentlab/contracts";
 
 import type { FactoryCanarySnapshot } from "./factory-canary-repository.js";
+import type { FactoryEvalAttestationSnapshot } from "./factory-eval-attestation-repository.js";
 import type { CanonicalFactoryDocument, FactoryDocumentCodec } from "./factory-documents.js";
 import type { FactoryEvalSnapshot } from "./factory-evaluation-repository.js";
 import { evaluateFactoryEvalRun } from "./factory-evaluation-policy.js";
@@ -106,6 +107,7 @@ export function assertFactoryEvalAssessment(
 
 export function assertFactoryCanaryAuthorization(
   evaluation: FactoryEvalSnapshot,
+  attestation: FactoryEvalAttestationSnapshot | null,
   approval: CanonicalFactoryDocument<FactoryCanaryApproval>,
   cohort: CanonicalFactoryDocument<FactoryCanaryCohort>,
   documents: Pick<FactoryDocumentCodec, "canaryApproval" | "canaryCohort">
@@ -133,8 +135,36 @@ export function assertFactoryCanaryAuthorization(
   if (canonicalApproval.digest !== approval.digest || canonicalApproval.json !== approval.json) {
     throw new Error("Factory canary approval is not canonical.");
   }
+  if (
+    (approval.value.schemaVersion === "agentlab.canary-approval.v1") !==
+    (cohort.value.schemaVersion === "agentlab.canary-cohort.v1")
+  ) {
+    throw new Error("Factory canary approval and cohort schema versions do not match.");
+  }
+  if (approval.value.schemaVersion === "agentlab.canary-approval.v2") {
+    if (cohort.value.schemaVersion !== "agentlab.canary-cohort.v2" || attestation === null) {
+      throw new Error("Factory canary authority requires its exact verified eval attestation.");
+    }
+    const predicate = attestation.attestation.signedAttestation.statement.predicate;
+    if (
+      attestation.attestationDigest !== approval.value.attestationDigest ||
+      attestation.attestation.assessmentDigest !== evaluation.assessmentDigest ||
+      attestation.attestation.runDigest !== evaluation.runDigest ||
+      predicate.roleIdentityPolicyDigest !== approval.value.roleIdentityPolicyDigest ||
+      approval.value.expiresAt > predicate.expiresAt ||
+      cohort.value.attestationDigest !== approval.value.attestationDigest ||
+      cohort.value.roleIdentityPolicyDigest !== approval.value.roleIdentityPolicyDigest
+    ) {
+      throw new Error("Factory canary authority exceeds or changes its verified attestation.");
+    }
+  } else if (cohort.value.schemaVersion !== "agentlab.canary-cohort.v1") {
+    throw new Error("Factory legacy canary authority has an incompatible cohort.");
+  }
   const expectedCohort = documents.canaryCohort({
-    schemaVersion: "agentlab.canary-cohort.v1",
+    schemaVersion:
+      approval.value.schemaVersion === "agentlab.canary-approval.v2"
+        ? "agentlab.canary-cohort.v2"
+        : "agentlab.canary-cohort.v1",
     cohortId: cohort.value.cohortId,
     assessmentDigest: evaluation.assessmentDigest,
     runDigest: evaluation.runDigest,
@@ -148,7 +178,13 @@ export function assertFactoryCanaryAuthorization(
     issuedAt: approval.value.occurredAt,
     expiresAt: approval.value.expiresAt,
     autoMerge: false,
-    release: false
+    release: false,
+    ...(approval.value.schemaVersion === "agentlab.canary-approval.v2"
+      ? {
+          attestationDigest: approval.value.attestationDigest,
+          roleIdentityPolicyDigest: approval.value.roleIdentityPolicyDigest
+        }
+      : {})
   });
   if (expectedCohort.digest !== cohort.digest || expectedCohort.json !== cohort.json) {
     throw new Error("Factory canary cohort does not exactly project its human approval.");
@@ -157,6 +193,7 @@ export function assertFactoryCanaryAuthorization(
 
 export function assertFactoryCanarySnapshot(
   evaluation: FactoryEvalSnapshot,
+  attestation: FactoryEvalAttestationSnapshot | null,
   snapshot: FactoryCanarySnapshot,
   documents: Pick<FactoryDocumentCodec, "canaryApproval" | "canaryCohort">
 ): void {
@@ -165,7 +202,7 @@ export function assertFactoryCanarySnapshot(
   if (approval.digest !== snapshot.approvalDigest || cohort.digest !== snapshot.cohortDigest) {
     throw new Error("Stored factory canary snapshot failed canonical integrity validation.");
   }
-  assertFactoryCanaryAuthorization(evaluation, approval, cohort, documents);
+  assertFactoryCanaryAuthorization(evaluation, attestation, approval, cohort, documents);
 }
 
 function stageWithin(requested: FactoryCanaryStage, maximum: FactoryCanaryStage): boolean {

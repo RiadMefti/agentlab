@@ -7,6 +7,10 @@ import type {
   FactoryCanarySnapshot
 } from "../../domain/factory-canary-repository.js";
 import type {
+  FactoryEvalAttestationRepository,
+  FactoryEvalAttestationSnapshot
+} from "../../domain/factory-eval-attestation-repository.js";
+import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
 } from "../../domain/factory-documents.js";
@@ -22,6 +26,8 @@ interface CanaryApprovalRow {
   readonly approval_id: unknown;
   readonly approval_digest: unknown;
   readonly assessment_digest: unknown;
+  readonly attestation_digest: unknown;
+  readonly role_identity_policy_digest: unknown;
   readonly challenger_candidate_digest: unknown;
   readonly stage: unknown;
   readonly actor_id: unknown;
@@ -34,6 +40,8 @@ interface CanaryCohortRow {
   readonly cohort_id: unknown;
   readonly cohort_digest: unknown;
   readonly assessment_digest: unknown;
+  readonly attestation_digest: unknown;
+  readonly role_identity_policy_digest: unknown;
   readonly run_digest: unknown;
   readonly approval_digest: unknown;
   readonly challenger_candidate_digest: unknown;
@@ -44,18 +52,21 @@ interface CanaryCohortRow {
 }
 
 const APPROVAL_COLUMNS = `
-  approval_id, approval_digest, assessment_digest, challenger_candidate_digest,
+  approval_id, approval_digest, assessment_digest, attestation_digest,
+  role_identity_policy_digest, challenger_candidate_digest,
   stage, actor_id, occurred_at, expires_at, approval_json
 `;
 
 const COHORT_COLUMNS = `
-  cohort_id, cohort_digest, assessment_digest, run_digest, approval_digest, challenger_candidate_digest,
+  cohort_id, cohort_digest, assessment_digest, attestation_digest, role_identity_policy_digest,
+  run_digest, approval_digest, challenger_candidate_digest,
   stage, issued_at, expires_at, cohort_json
 `;
 
 export interface SqliteFactoryCanaryRepositoryOptions extends SqliteDatabaseOptions {
   readonly documents?: FactoryDocumentCodec;
   readonly evaluations: Pick<FactoryEvaluationRepository, "findByAssessmentDigest">;
+  readonly attestations: Pick<FactoryEvalAttestationRepository, "findByAttestationDigest">;
 }
 
 /** SQLite-backed one-assessment/one-human-approval/one-cohort authority journal. */
@@ -63,11 +74,13 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
   readonly #database: DatabaseSync;
   readonly #documents: FactoryDocumentCodec;
   readonly #evaluations: Pick<FactoryEvaluationRepository, "findByAssessmentDigest">;
+  readonly #attestations: Pick<FactoryEvalAttestationRepository, "findByAttestationDigest">;
 
   public constructor(databasePath: string, options: SqliteFactoryCanaryRepositoryOptions) {
     this.#database = openSqliteDatabase(databasePath, options);
     this.#documents = options.documents ?? new NodeFactoryDocumentCodec();
     this.#evaluations = options.evaluations;
+    this.#attestations = options.attestations;
   }
 
   public async authorize(
@@ -82,19 +95,25 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
     if (evaluation === null) {
       throw new Error("Factory canary approval is missing its eval assessment.");
     }
-    assertFactoryCanaryAuthorization(evaluation, approval, cohort, this.#documents);
+    const attestation = await this.#attestationForApproval(approval.value);
+    assertFactoryCanaryAuthorization(evaluation, attestation, approval, cohort, this.#documents);
+    const approvalAttestation = attestationCoordinates(approval.value);
+    const cohortAttestation = attestationCoordinates(cohort.value);
     return this.#inTransaction(() => {
       this.#database
         .prepare(
           `INSERT INTO factory_canary_approvals (
-            approval_id, approval_digest, assessment_digest, challenger_candidate_digest,
+            approval_id, approval_digest, assessment_digest, attestation_digest,
+            role_identity_policy_digest, challenger_candidate_digest,
             stage, actor_id, occurred_at, expires_at, approval_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           approval.value.approvalId,
           approval.digest,
           approval.value.assessmentDigest,
+          approvalAttestation.attestationDigest,
+          approvalAttestation.roleIdentityPolicyDigest,
           approval.value.challengerCandidateDigest,
           approval.value.stage,
           approval.value.actor.id,
@@ -105,14 +124,17 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
       this.#database
         .prepare(
           `INSERT INTO factory_canary_cohorts (
-            cohort_id, cohort_digest, assessment_digest, run_digest, approval_digest,
+            cohort_id, cohort_digest, assessment_digest, attestation_digest,
+            role_identity_policy_digest, run_digest, approval_digest,
             challenger_candidate_digest, stage, issued_at, expires_at, cohort_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           cohort.value.cohortId,
           cohort.digest,
           cohort.value.assessmentDigest,
+          cohortAttestation.attestationDigest,
+          cohortAttestation.roleIdentityPolicyDigest,
           cohort.value.runDigest,
           cohort.value.approvalDigest,
           cohort.value.challengerCandidateDigest,
@@ -190,8 +212,9 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
     );
     if (evaluation === null)
       throw new Error("Stored factory canary is missing its eval assessment.");
+    const attestation = await this.#attestationForApproval(approval.value);
     const snapshot = snapshotFrom(approval, cohort);
-    assertFactoryCanarySnapshot(evaluation, snapshot, this.#documents);
+    assertFactoryCanarySnapshot(evaluation, attestation, snapshot, this.#documents);
     return snapshot;
   }
 
@@ -199,10 +222,13 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
     const approval = this.#documents.canaryApproval(
       parseJson(row.approval_json, "factory canary approval")
     );
+    const attestation = attestationCoordinates(approval.value);
     if (
       row.approval_id !== approval.value.approvalId ||
       row.approval_digest !== approval.digest ||
       row.assessment_digest !== approval.value.assessmentDigest ||
+      row.attestation_digest !== attestation.attestationDigest ||
+      row.role_identity_policy_digest !== attestation.roleIdentityPolicyDigest ||
       row.challenger_candidate_digest !== approval.value.challengerCandidateDigest ||
       row.stage !== approval.value.stage ||
       row.actor_id !== approval.value.actor.id ||
@@ -221,10 +247,13 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
     const cohort = this.#documents.canaryCohort(
       parseJson(row.cohort_json, "factory canary cohort")
     );
+    const attestation = attestationCoordinates(cohort.value);
     if (
       row.cohort_id !== cohort.value.cohortId ||
       row.cohort_digest !== cohort.digest ||
       row.assessment_digest !== cohort.value.assessmentDigest ||
+      row.attestation_digest !== attestation.attestationDigest ||
+      row.role_identity_policy_digest !== attestation.roleIdentityPolicyDigest ||
       row.run_digest !== cohort.value.runDigest ||
       row.approval_digest !== cohort.value.approvalDigest ||
       row.challenger_candidate_digest !== cohort.value.challengerCandidateDigest ||
@@ -260,6 +289,19 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
     return actual;
   }
 
+  async #attestationForApproval(
+    approval: FactoryCanaryApproval
+  ): Promise<FactoryEvalAttestationSnapshot | null> {
+    if (approval.schemaVersion === "agentlab.canary-approval.v1") return null;
+    const attestation = await this.#attestations.findByAttestationDigest(
+      approval.attestationDigest
+    );
+    if (attestation === null) {
+      throw new Error("Factory canary approval is missing its exact verified eval attestation.");
+    }
+    return attestation;
+  }
+
   #inTransaction<Value>(operation: () => Value): Value {
     this.#database.exec("BEGIN IMMEDIATE");
     try {
@@ -275,6 +317,19 @@ export class SqliteFactoryCanaryRepository implements FactoryCanaryRepository {
       throw error;
     }
   }
+}
+
+function attestationCoordinates(value: FactoryCanaryApproval | FactoryCanaryCohort): {
+  readonly attestationDigest: Sha256Digest | null;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
+} {
+  return value.schemaVersion === "agentlab.canary-approval.v2" ||
+    value.schemaVersion === "agentlab.canary-cohort.v2"
+    ? {
+        attestationDigest: value.attestationDigest,
+        roleIdentityPolicyDigest: value.roleIdentityPolicyDigest
+      }
+    : { attestationDigest: null, roleIdentityPolicyDigest: null };
 }
 
 function snapshotFrom(

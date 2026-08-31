@@ -2,7 +2,10 @@ import {
   factoryCanaryRequestSchema,
   factoryIdentifierSchema,
   factoryTimestampSchema,
-  sha256DigestSchema
+  sha256DigestSchema,
+  type FactoryCanaryApproval,
+  type FactoryCanaryCohort,
+  type Sha256Digest
 } from "@agentlab/contracts";
 import { z } from "zod";
 
@@ -14,10 +17,11 @@ import type {
 import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
 import { assertFactoryCanaryAuthorization } from "../domain/factory-evaluation-integrity.js";
 import type { FactoryEvaluationRepository } from "../domain/factory-evaluation-repository.js";
+import type { FactoryEvalAttestationService } from "./factory-eval-attestation-service.js";
 
 const authorizeCommandSchema = z
   .object({
-    assessmentDigest: sha256DigestSchema,
+    attestationDigest: sha256DigestSchema,
     request: factoryCanaryRequestSchema,
     confirmation: z.literal("authorize-canary")
   })
@@ -25,14 +29,28 @@ const authorizeCommandSchema = z
 
 export type FactoryCanaryAuthorityCommand = z.infer<typeof authorizeCommandSchema>;
 
-export interface FactoryCanaryAuthorityResult extends FactoryCanarySnapshot {
-  readonly schemaVersion: "agentlab.canary-authority-result.v1";
+type FactoryAttestedCanaryApproval = Extract<
+  FactoryCanaryApproval,
+  { readonly schemaVersion: "agentlab.canary-approval.v2" }
+>;
+type FactoryAttestedCanaryCohort = Extract<
+  FactoryCanaryCohort,
+  { readonly schemaVersion: "agentlab.canary-cohort.v2" }
+>;
+
+export interface FactoryCanaryAuthorityResult {
+  readonly schemaVersion: "agentlab.canary-authority-result.v2";
   readonly status: "authorized" | "existing";
+  readonly approval: FactoryAttestedCanaryApproval;
+  readonly approvalDigest: Sha256Digest;
+  readonly cohort: FactoryAttestedCanaryCohort;
+  readonly cohortDigest: Sha256Digest;
 }
 
 export interface FactoryCanaryAuthorityServiceDependencies {
   readonly operatorId: string;
   readonly evaluations: Pick<FactoryEvaluationRepository, "findByAssessmentDigest">;
+  readonly attestations: Pick<FactoryEvalAttestationService, "requireVerifiedAttestation">;
   readonly canaries: FactoryCanaryRepository;
   readonly documents: Pick<FactoryDocumentCodec, "canaryApproval" | "canaryCohort">;
   readonly now: () => string;
@@ -49,17 +67,24 @@ export class FactoryCanaryAuthorityService {
 
   public async authorize(input: unknown): Promise<FactoryCanaryAuthorityResult> {
     const command = authorizeCommandSchema.parse(input);
+    const attestation = await this.dependencies.attestations.requireVerifiedAttestation(
+      command.attestationDigest
+    );
     const evaluation = await this.dependencies.evaluations.findByAssessmentDigest(
-      command.assessmentDigest
+      attestation.attestation.assessmentDigest
     );
     if (evaluation === null) {
       throw new NotFoundError(
-        `Factory eval assessment ${command.assessmentDigest} does not exist.`
+        `Factory eval assessment ${attestation.attestation.assessmentDigest} does not exist.`
       );
     }
     const occurredAt = factoryTimestampSchema.parse(this.dependencies.now());
+    const predicate = attestation.attestation.signedAttestation.statement.predicate;
+    if (occurredAt < predicate.issuedAt || occurredAt >= predicate.expiresAt) {
+      throw new ConflictError("Verified factory eval attestation is no longer currently valid.");
+    }
     const existing = await this.dependencies.canaries.findByAssessmentDigest(
-      command.assessmentDigest
+      evaluation.assessmentDigest
     );
     if (existing !== null) {
       if (existing.cohort.expiresAt <= occurredAt) {
@@ -72,9 +97,11 @@ export class FactoryCanaryAuthorityService {
       throw new ConflictError("Factory canary authority request is already expired.");
     }
     const approval = this.dependencies.documents.canaryApproval({
-      schemaVersion: "agentlab.canary-approval.v1",
+      schemaVersion: "agentlab.canary-approval.v2",
       approvalId: this.dependencies.createId(),
-      assessmentDigest: command.assessmentDigest,
+      assessmentDigest: evaluation.assessmentDigest,
+      attestationDigest: attestation.attestationDigest,
+      roleIdentityPolicyDigest: predicate.roleIdentityPolicyDigest,
       challengerCandidateDigest: evaluation.run.challengerCandidateDigest,
       stage: command.request.stage,
       repositoryIds: command.request.repositoryIds,
@@ -94,9 +121,11 @@ export class FactoryCanaryAuthorityService {
       reason: command.request.reason
     });
     const cohort = this.dependencies.documents.canaryCohort({
-      schemaVersion: "agentlab.canary-cohort.v1",
+      schemaVersion: "agentlab.canary-cohort.v2",
       cohortId: this.dependencies.createId(),
-      assessmentDigest: command.assessmentDigest,
+      assessmentDigest: evaluation.assessmentDigest,
+      attestationDigest: attestation.attestationDigest,
+      roleIdentityPolicyDigest: predicate.roleIdentityPolicyDigest,
       runDigest: evaluation.runDigest,
       challengerCandidateDigest: evaluation.run.challengerCandidateDigest,
       approvalDigest: approval.digest,
@@ -110,7 +139,13 @@ export class FactoryCanaryAuthorityService {
       autoMerge: false,
       release: false
     });
-    assertFactoryCanaryAuthorization(evaluation, approval, cohort, this.dependencies.documents);
+    assertFactoryCanaryAuthorization(
+      evaluation,
+      attestation,
+      approval,
+      cohort,
+      this.dependencies.documents
+    );
     return result("authorized", await this.dependencies.canaries.authorize(approval, cohort));
   }
 
@@ -118,7 +153,8 @@ export class FactoryCanaryAuthorityService {
     const approval = existing.approval;
     const request = command.request;
     if (
-      approval.assessmentDigest !== command.assessmentDigest ||
+      approval.schemaVersion !== "agentlab.canary-approval.v2" ||
+      approval.attestationDigest !== command.attestationDigest ||
       approval.stage !== request.stage ||
       approval.repositoryIds[0] !== request.repositoryIds[0] ||
       approval.maximumRiskTier !== request.maximumRiskTier ||
@@ -141,10 +177,21 @@ function result(
   status: FactoryCanaryAuthorityResult["status"],
   snapshot: FactoryCanarySnapshot
 ): FactoryCanaryAuthorityResult {
+  const approval = snapshot.approval;
+  const cohort = snapshot.cohort;
+  if (
+    approval.schemaVersion !== "agentlab.canary-approval.v2" ||
+    cohort.schemaVersion !== "agentlab.canary-cohort.v2"
+  ) {
+    throw new Error("Factory canary authority cannot return legacy un-attested authority.");
+  }
   return {
-    schemaVersion: "agentlab.canary-authority-result.v1",
+    schemaVersion: "agentlab.canary-authority-result.v2",
     status,
-    ...snapshot
+    approval,
+    approvalDigest: snapshot.approvalDigest,
+    cohort,
+    cohortDigest: snapshot.cohortDigest
   };
 }
 

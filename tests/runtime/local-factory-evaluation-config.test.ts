@@ -62,9 +62,16 @@ describe("local factory evaluation file boundaries", () => {
       maximumIssuanceDelaySeconds: 300
     } as const;
     const canary = {
-      schemaVersion: "agentlab.local-factory-canary-authority.v1",
+      schemaVersion: "agentlab.local-factory-canary-authority.v2",
       databasePath: join(root, "agentlab.sqlite"),
-      operatorId: "release-controller"
+      operatorId: "release-controller",
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: join(root, "eval-public.pem"),
+      trustedKeyId: testEvalDigest(901),
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest,
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600
     } as const;
     await writePrivateJson(evaluatorPath, evaluator);
     await writePrivateJson(attestorPath, attestor);
@@ -79,7 +86,10 @@ describe("local factory evaluation file boundaries", () => {
       ...attestor,
       roleIdentityPolicy
     });
-    await expect(loadLocalFactoryCanaryAuthorityConfig(canaryPath)).resolves.toEqual(canary);
+    await expect(loadLocalFactoryCanaryAuthorityConfig(canaryPath)).resolves.toEqual({
+      ...canary,
+      roleIdentityPolicy
+    });
 
     await writePrivateJson(evaluatorPath, { ...evaluator, githubToken: "forbidden" });
     await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).rejects.toThrow();

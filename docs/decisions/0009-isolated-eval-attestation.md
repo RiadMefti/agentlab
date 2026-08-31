@@ -79,6 +79,10 @@ subject, times, key ID, payload type, and exactly one signature. Update and dele
 mutation. A changed second artifact for one run conflicts; an exact retry returns the existing
 verified record only while it remains within the configured validity window.
 
+[ADR 0012](0012-attested-canary-authority.md) makes this record mandatory downstream: every new
+human approval and cohort binds its exact attestation and role-identity-policy digests, and cohort
+expiry cannot exceed signature expiry.
+
 Key and config reads require canonical owner-only regular files with one link, stable metadata, and
 bounded size. Key sources return fresh mutable bytes; signer and verifier erase loaded material and
 temporary payload/signature buffers after each operation. Key rotation is additive: retain old

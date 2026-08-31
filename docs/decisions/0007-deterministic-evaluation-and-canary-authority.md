@@ -5,7 +5,8 @@
 **Date:** 2026-08-31
 
 > [ADR 0009](0009-isolated-eval-attestation.md) later adds isolated DSSE signing and immutable
-> verification records. The cohort remains dormant and unconsumed.
+> verification records. [ADR 0012](0012-attested-canary-authority.md) requires those records for
+> every new cohort. The cohort remains dormant and unconsumed.
 
 ## Context
 

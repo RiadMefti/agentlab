@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     const { runFactoryCanaryAuthorize } = await import("./run-factory-canary-authority.js");
     process.exitCode = await runFactoryCanaryAuthorize(
       action.configPath,
-      action.assessmentDigest,
+      action.attestationDigest,
       action.requestPath,
       action.confirmation
     );

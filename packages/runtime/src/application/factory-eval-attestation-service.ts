@@ -173,6 +173,33 @@ export class FactoryEvalAttestationService {
     return snapshot;
   }
 
+  public async requireVerifiedAttestation(
+    attestationDigestInput: Sha256Digest,
+    validAtInput?: string
+  ): Promise<FactoryEvalAttestationSnapshot> {
+    const attestationDigest = sha256DigestSchema.parse(attestationDigestInput);
+    const snapshot =
+      await this.dependencies.attestations.findByAttestationDigest(attestationDigest);
+    if (snapshot === null) {
+      throw new ConflictError(
+        `Factory eval attestation ${attestationDigest} is not a verified ledger record.`
+      );
+    }
+    const evaluation = await this.dependencies.evaluations.findByRunId(snapshot.attestation.runId);
+    if (
+      evaluation?.runDigest !== snapshot.attestation.runDigest ||
+      evaluation.assessmentDigest !== snapshot.attestation.assessmentDigest
+    ) {
+      throw new Error("Factory eval attestation is missing its exact assessed run.");
+    }
+    await this.#verifySnapshot(
+      snapshot,
+      evaluation,
+      validAtInput === undefined ? this.#now() : factoryTimestampSchema.parse(validAtInput)
+    );
+    return snapshot;
+  }
+
   async #verifySnapshot(
     snapshot: FactoryEvalAttestationSnapshot,
     evaluation: FactoryEvalSnapshot,

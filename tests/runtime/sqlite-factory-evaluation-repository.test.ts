@@ -80,15 +80,18 @@ describe("SQLite factory evaluation repositories", () => {
     const evaluations = new SqliteFactoryEvaluationRepository(databasePath);
     const fixture = testFactoryEvalDocuments();
     await evaluations.record(fixture.run, fixture.assessment);
-    const canaries = new SqliteFactoryCanaryRepository(databasePath, { evaluations });
+    const canaries = new SqliteFactoryCanaryRepository(databasePath, {
+      evaluations,
+      attestations: { findByAttestationDigest: () => Promise.resolve(null) }
+    });
     const authority = testFactoryCanaryDocuments(fixture.snapshot);
+    const expected = {
+      approval: authority.approval.value,
+      approvalDigest: authority.approval.digest,
+      cohort: authority.cohort.value,
+      cohortDigest: authority.cohort.digest
+    };
     try {
-      const expected = {
-        approval: authority.approval.value,
-        approvalDigest: authority.approval.digest,
-        cohort: authority.cohort.value,
-        cohortDigest: authority.cohort.digest
-      };
       await expect(canaries.authorize(authority.approval, authority.cohort)).resolves.toEqual(
         expected
       );
@@ -112,6 +115,14 @@ describe("SQLite factory evaluation repositories", () => {
 
     const database = new DatabaseSync(databasePath);
     try {
+      expect(
+        database
+          .prepare(
+            `SELECT attestation_digest, role_identity_policy_digest
+             FROM factory_canary_approvals`
+          )
+          .get()
+      ).toEqual({ attestation_digest: null, role_identity_policy_digest: null });
       expect(() =>
         database.prepare("UPDATE factory_canary_approvals SET stage = stage").run()
       ).toThrow(/immutable/u);
@@ -120,6 +131,36 @@ describe("SQLite factory evaluation repositories", () => {
       );
     } finally {
       database.close();
+    }
+
+    const legacy = new DatabaseSync(databasePath);
+    try {
+      legacy.exec(`
+        DROP INDEX factory_canary_approvals_attestation_idx;
+        DROP INDEX factory_canary_cohorts_attestation_idx;
+        DROP TRIGGER factory_canary_approvals_identity_guard;
+        DROP TRIGGER factory_canary_cohorts_identity_guard;
+        ALTER TABLE factory_canary_approvals DROP COLUMN role_identity_policy_digest;
+        ALTER TABLE factory_canary_approvals DROP COLUMN attestation_digest;
+        ALTER TABLE factory_canary_cohorts DROP COLUMN role_identity_policy_digest;
+        ALTER TABLE factory_canary_cohorts DROP COLUMN attestation_digest;
+        PRAGMA user_version = 13;
+      `);
+    } finally {
+      legacy.close();
+    }
+    const migratedEvaluations = new SqliteFactoryEvaluationRepository(databasePath);
+    const migratedCanaries = new SqliteFactoryCanaryRepository(databasePath, {
+      evaluations: migratedEvaluations,
+      attestations: { findByAttestationDigest: () => Promise.resolve(null) }
+    });
+    try {
+      await expect(
+        migratedCanaries.findByAssessmentDigest(fixture.assessment.digest)
+      ).resolves.toEqual(expected);
+    } finally {
+      migratedCanaries.close();
+      migratedEvaluations.close();
     }
   });
 

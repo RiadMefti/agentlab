@@ -1,8 +1,13 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { factoryIdentifierSchema } from "@agentlab/contracts";
+import {
+  factoryIdentifierSchema,
+  sha256DigestSchema,
+  type FactoryRoleIdentityPolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -14,7 +19,7 @@ const absolutePathSchema = z
     "Expected a normalized absolute path."
   );
 
-const configSchema = z
+const configV1Schema = z
   .object({
     schemaVersion: z.literal("agentlab.local-factory-canary-authority.v1"),
     databasePath: absolutePathSchema,
@@ -22,7 +27,28 @@ const configSchema = z
   })
   .strict();
 
-export type LocalFactoryCanaryAuthorityConfig = z.infer<typeof configSchema>;
+const configV2Schema = z
+  .object({
+    schemaVersion: z.literal("agentlab.local-factory-canary-authority.v2"),
+    databasePath: absolutePathSchema,
+    operatorId: factoryIdentifierSchema,
+    runnerId: factoryIdentifierSchema,
+    trustedPublicKeyPath: absolutePathSchema,
+    trustedKeyId: sha256DigestSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
+    maximumIssuanceDelaySeconds: z.number().int().min(1).max(86_400),
+    maximumAttestationLifetimeSeconds: z.number().int().min(60).max(604_800)
+  })
+  .strict();
+
+const configSchema = z.discriminatedUnion("schemaVersion", [configV1Schema, configV2Schema]);
+
+export type LocalFactoryCanaryAuthorityConfig =
+  | z.infer<typeof configV1Schema>
+  | (z.infer<typeof configV2Schema> & {
+      readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+    });
 
 /** Loads the minimal human canary-authority identity and durable ledger target. */
 export async function loadLocalFactoryCanaryAuthorityConfig(
@@ -35,7 +61,15 @@ export async function loadLocalFactoryCanaryAuthorityConfig(
     maximumBytes: 16 * 1_024
   });
   try {
-    return configSchema.parse(parseJson(content.toString("utf8")));
+    const config = configSchema.parse(parseJson(content.toString("utf8")));
+    return config.schemaVersion === "agentlab.local-factory-canary-authority.v1"
+      ? config
+      : {
+          ...config,
+          roleIdentityPolicy: await loadLocalFactoryRoleIdentityPolicy(
+            config.roleIdentityPolicyPath
+          )
+        };
   } finally {
     content.fill(0);
   }

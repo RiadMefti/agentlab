@@ -135,7 +135,7 @@ describe("terminal CLI", () => {
         "canary-authorize",
         "--config",
         "/private/agentlab/canary.json",
-        "--assessment",
+        "--attestation",
         assessment,
         "--request",
         "/private/agentlab/canary-request.json",
@@ -144,7 +144,7 @@ describe("terminal CLI", () => {
     ).toEqual({
       kind: "factory-canary-authorize",
       configPath: "/private/agentlab/canary.json",
-      assessmentDigest: assessment,
+      attestationDigest: assessment,
       requestPath: "/private/agentlab/canary-request.json",
       confirmation: "authorize-canary"
     });
@@ -164,7 +164,7 @@ describe("terminal CLI", () => {
         "canary-authorize",
         "--config",
         "/private/agentlab/canary.json",
-        "--assessment",
+        "--attestation",
         "not-a-digest",
         "--request",
         "/private/agentlab/canary-request.json",

@@ -144,9 +144,9 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   `@agentlab/runtime/factory-evaluator` records complete matched eval reports, deterministic
   assessments, and public-key-verified attestation records. The isolated
   `@agentlab/runtime/factory-eval-attestor` can only sign a fresh exact run and cannot reach SQLite.
-  The separate human-only `@agentlab/runtime/factory-canary-authority` can issue only an expiring
-  R0/R1 cohort with `autoMerge:false` and `release:false`. None can execute a model, contact GitHub,
-  merge, or release.
+  The separate human-only `@agentlab/runtime/factory-canary-authority` re-verifies one exact signed
+  eval record and can issue only an expiring R0/R1 cohort with `autoMerge:false` and
+  `release:false`. None can execute a model, contact GitHub, merge, or release.
 - `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
   candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
   regression, flake, cost, and latency metrics from raw samples, and atomically records one
@@ -155,14 +155,16 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   artifact from a signer composition with no database or remote capability. `eval-attest` verifies
   it against a pinned public key, exact run/assessment lineage, and independent timing bounds before
   one immutable schema-13 append.
-- `agentlab factory canary-authorize --config ... --assessment ... --request ... --confirm-authorize-canary`
-  requires a passing assessment and separate owner-only human request, then records one bounded
-  non-executing cohort. No shipped component consumes that cohort yet.
+- `agentlab factory canary-authorize --config ... --attestation ... --request ... --confirm-authorize-canary`
+  requires a currently valid verified attestation and separate owner-only human request, then
+  records one attestation- and role-policy-bound non-executing cohort. No shipped component consumes
+  that cohort yet.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
-  reconciles one exact daily UTC slot from an owner-only worker v2 config. SQLite v11 durably claims
-  each scheduled request before model work, reuses that correlation after interruption, reserves the
-  request's complete budget ceiling against the tick quota, and completes the slot once. It cannot
-  open a PR, mutate authority, merge, or release.
+  reconciles one exact daily UTC slot from an owner-only worker v3 config. SQLite v11 durably claims
+  each scheduled request before model work, while schedule-run v2 also pins the role-policy digest,
+  reuses that correlation after interruption, reserves the request's complete budget ceiling against
+  the tick quota, and completes the slot once. It cannot open a PR, mutate authority, merge, or
+  release.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -220,21 +222,22 @@ one advances an authorization-bound repaired branch. Both invoke only the broker
 preflight, and their inner services recheck policy, evidence, base revision, governance, and the
 broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
 matched report, signs and verifies its exact bytes through disjoint local compositions, and can
-issue a structurally non-merge/non-release cohort after human sample review. It does not yet provide
-the harness producer or an attestation-gated cohort consumer. Scheduled config v3 and eval signing
-now pin one canonical role policy: distinct non-root worker/signer UIDs plus the exact signer key
-and runner, with the policy digest carried in every signed eval predicate. No accounts are
-provisioned or activated. Provider-neutral per-run and per-tick reservation accounting are
-policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
+issue a structurally non-merge/non-release cohort after human sample review and fresh attestation
+re-verification. It does not yet provide the harness producer or a cohort consumer. Scheduled config
+v3 and eval signing now pin one canonical role policy: distinct non-root worker/signer UIDs plus the
+exact signer key and runner, with the policy digest carried in every signed eval predicate. No
+accounts are provisioned or activated. Provider-neutral per-run and per-tick reservation accounting
+are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
 worker and broker config can load the same separate strict cost-policy file without sharing broker
 credentials. The current repository governance blocks the write commands. No live factory task or PR
 has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
-separation, [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary,
-and [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities.
-The dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
+separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
+[ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities; and
+[ADR 0012](docs/decisions/0012-attested-canary-authority.md) for attestation-gated cohorts. The
+dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development

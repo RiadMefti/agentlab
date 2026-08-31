@@ -29,7 +29,7 @@ const defaultDependencies: FactoryCanaryAuthorityRunnerDependencies = {
 /** Issues only one bounded human-reviewed cohort; it cannot execute, merge, or release. */
 export async function runFactoryCanaryAuthorize(
   configPath: string,
-  assessmentDigest: string,
+  attestationDigest: string,
   requestPath: string,
   confirmation: string,
   dependencies: FactoryCanaryAuthorityRunnerDependencies = defaultDependencies
@@ -37,8 +37,8 @@ export async function runFactoryCanaryAuthorize(
   if (!isNormalizedAbsolutePath(configPath)) {
     throw new Error("Factory canary authority requires a normalized absolute config path.");
   }
-  if (!isSha256Digest(assessmentDigest)) {
-    throw new Error("Factory canary authority assessment digest is invalid.");
+  if (!isSha256Digest(attestationDigest)) {
+    throw new Error("Factory canary authority attestation digest is invalid.");
   }
   if (!isNormalizedAbsolutePath(requestPath)) {
     throw new Error("Factory canary authority requires a normalized absolute request path.");
@@ -52,7 +52,7 @@ export async function runFactoryCanaryAuthorize(
   ]);
   const runtime = dependencies.createRuntime(config);
   const result = await runtime.commands
-    .authorize({ assessmentDigest, request, confirmation })
+    .authorize({ attestationDigest, request, confirmation })
     .catch((error: unknown) => closeAfterFailure(runtime, error));
   await runtime.close();
   dependencies.write(`${serializeAuthority(result)}\n`);
@@ -61,12 +61,14 @@ export async function runFactoryCanaryAuthorize(
 
 function serializeAuthority(result: FactoryCanaryAuthorityResult): string {
   return JSON.stringify({
-    schemaVersion: "agentlab.canary-authority-command-result.v1",
+    schemaVersion: "agentlab.canary-authority-command-result.v2",
     status: result.status,
     approval: {
       approvalId: result.approval.approvalId,
       approvalDigest: result.approvalDigest,
       assessmentDigest: result.approval.assessmentDigest,
+      attestationDigest: result.approval.attestationDigest,
+      roleIdentityPolicyDigest: result.approval.roleIdentityPolicyDigest,
       challengerCandidateDigest: result.approval.challengerCandidateDigest,
       stage: result.approval.stage,
       repositoryIds: result.approval.repositoryIds,

@@ -208,6 +208,32 @@ describe("factory evaluation contracts", () => {
     expect(factoryCanaryCohortSchema.parse(cohort)).toEqual(cohort);
     expect(() => factoryCanaryCohortSchema.parse({ ...cohort, autoMerge: true })).toThrow();
     expect(() => factoryCanaryCohortSchema.parse({ ...cohort, release: true })).toThrow();
+    const attestedApproval = {
+      ...approval,
+      schemaVersion: "agentlab.canary-approval.v2" as const,
+      attestationDigest: testEvalDigest(806),
+      roleIdentityPolicyDigest: testEvalDigest(807)
+    };
+    const attestedCohort = {
+      ...cohort,
+      schemaVersion: "agentlab.canary-cohort.v2" as const,
+      attestationDigest: attestedApproval.attestationDigest,
+      roleIdentityPolicyDigest: attestedApproval.roleIdentityPolicyDigest
+    };
+    expect(factoryCanaryApprovalSchema.parse(attestedApproval)).toEqual(attestedApproval);
+    expect(factoryCanaryCohortSchema.parse(attestedCohort)).toEqual(attestedCohort);
+    expect(() =>
+      factoryCanaryApprovalSchema.parse({
+        ...attestedApproval,
+        attestationDigest: undefined
+      })
+    ).toThrow();
+    expect(() =>
+      factoryCanaryCohortSchema.parse({
+        ...attestedCohort,
+        roleIdentityPolicyDigest: undefined
+      })
+    ).toThrow();
     expect(() =>
       factoryCanaryApprovalSchema.parse({
         ...approval,

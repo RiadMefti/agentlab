@@ -12,7 +12,10 @@ import {
   TEST_CANARY_COHORT_ID,
   TEST_EVAL_ASSESSMENT_ID,
   testEvalDigest,
+  testFactoryCanaryDocuments,
+  testFactoryEvalAttestationSnapshot,
   testFactoryEvalBudget,
+  testFactoryEvalDocuments,
   testFactoryEvalRun
 } from "../helpers/factory-evaluation.js";
 
@@ -162,7 +165,7 @@ describe("factory evaluation integrity", () => {
     });
 
     expect(() => {
-      assertFactoryCanaryAuthorization(evaluation, approval, cohort, documents);
+      assertFactoryCanaryAuthorization(evaluation, null, approval, cohort, documents);
     }).not.toThrow();
 
     const oversizedApproval = documents.canaryApproval({
@@ -177,7 +180,43 @@ describe("factory evaluation integrity", () => {
       maximumTasks: 5
     });
     expect(() => {
-      assertFactoryCanaryAuthorization(evaluation, oversizedApproval, oversizedCohort, documents);
+      assertFactoryCanaryAuthorization(
+        evaluation,
+        null,
+        oversizedApproval,
+        oversizedCohort,
+        documents
+      );
     }).toThrow(/exceeds its exact passing eval authority/u);
+  });
+
+  it("binds new canary authority to one verified attestation and role policy", () => {
+    const evaluation = testFactoryEvalDocuments().snapshot;
+    const attestation = testFactoryEvalAttestationSnapshot(evaluation);
+    const authority = testFactoryCanaryDocuments(evaluation, { attestation });
+
+    expect(() => {
+      assertFactoryCanaryAuthorization(
+        evaluation,
+        attestation,
+        authority.approval,
+        authority.cohort,
+        documents
+      );
+    }).not.toThrow();
+
+    const otherAttestation = testFactoryEvalAttestationSnapshot(evaluation, {
+      attestationId: "10000000-0000-4000-8000-000000000008",
+      roleIdentityPolicyDigest: testEvalDigest(999)
+    });
+    expect(() => {
+      assertFactoryCanaryAuthorization(
+        evaluation,
+        otherAttestation,
+        authority.approval,
+        authority.cohort,
+        documents
+      );
+    }).toThrow(/verified attestation/u);
   });
 });

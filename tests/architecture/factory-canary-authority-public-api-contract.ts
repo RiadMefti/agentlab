@@ -2,6 +2,7 @@ import type {
   FactoryCanaryRequest,
   FactoryCanaryApproval,
   FactoryCanaryCohort,
+  FactoryRoleIdentityPolicy,
   Sha256Digest
 } from "@agentlab/contracts";
 import {
@@ -36,31 +37,58 @@ type Equal<Left, Right> = [Left] extends [Right]
   : false;
 type Assert<Value extends true> = Value;
 
-interface ExpectedConfig {
-  schemaVersion: "agentlab.local-factory-canary-authority.v1";
-  databasePath: string;
-  operatorId: string;
-}
+type ExpectedConfig =
+  | {
+      schemaVersion: "agentlab.local-factory-canary-authority.v1";
+      databasePath: string;
+      operatorId: string;
+    }
+  | {
+      schemaVersion: "agentlab.local-factory-canary-authority.v2";
+      databasePath: string;
+      operatorId: string;
+      runnerId: string;
+      trustedPublicKeyPath: string;
+      trustedKeyId: Sha256Digest;
+      roleIdentityPolicyPath: string;
+      expectedRoleIdentityPolicyDigest: Sha256Digest;
+      maximumIssuanceDelaySeconds: number;
+      maximumAttestationLifetimeSeconds: number;
+      readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+    };
 
 interface ExpectedOptions {
   readonly databasePath: string;
   readonly operatorId: string;
+  readonly runnerId: string;
+  readonly trustedPublicKeyPath: string;
+  readonly trustedKeyId: Sha256Digest;
+  readonly maximumIssuanceDelaySeconds: number;
+  readonly maximumAttestationLifetimeSeconds: number;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
 
 interface ExpectedCommand {
-  assessmentDigest: Sha256Digest;
+  attestationDigest: Sha256Digest;
   request: FactoryCanaryRequest;
   confirmation: "authorize-canary";
 }
 
 interface ExpectedResult {
-  readonly schemaVersion: "agentlab.canary-authority-result.v1";
+  readonly schemaVersion: "agentlab.canary-authority-result.v2";
   readonly status: "authorized" | "existing";
-  readonly approval: FactoryCanaryApproval;
+  readonly approval: Extract<
+    FactoryCanaryApproval,
+    { readonly schemaVersion: "agentlab.canary-approval.v2" }
+  >;
   readonly approvalDigest: Sha256Digest;
-  readonly cohort: FactoryCanaryCohort;
+  readonly cohort: Extract<
+    FactoryCanaryCohort,
+    { readonly schemaVersion: "agentlab.canary-cohort.v2" }
+  >;
   readonly cohortDigest: Sha256Digest;
 }
 

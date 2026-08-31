@@ -6,7 +6,10 @@ import { dirname, join } from "node:path";
 import { sha256DigestSchema, type Sha256Digest } from "@agentlab/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createLocalFactoryCanaryAuthority } from "../../packages/runtime/src/local-factory-canary-authority.js";
+import {
+  createConfiguredLocalFactoryCanaryAuthority,
+  createLocalFactoryCanaryAuthority
+} from "../../packages/runtime/src/local-factory-canary-authority.js";
 import { createLocalFactoryEvalAttestor } from "../../packages/runtime/src/local-factory-eval-attestor.js";
 import {
   createConfiguredLocalFactoryEvaluator,
@@ -90,6 +93,28 @@ describe("local factory evaluation compositions", () => {
       createConfiguredLocalFactoryEvaluator({ ...config, trustedKeyId: testEvalDigest(902) })
     ).toThrow(/trust coordinates/u);
     expect(existsSync(config.databasePath)).toBe(false);
+
+    expect(() =>
+      createConfiguredLocalFactoryCanaryAuthority({
+        schemaVersion: "agentlab.local-factory-canary-authority.v1",
+        databasePath: config.databasePath,
+        operatorId: "release-controller"
+      })
+    ).toThrow(/cannot issue cohorts without verified eval attestations/u);
+    expect(() =>
+      createLocalFactoryCanaryAuthority({
+        databasePath: config.databasePath,
+        operatorId: "release-controller",
+        runnerId: config.runnerId,
+        trustedPublicKeyPath: config.trustedPublicKeyPath,
+        trustedKeyId: testEvalDigest(902),
+        maximumIssuanceDelaySeconds: config.maximumIssuanceDelaySeconds,
+        maximumAttestationLifetimeSeconds: config.maximumAttestationLifetimeSeconds,
+        roleIdentityPolicy,
+        expectedRoleIdentityPolicyDigest: digest
+      })
+    ).toThrow(/trust coordinates/u);
+    expect(existsSync(config.databasePath)).toBe(false);
   });
 
   it("assesses, signs in isolation, verifies immutably, then issues a separate non-release cohort", async () => {
@@ -165,12 +190,19 @@ describe("local factory evaluation compositions", () => {
     const authority = createLocalFactoryCanaryAuthority({
       databasePath,
       operatorId: "release-controller",
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: key.publicPath,
+      trustedKeyId: key.keyId,
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600,
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
       now: () => "2026-08-30T12:00:00.000Z",
       createId: () => ids.shift() ?? "10000000-0000-4000-8000-000000000099"
     });
     expect(Object.keys(authority.commands)).toEqual(["authorize"]);
-    const result = await authority.commands.authorize({
-      assessmentDigest: evaluation.assessmentDigest,
+    const command = {
+      attestationDigest: attestation.attestationDigest,
       request: {
         schemaVersion: "agentlab.canary-request.v1",
         stage: "brokered-draft-pr",
@@ -180,26 +212,52 @@ describe("local factory evaluation compositions", () => {
         budget: testFactoryEvalBudget(),
         humanSampleReviewDigest: testEvalDigest(902),
         humanSampleSize: 4,
-        expiresAt: "2026-08-31T12:00:00.000Z",
+        expiresAt: "2026-08-30T12:30:00.000Z",
         reason: "Reviewed bounded promotion."
       },
       confirmation: "authorize-canary"
-    });
+    } as const;
+    const result = await authority.commands.authorize(command);
 
     expect(result).toMatchObject({
       status: "authorized",
       approval: {
+        schemaVersion: "agentlab.canary-approval.v2",
+        attestationDigest: attestation.attestationDigest,
+        roleIdentityPolicyDigest,
         actor: { kind: "human", role: "release-controller", id: "release-controller" }
       },
       cohort: {
+        schemaVersion: "agentlab.canary-cohort.v2",
+        attestationDigest: attestation.attestationDigest,
+        roleIdentityPolicyDigest,
         stage: "brokered-draft-pr",
         maximumRiskTier: "R1",
         autoMerge: false,
         release: false
       }
     });
+    await expect(authority.commands.authorize(command)).resolves.toEqual({
+      ...result,
+      status: "existing"
+    });
     await authority.close();
     await expect(authority.close()).resolves.toBeUndefined();
+
+    const expiredAuthority = createLocalFactoryCanaryAuthority({
+      databasePath,
+      operatorId: "release-controller",
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: key.publicPath,
+      trustedKeyId: key.keyId,
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600,
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
+      now: () => "2026-08-30T12:31:00.000Z"
+    });
+    await expect(expiredAuthority.commands.authorize(command)).rejects.toThrow(/validity window/u);
+    await expiredAuthority.close();
   });
 
   it("refuses ephemeral databases for both authority-bearing compositions", () => {
@@ -225,7 +283,16 @@ describe("local factory evaluation compositions", () => {
     expect(() =>
       createLocalFactoryCanaryAuthority({
         databasePath: ":memory:",
-        operatorId: "release-controller"
+        operatorId: "release-controller",
+        runnerId: "trusted-eval-runner",
+        trustedPublicKeyPath: "/private/eval-public.pem",
+        trustedKeyId: testEvalDigest(901),
+        maximumIssuanceDelaySeconds: 300,
+        maximumAttestationLifetimeSeconds: 3_600,
+        roleIdentityPolicy,
+        expectedRoleIdentityPolicyDigest: new NodeFactoryDocumentCodec().roleIdentityPolicy(
+          roleIdentityPolicy
+        ).digest
       })
     ).toThrow(/durable SQLite/u);
   });

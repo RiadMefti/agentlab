@@ -166,11 +166,22 @@ Use a separate `canary-authority.json` and release-controller account:
 
 ```json
 {
-  "schemaVersion": "agentlab.local-factory-canary-authority.v1",
+  "schemaVersion": "agentlab.local-factory-canary-authority.v2",
   "databasePath": "/absolute/private/evaluator/agentlab.sqlite",
-  "operatorId": "release-controller"
+  "operatorId": "release-controller",
+  "runnerId": "trusted-eval-runner",
+  "trustedPublicKeyPath": "/absolute/private/release/eval-public.pem",
+  "trustedKeyId": "sha256:...",
+  "roleIdentityPolicyPath": "/absolute/private/release/role-identities.json",
+  "expectedRoleIdentityPolicyDigest": "sha256:...",
+  "maximumIssuanceDelaySeconds": 300,
+  "maximumAttestationLifetimeSeconds": 3600
 }
 ```
+
+The public key and role-policy copy are owner-only but contain no signing secret. Their key, runner,
+and policy digests must match the evaluator and attestor deployment. Config v1 remains parseable for
+incident diagnosis but cannot issue new authority.
 
 The owner-only `agentlab.canary-request.v1` still contains stage, one repository, R0/R1 ceiling,
 task count, complete aggregate budget, human-review digest/size, expiry, and reason. Its budget must
@@ -179,16 +190,17 @@ fit inside the evaluated suite limits. Issue only after independent human review
 ```text
 agentlab factory canary-authorize \
   --config /absolute/private/release/canary-authority.json \
-  --assessment sha256:... \
+  --attestation sha256:... \
   --request /absolute/private/release/canary-request.json \
   --confirm-authorize-canary
 ```
 
-The result structurally fixes `autoMerge:false` and `release:false`. `read-only-shadow` requires R0;
-`local-proposal` and `brokered-draft-pr` require R1. Important: the current canary-authority command
-still resolves the deterministic assessment, not the attestation record. No shipped component reads
-the cohort to execute work. Do not interpret issuance as a running canary or bypass intake, task
-policy, broker preflight, repository governance, or human merge controls.
+The authority independently re-verifies the stored signature, run/assessment lineage, role-policy
+digest, and current validity window. Approval and cohort v2 bind the exact attestation and cannot
+outlive it. The result structurally fixes `autoMerge:false` and `release:false`. `read-only-shadow`
+requires R0; `local-proposal` and `brokered-draft-pr` require R1. No shipped component reads the
+cohort to execute work. Do not interpret issuance as a running canary or bypass intake, task policy,
+broker preflight, repository governance, or human merge controls.
 
 ## Failure, recovery, and incident handling
 
@@ -214,8 +226,8 @@ The current slice does not automate revocation, rollback, notification, or incid
 Before any cohort drives even shadow work, AgentLab still needs a sandboxed harness producer;
 content-addressed grader artifacts; a brokered multi-account storage boundary for the shared ledger;
 stronger runner identity or hardware-backed key custody where required; a crash-durable cohort
-consumer that requires a currently valid attestation, reserves aggregate usage, and binds every
-task; telemetry/control comparison; expiry/revocation enforcement; alerting; rollback drills; and
-incident automation. Brokered PR creation remains separately human-confirmed and blocked by
-repository governance and live cost-policy prerequisites in
+consumer that re-verifies the v2 attestation and role-policy pins, reserves aggregate usage, and
+binds every task; telemetry/control comparison; expiry/revocation enforcement; alerting; rollback
+drills; and incident automation. Brokered PR creation remains separately human-confirmed and blocked
+by repository governance and live cost-policy prerequisites in
 [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

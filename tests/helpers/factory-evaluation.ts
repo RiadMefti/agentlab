@@ -7,6 +7,7 @@ import {
   type FactoryCanaryApproval,
   type FactoryCanaryCohort,
   type FactoryEvalAssessment,
+  type FactoryEvalAttestationRecord,
   type FactoryEvalRun,
   type FactoryEvalSample,
   type FactoryEvalSuite,
@@ -15,6 +16,7 @@ import {
 } from "@agentlab/contracts";
 
 import type { FactoryEvalSnapshot } from "../../packages/runtime/src/domain/factory-evaluation-repository.js";
+import type { FactoryEvalAttestationSnapshot } from "../../packages/runtime/src/domain/factory-eval-attestation-repository.js";
 import { evaluateFactoryEvalRun } from "../../packages/runtime/src/domain/factory-evaluation-policy.js";
 import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain/factory-documents.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
@@ -26,6 +28,7 @@ export const TEST_EVAL_CORRELATION_ID = "10000000-0000-4000-8000-000000000002";
 export const TEST_EVAL_ASSESSMENT_ID = "10000000-0000-4000-8000-000000000003";
 export const TEST_CANARY_APPROVAL_ID = "10000000-0000-4000-8000-000000000004";
 export const TEST_CANARY_COHORT_ID = "10000000-0000-4000-8000-000000000005";
+export const TEST_EVAL_ATTESTATION_ID = "10000000-0000-4000-8000-000000000006";
 export const TEST_ROLE_IDENTITY_POLICY_DIGEST = `sha256:${"9".repeat(64)}`;
 
 export function testFactoryRoleIdentityPolicy(input: {
@@ -245,20 +248,51 @@ export function testFactoryEvalDocuments(
   return { run, assessment, snapshot };
 }
 
+interface TestFactoryCanaryDocumentsInput {
+  readonly approvalId?: string;
+  readonly cohortId?: string;
+  readonly maximumTasks?: number;
+  readonly operatorId?: string;
+  readonly attestation?: FactoryEvalAttestationSnapshot;
+  readonly expiresAt?: string;
+}
+
+type TestFactoryAttestedCanaryApproval = Extract<
+  FactoryCanaryApproval,
+  { readonly schemaVersion: "agentlab.canary-approval.v2" }
+>;
+type TestFactoryAttestedCanaryCohort = Extract<
+  FactoryCanaryCohort,
+  { readonly schemaVersion: "agentlab.canary-cohort.v2" }
+>;
+
 export function testFactoryCanaryDocuments(
   evaluation: FactoryEvalSnapshot,
-  input: {
-    readonly approvalId?: string;
-    readonly cohortId?: string;
-    readonly maximumTasks?: number;
-    readonly operatorId?: string;
-  } = {}
+  input: TestFactoryCanaryDocumentsInput & {
+    readonly attestation: FactoryEvalAttestationSnapshot;
+  }
+): {
+  readonly approval: CanonicalFactoryDocument<TestFactoryAttestedCanaryApproval>;
+  readonly cohort: CanonicalFactoryDocument<TestFactoryAttestedCanaryCohort>;
+};
+export function testFactoryCanaryDocuments(
+  evaluation: FactoryEvalSnapshot,
+  input?: TestFactoryCanaryDocumentsInput
+): {
+  readonly approval: CanonicalFactoryDocument<FactoryCanaryApproval>;
+  readonly cohort: CanonicalFactoryDocument<FactoryCanaryCohort>;
+};
+export function testFactoryCanaryDocuments(
+  evaluation: FactoryEvalSnapshot,
+  input: TestFactoryCanaryDocumentsInput = {}
 ): {
   readonly approval: CanonicalFactoryDocument<FactoryCanaryApproval>;
   readonly cohort: CanonicalFactoryDocument<FactoryCanaryCohort>;
 } {
+  const attestation = input.attestation;
   const approval = documents.canaryApproval({
-    schemaVersion: "agentlab.canary-approval.v1",
+    schemaVersion:
+      attestation === undefined ? "agentlab.canary-approval.v1" : "agentlab.canary-approval.v2",
     approvalId: input.approvalId ?? TEST_CANARY_APPROVAL_ID,
     assessmentDigest: evaluation.assessmentDigest,
     challengerCandidateDigest: evaluation.run.challengerCandidateDigest,
@@ -276,11 +310,19 @@ export function testFactoryCanaryDocuments(
       sessionId: null
     },
     occurredAt: "2026-08-30T12:00:00.000Z",
-    expiresAt: "2026-08-31T12:00:00.000Z",
-    reason: "Reviewed bounded promotion."
+    expiresAt: input.expiresAt ?? "2026-08-31T12:00:00.000Z",
+    reason: "Reviewed bounded promotion.",
+    ...(attestation === undefined
+      ? {}
+      : {
+          attestationDigest: attestation.attestationDigest,
+          roleIdentityPolicyDigest:
+            attestation.attestation.signedAttestation.statement.predicate.roleIdentityPolicyDigest
+        })
   });
   const cohort = documents.canaryCohort({
-    schemaVersion: "agentlab.canary-cohort.v1",
+    schemaVersion:
+      attestation === undefined ? "agentlab.canary-cohort.v1" : "agentlab.canary-cohort.v2",
     cohortId: input.cohortId ?? TEST_CANARY_COHORT_ID,
     assessmentDigest: evaluation.assessmentDigest,
     runDigest: evaluation.runDigest,
@@ -294,7 +336,91 @@ export function testFactoryCanaryDocuments(
     issuedAt: approval.value.occurredAt,
     expiresAt: approval.value.expiresAt,
     autoMerge: false,
-    release: false
+    release: false,
+    ...(attestation === undefined
+      ? {}
+      : {
+          attestationDigest: attestation.attestationDigest,
+          roleIdentityPolicyDigest:
+            attestation.attestation.signedAttestation.statement.predicate.roleIdentityPolicyDigest
+        })
   });
   return { approval, cohort };
+}
+
+export function testFactoryEvalAttestationSnapshot(
+  evaluation: FactoryEvalSnapshot,
+  input: {
+    readonly attestationId?: string;
+    readonly roleIdentityPolicyDigest?: Sha256Digest;
+    readonly issuedAt?: string;
+    readonly expiresAt?: string;
+    readonly verifiedAt?: string;
+  } = {}
+): FactoryEvalAttestationSnapshot {
+  const roleIdentityPolicyDigest =
+    input.roleIdentityPolicyDigest ?? TEST_ROLE_IDENTITY_POLICY_DIGEST;
+  const issuedAt = input.issuedAt ?? "2026-08-30T11:31:00.000Z";
+  const expiresAt = input.expiresAt ?? "2026-08-31T12:00:00.000Z";
+  const statement = documents.evalAttestationStatement({
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [
+      {
+        name: "agentlab.eval-run",
+        digest: { sha256: evaluation.runDigest.slice("sha256:".length) }
+      }
+    ],
+    predicateType: "https://agentlab.dev/attestations/eval-run/v1",
+    predicate: {
+      schemaVersion: "agentlab.eval-run-attestation-predicate.v1",
+      runnerId: evaluation.run.actor.id,
+      runId: evaluation.run.runId,
+      runDigest: evaluation.runDigest,
+      suiteDigest: evaluation.run.suiteDigest,
+      caseBankDigest: evaluation.run.suite.caseBankDigest,
+      baselineHarnessDigest: evaluation.run.baselineCandidate.harnessDigest,
+      challengerHarnessDigest: evaluation.run.challengerCandidate.harnessDigest,
+      baselineCandidateDigest: evaluation.run.baselineCandidateDigest,
+      challengerCandidateDigest: evaluation.run.challengerCandidateDigest,
+      roleIdentityPolicyDigest,
+      startedAt: evaluation.run.startedAt,
+      completedAt: evaluation.run.completedAt,
+      issuedAt,
+      expiresAt
+    }
+  });
+  const keyId = testEvalDigest(901);
+  const envelope = documents.dsseEnvelope({
+    payloadType: "application/vnd.in-toto+json",
+    payload: Buffer.from(statement.json, "utf8").toString("base64"),
+    signatures: [{ keyid: keyId, sig: `${"A".repeat(86)}==` }]
+  });
+  const signed = documents.signedEvalAttestation({
+    schemaVersion: "agentlab.signed-eval-attestation.v1",
+    statementDigest: statement.digest,
+    statement: statement.value,
+    envelopeDigest: envelope.digest,
+    envelope: envelope.value
+  });
+  const record: CanonicalFactoryDocument<FactoryEvalAttestationRecord> =
+    documents.evalAttestationRecord({
+      schemaVersion: "agentlab.eval-attestation-record.v1",
+      attestationId: input.attestationId ?? TEST_EVAL_ATTESTATION_ID,
+      assessmentDigest: evaluation.assessmentDigest,
+      runId: evaluation.run.runId,
+      runDigest: evaluation.runDigest,
+      signedAttestationDigest: signed.digest,
+      statementDigest: statement.digest,
+      envelopeDigest: envelope.digest,
+      keyId,
+      verifiedAt: input.verifiedAt ?? issuedAt,
+      verifier: {
+        kind: "control-plane",
+        role: "policy-engine",
+        id: "agentlab-eval-attestation",
+        sessionId: null
+      },
+      signedAttestation: signed.value
+    });
+  return { attestation: record.value, attestationDigest: record.digest };
 }

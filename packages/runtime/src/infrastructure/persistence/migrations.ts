@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 13;
+export const latestSchemaVersion = 14;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -2555,6 +2555,182 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 13;
+      COMMIT;
+    `);
+  }
+
+  if (version < 14) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE factory_canary_approvals ADD COLUMN attestation_digest TEXT
+        REFERENCES factory_eval_attestations(attestation_digest);
+      ALTER TABLE factory_canary_approvals ADD COLUMN role_identity_policy_digest TEXT CHECK (
+        role_identity_policy_digest IS NULL OR
+        (length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:')
+      );
+      ALTER TABLE factory_canary_cohorts ADD COLUMN attestation_digest TEXT
+        REFERENCES factory_eval_attestations(attestation_digest);
+      ALTER TABLE factory_canary_cohorts ADD COLUMN role_identity_policy_digest TEXT CHECK (
+        role_identity_policy_digest IS NULL OR
+        (length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:')
+      );
+
+      CREATE UNIQUE INDEX factory_canary_approvals_attestation_idx
+        ON factory_canary_approvals(attestation_digest)
+        WHERE attestation_digest IS NOT NULL;
+      CREATE UNIQUE INDEX factory_canary_cohorts_attestation_idx
+        ON factory_canary_cohorts(attestation_digest)
+        WHERE attestation_digest IS NOT NULL;
+
+      DROP TRIGGER IF EXISTS factory_canary_approvals_identity_guard;
+      CREATE TRIGGER factory_canary_approvals_identity_guard
+      BEFORE INSERT ON factory_canary_approvals
+      WHEN
+        json_extract(NEW.approval_json, '$.schemaVersion') IS NULL OR
+        json_extract(NEW.approval_json, '$.schemaVersion') NOT IN (
+          'agentlab.canary-approval.v1', 'agentlab.canary-approval.v2'
+        ) OR
+        (SELECT decision FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest) IS NOT 'pass' OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT json_extract(assessment_json, '$.challengerCandidateDigest')
+          FROM factory_eval_assessments WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        json_extract(NEW.approval_json, '$.approvalId') IS NOT NEW.approval_id OR
+        json_extract(NEW.approval_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.approval_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.approval_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.approval_json, '$.actor.id') IS NOT NEW.actor_id OR
+        json_extract(NEW.approval_json, '$.actor.kind') IS NOT 'human' OR
+        json_extract(NEW.approval_json, '$.actor.role') IS NOT 'release-controller' OR
+        json_extract(NEW.approval_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.approval_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        (
+          json_extract(NEW.approval_json, '$.schemaVersion') = 'agentlab.canary-approval.v1' AND
+          (NEW.attestation_digest IS NOT NULL OR NEW.role_identity_policy_digest IS NOT NULL)
+        ) OR
+        (
+          json_extract(NEW.approval_json, '$.schemaVersion') = 'agentlab.canary-approval.v2' AND
+          (
+            NEW.attestation_digest IS NULL OR
+            NEW.role_identity_policy_digest IS NULL OR
+            json_extract(NEW.approval_json, '$.attestationDigest')
+              IS NOT NEW.attestation_digest OR
+            json_extract(NEW.approval_json, '$.roleIdentityPolicyDigest')
+              IS NOT NEW.role_identity_policy_digest OR
+            NEW.assessment_digest IS NOT (
+              SELECT assessment_digest FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.role_identity_policy_digest IS NOT (
+              SELECT json_extract(
+                attestation_json,
+                '$.signedAttestation.statement.predicate.roleIdentityPolicyDigest'
+              )
+              FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.occurred_at < (
+              SELECT issued_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.occurred_at >= (
+              SELECT expires_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.expires_at > (
+              SELECT expires_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            )
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approval identity mismatch');
+      END;
+
+      DROP TRIGGER IF EXISTS factory_canary_cohorts_identity_guard;
+      CREATE TRIGGER factory_canary_cohorts_identity_guard
+      BEFORE INSERT ON factory_canary_cohorts
+      WHEN
+        json_extract(NEW.cohort_json, '$.schemaVersion') IS NULL OR
+        json_extract(NEW.cohort_json, '$.schemaVersion') NOT IN (
+          'agentlab.canary-cohort.v1', 'agentlab.canary-cohort.v2'
+        ) OR
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.issued_at IS NOT (
+          SELECT occurred_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.expires_at IS NOT (
+          SELECT expires_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        json_extract(NEW.cohort_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.cohort_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.cohort_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.cohort_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.cohort_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.cohort_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.cohort_json, '$.issuedAt') IS NOT NEW.issued_at OR
+        json_extract(NEW.cohort_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.cohort_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.cohort_json, '$.release') IS NOT 0 OR
+        (
+          json_extract(NEW.cohort_json, '$.schemaVersion') = 'agentlab.canary-cohort.v1' AND
+          (
+            NEW.attestation_digest IS NOT NULL OR
+            NEW.role_identity_policy_digest IS NOT NULL OR
+            (SELECT json_extract(approval_json, '$.schemaVersion')
+              FROM factory_canary_approvals WHERE approval_digest = NEW.approval_digest)
+              IS NOT 'agentlab.canary-approval.v1'
+          )
+        ) OR
+        (
+          json_extract(NEW.cohort_json, '$.schemaVersion') = 'agentlab.canary-cohort.v2' AND
+          (
+            NEW.attestation_digest IS NULL OR
+            NEW.role_identity_policy_digest IS NULL OR
+            NEW.attestation_digest IS NOT (
+              SELECT attestation_digest FROM factory_canary_approvals
+              WHERE approval_digest = NEW.approval_digest
+            ) OR
+            NEW.role_identity_policy_digest IS NOT (
+              SELECT role_identity_policy_digest FROM factory_canary_approvals
+              WHERE approval_digest = NEW.approval_digest
+            ) OR
+            json_extract(NEW.cohort_json, '$.attestationDigest')
+              IS NOT NEW.attestation_digest OR
+            json_extract(NEW.cohort_json, '$.roleIdentityPolicyDigest')
+              IS NOT NEW.role_identity_policy_digest OR
+            (SELECT json_extract(approval_json, '$.schemaVersion')
+              FROM factory_canary_approvals WHERE approval_digest = NEW.approval_digest)
+              IS NOT 'agentlab.canary-approval.v2'
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort identity mismatch');
+      END;
+
+      PRAGMA user_version = 14;
       COMMIT;
     `);
   }

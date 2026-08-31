@@ -14,11 +14,13 @@ import { NodeFactoryDsseSigner } from "../../packages/runtime/src/infrastructure
 import { NodeFactoryDsseVerifier } from "../../packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
+import { SqliteFactoryCanaryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.js";
 import { SqliteFactoryEvalAttestationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.js";
 import { SqliteFactoryEvaluationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.js";
 import {
   TEST_ROLE_IDENTITY_POLICY_DIGEST,
   testEvalDigest,
+  testFactoryCanaryDocuments,
   testFactoryEvalDocuments
 } from "../helpers/factory-evaluation.js";
 
@@ -87,6 +89,33 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
       assessmentDigest: testEvalDigest(997)
     });
     await expect(attestations.record(wrongAssessment)).rejects.toThrow(/exact assessment and run/u);
+
+    const canaries = new SqliteFactoryCanaryRepository(databasePath, {
+      evaluations,
+      attestations,
+      documents
+    });
+    const authority = testFactoryCanaryDocuments(evaluation.snapshot, {
+      attestation: expected,
+      expiresAt: "2026-08-30T12:30:00.000Z"
+    });
+    const wrongApproval = documents.canaryApproval({
+      ...authority.approval.value,
+      roleIdentityPolicyDigest: testEvalDigest(999)
+    });
+    const wrongCohort = documents.canaryCohort({
+      ...authority.cohort.value,
+      approvalDigest: wrongApproval.digest,
+      roleIdentityPolicyDigest: testEvalDigest(999)
+    });
+    await expect(canaries.authorize(wrongApproval, wrongCohort)).rejects.toThrow(
+      /verified attestation/u
+    );
+    const canarySnapshot = await canaries.authorize(authority.approval, authority.cohort);
+    await expect(canaries.findByCohortDigest(authority.cohort.digest)).resolves.toEqual(
+      canarySnapshot
+    );
+    canaries.close();
     attestations.close();
     evaluations.close();
 
@@ -115,6 +144,17 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
       expect(() => database.prepare("DELETE FROM factory_eval_attestations").run()).toThrow(
         /immutable/u
       );
+      expect(
+        database
+          .prepare(
+            `SELECT attestation_digest, role_identity_policy_digest
+             FROM factory_canary_cohorts`
+          )
+          .get()
+      ).toEqual({
+        attestation_digest: recorded.attestationDigest,
+        role_identity_policy_digest: TEST_ROLE_IDENTITY_POLICY_DIGEST
+      });
       const row = database.prepare("SELECT * FROM factory_eval_attestations").get() as
         AttestationSqlRow | undefined;
       if (row === undefined) throw new Error("Expected one stored factory eval attestation.");
@@ -157,6 +197,14 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
     const legacy = new DatabaseSync(databasePath);
     try {
       legacy.exec(`
+        DROP INDEX factory_canary_approvals_attestation_idx;
+        DROP INDEX factory_canary_cohorts_attestation_idx;
+        DROP TRIGGER factory_canary_approvals_identity_guard;
+        DROP TRIGGER factory_canary_cohorts_identity_guard;
+        ALTER TABLE factory_canary_approvals DROP COLUMN role_identity_policy_digest;
+        ALTER TABLE factory_canary_approvals DROP COLUMN attestation_digest;
+        ALTER TABLE factory_canary_cohorts DROP COLUMN role_identity_policy_digest;
+        ALTER TABLE factory_canary_cohorts DROP COLUMN attestation_digest;
         DROP TABLE factory_eval_attestations;
         PRAGMA user_version = 12;
       `);

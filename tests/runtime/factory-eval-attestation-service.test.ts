@@ -76,6 +76,18 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
       attestation: first.attestation,
       attestationDigest: first.attestationDigest
     });
+    await expect(
+      fixture.verification.requireVerifiedAttestation(
+        first.attestationDigest,
+        "2026-08-30T12:30:59.999Z"
+      )
+    ).resolves.toEqual({
+      attestation: first.attestation,
+      attestationDigest: first.attestationDigest
+    });
+    await expect(
+      fixture.verification.requireVerifiedAttestation(testEvalDigest(999))
+    ).rejects.toThrow(/not a verified ledger record/u);
   });
 
   it("rejects a statement substitution even when its wrapper digests are recomputed", async () => {

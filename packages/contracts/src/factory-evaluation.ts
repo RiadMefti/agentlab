@@ -265,25 +265,40 @@ export const factoryCanaryRequestSchema = z
   .strict();
 export type FactoryCanaryRequest = z.infer<typeof factoryCanaryRequestSchema>;
 
+const factoryCanaryApprovalShape = {
+  approvalId: z.uuid(),
+  assessmentDigest: sha256DigestSchema,
+  challengerCandidateDigest: sha256DigestSchema,
+  stage: factoryCanaryStageSchema,
+  repositoryIds: z.array(factoryIdentifierSchema).length(1),
+  maximumRiskTier: z.enum(["R0", "R1"]),
+  maximumTasks: z.number().int().min(1).max(100),
+  budget: factoryBudgetSchema,
+  humanSampleReviewDigest: sha256DigestSchema,
+  humanSampleSize: z.number().int().min(1).max(256),
+  actor: factoryActorSchema,
+  occurredAt: factoryTimestampSchema,
+  expiresAt: factoryTimestampSchema,
+  reason: z.string().trim().min(1).max(500)
+} as const;
+
 export const factoryCanaryApprovalSchema = z
-  .object({
-    schemaVersion: z.literal("agentlab.canary-approval.v1"),
-    approvalId: z.uuid(),
-    assessmentDigest: sha256DigestSchema,
-    challengerCandidateDigest: sha256DigestSchema,
-    stage: factoryCanaryStageSchema,
-    repositoryIds: z.array(factoryIdentifierSchema).length(1),
-    maximumRiskTier: z.enum(["R0", "R1"]),
-    maximumTasks: z.number().int().min(1).max(100),
-    budget: factoryBudgetSchema,
-    humanSampleReviewDigest: sha256DigestSchema,
-    humanSampleSize: z.number().int().min(1).max(256),
-    actor: factoryActorSchema,
-    occurredAt: factoryTimestampSchema,
-    expiresAt: factoryTimestampSchema,
-    reason: z.string().trim().min(1).max(500)
-  })
-  .strict()
+  .discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.canary-approval.v1"),
+        ...factoryCanaryApprovalShape
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.canary-approval.v2"),
+        ...factoryCanaryApprovalShape,
+        attestationDigest: sha256DigestSchema,
+        roleIdentityPolicyDigest: sha256DigestSchema
+      })
+      .strict()
+  ])
   .superRefine((approval, context) => {
     if (new Set(approval.repositoryIds).size !== approval.repositoryIds.length) {
       context.addIssue({
@@ -309,26 +324,41 @@ export const factoryCanaryApprovalSchema = z
   });
 export type FactoryCanaryApproval = z.infer<typeof factoryCanaryApprovalSchema>;
 
-/** Bounded cohort authority. Auto-merge and release are structurally impossible in v1. */
+const factoryCanaryCohortShape = {
+  cohortId: z.uuid(),
+  assessmentDigest: sha256DigestSchema,
+  runDigest: sha256DigestSchema,
+  challengerCandidateDigest: sha256DigestSchema,
+  approvalDigest: sha256DigestSchema,
+  stage: factoryCanaryStageSchema,
+  repositoryIds: z.array(factoryIdentifierSchema).length(1),
+  maximumRiskTier: z.enum(["R0", "R1"]),
+  maximumTasks: z.number().int().min(1).max(100),
+  budget: factoryBudgetSchema,
+  issuedAt: factoryTimestampSchema,
+  expiresAt: factoryTimestampSchema,
+  autoMerge: z.literal(false),
+  release: z.literal(false)
+} as const;
+
+/** Bounded cohort authority. Auto-merge and release are structurally impossible. */
 export const factoryCanaryCohortSchema = z
-  .object({
-    schemaVersion: z.literal("agentlab.canary-cohort.v1"),
-    cohortId: z.uuid(),
-    assessmentDigest: sha256DigestSchema,
-    runDigest: sha256DigestSchema,
-    challengerCandidateDigest: sha256DigestSchema,
-    approvalDigest: sha256DigestSchema,
-    stage: factoryCanaryStageSchema,
-    repositoryIds: z.array(factoryIdentifierSchema).length(1),
-    maximumRiskTier: z.enum(["R0", "R1"]),
-    maximumTasks: z.number().int().min(1).max(100),
-    budget: factoryBudgetSchema,
-    issuedAt: factoryTimestampSchema,
-    expiresAt: factoryTimestampSchema,
-    autoMerge: z.literal(false),
-    release: z.literal(false)
-  })
-  .strict()
+  .discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.canary-cohort.v1"),
+        ...factoryCanaryCohortShape
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.canary-cohort.v2"),
+        ...factoryCanaryCohortShape,
+        attestationDigest: sha256DigestSchema,
+        roleIdentityPolicyDigest: sha256DigestSchema
+      })
+      .strict()
+  ])
   .superRefine((cohort, context) => {
     if (new Set(cohort.repositoryIds).size !== cohort.repositoryIds.length) {
       context.addIssue({

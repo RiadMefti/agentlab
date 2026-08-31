@@ -18,6 +18,7 @@ import type {
   FactoryEvaluationRepository,
   FactoryEvalSnapshot
 } from "../../packages/runtime/src/domain/factory-evaluation-repository.js";
+import type { FactoryEvalAttestationSnapshot } from "../../packages/runtime/src/domain/factory-eval-attestation-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import {
   TEST_CANARY_APPROVAL_ID,
@@ -26,6 +27,7 @@ import {
   testEvalDigest,
   testFactoryConfigurationCandidate,
   testFactoryEvalBudget,
+  testFactoryEvalAttestationSnapshot,
   testFactoryEvalDocuments,
   testFactoryEvalRun,
   testFactoryEvalSamples,
@@ -105,7 +107,9 @@ describe("FactoryEvaluationService", () => {
 describe("FactoryCanaryAuthorityService", () => {
   it("issues one exact human cohort and replays the same request idempotently", async () => {
     const evaluation = testFactoryEvalDocuments().snapshot;
+    const attestation = testFactoryEvalAttestationSnapshot(evaluation);
     const evaluations = new MemoryEvaluations(evaluation);
+    const attestations = new MemoryVerifiedAttestations(attestation);
     const canaries = new MemoryCanaries();
     const ids = [TEST_CANARY_APPROVAL_ID, TEST_CANARY_COHORT_ID];
     const createId = vi.fn(() => {
@@ -116,23 +120,32 @@ describe("FactoryCanaryAuthorityService", () => {
     const service = new FactoryCanaryAuthorityService({
       operatorId: "release-controller",
       evaluations,
+      attestations,
       canaries,
       documents,
       now: () => "2026-08-30T12:00:00.000Z",
       createId
     });
-    const command = canaryCommand(evaluation.assessmentDigest);
+    const command = canaryCommand(attestation.attestationDigest);
 
     const first = await service.authorize(command);
     const second = await service.authorize(command);
 
     expect(first).toMatchObject({
-      schemaVersion: "agentlab.canary-authority-result.v1",
+      schemaVersion: "agentlab.canary-authority-result.v2",
       status: "authorized",
       approval: {
+        schemaVersion: "agentlab.canary-approval.v2",
+        attestationDigest: attestation.attestationDigest,
         actor: { kind: "human", role: "release-controller", id: "release-controller" }
       },
-      cohort: { autoMerge: false, release: false, maximumTasks: 2 }
+      cohort: {
+        schemaVersion: "agentlab.canary-cohort.v2",
+        attestationDigest: attestation.attestationDigest,
+        autoMerge: false,
+        release: false,
+        maximumTasks: 2
+      }
     });
     expect(second).toEqual({ ...first, status: "existing" });
     expect(canaries.authorizeCalls).toBe(1);
@@ -144,27 +157,35 @@ describe("FactoryCanaryAuthorityService", () => {
     const serviceFixture = canaryService(evaluation);
 
     await expect(
+      serviceFixture.service.authorize(canaryCommand(testEvalDigest(999)))
+    ).rejects.toThrow(/not verified/u);
+    await expect(
       serviceFixture.service.authorize({
-        ...canaryCommand(evaluation.assessmentDigest),
+        ...canaryCommand(serviceFixture.attestation.attestationDigest),
         request: {
-          ...canaryCommand(evaluation.assessmentDigest).request,
+          ...canaryCommand(serviceFixture.attestation.attestationDigest).request,
           expiresAt: "2026-08-30T11:59:59.000Z"
         }
       })
     ).rejects.toThrow(/already expired/u);
     await expect(
       serviceFixture.service.authorize({
-        ...canaryCommand(evaluation.assessmentDigest),
-        request: { ...canaryCommand(evaluation.assessmentDigest).request, maximumTasks: 5 }
+        ...canaryCommand(serviceFixture.attestation.attestationDigest),
+        request: {
+          ...canaryCommand(serviceFixture.attestation.attestationDigest).request,
+          maximumTasks: 5
+        }
       })
     ).rejects.toThrow(/exceeds its exact passing eval authority/u);
 
-    await serviceFixture.service.authorize(canaryCommand(evaluation.assessmentDigest));
+    await serviceFixture.service.authorize(
+      canaryCommand(serviceFixture.attestation.attestationDigest)
+    );
     await expect(
       serviceFixture.service.authorize({
-        ...canaryCommand(evaluation.assessmentDigest),
+        ...canaryCommand(serviceFixture.attestation.attestationDigest),
         request: {
-          ...canaryCommand(evaluation.assessmentDigest).request,
+          ...canaryCommand(serviceFixture.attestation.attestationDigest).request,
           reason: "Different immutable authority."
         }
       })
@@ -172,13 +193,14 @@ describe("FactoryCanaryAuthorityService", () => {
     const expiredRetry = new FactoryCanaryAuthorityService({
       operatorId: "release-controller",
       evaluations: new MemoryEvaluations(evaluation),
+      attestations: new MemoryVerifiedAttestations(serviceFixture.attestation),
       canaries: serviceFixture.canaries,
       documents,
       now: () => "2026-09-01T12:00:00.000Z",
       createId: () => "10000000-0000-4000-8000-000000000099"
     });
     await expect(
-      expiredRetry.authorize(canaryCommand(evaluation.assessmentDigest))
+      expiredRetry.authorize(canaryCommand(serviceFixture.attestation.attestationDigest))
     ).rejects.toThrow(/has expired/u);
 
     const suite = testFactoryEvalSuite();
@@ -193,8 +215,9 @@ describe("FactoryCanaryAuthorityService", () => {
       run: testFactoryEvalRun({ suite, samples }),
       assessmentId: "10000000-0000-4000-8000-000000000008"
     }).snapshot;
+    const deniedFixture = canaryService(denied);
     await expect(
-      canaryService(denied).service.authorize(canaryCommand(denied.assessmentDigest))
+      deniedFixture.service.authorize(canaryCommand(deniedFixture.attestation.attestationDigest))
     ).rejects.toThrow(/exceeds its exact passing eval authority/u);
   });
 });
@@ -281,9 +304,9 @@ class MemoryCanaries implements FactoryCanaryRepository {
   }
 }
 
-function canaryCommand(assessmentDigest: Sha256Digest) {
+function canaryCommand(attestationDigest: Sha256Digest) {
   return {
-    assessmentDigest,
+    attestationDigest,
     request: {
       schemaVersion: "agentlab.canary-request.v1",
       stage: "brokered-draft-pr",
@@ -301,18 +324,37 @@ function canaryCommand(assessmentDigest: Sha256Digest) {
 }
 
 function canaryService(evaluation: FactoryEvalSnapshot) {
+  const attestation = testFactoryEvalAttestationSnapshot(evaluation, {
+    expiresAt: "2026-09-02T12:00:00.000Z"
+  });
   const evaluations = new MemoryEvaluations(evaluation);
+  const attestations = new MemoryVerifiedAttestations(attestation);
   const canaries = new MemoryCanaries();
   const ids = [TEST_CANARY_APPROVAL_ID, TEST_CANARY_COHORT_ID];
   return {
+    attestation,
     canaries,
     service: new FactoryCanaryAuthorityService({
       operatorId: "release-controller",
       evaluations,
+      attestations,
       canaries,
       documents,
       now: () => "2026-08-30T12:00:00.000Z",
       createId: () => ids.shift() ?? "10000000-0000-4000-8000-000000000099"
     })
   };
+}
+
+class MemoryVerifiedAttestations {
+  public constructor(private readonly snapshot: FactoryEvalAttestationSnapshot) {}
+
+  public requireVerifiedAttestation(
+    attestationDigest: Sha256Digest
+  ): Promise<FactoryEvalAttestationSnapshot> {
+    if (attestationDigest !== this.snapshot.attestationDigest) {
+      return Promise.reject(new Error("Factory eval attestation is not verified."));
+    }
+    return Promise.resolve(this.snapshot);
+  }
 }

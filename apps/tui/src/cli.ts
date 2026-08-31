@@ -46,7 +46,7 @@ export type CliAction =
   | {
       readonly kind: "factory-canary-authorize";
       readonly configPath: string;
-      readonly assessmentDigest: `sha256:${string}`;
+      readonly attestationDigest: `sha256:${string}`;
       readonly requestPath: string;
       readonly confirmation: "authorize-canary";
     }
@@ -198,22 +198,22 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     input[0] === "factory" &&
     input[1] === "canary-authorize" &&
     input[2] === "--config" &&
-    input[4] === "--assessment" &&
+    input[4] === "--attestation" &&
     input[6] === "--request" &&
     input[8] === "--confirm-authorize-canary"
   ) {
     const configPath = input[3];
-    const assessmentDigest = input[5];
+    const attestationDigest = input[5];
     const requestPath = input[7];
     if (
       isNormalizedAbsolutePath(configPath) &&
-      isSha256Digest(assessmentDigest) &&
+      isSha256Digest(attestationDigest) &&
       isNormalizedAbsolutePath(requestPath)
     ) {
       return {
         kind: "factory-canary-authorize",
         configPath,
-        assessmentDigest,
+        attestationDigest,
         requestPath,
         confirmation: "authorize-canary"
       };
@@ -607,7 +607,7 @@ Factory authority:
       Verify one DSSE artifact against a pinned public key and exact immutable assessment, then record it.
   agentlab factory eval-inspect --config <absolute-path> --assessment <sha256>
       Inspect compact metrics and policy reasons for one immutable assessment.
-  agentlab factory canary-authorize --config <absolute-path> --assessment <sha256> --request <absolute-path> --confirm-authorize-canary
+  agentlab factory canary-authorize --config <absolute-path> --attestation <sha256> --request <absolute-path> --confirm-authorize-canary
       Issue one human-reviewed, expiring R0/R1 cohort that structurally forbids merge and release.
   agentlab factory authority-status --config <absolute-path>
       Inspect local scheduler and draft-PR authority plus both immutable event histories.
