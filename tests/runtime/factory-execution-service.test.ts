@@ -24,6 +24,7 @@ import { FactoryExecutionService } from "../../packages/runtime/src/application/
 import { FactoryExecutionRecoveryService } from "../../packages/runtime/src/application/factory-execution-recovery-service.js";
 import { FactoryPullRequestService } from "../../packages/runtime/src/application/factory-pull-request-service.js";
 import { FactoryPullRequestObservationService } from "../../packages/runtime/src/application/factory-pull-request-observation-service.js";
+import { FactoryPullRequestRepairAdmissionService } from "../../packages/runtime/src/application/factory-pull-request-repair-admission-service.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
 import type {
   FactoryAgentExecutionInput,
@@ -429,6 +430,66 @@ describe("FactoryPullRequestService", () => {
     }
   });
 
+  it("idempotently reserves one exact post-PR repair without copying untrusted text or changing state", async () => {
+    const fixture = await executionFixture();
+    try {
+      await fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID });
+      await fixture.controlPlane.setAuthority({
+        control: "pr-broker",
+        enabled: true,
+        actor: requester,
+        reason: "Admit one bounded post-PR repair."
+      });
+      const remote = new FakePullRequestBroker(strongGovernance);
+      await fixture.pullRequests(remote).openDraft({ taskId: TEST_FACTORY_TASK_ID });
+      const observed = await fixture.pullRequestObservations(remote).observe({
+        taskId: TEST_FACTORY_TASK_ID
+      });
+      if (observed.status !== "observed") throw new Error("Expected an actionable observation.");
+
+      const first = await fixture.pullRequestRepairAdmissions.admit({
+        taskId: TEST_FACTORY_TASK_ID,
+        observationDigest: observed.observationDigest
+      });
+      expect(first).toMatchObject({
+        status: "authorized",
+        created: true,
+        authorization: {
+          observationDigest: observed.observationDigest,
+          observationEvidenceBundleDigest: observed.evidenceBundleDigest,
+          contractRepairAttempt: 1,
+          reasonCodes: ["review-changes-requested", "trusted-check-failed"],
+          selectedReviewIds: ["501"],
+          failedChecks: [{ name: "verify", conclusion: "failure" }]
+        }
+      });
+      if (first.status !== "authorized") throw new Error("Expected repair authorization.");
+      const authorizationJson = await fixture.artifacts.readText(
+        first.authorizationDigest,
+        1024 * 1024
+      );
+      expect(authorizationJson).not.toContain("Ignore the task contract");
+      expect(authorizationJson).not.toContain("untrustedBody");
+
+      await expect(
+        fixture.pullRequestRepairAdmissions.admit({
+          taskId: TEST_FACTORY_TASK_ID,
+          observationDigest: observed.observationDigest
+        })
+      ).resolves.toMatchObject({
+        status: "authorized",
+        authorizationDigest: first.authorizationDigest,
+        evidenceBundleDigest: first.evidenceBundleDigest,
+        created: false
+      });
+      await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "pr-open"
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("rejects observer output that diverges from the durable PR record", async () => {
     const fixture = await executionFixture();
     try {
@@ -754,6 +815,18 @@ async function executionFixture(
       now,
       createId
     });
+  const pullRequestRepairAdmissions = new FactoryPullRequestRepairAdmissionService({
+    dispatches,
+    tasks: repository,
+    evidence: repository,
+    controls: repository,
+    evidenceIngress,
+    evidenceCredentials,
+    artifacts,
+    documents,
+    now,
+    createId
+  });
   return {
     repository,
     artifacts,
@@ -763,6 +836,7 @@ async function executionFixture(
     service,
     pullRequests,
     pullRequestObservations,
+    pullRequestRepairAdmissions,
     workspaces,
     agents,
     gates,

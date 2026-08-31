@@ -146,6 +146,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   conversation comments. It stores bounded feedback as explicitly untrusted content-addressed
   evidence, prints only counts and a deterministic disposition, and has no repair, merge, or release
   path.
+- `agentlab factory broker-authorize-repair --config ... --task ... --observation ... --policy ... --confirm-repair`
+  reserves one remaining contract repair attempt from the exact latest actionable observation. Its
+  immutable authorization selects formal exact-head change requests from trusted human repository
+  associations, linked inline comments, and failed checks from pinned producers by ID; it never
+  copies feedback text, invokes a model, changes task state, or writes GitHub. Fresh repair
+  execution remains a later worker slice.
 - `packages/contracts` owns provider, conversation, session, and software-factory schemas shared
   across local layers.
 

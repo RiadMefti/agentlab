@@ -9,6 +9,7 @@ import {
   type FactoryPatchProposal,
   type FactoryProcessIsolation,
   type FactoryPullRequestObservation,
+  type FactoryPullRequestRepairAuthorization,
   type FactoryPullRequestProposal,
   type FactoryPullRequestRecord,
   type FactoryReviewResult,
@@ -553,6 +554,61 @@ export class FactoryEvidencePublisher {
           {
             name: "pull-request-record-digest",
             value: input.observation.value.pullRequestRecordDigest
+          }
+        ]
+      })
+    ]);
+  }
+
+  public async pullRequestRepairAuthorization(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly authorization: CanonicalFactoryDocument<FactoryPullRequestRepairAuthorization>;
+  }): Promise<StoredEvidenceBundle> {
+    if (
+      input.authorization.value.taskId !== input.task.contract.taskId ||
+      input.authorization.value.contractDigest !== input.task.contractDigest ||
+      input.authorization.value.policyBundleDigest !== input.task.contract.gateProfile.policyDigest
+    ) {
+      throw new Error("PR repair authorization does not match its immutable task contract.");
+    }
+    const artifact = await this.#documentArtifact(
+      input.authorization,
+      "application/vnd.agentlab.pull-request-repair-authorization.v1+json"
+    );
+    return this.#append(this.#credential("prBroker"), input.task, [
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "pull-request",
+        result: "pass",
+        subjectDigest: input.authorization.digest,
+        artifact,
+        producer: {
+          kind: "broker",
+          role: "pr-broker",
+          id: input.authorization.value.brokerId,
+          sessionId: null
+        },
+        createdAt: input.authorization.value.createdAt,
+        claims: [
+          {
+            name: "observation-digest",
+            value: input.authorization.value.observationDigest
+          },
+          {
+            name: "observation-evidence-bundle-digest",
+            value: input.authorization.value.observationEvidenceBundleDigest
+          },
+          {
+            name: "pull-request-record-digest",
+            value: input.authorization.value.pullRequestRecordDigest
+          },
+          {
+            name: "head-revision",
+            value: input.authorization.value.headRevision
+          },
+          {
+            name: "contract-repair-attempt",
+            value: String(input.authorization.value.contractRepairAttempt)
           }
         ]
       })

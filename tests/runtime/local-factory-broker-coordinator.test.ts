@@ -115,6 +115,9 @@ function createOperator(
     },
     pullRequestObservations: {
       observe: () => Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] })
+    },
+    pullRequestRepairAdmissions: {
+      admit: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] })
     }
   });
 }

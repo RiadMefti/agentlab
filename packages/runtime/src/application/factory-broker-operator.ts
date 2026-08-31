@@ -14,6 +14,10 @@ import type {
   FactoryPullRequestObservationOutcome,
   FactoryPullRequestObservationService
 } from "./factory-pull-request-observation-service.js";
+import type {
+  FactoryPullRequestRepairAdmissionOutcome,
+  FactoryPullRequestRepairAdmissionService
+} from "./factory-pull-request-repair-admission-service.js";
 
 export interface FactoryBrokerPreflight {
   readonly schemaVersion: "agentlab.broker-preflight.v1";
@@ -32,6 +36,7 @@ export interface FactoryBrokerOperatorDependencies {
   readonly controls: Pick<FactoryControlRepository, "state">;
   readonly pullRequests: Pick<FactoryPullRequestService, "openDraft">;
   readonly pullRequestObservations: Pick<FactoryPullRequestObservationService, "observe">;
+  readonly pullRequestRepairAdmissions: Pick<FactoryPullRequestRepairAdmissionService, "admit">;
 }
 
 /** Public authority-plane boundary; this process has no model or provider execution dependency. */
@@ -74,5 +79,9 @@ export class FactoryBrokerOperator {
 
   public observePullRequest(input: unknown): Promise<FactoryPullRequestObservationOutcome> {
     return this.dependencies.pullRequestObservations.observe(input);
+  }
+
+  public admitPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairAdmissionOutcome> {
+    return this.dependencies.pullRequestRepairAdmissions.admit(input);
   }
 }

@@ -218,6 +218,48 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires an exact observation digest and explicit repair-admission confirmation", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const observation = `sha256:${"d".repeat(64)}`;
+    const policy = `sha256:${"c".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-authorize-repair",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--observation",
+        observation,
+        "--policy",
+        policy,
+        "--confirm-repair"
+      ])
+    ).toEqual({
+      kind: "factory-broker-authorize-repair",
+      configPath: "/private/agentlab/broker.json",
+      taskId,
+      observationDigest: observation,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "authorize-repair"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-authorize-repair",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--observation",
+        observation,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires exact compare-and-set state, reason, and matching broker confirmation", () => {
     expect(
       parseCliArguments([
@@ -292,11 +334,13 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory broker-open-draft --config");
     expect(helpText).toContain("factory broker-observe-pr --config");
+    expect(helpText).toContain("factory broker-authorize-repair --config");
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
     expect(helpText).toContain("--confirm-observe");
+    expect(helpText).toContain("--confirm-repair");
     expect(helpText).toContain("--confirm-run");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");

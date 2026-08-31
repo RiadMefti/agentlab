@@ -17,6 +17,7 @@ import {
 } from "./application/factory-evidence-ingress.js";
 import { FactoryPullRequestService } from "./application/factory-pull-request-service.js";
 import { FactoryPullRequestObservationService } from "./application/factory-pull-request-observation-service.js";
+import { FactoryPullRequestRepairAdmissionService } from "./application/factory-pull-request-repair-admission-service.js";
 import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import type { LocalFactoryBrokerConfig } from "./infrastructure/filesystem/local-factory-broker-config.js";
@@ -171,6 +172,18 @@ export function createLocalFactoryBroker(
       now,
       createId
     });
+    const pullRequestRepairAdmissions = new FactoryPullRequestRepairAdmissionService({
+      dispatches,
+      tasks: factory,
+      evidence: factory,
+      controls: factory,
+      evidenceIngress,
+      evidenceCredentials: { prBroker: brokerCredential },
+      artifacts,
+      documents,
+      now,
+      createId
+    });
     const operator = new FactoryBrokerOperator({
       repositoryId: options.repositoryId,
       policyBundleDigest: policyBundle.digest,
@@ -178,7 +191,8 @@ export function createLocalFactoryBroker(
       remote,
       controls: factory,
       pullRequests,
-      pullRequestObservations
+      pullRequestObservations,
+      pullRequestRepairAdmissions
     });
     return new LocalFactoryBrokerCoordinator({
       operator,

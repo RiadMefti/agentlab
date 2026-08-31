@@ -96,6 +96,18 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-authorize-repair") {
+    const { runFactoryBrokerAuthorizeRepair } =
+      await import("./run-factory-broker-authorize-repair.js");
+    process.exitCode = await runFactoryBrokerAuthorizeRepair(
+      action.configPath,
+      action.taskId,
+      action.observationDigest,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
   if (invocation.kind === "direct") {
