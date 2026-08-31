@@ -9,8 +9,12 @@ import {
   factoryConfigurationCandidateSchema,
   factoryControlEventSchema,
   factoryEvalAssessmentSchema,
+  factoryEvalAttestationRecordSchema,
+  factoryEvalAttestationStatementSchema,
   factoryEvalRunSchema,
   factoryEvalSuiteSchema,
+  factoryDsseEnvelopeSchema,
+  factorySignedEvalAttestationSchema,
   factoryExecutionEventSchema,
   factoryExecutionRunSchema,
   factoryGateObservationSchema,
@@ -121,6 +125,22 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public evalAssessment(input: unknown) {
     return encodeCanonicalDocument(factoryEvalAssessmentSchema.parse(input));
+  }
+
+  public evalAttestationStatement(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAttestationStatementSchema.parse(input));
+  }
+
+  public dsseEnvelope(input: unknown) {
+    return encodeCanonicalDocument(factoryDsseEnvelopeSchema.parse(input));
+  }
+
+  public signedEvalAttestation(input: unknown) {
+    return encodeCanonicalDocument(factorySignedEvalAttestationSchema.parse(input));
+  }
+
+  public evalAttestationRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAttestationRecordSchema.parse(input));
   }
 
   public canaryApproval(input: unknown) {

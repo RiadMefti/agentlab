@@ -2,11 +2,13 @@ import {
   createConfiguredLocalFactoryEvaluator,
   loadLocalFactoryEvalRun,
   loadLocalFactoryEvaluatorConfig,
+  loadLocalFactorySignedEvalAttestation,
+  type FactoryEvalAttestationRecordResult,
   type FactoryEvalSnapshot,
   type LocalFactoryEvaluatorConfig,
   type LocalFactoryEvaluatorRuntime
 } from "@agentlab/runtime/factory-evaluator";
-import type { FactoryEvalRun } from "@agentlab/contracts";
+import type { FactoryEvalRun, FactorySignedEvalAttestation } from "@agentlab/contracts";
 
 import { isNormalizedAbsolutePath, isSha256Digest } from "./factory-cli-input.js";
 
@@ -20,6 +22,20 @@ export interface FactoryEvaluatorRunnerDependencies {
 const defaultDependencies: FactoryEvaluatorRunnerDependencies = {
   loadConfig: loadLocalFactoryEvaluatorConfig,
   loadRun: loadLocalFactoryEvalRun,
+  createRuntime: createConfiguredLocalFactoryEvaluator,
+  write: (message) => process.stdout.write(message)
+};
+
+export interface FactoryEvalAttestationRunnerDependencies {
+  readonly loadConfig: (path: string) => Promise<LocalFactoryEvaluatorConfig>;
+  readonly loadAttestation: (path: string) => Promise<FactorySignedEvalAttestation>;
+  readonly createRuntime: (config: LocalFactoryEvaluatorConfig) => LocalFactoryEvaluatorRuntime;
+  readonly write: (message: string) => void;
+}
+
+const defaultAttestationDependencies: FactoryEvalAttestationRunnerDependencies = {
+  loadConfig: loadLocalFactoryEvaluatorConfig,
+  loadAttestation: loadLocalFactorySignedEvalAttestation,
   createRuntime: createConfiguredLocalFactoryEvaluator,
   write: (message) => process.stdout.write(message)
 };
@@ -75,6 +91,39 @@ export async function runFactoryEvalInspect(
   return 0;
 }
 
+/** Verifies and immutably records one signed artifact against an exact assessment. */
+export async function runFactoryEvalAttest(
+  configPath: string,
+  assessmentDigest: string,
+  attestationPath: string,
+  confirmation: string,
+  dependencies: FactoryEvalAttestationRunnerDependencies = defaultAttestationDependencies
+): Promise<number> {
+  if (!isNormalizedAbsolutePath(configPath)) {
+    throw new Error("Factory eval attestation requires a normalized absolute config path.");
+  }
+  if (!isSha256Digest(assessmentDigest)) {
+    throw new Error("Factory eval attestation assessment digest is invalid.");
+  }
+  if (!isNormalizedAbsolutePath(attestationPath)) {
+    throw new Error("Factory eval attestation requires a normalized absolute artifact path.");
+  }
+  if (confirmation !== "attest-eval") {
+    throw new Error("Factory eval attestation requires explicit confirmation.");
+  }
+  const [config, signedAttestation] = await Promise.all([
+    dependencies.loadConfig(configPath),
+    dependencies.loadAttestation(attestationPath)
+  ]);
+  const runtime = dependencies.createRuntime(config);
+  const result = await runtime.commands
+    .attest({ assessmentDigest, signedAttestation })
+    .catch((error: unknown) => closeAfterFailure(runtime, error));
+  await runtime.close();
+  dependencies.write(`${serializeAttestation(result)}\n`);
+  return 0;
+}
+
 function serializeEvaluation(status: "assessed" | "inspected", snapshot: FactoryEvalSnapshot) {
   return JSON.stringify({
     schemaVersion: "agentlab.eval-command-result.v1",
@@ -109,6 +158,23 @@ function serializeEvaluation(status: "assessed" | "inspected", snapshot: Factory
       metrics: snapshot.assessment.metrics,
       reasonCodes: snapshot.assessment.reasonCodes
     }
+  });
+}
+
+function serializeAttestation(result: FactoryEvalAttestationRecordResult): string {
+  const statement = result.attestation.signedAttestation.statement;
+  return JSON.stringify({
+    schemaVersion: "agentlab.eval-attestation-command-result.v1",
+    status: result.status,
+    attestationId: result.attestation.attestationId,
+    attestationDigest: result.attestationDigest,
+    assessmentDigest: result.attestation.assessmentDigest,
+    runId: result.attestation.runId,
+    runDigest: result.attestation.runDigest,
+    keyId: result.attestation.keyId,
+    issuedAt: statement.predicate.issuedAt,
+    expiresAt: statement.predicate.expiresAt,
+    verifiedAt: result.attestation.verifiedAt
   });
 }
 

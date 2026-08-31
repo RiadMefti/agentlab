@@ -48,6 +48,25 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-eval-sign") {
+    const { runFactoryEvalSign } = await import("./run-factory-eval-attestor.js");
+    process.exitCode = await runFactoryEvalSign(
+      action.configPath,
+      action.runPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-attest") {
+    const { runFactoryEvalAttest } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalAttest(
+      action.configPath,
+      action.assessmentDigest,
+      action.attestationPath,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-eval-inspect") {
     const { runFactoryEvalInspect } = await import("./run-factory-evaluator.js");
     process.exitCode = await runFactoryEvalInspect(action.configPath, action.assessmentDigest);

@@ -89,6 +89,10 @@ describe("architecture dependency rules", () => {
           "packages/runtime/src/local-factory-evaluator.ts"
         ),
         local(
+          "@agentlab/runtime/factory-eval-attestor",
+          "packages/runtime/src/local-factory-eval-attestor.ts"
+        ),
+        local(
           "@agentlab/runtime/factory-canary-authority",
           "packages/runtime/src/local-factory-canary-authority.ts"
         )
@@ -98,6 +102,7 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-authority.ts"),
       source("packages/runtime/src/local-factory-intake.ts"),
       source("packages/runtime/src/local-factory-evaluator.ts"),
+      source("packages/runtime/src/local-factory-eval-attestor.ts"),
       source("packages/runtime/src/local-factory-canary-authority.ts")
     ]);
 
@@ -145,6 +150,43 @@ describe("architecture dependency rules", () => {
         "packages/runtime/src/infrastructure/github/github-rest-client.ts",
         "packages/runtime/src/infrastructure/providers/model.ts",
         "packages/runtime/src/local-factory-broker.ts"
+      ])
+    );
+  });
+
+  it("keeps eval signing and verification in disjoint executable capability closures", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-eval-attestor.ts", [
+        local(
+          "./infrastructure/persistence/sqlite-factory-evaluation-repository.js",
+          "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts"
+      ),
+      source("packages/runtime/src/local-factory-evaluator.ts", [
+        local(
+          "./infrastructure/crypto/node-factory-dsse-signer.js",
+          "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"),
+      source("apps/tui/src/run-factory-eval-attestor.ts", [
+        local(
+          "@agentlab/runtime/factory-evaluator",
+          "packages/runtime/src/local-factory-evaluator.ts"
+        )
+      ])
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(3);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+        "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts",
+        "packages/runtime/src/local-factory-evaluator.ts"
       ])
     );
   });
@@ -705,6 +747,10 @@ function architectureFixture(): string {
         default: "./dist/local-factory-evaluator.js",
         types: "./dist/local-factory-evaluator.d.ts"
       },
+      "./factory-eval-attestor": {
+        default: "./dist/local-factory-eval-attestor.js",
+        types: "./dist/local-factory-eval-attestor.d.ts"
+      },
       "./factory-canary-authority": {
         default: "./dist/local-factory-canary-authority.js",
         types: "./dist/local-factory-canary-authority.d.ts"
@@ -718,6 +764,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-intake.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-evaluator.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-eval-attestor.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-canary-authority.ts", "export {};\n");
   return root;
 }

@@ -167,6 +167,7 @@ describe("SqliteFactoryExecutionRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TABLE factory_eval_attestations;
         DROP TABLE factory_canary_cohorts;
         DROP TABLE factory_canary_approvals;
         DROP TABLE factory_eval_assessments;

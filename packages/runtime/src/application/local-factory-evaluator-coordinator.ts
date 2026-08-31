@@ -1,6 +1,10 @@
 import type { FactoryEvalSnapshot } from "../domain/factory-evaluation-repository.js";
 import type { WriterLease } from "../domain/writer-lease.js";
 import type { FactoryEvaluationService } from "./factory-evaluation-service.js";
+import type {
+  FactoryEvalAttestationRecordResult,
+  FactoryEvalAttestationService
+} from "./factory-eval-attestation-service.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
 
@@ -8,6 +12,7 @@ const defaultMaximumQueuedCommands = 8;
 
 export interface FactoryEvaluatorCommandPort {
   assess(input: unknown): Promise<FactoryEvalSnapshot>;
+  attest(input: unknown): Promise<FactoryEvalAttestationRecordResult>;
   inspect(input: unknown): Promise<FactoryEvalSnapshot>;
 }
 
@@ -18,16 +23,18 @@ export interface LocalFactoryEvaluatorRuntime {
 
 export interface LocalFactoryEvaluatorCoordinatorDependencies {
   readonly evaluator: Pick<FactoryEvaluationService, "assess" | "inspect">;
+  readonly attestations: Pick<FactoryEvalAttestationService, "record">;
   readonly tasks: RuntimeTaskOwner;
   readonly repositories: RuntimeRepositoryOwner;
   readonly writerLease: WriterLease;
   readonly maximumQueuedCommands?: number;
 }
 
-/** Serializes immutable eval admission and retains exclusive ledger ownership through cleanup. */
+/** Serializes immutable eval and attestation admission through exclusive ledger cleanup. */
 export class LocalFactoryEvaluatorCoordinator implements LocalFactoryEvaluatorRuntime {
   public readonly commands: FactoryEvaluatorCommandPort;
   readonly #evaluator: Pick<FactoryEvaluationService, "assess" | "inspect">;
+  readonly #attestations: Pick<FactoryEvalAttestationService, "record">;
   readonly #tasks: RuntimeTaskOwner;
   readonly #repositories: RuntimeRepositoryOwner;
   readonly #writerLease: WriterLease;
@@ -41,6 +48,7 @@ export class LocalFactoryEvaluatorCoordinator implements LocalFactoryEvaluatorRu
 
   public constructor(dependencies: LocalFactoryEvaluatorCoordinatorDependencies) {
     this.#evaluator = dependencies.evaluator;
+    this.#attestations = dependencies.attestations;
     this.#tasks = dependencies.tasks;
     this.#repositories = dependencies.repositories;
     this.#writerLease = dependencies.writerLease;
@@ -51,6 +59,7 @@ export class LocalFactoryEvaluatorCoordinator implements LocalFactoryEvaluatorRu
     this.#maximumQueuedCommands = maximum;
     this.commands = {
       assess: (input) => this.#run(() => this.#evaluator.assess(input)),
+      attest: (input) => this.#run(() => this.#attestations.record(input)),
       inspect: (input) => this.#run(() => this.#evaluator.inspect(input))
     };
   }

@@ -5,8 +5,12 @@ import type {
   FactoryCanaryCohort,
   FactoryConfigurationCandidate,
   FactoryEvalAssessment,
+  FactoryEvalAttestationRecord,
+  FactoryEvalAttestationStatement,
   FactoryEvalRun,
   FactoryEvalSuite,
+  FactoryDsseEnvelope,
+  FactorySignedEvalAttestation,
   FactoryAgentRunRequest,
   FactoryExecutionEvent,
   FactoryExecutionRun,
@@ -73,6 +77,12 @@ export interface FactoryDocumentCodec {
   evalSuite(input: unknown): CanonicalFactoryDocument<FactoryEvalSuite>;
   evalRun(input: unknown): CanonicalFactoryDocument<FactoryEvalRun>;
   evalAssessment(input: unknown): CanonicalFactoryDocument<FactoryEvalAssessment>;
+  evalAttestationStatement(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryEvalAttestationStatement>;
+  dsseEnvelope(input: unknown): CanonicalFactoryDocument<FactoryDsseEnvelope>;
+  signedEvalAttestation(input: unknown): CanonicalFactoryDocument<FactorySignedEvalAttestation>;
+  evalAttestationRecord(input: unknown): CanonicalFactoryDocument<FactoryEvalAttestationRecord>;
   canaryApproval(input: unknown): CanonicalFactoryDocument<FactoryCanaryApproval>;
   canaryCohort(input: unknown): CanonicalFactoryDocument<FactoryCanaryCohort>;
   executionRun(input: unknown): CanonicalFactoryDocument<FactoryExecutionRun>;

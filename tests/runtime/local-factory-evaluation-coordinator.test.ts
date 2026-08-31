@@ -1,6 +1,8 @@
+import type { FactorySignedEvalAttestation } from "@agentlab/contracts";
 import { describe, expect, it } from "vitest";
 
 import { LocalFactoryCanaryAuthorityCoordinator } from "../../packages/runtime/src/application/local-factory-canary-authority-coordinator.js";
+import { LocalFactoryEvalAttestorCoordinator } from "../../packages/runtime/src/application/local-factory-eval-attestor-coordinator.js";
 import { LocalFactoryEvaluatorCoordinator } from "../../packages/runtime/src/application/local-factory-evaluator-coordinator.js";
 import { RuntimeRepositoryOwner } from "../../packages/runtime/src/application/runtime-repository-owner.js";
 import { RuntimeTaskOwner } from "../../packages/runtime/src/application/runtime-task-owner.js";
@@ -10,6 +12,24 @@ import {
 } from "../helpers/factory-evaluation.js";
 
 describe("local factory evaluation coordinators", () => {
+  it("bounds, serializes, and drains isolated eval signing", async () => {
+    const signed = {} as FactorySignedEvalAttestation;
+    const pending = deferred<FactorySignedEvalAttestation>();
+    const runtime = new LocalFactoryEvalAttestorCoordinator({
+      attestor: { attest: () => pending.promise },
+      tasks: new RuntimeTaskOwner(),
+      maximumQueuedCommands: 1
+    });
+
+    const signing = runtime.commands.sign({});
+    await expect(runtime.commands.sign({})).rejects.toThrow(/queue is full/u);
+    const closing = runtime.close();
+    pending.resolve(signed);
+    await expect(signing).resolves.toBe(signed);
+    await expect(closing).resolves.toBeUndefined();
+    await expect(runtime.commands.sign({})).rejects.toThrow(/runtime is closing/u);
+  });
+
   it("bounds, serializes, and drains evaluator work before repositories and lease", async () => {
     const evaluation = testFactoryEvalDocuments().snapshot;
     const pending = deferred<typeof evaluation>();
@@ -21,6 +41,7 @@ describe("local factory evaluation coordinators", () => {
         assess: () => pending.promise,
         inspect: () => Promise.resolve(evaluation)
       },
+      attestations: { record: () => Promise.reject(new Error("Unexpected attestation.")) },
       tasks: new RuntimeTaskOwner(),
       repositories,
       writerLease: { databasePath: "/tmp/evaluator.sqlite", close: () => events.push("lease") },

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadLocalFactoryCanaryAuthorityConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-canary-authority-config.js";
 import { loadLocalFactoryCanaryRequest } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-canary-request.js";
 import { loadLocalFactoryEvalRun } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.js";
+import { loadLocalFactoryEvalAttestorConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.js";
 import { loadLocalFactoryEvaluatorConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.js";
 import {
   testEvalDigest,
@@ -28,9 +29,22 @@ describe("local factory evaluation file boundaries", () => {
     const evaluatorPath = join(root, "evaluator.json");
     const canaryPath = join(root, "canary-authority.json");
     const evaluator = {
-      schemaVersion: "agentlab.local-factory-evaluator.v1",
+      schemaVersion: "agentlab.local-factory-evaluator.v2",
       databasePath: join(root, "agentlab.sqlite"),
-      runnerId: "trusted-eval-runner"
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: join(root, "eval-public.pem"),
+      trustedKeyId: testEvalDigest(901),
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600
+    } as const;
+    const attestorPath = join(root, "attestor.json");
+    const attestor = {
+      schemaVersion: "agentlab.local-factory-eval-attestor.v1",
+      runnerId: "trusted-eval-runner",
+      privateKeyPath: join(root, "eval-private.pem"),
+      keyId: testEvalDigest(901),
+      attestationLifetimeSeconds: 3_600,
+      maximumIssuanceDelaySeconds: 300
     } as const;
     const canary = {
       schemaVersion: "agentlab.local-factory-canary-authority.v1",
@@ -38,9 +52,11 @@ describe("local factory evaluation file boundaries", () => {
       operatorId: "release-controller"
     } as const;
     await writePrivateJson(evaluatorPath, evaluator);
+    await writePrivateJson(attestorPath, attestor);
     await writePrivateJson(canaryPath, canary);
 
     await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).resolves.toEqual(evaluator);
+    await expect(loadLocalFactoryEvalAttestorConfig(attestorPath)).resolves.toEqual(attestor);
     await expect(loadLocalFactoryCanaryAuthorityConfig(canaryPath)).resolves.toEqual(canary);
 
     await writePrivateJson(evaluatorPath, { ...evaluator, githubToken: "forbidden" });
@@ -84,9 +100,13 @@ describe("local factory evaluation file boundaries", () => {
     const root = await temporaryRoot();
     const path = join(root, "evaluator.json");
     await writePrivateJson(path, {
-      schemaVersion: "agentlab.local-factory-evaluator.v1",
+      schemaVersion: "agentlab.local-factory-evaluator.v2",
       databasePath: join(root, "agentlab.sqlite"),
-      runnerId: "trusted-eval-runner"
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: join(root, "eval-public.pem"),
+      trustedKeyId: testEvalDigest(901),
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600
     });
     await chmod(path, 0o644);
     await expect(loadLocalFactoryEvaluatorConfig(path)).rejects.toThrow(/owner-only/u);

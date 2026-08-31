@@ -67,6 +67,41 @@ describe("terminal CLI", () => {
     expect(
       parseCliArguments([
         "factory",
+        "eval-sign",
+        "--config",
+        "/private/agentlab/attestor.json",
+        "--run",
+        "/private/agentlab/eval-run.json",
+        "--confirm-sign"
+      ])
+    ).toEqual({
+      kind: "factory-eval-sign",
+      configPath: "/private/agentlab/attestor.json",
+      runPath: "/private/agentlab/eval-run.json",
+      confirmation: "sign-eval"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "eval-attest",
+        "--config",
+        "/private/agentlab/evaluator.json",
+        "--assessment",
+        assessment,
+        "--attestation",
+        "/private/agentlab/signed-attestation.json",
+        "--confirm-attest"
+      ])
+    ).toEqual({
+      kind: "factory-eval-attest",
+      configPath: "/private/agentlab/evaluator.json",
+      assessmentDigest: assessment,
+      attestationPath: "/private/agentlab/signed-attestation.json",
+      confirmation: "attest-eval"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
         "eval-assess",
         "--config",
         "/private/agentlab/evaluator.json",

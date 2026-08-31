@@ -13,14 +13,16 @@ import type { FactoryEvalSnapshot } from "./factory-evaluation-repository.js";
 import { evaluateFactoryEvalRun } from "./factory-evaluation-policy.js";
 import { factoryTimestampDifferenceSeconds } from "./factory-timestamp.js";
 
-type EvalDocuments = Pick<
+type EvalRunDocuments = Pick<
   FactoryDocumentCodec,
-  "configurationCandidate" | "evalSuite" | "evalRun" | "evalAssessment"
+  "configurationCandidate" | "evalSuite" | "evalRun"
 >;
+
+type EvalDocuments = EvalRunDocuments & Pick<FactoryDocumentCodec, "evalAssessment">;
 
 export function assertFactoryEvalRun(
   run: CanonicalFactoryDocument<FactoryEvalRun>,
-  documents: EvalDocuments
+  documents: EvalRunDocuments
 ): void {
   const suite = documents.evalSuite(run.value.suite);
   const baseline = documents.configurationCandidate(run.value.baselineCandidate);

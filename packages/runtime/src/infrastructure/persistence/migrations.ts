@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 12;
+export const latestSchemaVersion = 13;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -2447,6 +2447,114 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 12;
+      COMMIT;
+    `);
+  }
+
+  if (version < 13) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_attestations (
+        attestation_id TEXT PRIMARY KEY CHECK (length(attestation_id) = 36),
+        attestation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(attestation_digest) = 71 AND substr(attestation_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        run_id TEXT NOT NULL UNIQUE REFERENCES factory_eval_runs(run_id),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        signed_attestation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(signed_attestation_digest) = 71 AND
+          substr(signed_attestation_digest, 1, 7) = 'sha256:'
+        ),
+        statement_digest TEXT NOT NULL UNIQUE CHECK (
+          length(statement_digest) = 71 AND substr(statement_digest, 1, 7) = 'sha256:'
+        ),
+        envelope_digest TEXT NOT NULL UNIQUE CHECK (
+          length(envelope_digest) = 71 AND substr(envelope_digest, 1, 7) = 'sha256:'
+        ),
+        key_id TEXT NOT NULL CHECK (
+          length(key_id) = 71 AND substr(key_id, 1, 7) = 'sha256:'
+        ),
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        verified_at TEXT NOT NULL,
+        attestation_json TEXT NOT NULL CHECK (
+          length(attestation_json) BETWEEN 2 AND 2097152 AND json_valid(attestation_json)
+        ),
+        CHECK (issued_at <= verified_at AND verified_at < expires_at)
+      ) STRICT;
+
+      CREATE TRIGGER factory_eval_attestations_no_update
+      BEFORE UPDATE ON factory_eval_attestations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestations are immutable');
+      END;
+      CREATE TRIGGER factory_eval_attestations_no_delete
+      BEFORE DELETE ON factory_eval_attestations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestations are immutable');
+      END;
+      CREATE TRIGGER factory_eval_attestations_identity_guard
+      BEFORE INSERT ON factory_eval_attestations
+      WHEN
+        NEW.run_id IS NOT (
+          SELECT run_id FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.attestation_json, '$.attestationId') IS NOT NEW.attestation_id OR
+        json_extract(NEW.attestation_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.attestation_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.attestation_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestationDigest')
+          IS NOT NEW.signed_attestation_digest OR
+        json_extract(NEW.attestation_json, '$.statementDigest') IS NOT NEW.statement_digest OR
+        json_extract(NEW.attestation_json, '$.envelopeDigest') IS NOT NEW.envelope_digest OR
+        json_extract(NEW.attestation_json, '$.keyId') IS NOT NEW.key_id OR
+        json_extract(NEW.attestation_json, '$.verifiedAt') IS NOT NEW.verified_at OR
+        json_extract(NEW.attestation_json, '$.verifier.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.attestation_json, '$.verifier.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.attestation_json, '$.verifier.id') IS NOT 'agentlab-eval-attestation' OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statementDigest')
+          IS NOT NEW.statement_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelopeDigest')
+          IS NOT NEW.envelope_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.runId')
+          IS NOT NEW.run_id OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.runDigest')
+          IS NOT NEW.run_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.issuedAt')
+          IS NOT NEW.issued_at OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.expiresAt')
+          IS NOT NEW.expires_at OR
+        json_extract(
+          NEW.attestation_json,
+          '$.signedAttestation.statement.subject[0].digest.sha256'
+        ) IS NOT substr(NEW.run_digest, 8) OR
+        json_array_length(
+          json_extract(NEW.attestation_json, '$.signedAttestation.statement.subject')
+        ) IS NOT 1 OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelope.payloadType')
+          IS NOT 'application/vnd.in-toto+json' OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelope.signatures[0].keyid')
+          IS NOT NEW.key_id OR
+        json_array_length(
+          json_extract(NEW.attestation_json, '$.signedAttestation.envelope.signatures')
+        ) IS NOT 1
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestation identity mismatch');
+      END;
+
+      PRAGMA user_version = 13;
       COMMIT;
     `);
   }

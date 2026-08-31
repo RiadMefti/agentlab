@@ -18,13 +18,14 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use six
+The interactive product is local-only and single-process. Optional factory operations use seven
 separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
 switch operator, a credential-bearing draft-PR broker, a credentialless governed intake operator, a
-credentialless deterministic evaluator, and a separate human canary-authority operator. Only the
-broker may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has
-no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command
-language, MCP bridge, or provider-session translation layer.
+credentialless deterministic evaluator/verifier, an isolated key-bearing eval attestor, and a
+separate human canary-authority operator. Only the broker may make explicit GitHub API calls; none
+is loaded into the interactive runtime. AgentLab has no HTTP server, WebSocket gateway, browser
+renderer, desktop shell, remote mode, app command language, MCP bridge, or provider-session
+translation layer.
 
 ## Two paths
 
@@ -209,24 +210,34 @@ release capability and stops every successful task at `pr-proposed`. AgentLab do
 timer; an owner-governed system timer must invoke this one-shot command with the reviewed digests.
 See [Local factory scheduler operations](factory-operations.md).
 
-Configuration promotion is a separate two-process boundary accepted by
-[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md). The exact
+Configuration promotion is a separate three-process boundary accepted by
+[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and
+[ADR 0009](decisions/0009-isolated-eval-attestation.md). The exact
 `@agentlab/runtime/factory-evaluator` composition is credentialless: it ingests one strict
-owner-only matched eval report from a pinned gate-runner ID, recanonicalizes the candidate and suite
-digests, requires the complete ordered case/trial matrix, computes conservative success/safety
-confidence, regression, false-positive, flake, cost-ratio, and p95-latency metrics from raw samples,
-and records one deterministic pass/deny assessment. It has no provider executor, process runner,
-worktree, GitHub, authority switch, merge, or release port.
+owner-only matched eval report from a pinned gate-runner ID, computes conservative deterministic
+metrics from raw samples, and records one pass/deny assessment. Config v2 also pins one Ed25519
+public key and independent freshness/lifetime limits. The evaluator can verify a canonical DSSE
+in-toto statement against the exact immutable run and assessment and append one attestation record.
+It has no signer, provider executor, process runner, worktree, GitHub, authority switch, merge, or
+release port.
+
+The exact `@agentlab/runtime/factory-eval-attestor` composition receives only the same strict run,
+runner identity, private-key coordinate, key ID, and timing bounds. It emits one portable signed
+artifact and has no database, verifier ledger, provider, process, repository, GitHub, broker,
+authority, merge, release, or canary port. Signing and verification are separate crypto modules and
+separate transitive executable allowlists. A signature authenticates exact bytes and key custody;
+the repository still does not ship the harness that proves trials were honestly executed.
 
 The distinct `@agentlab/runtime/factory-canary-authority` composition resolves only a passing
 assessment and one strict owner-only human request. It can issue one expiring cohort for exactly one
 repository, R0/R1, a bounded task count, and a complete aggregate budget capped by the evaluated
 suite. The only stages are `read-only-shadow`, `local-proposal`, and `brokered-draft-pr`;
-`autoMerge` and `release` are literal `false`. SQLite version 12 atomically stores immutable
-run/assessment and approval/cohort pairs and rejects update or deletion. Neither composition runs a
-canary. No shipped consumer converts a cohort into task, scheduler, broker, merge, or release
-authority; the repository also does not yet ship the eval harness that produces and attests the raw
-report. See [Local factory evaluation operations](factory-evaluation-operations.md).
+`autoMerge` and `release` are literal `false`. SQLite version 13 atomically stores immutable
+run/assessment and approval/cohort pairs plus one assessment-bound verified attestation per run and
+rejects update or deletion. No composition runs a canary. Canary authority still resolves the
+assessment rather than requiring the attestation, and no shipped consumer converts a cohort into
+task, scheduler, broker, merge, or release authority. See
+[Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -416,9 +427,10 @@ intake configuration or task has been provisioned. No live agent task or PR has 
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
 and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
 reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Repository/day and organization/day quotas, an attested eval harness, cohort consumption,
-telemetry-driven canary comparison, merge, release, rollback, and incident automation remain later
-stages. The deterministic assessment and bounded non-release cohort ledger exist but are dormant.
+Repository/day and organization/day quotas, a sandboxed harness producer, attestation-gated cohort
+consumption, telemetry-driven canary comparison, merge, release, rollback, and incident automation
+remain later stages. The deterministic assessment and bounded non-release cohort ledger exist but
+are dormant.
 
 ## Dependency map
 
@@ -432,6 +444,7 @@ broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broke
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
 human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
 eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ local-factory-evaluator composition
+eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
                                                          │              │
                                                          ▼              ▼
@@ -461,8 +474,8 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, evaluator, switch-authority, and canary-authority subpaths are exact; every
-  runtime deep import fails.
+  broker, worker, evaluator, eval-attestor, switch-authority, and canary-authority subpaths are
+  exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
@@ -471,9 +484,10 @@ The product-source rules are executable and fail closed:
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
-- Evaluator and canary-authority closures have separate exact allowlists. Neither can reach
-  provider, process-execution, GitHub, broker, merge, release, tmux, terminal, or interactive
-  modules, and the evaluator cannot reach human canary issuance.
+- Evaluator, eval-attestor, and canary-authority closures have separate exact allowlists. None can
+  reach provider, process-execution, GitHub, broker, merge, release, tmux, terminal, or interactive
+  modules. The evaluator cannot reach signing or human canary issuance; the attestor cannot reach
+  the evaluator, SQLite, or any authority.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -510,6 +524,7 @@ never exclude workspace production source.
 | Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`        |
 | Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`           |
 | Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`        |
+| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`    |
 | Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts` |
 | Terminal rendering, input, or interaction state              | `apps/tui`                                               |
 | Installer, cache, or binary handoff                          | `packages/launcher`                                      |
