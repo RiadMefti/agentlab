@@ -1,4 +1,5 @@
 export * from "./conversation.js";
+export * from "./factory-execution.js";
 export * from "./factory.js";
 export * from "./factory-preparation.js";
 export * from "./provider.js";

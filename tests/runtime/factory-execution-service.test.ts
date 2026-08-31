@@ -20,6 +20,7 @@ import {
   FactoryEvidenceIngress
 } from "../../packages/runtime/src/application/factory-evidence-ingress.js";
 import { FactoryExecutionService } from "../../packages/runtime/src/application/factory-execution-service.js";
+import { FactoryExecutionRecoveryService } from "../../packages/runtime/src/application/factory-execution-recovery-service.js";
 import { FactoryPullRequestService } from "../../packages/runtime/src/application/factory-pull-request-service.js";
 import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent-session-name.js";
 import type {
@@ -48,6 +49,10 @@ import type {
   FactoryWorkspaceManager,
   FactoryWorkspacePatch
 } from "../../packages/runtime/src/domain/factory-workspace.js";
+import type {
+  FactoryWorkspaceRecoveryInput,
+  FactoryWorkspaceRecoveryReconciler
+} from "../../packages/runtime/src/domain/factory-workspace-recovery.js";
 import { storedConversationSchema } from "../../packages/runtime/src/domain/conversation-record.js";
 import { FileFactoryArtifactStore } from "../../packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.js";
 import {
@@ -55,6 +60,7 @@ import {
   NodeFactoryDocumentCodec
 } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
+import { SqliteFactoryExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { MemoryConversationRepository } from "../helpers/fakes.js";
 import {
   TEST_FACTORY_CONVERSATION_ID,
@@ -83,6 +89,14 @@ describe("FactoryExecutionService", () => {
       expect(result.reviews).toHaveLength(1);
       expect(fixture.workspaces.closedAttempts).toEqual([1]);
       expect(fixture.agents.roles).toEqual(["implementer", "reviewer"]);
+      await expect(fixture.executions.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "completed",
+        lastEvent: { kind: "execution-finished", taskState: "pr-proposed" }
+      });
+      const executionEvents = await fixture.executions.listEvents(TEST_FACTORY_TASK_ID);
+      expect(executionEvents.filter(({ kind }) => kind === "attempt-started")).toHaveLength(1);
+      expect(executionEvents.filter(({ kind }) => kind === "operation-started")).toHaveLength(9);
+      expect(executionEvents.filter(({ kind }) => kind === "operation-finished")).toHaveLength(9);
 
       await fixture.controlPlane.setAuthority({
         control: "pr-broker",
@@ -103,7 +117,7 @@ describe("FactoryExecutionService", () => {
       });
       expect(policy.decision).toMatchObject({ outcome: "allow", reasonCodes: [] });
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 
@@ -139,7 +153,7 @@ describe("FactoryExecutionService", () => {
       });
       expect(decision.decision.outcome).toBe("allow");
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 
@@ -153,7 +167,7 @@ describe("FactoryExecutionService", () => {
       expect(result.task.lastEvent.reasonCode).toBe("quality-gate-mutated-patch");
       expect(fixture.agents.roles).toEqual(["implementer"]);
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 
@@ -165,11 +179,65 @@ describe("FactoryExecutionService", () => {
       );
       await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
         state: "failed",
-        lastEvent: { reasonCode: "orchestration-error" }
+        lastEvent: { reasonCode: "execution-interrupted" }
       });
+      const eventCount = (await fixture.executions.listEvents(TEST_FACTORY_TASK_ID)).length;
+      await expect(
+        fixture.recovery.recover({
+          taskId: TEST_FACTORY_TASK_ID,
+          correlationId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        })
+      ).resolves.toMatchObject({ execution: { state: "abandoned" }, task: { state: "failed" } });
+      await expect(fixture.executions.listEvents(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(
+        eventCount
+      );
       expect(fixture.workspaces.closedAttempts).toEqual([]);
     } finally {
-      fixture.repository.close();
+      fixture.close();
+    }
+  });
+
+  it("keeps exact agent coordinates recoverable until process and workspace cleanup is proven", async () => {
+    const fixture = await executionFixture({ agentCleanupUnconfirmed: true });
+    try {
+      await expect(fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID })).rejects.toThrow(
+        /process cleanup could not be confirmed/u
+      );
+      await expect(fixture.executions.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "abandoned",
+        lastEvent: { kind: "execution-abandoned", operationId: fixture.agents.executionIds[0] }
+      });
+      expect(fixture.workspaceRecovery.inputs[0]).toMatchObject({
+        workspaceId: fixture.workspaces.workspaceIds[0],
+        processExecutionIds: [fixture.agents.executionIds[0]]
+      });
+      await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "failed",
+        lastEvent: { reasonCode: "execution-interrupted" }
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("does not terminalize or erase an interrupted execution when recovery is uncertain", async () => {
+    const fixture = await executionFixture({
+      failWorkspaceCreation: true,
+      recoveryUncertain: true
+    });
+    try {
+      await expect(fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID })).rejects.toThrow(
+        /durable recovery could not be confirmed/u
+      );
+      await expect(fixture.executions.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "workspace-active",
+        lastEvent: { kind: "attempt-started" }
+      });
+      await expect(fixture.repository.findById(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
+        state: "executing"
+      });
+    } finally {
+      fixture.close();
     }
   });
 
@@ -182,7 +250,7 @@ describe("FactoryExecutionService", () => {
         task: { lastEvent: { reasonCode: "independent-review-identity-missing" } }
       });
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 
@@ -197,7 +265,7 @@ describe("FactoryExecutionService", () => {
       expect(fixture.gates.executed).toHaveLength(4);
       expect(fixture.agents.roles).toEqual(["implementer"]);
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 });
@@ -230,7 +298,7 @@ describe("FactoryPullRequestService", () => {
       const latest = await fixture.repository.latestEvidence(TEST_FACTORY_TASK_ID);
       expect(latest?.bundle.items.map(({ kind }) => kind)).toEqual(["policy", "pull-request"]);
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 
@@ -258,7 +326,7 @@ describe("FactoryPullRequestService", () => {
       });
       expect(remote.opened).toHaveLength(0);
     } finally {
-      fixture.repository.close();
+      fixture.close();
     }
   });
 });
@@ -270,6 +338,8 @@ async function executionFixture(
     readonly failWorkspaceCreation?: boolean;
     readonly missingReviewerIdentity?: boolean;
     readonly gateWallClockSeconds?: number;
+    readonly agentCleanupUnconfirmed?: boolean;
+    readonly recoveryUncertain?: boolean;
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-execution-test-"));
@@ -280,7 +350,9 @@ async function executionFixture(
   const policyBundle = encodeCanonicalDocument(defaultFactoryPolicyBundle);
   const policy = new FactoryPolicyEngine(policyBundle.digest);
   const contract = executableContract(packages, policyBundle.digest);
-  const repository = new SqliteFactoryRepository(":memory:");
+  const databasePath = join(root, "agentlab.sqlite");
+  const repository = new SqliteFactoryRepository(databasePath);
+  const executions = new SqliteFactoryExecutionRepository(databasePath);
   const conversations = new MemoryConversationRepository();
   conversations.conversations.push(
     storedConversationSchema.parse({
@@ -392,7 +464,10 @@ async function executionFixture(
     options.mutateAfterGates === true,
     options.failWorkspaceCreation === true
   );
-  const agents = new FakeAgentExecutor(options.missingReviewerIdentity === true);
+  const agents = new FakeAgentExecutor(
+    options.missingReviewerIdentity === true,
+    options.agentCleanupUnconfirmed === true
+  );
   const gates = new FakeGateExecutor(
     options.failFirstGate === true,
     options.gateWallClockSeconds ?? 1
@@ -400,7 +475,22 @@ async function executionFixture(
   const providers: FactoryAgentProviderResolver = {
     resolve: (provider) => Promise.resolve({ executable: `/opt/${provider}`, version: "1.0.0" })
   };
+  const workspaceRecovery = new FakeWorkspaceRecovery(options.recoveryUncertain === true);
+  const recovery = new FactoryExecutionRecoveryService({
+    executions,
+    tasks: repository,
+    evidence: repository,
+    conversations,
+    controlPlane,
+    workspaces: workspaceRecovery,
+    documents,
+    now,
+    createId,
+    controlPlaneActorId: "agentlab-execution"
+  });
   const service = new FactoryExecutionService({
+    executions,
+    recovery,
     tasks: repository,
     evidence: repository,
     conversations,
@@ -416,7 +506,8 @@ async function executionFixture(
     providers,
     gates,
     now,
-    createId
+    createId,
+    controlPlaneActorId: "agentlab-execution"
   });
   const pullRequests = (remote: FactoryDraftPullRequestBroker) =>
     new FactoryPullRequestService({
@@ -435,13 +526,20 @@ async function executionFixture(
     });
   return {
     repository,
+    executions,
     controlPlane,
     service,
     pullRequests,
     workspaces,
     agents,
     gates,
-    task
+    workspaceRecovery,
+    recovery,
+    task,
+    close: () => {
+      executions.close();
+      repository.close();
+    }
   };
 }
 
@@ -449,6 +547,7 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
   public readonly createdAttempts: number[] = [];
   public readonly appliedAttempts: number[] = [];
   public readonly closedAttempts: number[] = [];
+  public readonly workspaceIds: string[] = [];
   readonly #collectCounts = new Map<number, number>();
 
   public constructor(
@@ -458,9 +557,10 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
 
   public create(input: CreateFactoryWorkspaceInput): Promise<FactoryWorkspace> {
     this.createdAttempts.push(input.attempt);
+    if (input.workspaceId !== undefined) this.workspaceIds.push(input.workspaceId);
     if (this.failCreation) return Promise.reject(new Error("workspace creation failed"));
     const workspace: FactoryWorkspace = {
-      id: `00000000-0000-4000-8000-${String(input.attempt).padStart(12, "0")}`,
+      id: input.workspaceId ?? `00000000-0000-4000-8000-${String(input.attempt).padStart(12, "0")}`,
       taskId: input.taskId,
       attempt: input.attempt,
       repositoryRoot: input.repositoryRoot,
@@ -489,8 +589,12 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
 
 class FakeAgentExecutor implements FactoryAgentExecutor {
   public readonly roles: string[] = [];
+  public readonly executionIds: string[] = [];
 
-  public constructor(private readonly missingReviewerIdentity: boolean) {}
+  public constructor(
+    private readonly missingReviewerIdentity: boolean,
+    private readonly cleanupUnconfirmed: boolean
+  ) {}
 
   public capabilities() {
     return [
@@ -517,6 +621,17 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
 
   public execute(input: FactoryAgentExecutionInput): Promise<FactoryAgentExecutionOutput> {
     this.roles.push(input.request.role);
+    this.executionIds.push(input.request.executionId);
+    if (this.cleanupUnconfirmed && input.request.role === "implementer") {
+      return Promise.resolve({
+        ...successfulRun(input.request, input.resourceLimits),
+        status: "failed",
+        finalOutput: null,
+        providerSessionId: null,
+        usageComplete: false,
+        errorCode: "process-cleanup-failed"
+      });
+    }
     return Promise.resolve(
       successfulRun(
         input.request,
@@ -527,9 +642,23 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
   }
 }
 
+class FakeWorkspaceRecovery implements FactoryWorkspaceRecoveryReconciler {
+  public readonly inputs: FactoryWorkspaceRecoveryInput[] = [];
+
+  public constructor(private readonly uncertain: boolean) {}
+
+  public reconcile(input: FactoryWorkspaceRecoveryInput) {
+    this.inputs.push(input);
+    return Promise.resolve(
+      this.uncertain
+        ? ({ status: "uncertain", reasonCode: "process-state-uncertain" } as const)
+        : ({ status: "inactive" } as const)
+    );
+  }
+}
+
 class FakeGateExecutor implements FactoryGateExecutor {
   readonly #calls = new Map<string, number>();
-  #isolationSequence = 1;
   public readonly executed: string[] = [];
 
   public constructor(
@@ -546,7 +675,6 @@ class FakeGateExecutor implements FactoryGateExecutor {
     const count = (this.#calls.get(input.gateId) ?? 0) + 1;
     this.#calls.set(input.gateId, count);
     const failed = this.failFirstGate && input.gateId === "format" && count === 1;
-    const isolationId = `55555555-5555-4555-8555-${String(this.#isolationSequence++).padStart(12, "0")}`;
     return Promise.resolve({
       gateId: input.gateId,
       evidenceKind:
@@ -560,7 +688,7 @@ class FakeGateExecutor implements FactoryGateExecutor {
       outputBytes: failed ? 4 : 2,
       stdout: failed ? "" : "ok",
       stderr: failed ? "fail" : "",
-      isolation: testIsolation(isolationId, input.resourceLimits)
+      isolation: testIsolation(input.isolationId, input.resourceLimits)
     });
   }
 }

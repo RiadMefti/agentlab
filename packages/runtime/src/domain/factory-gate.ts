@@ -17,6 +17,8 @@ export interface FactoryGateDefinition {
 
 export interface FactoryGateExecutionInput {
   readonly gateId: string;
+  /** Caller-owned durable identity persisted before the gate process may start. */
+  readonly isolationId: string;
   readonly workspace: FactoryWorkspace;
   readonly resourceLimits: FactoryResourceLimits;
 }
