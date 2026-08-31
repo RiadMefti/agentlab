@@ -75,6 +75,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-broker.ts",
         default: "./dist/local-factory-broker.js",
         types: "./dist/local-factory-broker.d.ts"
+      },
+      "./factory-worker": {
+        source: "packages/runtime/src/local-factory-worker.ts",
+        default: "./dist/local-factory-worker.js",
+        types: "./dist/local-factory-worker.d.ts"
       }
     }
   }
@@ -346,6 +351,7 @@ function compositionBoundaryViolations(
       description: "broker composition",
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-runtime.ts" ||
+        path === "packages/runtime/src/local-factory-worker.ts" ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -355,7 +361,20 @@ function compositionBoundaryViolations(
       description: "interactive composition",
       forbidden: (path: string) =>
         path === "packages/runtime/src/local-factory-broker.ts" ||
+        path === "packages/runtime/src/local-factory-worker.ts" ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
+    },
+    {
+      entry: "packages/runtime/src/local-factory-worker.ts",
+      description: "worker composition",
+      forbidden: (path: string) =>
+        path === "packages/runtime/src/local-runtime.ts" ||
+        path === "packages/runtime/src/local-factory-broker.ts" ||
+        path.startsWith("packages/runtime/src/infrastructure/github/") ||
+        path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+        path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
+        (path.startsWith("packages/runtime/src/infrastructure/providers/") &&
+          !factoryWorkerProviderModules.has(path))
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -401,13 +420,24 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/runtime/src/infrastructure/")) return "runtime-infrastructure";
   if (
     path === "packages/runtime/src/local-runtime.ts" ||
-    path === "packages/runtime/src/local-factory-broker.ts"
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts"
   ) {
     return "runtime-composition";
   }
   if (path.startsWith("apps/tui/src/")) return "tui";
   return null;
 }
+
+const factoryWorkerProviderModules = new Set([
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts"
+]);
 
 interface ProductionSourceInventory {
   readonly paths: readonly string[];

@@ -131,7 +131,8 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   Bun's native PTY.
 - `packages/runtime/src/local-runtime.ts` composes the interactive runtime;
   `local-factory-broker.ts` is a separate broker-only composition exported only through
-  `@agentlab/runtime/factory-broker`.
+  `@agentlab/runtime/factory-broker`; and `local-factory-worker.ts` is a credentialless execution
+  composition exported only through `@agentlab/runtime/factory-worker`.
 - `packages/contracts` owns provider, conversation, session, and dormant software-factory schemas
   shared across local layers.
 
@@ -143,16 +144,18 @@ lines held by the embedded terminal varies with encoded content. Focused tests e
 multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
-The repository also contains a tested, staged software-factory safety kernel and draft-PR broker. It
-is not connected to the interactive runtime, scheduled, or enabled. The only product-facing operator
-action is a separate, non-authorizing `agentlab factory broker-preflight --config <absolute-path>`
-command that makes no GitHub mutation; authority remains default-off, and the CLI cannot enable it
-or open a PR. Provider-neutral per-run cost accounting is policy-pinned and fail-closed, but its
-shipped live rate card is intentionally empty. Owner-only broker config v2 can reference a separate
-strict cost-policy file without exposing broker credentials to future workers. Normal database
-migration creates only inert local ledger tables. See
-[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases.
+The repository also contains a tested, staged software-factory safety kernel, credentialless local
+worker composition, and draft-PR broker. Neither factory composition is connected to the interactive
+runtime, scheduled, deployed, published, or enabled. The worker has a bounded serialized command
+port and read-only host preflight covering its pinned toolchain and owner-only storage roots, but no
+GitHub or authority-control capability. The only product CLI action is the separate, non-authorizing
+`agentlab factory broker-preflight --config <absolute-path>` command, which makes no GitHub
+mutation; authority remains default-off, and the CLI cannot enable it or open a PR. Provider-neutral
+per-run cost accounting is policy-pinned and fail-closed, and the shipped live rate card is
+intentionally empty. Owner-only worker and broker config can load the same separate strict
+cost-policy file without sharing broker credentials. No live factory task or PR has been created.
+See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented
+controls, activation blockers, and later phases.
 
 ## Development
 
