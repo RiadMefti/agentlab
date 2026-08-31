@@ -62,6 +62,12 @@ API:
   [secure use of GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions),
   and
   [artifact attestations](https://docs.github.com/en/actions/concepts/security/artifact-attestations).
+- GitHub's REST API exposes exact branch-reference and pull-request readback but no create-PR
+  idempotency key, so crash recovery must reconcile the deterministic branch/head/PR tuple. GitHub
+  App installation tokens can be restricted to selected repositories and permissions and expire
+  after one hour. See [Git references](https://docs.github.com/en/rest/git/refs),
+  [pull requests](https://docs.github.com/en/rest/pulls/pulls), and
+  [installation access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
 - SLSA requires provenance verification against expected builder, source, build type, and
   parameters; its higher source level requires two-party review and its higher build level requires
   isolation. See [source requirements](https://slsa.dev/spec/v1.2/source-requirements),
@@ -377,6 +383,25 @@ protected paths, patch size, required successful evidence, reviewer independence
 budget. It may then open or update only a draft PR. Broker limits bound title/body size, file count,
 labels, reviewers, and one PR per deduplication key.
 
+Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
+to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
+before the first remote side effect. Its five-event SQLite v8 journal is immutable and append-only:
+
+```text
+ready → dispatch-active → remote-open → evidence-recorded → completed
+```
+
+The Git commit generated from a replayed proposal is deterministic because the base, patch, title,
+and timestamp are pinned. The broker reuses an existing branch only when its head is exact; it
+reuses an existing PR only when its repository, branch, base, head, draft state, title, and body are
+exact. A crash after branch push resumes PR creation without another push. A lost successful API
+response is recovered by bounded branch-filtered PR readback. The application separately persists
+the validated remote record, authenticated evidence bundle digest, and exact `pr-open` task-event
+digest. Injected failures after each checkpoint prove that a retry creates neither a second commit
+nor a second PR. A checkpoint that observes revocation performs no new write. If revocation races an
+already in-flight call, the exact remote result is journaled but cannot authorize the task
+transition; the dispatch remains recoverable for operator action.
+
 PR CI checks the actual head SHA. A failure appends evidence and may create a bounded repair attempt
 in a fresh isolated worker; it cannot silently widen scope. The repaired patch repeats all gates and
 independent review. Exhausted budget becomes `needs-attention`.
@@ -466,13 +491,16 @@ isolation are implemented. Post-contract execution now has an immutable run head
 resource journal, caller-owned worktree/agent/gate identities, canonical agent requests, and
 deterministic restart recovery through the shared reconciler. The live sandbox, preparation
 recovery, and multi-operation execution recovery preflights pass on the current Linux development
-host. They are intentionally not wired into the public runtime or TUI. No live agent task or PR has
-been created by this code. Phase 4 activation remains blocked until repository governance requires
-at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
-to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
-provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
-activation change must run `test:factory-sandbox` in the supported target-host CI lane, configure
-protected-path ownership, and supply a separate short-lived broker identity.
+host. Draft-PR dispatch now also has an immutable exact-proposal run, SQLite v8 checkpoint journal,
+deterministic branch/PR reconciliation, and injected recovery tests spanning remote creation,
+evidence append, and task-ledger transition. These paths are intentionally not wired into the public
+runtime or TUI. No live agent task or PR has been created by this code. Phase 4 activation remains
+blocked until repository governance requires at least one approval, dismisses stale reviews,
+requires approval of the latest push, applies rules to administrators, forbids force-push/deletion,
+and requires the exact `verify` check. Complete provider cost accounting must also be configured; an
+incomplete usage record denies PR creation. The activation change must run `test:factory-sandbox` in
+the supported target-host CI lane, configure protected-path ownership, and supply a separate
+short-lived broker identity.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and

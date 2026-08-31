@@ -80,6 +80,72 @@ describe("GitHubFactoryPullRequestBroker", () => {
     expect(fixture.api.createdPullRequests).toBe(1);
   });
 
+  it("requires the exact branch and live draft before accepting durable remote evidence", async () => {
+    const fixture = brokerFixture();
+    const input = {
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    };
+    const opened = await fixture.broker.openDraft(input);
+
+    await expect(
+      fixture.broker.verifyDraft({ proposal: fixture.proposal, record: opened.record })
+    ).resolves.toBeUndefined();
+    fixture.api.mutatePullRequestTitle();
+    await expect(
+      fixture.broker.verifyDraft({ proposal: fixture.proposal, record: opened.record })
+    ).rejects.toThrow(/no longer matches/u);
+  });
+
+  it("does not treat an open PR with a missing broker branch as an idempotent success", async () => {
+    const fixture = brokerFixture();
+    const input = {
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    };
+    await fixture.broker.openDraft(input);
+    fixture.state.branchHead = null;
+
+    await expect(fixture.broker.openDraft(input)).rejects.toThrow(/does not match/u);
+    expect(fixture.runner.pushes).toBe(1);
+    expect(fixture.api.createdPullRequests).toBe(1);
+  });
+
+  it("resumes an exact branch left by a crash before PR creation without pushing again", async () => {
+    const fixture = brokerFixture({ failCreateBeforeRecordOnce: true });
+    const input = {
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    };
+
+    await expect(fixture.broker.openDraft(input)).rejects.toThrow(/retained for recovery/u);
+    await expect(fixture.broker.openDraft(input)).resolves.toMatchObject({
+      created: true,
+      record: { number: 42 }
+    });
+    expect(fixture.runner.pushes).toBe(1);
+    expect(fixture.api.createdPullRequests).toBe(1);
+  });
+
+  it("reconciles the exact draft when GitHub accepted creation but its response was lost", async () => {
+    const fixture = brokerFixture({ loseCreateResponseOnce: true });
+
+    await expect(
+      fixture.broker.openDraft({
+        proposal: fixture.proposal,
+        patch: fixture.patch,
+        repositoryRoot: fixture.repository
+      })
+    ).resolves.toMatchObject({ created: false, record: { number: 42 } });
+    expect(fixture.runner.pushes).toBe(1);
+    expect(fixture.api.createdPullRequests).toBe(1);
+    expect(fixture.api.closedPullRequests).toEqual([]);
+    expect(fixture.api.deletedBranches).toEqual([]);
+  });
+
   it("rejects different patch bytes before inspecting or writing the remote", async () => {
     const fixture = brokerFixture();
 
@@ -161,6 +227,8 @@ function brokerFixture(
   options: {
     readonly mismatchedCreatedHead?: boolean;
     readonly mismatchedCreatedRef?: boolean;
+    readonly failCreateBeforeRecordOnce?: boolean;
+    readonly loseCreateResponseOnce?: boolean;
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-github-broker-"));
@@ -189,7 +257,7 @@ function brokerFixture(
     gitExecutable,
     temporaryRoot: join(root, "broker")
   });
-  return { api, baseRevision, broker, patch, proposal, repository, runner };
+  return { api, baseRevision, broker, patch, proposal, repository, runner, state };
 }
 
 function proposalFor(baseRevision: string, patch: string): FactoryPullRequestProposal {
@@ -265,8 +333,18 @@ class FakeGitHubApi implements GitHubRestApi {
     private readonly options: {
       readonly mismatchedCreatedHead?: boolean;
       readonly mismatchedCreatedRef?: boolean;
+      readonly failCreateBeforeRecordOnce?: boolean;
+      readonly loseCreateResponseOnce?: boolean;
     }
   ) {}
+
+  #failedCreate = false;
+  #lostCreateResponse = false;
+
+  public mutatePullRequestTitle(): void {
+    if (this.#pullRequest === null) throw new Error("Fake remote has no pull request to mutate.");
+    this.#pullRequest = { ...this.#pullRequest, title: "mutated title" };
+  }
 
   public request(
     method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -306,6 +384,10 @@ class FakeGitHubApi implements GitHubRestApi {
     }
     if (method === "POST" && path.endsWith("/pulls")) {
       this.createdBody = body;
+      if (this.options.failCreateBeforeRecordOnce === true && !this.#failedCreate) {
+        this.#failedCreate = true;
+        return Promise.reject(new Error("Injected create request failure."));
+      }
       this.createdPullRequests += 1;
       this.#pullRequest = pullRequest(
         this.options.mismatchedCreatedHead === true ? "f".repeat(40) : requiredHead(this.state),
@@ -313,6 +395,10 @@ class FakeGitHubApi implements GitHubRestApi {
         "open",
         this.options.mismatchedCreatedRef === true ? "agentlab/other" : branchName
       );
+      if (this.options.loseCreateResponseOnce === true && !this.#lostCreateResponse) {
+        this.#lostCreateResponse = true;
+        return Promise.reject(new Error("Injected lost create response."));
+      }
       return Promise.resolve(this.#pullRequest);
     }
     if (method === "PATCH" && path.endsWith("/pulls/42")) {

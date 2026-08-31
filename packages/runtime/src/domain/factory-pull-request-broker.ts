@@ -22,6 +22,11 @@ export interface FactoryRemoteRepositorySnapshot {
   readonly governance: FactoryRepositoryGovernance;
 }
 
+export interface FactoryPullRequestBrokerIdentity {
+  readonly brokerId: string;
+  readonly repositoryId: string;
+}
+
 export interface OpenFactoryDraftPullRequestInput {
   readonly proposal: FactoryPullRequestProposal;
   readonly patch: string;
@@ -33,9 +38,16 @@ export interface OpenFactoryDraftPullRequestResult {
   readonly created: boolean;
 }
 
+export interface VerifyFactoryDraftPullRequestInput {
+  readonly proposal: FactoryPullRequestProposal;
+  readonly record: FactoryPullRequestRecord;
+}
+
 /** Sole remote-write port. Implementations carry no model/provider credential. */
 export interface FactoryDraftPullRequestBroker {
+  identity(): FactoryPullRequestBrokerIdentity;
   inspect(repositoryId: string): Promise<FactoryRemoteRepositorySnapshot>;
   openDraft(input: OpenFactoryDraftPullRequestInput): Promise<OpenFactoryDraftPullRequestResult>;
+  verifyDraft(input: VerifyFactoryDraftPullRequestInput): Promise<void>;
   closeDraft(record: FactoryPullRequestRecord, reason: string): Promise<void>;
 }

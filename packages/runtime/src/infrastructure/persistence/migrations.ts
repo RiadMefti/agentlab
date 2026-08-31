@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 7;
+export const latestSchemaVersion = 8;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -972,6 +972,308 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 7;
+      COMMIT;
+    `);
+  }
+
+  if (version < 8) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_pull_request_dispatches (
+        dispatch_id TEXT PRIMARY KEY CHECK (length(dispatch_id) = 36),
+        dispatch_digest TEXT NOT NULL UNIQUE CHECK (
+          length(dispatch_digest) = 71 AND substr(dispatch_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL UNIQUE REFERENCES factory_task_contracts(task_id),
+        contract_digest TEXT NOT NULL CHECK (
+          length(contract_digest) = 71 AND substr(contract_digest, 1, 7) = 'sha256:'
+        ),
+        proposal_digest TEXT NOT NULL UNIQUE CHECK (
+          length(proposal_digest) = 71 AND substr(proposal_digest, 1, 7) = 'sha256:'
+        ),
+        broker_id TEXT NOT NULL CHECK (length(broker_id) BETWEEN 1 AND 128),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        branch_name TEXT NOT NULL CHECK (length(branch_name) BETWEEN 1 AND 128),
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        dispatch_json TEXT NOT NULL CHECK (
+          length(dispatch_json) BETWEEN 2 AND 2097152 AND json_valid(dispatch_json)
+        ),
+        UNIQUE(repository_id, branch_name)
+      ) STRICT;
+      CREATE INDEX factory_pull_request_dispatches_recoverable_idx
+        ON factory_pull_request_dispatches(created_at, task_id);
+
+      CREATE TABLE factory_pull_request_dispatch_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        dispatch_id TEXT NOT NULL REFERENCES factory_pull_request_dispatches(dispatch_id),
+        dispatch_digest TEXT NOT NULL CHECK (
+          length(dispatch_digest) = 71 AND substr(dispatch_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL,
+        contract_digest TEXT NOT NULL CHECK (
+          length(contract_digest) = 71 AND substr(contract_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 5),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'dispatch-started', 'remote-observed', 'evidence-recorded', 'task-recorded'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'dispatch-active', 'remote-open', 'evidence-recorded', 'completed'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'dispatch-active', 'remote-open', 'evidence-recorded', 'completed'
+        )),
+        record_digest TEXT CHECK (
+          record_digest IS NULL OR
+          (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')
+        ),
+        pull_request_number INTEGER CHECK (
+          pull_request_number IS NULL OR pull_request_number >= 1
+        ),
+        head_revision TEXT CHECK (
+          head_revision IS NULL OR length(head_revision) IN (40, 64)
+        ),
+        remote_created INTEGER CHECK (remote_created IS NULL OR remote_created IN (0, 1)),
+        evidence_bundle_digest TEXT REFERENCES factory_evidence_bundles(bundle_digest),
+        task_event_digest TEXT REFERENCES factory_task_events(event_digest),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 2097152 AND json_valid(event_json)
+        ),
+        UNIQUE(dispatch_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_pull_request_dispatch_events_dispatch_idx
+        ON factory_pull_request_dispatch_events(dispatch_id, sequence);
+      CREATE INDEX factory_pull_request_dispatch_events_task_idx
+        ON factory_pull_request_dispatch_events(task_id, sequence);
+
+      CREATE TRIGGER factory_pull_request_dispatches_no_update
+      BEFORE UPDATE ON factory_pull_request_dispatches
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatches are immutable');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatches_no_delete
+      BEFORE DELETE ON factory_pull_request_dispatches
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatches are immutable');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatches_contract_guard
+      BEFORE INSERT ON factory_pull_request_dispatches
+      WHEN
+        NEW.contract_digest != (
+          SELECT contract_digest FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.repository_id != (
+          SELECT repository_id FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        NEW.base_revision != (
+          SELECT base_revision FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.dispatch_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.dispatch_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.dispatch_json, '$.proposalDigest') IS NOT NEW.proposal_digest OR
+        json_extract(NEW.dispatch_json, '$.brokerId') IS NOT NEW.broker_id OR
+        json_extract(NEW.dispatch_json, '$.proposal.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.dispatch_json, '$.proposal.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.dispatch_json, '$.proposal.branchName') IS NOT NEW.branch_name OR
+        json_extract(NEW.dispatch_json, '$.proposal.createdAt') IS NOT NEW.created_at
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch contract mismatch');
+      END;
+
+      CREATE TRIGGER factory_pull_request_dispatch_events_no_update
+      BEFORE UPDATE ON factory_pull_request_dispatch_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch events are append-only');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_no_delete
+      BEFORE DELETE ON factory_pull_request_dispatch_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch events are append-only');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_identity_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN
+        NEW.dispatch_digest != (
+          SELECT dispatch_digest FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        NEW.task_id != (
+          SELECT task_id FROM factory_pull_request_dispatches WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        NEW.contract_digest != (
+          SELECT contract_digest FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        NEW.correlation_id != (
+          SELECT correlation_id FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch event identity mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_sequence_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_pull_request_dispatch_events
+        WHERE dispatch_id = NEW.dispatch_id
+      ), 1)
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch event sequence mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_chain_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.previous_event_digest IS NOT NULL) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_pull_request_dispatch_events
+          WHERE dispatch_id = NEW.dispatch_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch digest chain mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_from_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.from_state IS NOT NULL) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_pull_request_dispatch_events
+          WHERE dispatch_id = NEW.dispatch_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch previous state mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_transition_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'dispatch-started' AND
+          NEW.from_state = 'ready' AND NEW.to_state = 'dispatch-active') OR
+        (NEW.kind = 'remote-observed' AND
+          NEW.from_state = 'dispatch-active' AND NEW.to_state = 'remote-open') OR
+        (NEW.kind = 'evidence-recorded' AND
+          NEW.from_state = 'remote-open' AND NEW.to_state = 'evidence-recorded') OR
+        (NEW.kind = 'task-recorded' AND
+          NEW.from_state = 'evidence-recorded' AND NEW.to_state = 'completed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory pull-request dispatch transition');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_fields_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'dispatch-started') AND
+          NEW.record_digest IS NULL AND NEW.pull_request_number IS NULL AND
+          NEW.head_revision IS NULL AND NEW.remote_created IS NULL AND
+          NEW.evidence_bundle_digest IS NULL AND NEW.task_event_digest IS NULL) OR
+        (NEW.kind = 'remote-observed' AND
+          NEW.record_digest IS NOT NULL AND NEW.pull_request_number IS NOT NULL AND
+          NEW.head_revision IS NOT NULL AND NEW.remote_created IS NOT NULL AND
+          NEW.evidence_bundle_digest IS NULL AND NEW.task_event_digest IS NULL) OR
+        (NEW.kind = 'evidence-recorded' AND
+          NEW.record_digest IS NULL AND NEW.pull_request_number IS NULL AND
+          NEW.head_revision IS NULL AND NEW.remote_created IS NULL AND
+          NEW.evidence_bundle_digest IS NOT NULL AND NEW.task_event_digest IS NULL) OR
+        (NEW.kind = 'task-recorded' AND
+          NEW.record_digest IS NULL AND NEW.pull_request_number IS NULL AND
+          NEW.head_revision IS NULL AND NEW.remote_created IS NULL AND
+          NEW.evidence_bundle_digest IS NULL AND NEW.task_event_digest IS NOT NULL)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch event fields mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_remote_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NEW.kind = 'remote-observed' AND (
+        json_extract(NEW.event_json, '$.record.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.record.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.event_json, '$.record.proposalDigest') IS NOT (
+          SELECT proposal_digest FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        json_extract(NEW.event_json, '$.record.repositoryId') IS NOT (
+          SELECT repository_id FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        json_extract(NEW.event_json, '$.record.baseRevision') IS NOT (
+          SELECT base_revision FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        json_extract(NEW.event_json, '$.record.branchName') IS NOT (
+          SELECT branch_name FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        json_extract(NEW.event_json, '$.record.brokerId') IS NOT (
+          SELECT broker_id FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        ) OR
+        json_extract(NEW.event_json, '$.record.number') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.event_json, '$.record.headRevision') IS NOT NEW.head_revision
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request remote record mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_evidence_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NEW.kind = 'evidence-recorded' AND (
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_evidence_bundles
+          WHERE bundle_digest = NEW.evidence_bundle_digest
+        ) OR
+        NEW.contract_digest IS NOT (
+          SELECT contract_digest FROM factory_evidence_bundles
+          WHERE bundle_digest = NEW.evidence_bundle_digest
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request evidence identity mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_task_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN NEW.kind = 'task-recorded' AND (
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_task_events WHERE event_digest = NEW.task_event_digest
+        ) OR
+        (SELECT to_state FROM factory_task_events WHERE event_digest = NEW.task_event_digest) != 'pr-open' OR
+        json_extract((
+          SELECT event_json FROM factory_task_events WHERE event_digest = NEW.task_event_digest
+        ), '$.evidenceBundleDigest') IS NOT (
+          SELECT evidence_bundle_digest FROM factory_pull_request_dispatch_events
+          WHERE dispatch_id = NEW.dispatch_id ORDER BY sequence DESC LIMIT 1
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request task event mismatch');
+      END;
+      CREATE TRIGGER factory_pull_request_dispatch_events_timestamp_guard
+      BEFORE INSERT ON factory_pull_request_dispatch_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at != (
+          SELECT created_at FROM factory_pull_request_dispatches
+          WHERE dispatch_id = NEW.dispatch_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_pull_request_dispatch_events
+          WHERE dispatch_id = NEW.dispatch_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 8;
       COMMIT;
     `);
   }
