@@ -4,7 +4,13 @@ import {
   evidenceBundleSchema,
   factoryAgentRunRequestSchema,
   factoryAgentRunRecordSchema,
+  factoryCanaryApprovalSchema,
+  factoryCanaryCohortSchema,
+  factoryConfigurationCandidateSchema,
   factoryControlEventSchema,
+  factoryEvalAssessmentSchema,
+  factoryEvalRunSchema,
+  factoryEvalSuiteSchema,
   factoryExecutionEventSchema,
   factoryExecutionRunSchema,
   factoryGateObservationSchema,
@@ -99,6 +105,30 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public controlEvent(input: unknown) {
     return encodeCanonicalDocument(factoryControlEventSchema.parse(input));
+  }
+
+  public configurationCandidate(input: unknown) {
+    return encodeCanonicalDocument(factoryConfigurationCandidateSchema.parse(input));
+  }
+
+  public evalSuite(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSuiteSchema.parse(input));
+  }
+
+  public evalRun(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalRunSchema.parse(input));
+  }
+
+  public evalAssessment(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAssessmentSchema.parse(input));
+  }
+
+  public canaryApproval(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryApprovalSchema.parse(input));
+  }
+
+  public canaryCohort(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryCohortSchema.parse(input));
   }
 
   public executionRun(input: unknown) {

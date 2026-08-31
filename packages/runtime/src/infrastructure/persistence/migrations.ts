@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 11;
+export const latestSchemaVersion = 12;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -2203,6 +2203,250 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 11;
+      COMMIT;
+    `);
+  }
+
+  if (version < 12) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        suite_digest TEXT NOT NULL CHECK (
+          length(suite_digest) = 71 AND substr(suite_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_candidate_digest TEXT NOT NULL CHECK (
+          length(baseline_candidate_digest) = 71 AND
+          substr(baseline_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        CHECK (started_at <= completed_at)
+      ) STRICT;
+
+      CREATE TABLE factory_eval_assessments (
+        assessment_id TEXT PRIMARY KEY CHECK (length(assessment_id) = 36),
+        assessment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(assessment_digest) = 71 AND substr(assessment_digest, 1, 7) = 'sha256:'
+        ),
+        run_id TEXT NOT NULL UNIQUE REFERENCES factory_eval_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (decision IN ('pass', 'deny')),
+        assessed_at TEXT NOT NULL,
+        assessment_json TEXT NOT NULL CHECK (
+          length(assessment_json) BETWEEN 2 AND 1048576 AND json_valid(assessment_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_eval_assessments_challenger_idx
+        ON factory_eval_assessments(
+          json_extract(assessment_json, '$.challengerCandidateDigest'), assessed_at
+        );
+
+      CREATE TABLE factory_canary_approvals (
+        approval_id TEXT PRIMARY KEY CHECK (length(approval_id) = 36),
+        approval_digest TEXT NOT NULL UNIQUE CHECK (
+          length(approval_digest) = 71 AND substr(approval_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        actor_id TEXT NOT NULL CHECK (length(actor_id) BETWEEN 1 AND 128),
+        occurred_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        approval_json TEXT NOT NULL CHECK (
+          length(approval_json) BETWEEN 2 AND 1048576 AND json_valid(approval_json)
+        ),
+        CHECK (occurred_at < expires_at)
+      ) STRICT;
+
+      CREATE TABLE factory_canary_cohorts (
+        cohort_id TEXT PRIMARY KEY CHECK (length(cohort_id) = 36),
+        cohort_digest TEXT NOT NULL UNIQUE CHECK (
+          length(cohort_digest) = 71 AND substr(cohort_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        approval_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_canary_approvals(approval_digest),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        cohort_json TEXT NOT NULL CHECK (
+          length(cohort_json) BETWEEN 2 AND 1048576 AND json_valid(cohort_json)
+        ),
+        CHECK (issued_at < expires_at)
+      ) STRICT;
+
+      CREATE TRIGGER factory_eval_runs_no_update
+      BEFORE UPDATE ON factory_eval_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval runs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_runs_no_delete
+      BEFORE DELETE ON factory_eval_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval runs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_runs_identity_guard
+      BEFORE INSERT ON factory_eval_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.suiteDigest') IS NOT NEW.suite_digest OR
+        json_extract(NEW.run_json, '$.baselineCandidateDigest') IS NOT NEW.baseline_candidate_digest OR
+        json_extract(NEW.run_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.run_json, '$.startedAt') IS NOT NEW.started_at OR
+        json_extract(NEW.run_json, '$.completedAt') IS NOT NEW.completed_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_eval_assessments_no_update
+      BEFORE UPDATE ON factory_eval_assessments
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessments are immutable');
+      END;
+      CREATE TRIGGER factory_eval_assessments_no_delete
+      BEFORE DELETE ON factory_eval_assessments
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessments are immutable');
+      END;
+      CREATE TRIGGER factory_eval_assessments_identity_guard
+      BEFORE INSERT ON factory_eval_assessments
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.assessmentId') IS NOT NEW.assessment_id OR
+        json_extract(NEW.assessment_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.assessment_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.assessment_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.assessment_json, '$.assessedAt') IS NOT NEW.assessed_at OR
+        json_extract(NEW.assessment_json, '$.suiteDigest') IS NOT (
+          SELECT suite_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.baselineCandidateDigest') IS NOT (
+          SELECT baseline_candidate_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.challengerCandidateDigest') IS NOT (
+          SELECT challenger_candidate_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessment identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_approvals_no_update
+      BEFORE UPDATE ON factory_canary_approvals
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approvals are immutable');
+      END;
+      CREATE TRIGGER factory_canary_approvals_no_delete
+      BEFORE DELETE ON factory_canary_approvals
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approvals are immutable');
+      END;
+      CREATE TRIGGER factory_canary_approvals_identity_guard
+      BEFORE INSERT ON factory_canary_approvals
+      WHEN
+        (SELECT decision FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest) IS NOT 'pass' OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT json_extract(assessment_json, '$.challengerCandidateDigest')
+          FROM factory_eval_assessments WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        json_extract(NEW.approval_json, '$.approvalId') IS NOT NEW.approval_id OR
+        json_extract(NEW.approval_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.approval_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.approval_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.approval_json, '$.actor.id') IS NOT NEW.actor_id OR
+        json_extract(NEW.approval_json, '$.actor.kind') IS NOT 'human' OR
+        json_extract(NEW.approval_json, '$.actor.role') IS NOT 'release-controller' OR
+        json_extract(NEW.approval_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.approval_json, '$.expiresAt') IS NOT NEW.expires_at
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approval identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_cohorts_no_update
+      BEFORE UPDATE ON factory_canary_cohorts
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohorts are immutable');
+      END;
+      CREATE TRIGGER factory_canary_cohorts_no_delete
+      BEFORE DELETE ON factory_canary_cohorts
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohorts are immutable');
+      END;
+      CREATE TRIGGER factory_canary_cohorts_identity_guard
+      BEFORE INSERT ON factory_canary_cohorts
+      WHEN
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.issued_at IS NOT (
+          SELECT occurred_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.expires_at IS NOT (
+          SELECT expires_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        json_extract(NEW.cohort_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.cohort_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.cohort_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.cohort_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.cohort_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.cohort_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.cohort_json, '$.issuedAt') IS NOT NEW.issued_at OR
+        json_extract(NEW.cohort_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.cohort_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.cohort_json, '$.release') IS NOT 0
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort identity mismatch');
+      END;
+
+      PRAGMA user_version = 12;
       COMMIT;
     `);
   }

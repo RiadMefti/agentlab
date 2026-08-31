@@ -1,6 +1,12 @@
 import type {
   EvidenceBundle,
   FactoryControlEvent,
+  FactoryCanaryApproval,
+  FactoryCanaryCohort,
+  FactoryConfigurationCandidate,
+  FactoryEvalAssessment,
+  FactoryEvalRun,
+  FactoryEvalSuite,
   FactoryAgentRunRequest,
   FactoryExecutionEvent,
   FactoryExecutionRun,
@@ -63,6 +69,12 @@ export interface FactoryDocumentCodec {
   taskEvent(input: unknown): CanonicalFactoryDocument<TaskEvent>;
   evidenceBundle(input: unknown): CanonicalFactoryDocument<EvidenceBundle>;
   controlEvent(input: unknown): CanonicalFactoryDocument<FactoryControlEvent>;
+  configurationCandidate(input: unknown): CanonicalFactoryDocument<FactoryConfigurationCandidate>;
+  evalSuite(input: unknown): CanonicalFactoryDocument<FactoryEvalSuite>;
+  evalRun(input: unknown): CanonicalFactoryDocument<FactoryEvalRun>;
+  evalAssessment(input: unknown): CanonicalFactoryDocument<FactoryEvalAssessment>;
+  canaryApproval(input: unknown): CanonicalFactoryDocument<FactoryCanaryApproval>;
+  canaryCohort(input: unknown): CanonicalFactoryDocument<FactoryCanaryCohort>;
   executionRun(input: unknown): CanonicalFactoryDocument<FactoryExecutionRun>;
   executionEvent(input: unknown): CanonicalFactoryDocument<FactoryExecutionEvent>;
   policyDecision(input: unknown): CanonicalFactoryDocument<FactoryPolicyDecision>;

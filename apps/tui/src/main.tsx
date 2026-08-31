@@ -39,6 +39,30 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-eval-assess") {
+    const { runFactoryEvalAssess } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalAssess(
+      action.configPath,
+      action.runPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-inspect") {
+    const { runFactoryEvalInspect } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalInspect(action.configPath, action.assessmentDigest);
+    return;
+  }
+  if (action.kind === "factory-canary-authorize") {
+    const { runFactoryCanaryAuthorize } = await import("./run-factory-canary-authority.js");
+    process.exitCode = await runFactoryCanaryAuthorize(
+      action.configPath,
+      action.assessmentDigest,
+      action.requestPath,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-broker-preflight") {
     const { runFactoryBrokerPreflight } = await import("./run-factory-broker-preflight.js");
     process.exitCode = await runFactoryBrokerPreflight(action.configPath);

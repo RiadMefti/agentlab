@@ -137,7 +137,18 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   `@agentlab/runtime/factory-authority`; it can compare-and-set scheduler and broker switches but
   has no scheduler execution, provider, process, or GitHub port. The separate
   `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local feature or
-  bug reports under repository-owned policy; it has no model or remote authority.
+  bug reports under repository-owned policy; it has no model or remote authority. The credentialless
+  `@agentlab/runtime/factory-evaluator` records complete matched eval reports and deterministic
+  assessments, while the separate human-only `@agentlab/runtime/factory-canary-authority` can issue
+  only an expiring R0/R1 cohort with `autoMerge:false` and `release:false`. Neither can execute a
+  model, contact GitHub, merge, or release.
+- `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
+  candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
+  regression, flake, cost, and latency metrics from raw samples, and atomically records one
+  pass/deny assessment. `eval-inspect` emits the compact immutable result without samples or traces.
+- `agentlab factory canary-authorize --config ... --assessment ... --request ... --confirm-authorize-canary`
+  requires a passing assessment and separate owner-only human request, then records one bounded
+  non-executing cohort. No shipped component consumes that cohort yet.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
   reconciles one exact daily UTC slot from an owner-only worker v2 config. SQLite v11 durably claims
   each scheduled request before model work, reuses that correlation after interruption, reserves the
@@ -182,30 +193,35 @@ multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
 The repository also contains a tested, staged software-factory safety kernel, governed local intake,
-credentialless local worker composition, human-only authority composition, bounded daily scheduler,
-and draft-PR broker. None is connected to the interactive runtime. No live schedule policy, timer,
-worker, broker, or authority configuration is provisioned or enabled. Intake accepts a strict
-owner-only `feature` or `bug` submission, derives task identity and the current Git base itself,
-verifies every pinned skill package and exact-model cost rule, and registers an immutable
-preparation journal only after literal confirmation and an operator-pinned policy digest. A distinct
-`--confirm-register-scheduled` confirmation marks requests eligible for scheduler selection. The
-worker has a bounded serialized command port and read-only host preflight covering its pinned
-toolchain, schedule-policy digest, and owner-only storage roots, but no GitHub or authority-control
-capability. Its manual task runner, daily scheduler, and authorization-bound PR repair runner are
-crash-resumable and stop before remote writes. Separate CLI commands inspect local authority and
-compare-and-set the scheduler and broker switches independently; that human-only process cannot run
-agents or contact GitHub. The two remote-write commands require an exact task UUID, an
-operator-pinned policy digest, and literal confirmation: one opens the initial draft and one
-advances an authorization-bound repaired branch. Both invoke only the broker after a clean
+credentialless local worker and evaluator compositions, two human-only authority compositions,
+bounded daily scheduler, and draft-PR broker. None is connected to the interactive runtime. No live
+schedule/eval policy, timer, worker, evaluator, broker, or authority configuration is provisioned or
+enabled. Intake accepts a strict owner-only `feature` or `bug` submission, derives task identity and
+the current Git base itself, verifies every pinned skill package and exact-model cost rule, and
+registers an immutable preparation journal only after literal confirmation and an operator-pinned
+policy digest. A distinct `--confirm-register-scheduled` confirmation marks requests eligible for
+scheduler selection. The worker has a bounded serialized command port and read-only host preflight
+covering its pinned toolchain, schedule-policy digest, and owner-only storage roots, but no GitHub
+or authority-control capability. Its manual task runner, daily scheduler, and authorization-bound PR
+repair runner are crash-resumable and stop before remote writes. Separate CLI commands inspect local
+authority and compare-and-set the scheduler and broker switches independently; that human-only
+process cannot run agents or contact GitHub. The two remote-write commands require an exact task
+UUID, an operator-pinned policy digest, and literal confirmation: one opens the initial draft and
+one advances an authorization-bound repaired branch. Both invoke only the broker after a clean
 preflight, and their inner services recheck policy, evidence, base revision, governance, and the
-broker kill switch. Both switches remain default-off. Provider-neutral per-run and per-tick
-reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
+broker kill switch. Both switches remain default-off. The eval slice accepts a trusted owner-only
+matched report and can issue a structurally non-merge/non-release cohort after human sample review,
+but it does not yet provide the harness producer or a cohort consumer. Provider-neutral per-run and
+per-tick reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
 intentionally empty. Owner-only worker and broker config can load the same separate strict
 cost-policy file without sharing broker credentials. The current repository governance blocks the
 write commands. No live factory task or PR has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases. The dormant scheduler ceremony and exact limitations are in
-[Local factory scheduler operations](docs/factory-operations.md).
+activation blockers, and later phases, and
+[ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
+separation. The dormant procedures are in
+[Local factory scheduler operations](docs/factory-operations.md) and
+[Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development
 

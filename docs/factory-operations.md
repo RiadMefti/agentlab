@@ -112,5 +112,9 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, eval promotion gate, auto-broker, merge, canary, rollback controller, or
-incident automation is shipped. Those remain required before calling the factory self-maintaining.
+maintenance discovery, attested eval-harness producer, cohort consumer, auto-broker, merge,
+telemetry-driven canary, rollback controller, or incident automation is shipped. A separate dormant
+deterministic assessment and human non-release cohort ledger now exists, but it cannot schedule or
+authorize work by itself. See
+[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
+are required before calling the factory self-maintaining.
