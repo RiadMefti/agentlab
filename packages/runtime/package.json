@@ -23,6 +23,14 @@
     "./factory-intake": {
       "types": "./dist/local-factory-intake.d.ts",
       "default": "./dist/local-factory-intake.js"
+    },
+    "./factory-evaluator": {
+      "types": "./dist/local-factory-evaluator.d.ts",
+      "default": "./dist/local-factory-evaluator.js"
+    },
+    "./factory-canary-authority": {
+      "types": "./dist/local-factory-canary-authority.d.ts",
+      "default": "./dist/local-factory-canary-authority.js"
     }
   },
   "files": [

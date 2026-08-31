@@ -20,6 +20,24 @@ export type CliAction =
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
   | {
+      readonly kind: "factory-eval-assess";
+      readonly configPath: string;
+      readonly runPath: string;
+      readonly confirmation: "assess-eval";
+    }
+  | {
+      readonly kind: "factory-eval-inspect";
+      readonly configPath: string;
+      readonly assessmentDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-canary-authorize";
+      readonly configPath: string;
+      readonly assessmentDigest: `sha256:${string}`;
+      readonly requestPath: string;
+      readonly confirmation: "authorize-canary";
+    }
+  | {
       readonly kind: "factory-scheduler-tick";
       readonly configPath: string;
       readonly expectedSchedulePolicyDigest: `sha256:${string}`;
@@ -94,6 +112,59 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 7 &&
+    input[0] === "factory" &&
+    input[1] === "eval-assess" &&
+    input[2] === "--config" &&
+    input[4] === "--run" &&
+    input[6] === "--confirm-assess"
+  ) {
+    const configPath = input[3];
+    const runPath = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
+      return { kind: "factory-eval-assess", configPath, runPath, confirmation: "assess-eval" };
+    }
+  }
+  if (
+    input.length === 6 &&
+    input[0] === "factory" &&
+    input[1] === "eval-inspect" &&
+    input[2] === "--config" &&
+    input[4] === "--assessment"
+  ) {
+    const configPath = input[3];
+    const assessmentDigest = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isSha256Digest(assessmentDigest)) {
+      return { kind: "factory-eval-inspect", configPath, assessmentDigest };
+    }
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "canary-authorize" &&
+    input[2] === "--config" &&
+    input[4] === "--assessment" &&
+    input[6] === "--request" &&
+    input[8] === "--confirm-authorize-canary"
+  ) {
+    const configPath = input[3];
+    const assessmentDigest = input[5];
+    const requestPath = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(assessmentDigest) &&
+      isNormalizedAbsolutePath(requestPath)
+    ) {
+      return {
+        kind: "factory-canary-authorize",
+        configPath,
+        assessmentDigest,
+        requestPath,
+        confirmation: "authorize-canary"
+      };
+    }
   }
   if (
     input.length === 8 &&
@@ -425,7 +496,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-assess ...|eval-inspect ...|canary-authorize ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -475,6 +546,12 @@ Factory authority:
       Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
   agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register[-scheduled]
       Register one owner-authored feature or bug report for explicit or autonomous execution.
+  agentlab factory eval-assess --config <absolute-path> --run <absolute-path> --confirm-assess
+      Record complete matched trials and compute a deterministic promotion assessment; no model or remote access.
+  agentlab factory eval-inspect --config <absolute-path> --assessment <sha256>
+      Inspect compact metrics and policy reasons for one immutable assessment.
+  agentlab factory canary-authorize --config <absolute-path> --assessment <sha256> --request <absolute-path> --confirm-authorize-canary
+      Issue one human-reviewed, expiring R0/R1 cohort that structurally forbids merge and release.
   agentlab factory authority-status --config <absolute-path>
       Inspect local scheduler and draft-PR authority plus both immutable event histories.
   agentlab factory scheduler-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-scheduler

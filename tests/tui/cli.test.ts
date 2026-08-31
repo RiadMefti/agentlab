@@ -62,6 +62,82 @@ describe("terminal CLI", () => {
     });
   });
 
+  it("requires exact eval and human canary authority coordinates", () => {
+    const assessment = `sha256:${"a".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "eval-assess",
+        "--config",
+        "/private/agentlab/evaluator.json",
+        "--run",
+        "/private/agentlab/eval-run.json",
+        "--confirm-assess"
+      ])
+    ).toEqual({
+      kind: "factory-eval-assess",
+      configPath: "/private/agentlab/evaluator.json",
+      runPath: "/private/agentlab/eval-run.json",
+      confirmation: "assess-eval"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "eval-inspect",
+        "--config",
+        "/private/agentlab/evaluator.json",
+        "--assessment",
+        assessment
+      ])
+    ).toEqual({
+      kind: "factory-eval-inspect",
+      configPath: "/private/agentlab/evaluator.json",
+      assessmentDigest: assessment
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "canary-authorize",
+        "--config",
+        "/private/agentlab/canary.json",
+        "--assessment",
+        assessment,
+        "--request",
+        "/private/agentlab/canary-request.json",
+        "--confirm-authorize-canary"
+      ])
+    ).toEqual({
+      kind: "factory-canary-authorize",
+      configPath: "/private/agentlab/canary.json",
+      assessmentDigest: assessment,
+      requestPath: "/private/agentlab/canary-request.json",
+      confirmation: "authorize-canary"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "eval-assess",
+        "--config",
+        "/private/agentlab/evaluator.json",
+        "--run",
+        "/private/agentlab/eval-run.json"
+      ])
+    ).toThrow(/Usage/u);
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "canary-authorize",
+        "--config",
+        "/private/agentlab/canary.json",
+        "--assessment",
+        "not-a-digest",
+        "--request",
+        "/private/agentlab/canary-request.json",
+        "--confirm-authorize-canary"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires exact request, policy pin, and confirmation for factory intake", () => {
     const policy = `sha256:${"a".repeat(64)}`;
     expect(

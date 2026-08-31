@@ -18,12 +18,13 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use four
+The interactive product is local-only and single-process. Optional factory operations use six
 separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
-authority operator, a credential-bearing draft-PR broker, and a credentialless governed intake
-operator. Only the broker may make explicit GitHub API calls; none is loaded into the interactive
-runtime. AgentLab has no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote
-mode, app command language, MCP bridge, or provider-session translation layer.
+switch operator, a credential-bearing draft-PR broker, a credentialless governed intake operator, a
+credentialless deterministic evaluator, and a separate human canary-authority operator. Only the
+broker may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has
+no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command
+language, MCP bridge, or provider-session translation layer.
 
 ## Two paths
 
@@ -50,19 +51,20 @@ attempts remain workers beneath that conversation's single captain, and provider
 stays behind ports. Deterministic code—not captain instructions—owns task state, capabilities,
 budgets, gates, evidence, and remote authority.
 
-The source tree now contains the dormant stages 1–4 safety path plus bounded local scheduler
-admission: strict contracts; an immutable SQLite task/evidence ledger; deterministic risk policy and
-kill switches; content-addressed artifacts; exact-base disposable worktrees; bounded provider-native
-implement, repair, and independent-review adapters; sandboxed deterministic gates; authenticated
-evidence channels; and a separate GitHub adapter that can reconstruct one exact patch and request
-only a draft PR after rechecking repository governance. Factory policy 1.3 conservatively classifies
-the complete allowed write scope before execution, binds preparation evidence to the compiled
-contract, and pins per-tier process-tree limits. Every agent or gate executor requires an injected
-OS isolator; the Linux adapter creates a unique transient systemd user scope with cgroup CPU,
-memory, swap, and task ceilings and has no unbounded fallback. The wrapper strips its user-manager
-environment before starting the target. Deterministic gates run Bubblewrap inside that scope. The
-model-bearing subprocess environment is allowlisted and excludes repository, cloud, and package
-credentials. The broker credential is acquired only at the separate broker boundary.
+The source tree now contains the dormant stages 1–4 safety path, bounded local scheduler admission,
+and a dormant eval-promotion ledger: strict contracts; immutable SQLite task/evidence/eval journals;
+deterministic risk and promotion policy; kill switches; content-addressed artifacts; exact-base
+disposable worktrees; bounded provider-native implement, repair, and independent-review adapters;
+sandboxed deterministic gates; authenticated evidence channels; and a separate GitHub adapter that
+can reconstruct one exact patch and request only a draft PR after rechecking repository governance.
+Factory policy 1.3 conservatively classifies the complete allowed write scope before execution,
+binds preparation evidence to the compiled contract, and pins per-tier process-tree limits. Every
+agent or gate executor requires an injected OS isolator; the Linux adapter creates a unique
+transient systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no unbounded
+fallback. The wrapper strips its user-manager environment before starting the target. Deterministic
+gates run Bubblewrap inside that scope. The model-bearing subprocess environment is allowlisted and
+excludes repository, cloud, and package credentials. The broker credential is acquired only at the
+separate broker boundary.
 
 That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
 requests an installation token for one configured numeric repository ID with only `checks:read`,
@@ -206,6 +208,25 @@ idempotency guard. The scheduler has no broker, remote credential, authority mut
 release capability and stops every successful task at `pr-proposed`. AgentLab does not install a
 timer; an owner-governed system timer must invoke this one-shot command with the reviewed digests.
 See [Local factory scheduler operations](factory-operations.md).
+
+Configuration promotion is a separate two-process boundary accepted by
+[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md). The exact
+`@agentlab/runtime/factory-evaluator` composition is credentialless: it ingests one strict
+owner-only matched eval report from a pinned gate-runner ID, recanonicalizes the candidate and suite
+digests, requires the complete ordered case/trial matrix, computes conservative success/safety
+confidence, regression, false-positive, flake, cost-ratio, and p95-latency metrics from raw samples,
+and records one deterministic pass/deny assessment. It has no provider executor, process runner,
+worktree, GitHub, authority switch, merge, or release port.
+
+The distinct `@agentlab/runtime/factory-canary-authority` composition resolves only a passing
+assessment and one strict owner-only human request. It can issue one expiring cohort for exactly one
+repository, R0/R1, a bounded task count, and a complete aggregate budget capped by the evaluated
+suite. The only stages are `read-only-shadow`, `local-proposal`, and `brokered-draft-pr`;
+`autoMerge` and `release` are literal `false`. SQLite version 12 atomically stores immutable
+run/assessment and approval/cohort pairs and rejects update or deletion. Neither composition runs a
+canary. No shipped consumer converts a cohort into task, scheduler, broker, merge, or release
+authority; the repository also does not yet ship the eval harness that produces and attests the raw
+report. See [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -395,8 +416,9 @@ intake configuration or task has been provisioned. No live agent task or PR has 
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
 and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
 reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Repository/day and organization/day quotas, eval promotion, merge, release, canary, and incident
-automation remain later stages.
+Repository/day and organization/day quotas, an attested eval harness, cohort consumption,
+telemetry-driven canary comparison, merge, release, rollback, and incident automation remain later
+stages. The deterministic assessment and bounded non-release cohort ledger exist but are dormant.
 
 ## Dependency map
 
@@ -409,6 +431,8 @@ intake operator ───▶ @agentlab/runtime/factory-intake ▶ local-factory-
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
 human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
+eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ local-factory-evaluator composition
+release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
                                                          │              │
                                                          ▼              ▼
                                                    application     infrastructure
@@ -420,15 +444,15 @@ human operator ────▶ @agentlab/runtime/factory-authority ▶ local-fac
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                                  | May depend on workspace areas                  |
-| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                             | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                          | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership          | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters         | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, intake, worker, human-authority, and broker construction | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation               | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff                 | launcher                                       |
+| Area                      | Owns                                                                               | May depend on workspace areas                  |
+| ------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                                          | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                                       | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                       | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                      | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, evaluator, human authorities, and broker construction | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                            | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                              | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -437,7 +461,8 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, and human-authority subpaths are exact; every runtime deep import fails.
+  broker, worker, evaluator, switch-authority, and canary-authority subpaths are exact; every
+  runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
@@ -446,6 +471,9 @@ The product-source rules are executable and fail closed:
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
+- Evaluator and canary-authority closures have separate exact allowlists. Neither can reach
+  provider, process-execution, GitHub, broker, merge, release, tmux, terminal, or interactive
+  modules, and the evaluator cannot reach human canary issuance.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -470,19 +498,21 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                          |
-| ------------------------------------------------------------ | ------------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                              |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                     |
-| Product use case or coordination policy                      | `packages/runtime/src/application`                |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`             |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`           |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`    |
-| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`    |
-| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts` |
-| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`    |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                        |
-| Installer, cache, or binary handoff                          | `packages/launcher`                               |
+| Change                                                       | Location                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                                     |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                            |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                       |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                    |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                  |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`           |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`           |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`        |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`           |
+| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`        |
+| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                               |
+| Installer, cache, or binary handoff                          | `packages/launcher`                                      |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

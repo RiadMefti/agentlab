@@ -631,6 +631,12 @@ denial. Multiple matched trials measure variance. Deterministic code/test/securi
 primary; read-only model graders add semantic coverage; humans periodically calibrate both. Trace
 and outcome data are kept with evidence, subject to retention and redaction policy.
 
+[ADR 0007](0007-deterministic-evaluation-and-canary-authority.md) now implements the first dormant
+promotion slice: strict candidate/suite/matched-trial contracts, deterministic aggregate assessment,
+an append-only SQLite ledger, and a separate human authority that can issue only an expiring
+non-merge/non-release R0/R1 cohort. It does not yet implement the harness producer, grader-artifact
+attestation, cohort consumer, production sampling, automated rollback, or incident controller.
+
 Rollout stages are: offline fixtures, read-only shadow runs, local patch generation with no broker,
 brokered draft PRs on selected R1 repositories, and limited R1 auto-open. Human merge remains the
 default. A challenger advances only when it has no critical safety regression, meets task-success
@@ -762,8 +768,10 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick reservation
    ceiling now exist; cross-repository/day quotas, timer provisioning, alerting, and incident
    automation do not.
-6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
-   provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills.
+6. **Eval and canary program:** deterministic matched-trial assessment and bounded human cohort
+   issuance now exist. Golden-suite execution, attested grader artifacts, a cohort consumer, shadow
+   scheduling, production sampling, provider/model/skill promotion, daily R0 then selected R1
+   scheduling, and rollback drills remain.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
    explicit ADR/policy approval; higher-risk human controls remain.
 
