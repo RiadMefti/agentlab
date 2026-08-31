@@ -278,6 +278,9 @@ export class FactoryPreparationMaterializer {
           { name: "policy-version", value: this.dependencies.policyBundle.value.version }
         ]
       ),
+      this.#gateEvidence("contract-validation", published.contractArtifact, subject, createdAt),
+      this.#gateEvidence("scope-validation", published.contractArtifact, subject, createdAt),
+      this.#gateEvidence("policy-validation", published.policyArtifact, subject, createdAt),
       this.#evidence("provenance", source.authority, subject, createdAt, [
         { name: "document", value: "preparation-authority" }
       ]),
@@ -312,6 +315,32 @@ export class FactoryPreparationMaterializer {
         attestations: []
       })
     );
+  }
+
+  #gateEvidence(
+    gateId: "contract-validation" | "scope-validation" | "policy-validation",
+    artifact: FactoryArtifactReference,
+    subjectDigest: Sha256Digest,
+    createdAt: string
+  ): EvidenceItem {
+    return evidenceItemSchema.parse({
+      id: this.#id(),
+      kind: "test",
+      result: "pass",
+      subjectDigest,
+      artifact,
+      producer: {
+        kind: "control-plane",
+        role: "gate-runner",
+        id: "agentlab-local-gates",
+        sessionId: null
+      },
+      createdAt,
+      claims: [
+        { name: "gate-id", value: gateId },
+        { name: "gate-result", value: "pass" }
+      ]
+    });
   }
 
   #evidence(

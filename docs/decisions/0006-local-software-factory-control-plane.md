@@ -210,12 +210,14 @@ and journal recoverable and nonterminal. A repeated recovery is idempotent after
 
 Materialization replays all referenced artifacts and rejects missing, changed, substituted,
 over-budget, or identity-mismatched data. One SQLite transaction then inserts the immutable
-contract, the complete `intake → qualified → specified → planned` task-event chain, initial
-evidence, and the preparation `prepared` marker. A forced late insert failure is tested to leave
-neither a partial task ledger nor a false prepared marker. These paths remain internal: the Linux
-recovery adapter is not composed or exercised in the supported target-host CI lane, and a
-composition root, operator command/TUI, and activation controls are still required before a live
-request can invoke them.
+contract, the complete `intake → qualified → specified → planned` task-event chain, initial evidence
+(including trusted `contract-validation`, `scope-validation`, and `policy-validation` claims bound
+to the compiled contract and pinned policy), and the preparation `prepared` marker. Those
+deterministic gate claims are emitted only by the materializer, not by a worker. A forced late
+insert failure is tested to leave neither a partial task ledger nor a false prepared marker. These
+paths remain internal: the Linux recovery adapter is not composed or exercised in the supported
+target-host CI lane, and a composition root, operator command/TUI, and activation controls are still
+required before a live request can invoke them.
 
 ```text
 registered → qualifying → qualified → specifying → specified → planning → planned → prepared
