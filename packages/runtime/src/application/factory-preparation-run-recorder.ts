@@ -279,8 +279,10 @@ function latestOutputDigest(snapshot: FactoryPreparationSnapshot, phase: Factory
     snapshot.lastEvent.phase !== phase &&
     snapshot.lastEvent.inputArtifactDigests.length > 1
   ) {
-    const index = phase === "qualify" ? 1 : 2;
-    const digest = snapshot.lastEvent.inputArtifactDigests[index];
+    const digest =
+      phase === "qualify"
+        ? snapshot.lastEvent.inputArtifactDigests[1]
+        : snapshot.lastEvent.inputArtifactDigests[2];
     if (digest !== undefined) return digest;
   }
   throw new Error(`Preparation run has no exact ${phase} digest.`);
