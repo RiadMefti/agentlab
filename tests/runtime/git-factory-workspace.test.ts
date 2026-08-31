@@ -10,7 +10,9 @@ import { GitFactoryWorkspaceManager } from "../../packages/runtime/src/infrastru
 import { NodeCommandRunner } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 
 const TASK_ID = "11111111-1111-4111-8111-111111111111";
+const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const gitExecutable = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+const flockExecutable = execFileSync("which", ["flock"], { encoding: "utf8" }).trim();
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
@@ -24,12 +26,22 @@ describe("GitFactoryWorkspaceManager", () => {
     expect(() => workspaceManager("/")).toThrow(/dedicated non-root path/u);
   });
 
-  it("requires an absolute trusted Git executable", () => {
+  it("requires absolute trusted Git and flock executables", () => {
     expect(
       () =>
         new GitFactoryWorkspaceManager(new NodeCommandRunner(), {
           root: "/tmp/agentlab-factory-test",
           gitExecutable: "git",
+          flockExecutable,
+          createId: () => "00000000-0000-4000-8000-000000000001"
+        })
+    ).toThrow(/absolute safe path/u);
+    expect(
+      () =>
+        new GitFactoryWorkspaceManager(new NodeCommandRunner(), {
+          root: "/tmp/agentlab-factory-test",
+          gitExecutable,
+          flockExecutable: "flock",
           createId: () => "00000000-0000-4000-8000-000000000001"
         })
     ).toThrow(/absolute safe path/u);
@@ -43,8 +55,12 @@ describe("GitFactoryWorkspaceManager", () => {
       taskId: TASK_ID,
       attempt: 1,
       repositoryRoot: fixture.repository,
-      baseRevision: fixture.baseRevision
+      baseRevision: fixture.baseRevision,
+      workspaceId: WORKSPACE_ID
     });
+
+    expect(workspace.id).toBe(WORKSPACE_ID);
+    expect(workspace.root).toBe(join(fixture.factoryRoot, TASK_ID, `1-${WORKSPACE_ID}`));
 
     writeFileSync(join(workspace.root, "tracked.txt"), "changed\n", "utf8");
     writeFileSync(join(workspace.root, "new.txt"), "new\n", "utf8");
@@ -211,6 +227,7 @@ function workspaceManager(root: string, owner?: RuntimeResourceOwner): GitFactor
   return new GitFactoryWorkspaceManager(new NodeCommandRunner(), {
     root,
     gitExecutable,
+    flockExecutable,
     createId: () => `00000000-0000-4000-8000-${String(next++).padStart(12, "0")}`,
     ...(owner === undefined ? {} : { resourceOwner: owner })
   });

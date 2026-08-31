@@ -21,6 +21,8 @@ export interface CreateFactoryWorkspaceInput {
   readonly attempt: number;
   readonly repositoryRoot: string;
   readonly baseRevision: GitObjectId;
+  /** Optional caller-pinned identity used when a durable journal must recover this exact workspace. */
+  readonly workspaceId?: string;
 }
 
 export interface CollectFactoryWorkspaceInput {

@@ -1,5 +1,5 @@
-import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   factoryChangeSetSchema,
@@ -17,6 +17,15 @@ import type {
   FactoryWorkspacePatch
 } from "../../domain/factory-workspace.js";
 import type { CommandRunner } from "../process/command-runner.js";
+import { FactoryGitCommandRunner, parseFactoryGitNullList } from "./factory-git-command.js";
+import {
+  factoryPathWithin,
+  factoryPathsOverlap,
+  factoryWorkspaceTarget,
+  prepareFactoryWorkspaceRoot,
+  prepareFactoryWorkspaceTaskDirectory,
+  resolveFactoryWorkspaceRoot
+} from "./factory-workspace-paths.js";
 
 const createInputSchema = z
   .object({
@@ -27,7 +36,8 @@ const createInputSchema = z
       .min(1)
       .max(4_096)
       .refine((value) => !value.includes("\0")),
-    baseRevision: gitObjectIdSchema
+    baseRevision: gitObjectIdSchema,
+    workspaceId: z.uuid().optional()
   })
   .strict();
 
@@ -45,19 +55,20 @@ const maximumAttributeArgumentCount = 128;
 interface OwnedWorkspace {
   readonly handle: ManagedGitFactoryWorkspace;
   readonly commonGitDirectory: string;
+  readonly lockDirectory: string;
 }
 
 export interface GitFactoryWorkspaceManagerOptions {
   readonly root: string;
   readonly gitExecutable: string;
+  readonly flockExecutable: string;
   readonly createId: () => string;
   readonly resourceOwner?: ManagedRuntimeResourceOwner;
 }
 
 /** Exact-base detached Git worktrees with bounded patch capture and owned cleanup. */
 export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
-  readonly #runner: CommandRunner;
-  readonly #gitExecutable: string;
+  readonly #git: FactoryGitCommandRunner;
   readonly #createId: () => string;
   readonly #resourceOwner: ManagedRuntimeResourceOwner | undefined;
   readonly #rootPath: string;
@@ -65,21 +76,17 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
   readonly #owned = new Map<string, OwnedWorkspace>();
 
   public constructor(runner: CommandRunner, options: GitFactoryWorkspaceManagerOptions) {
-    this.#runner = runner;
-    if (!isAbsolute(options.gitExecutable) || options.gitExecutable.includes("\0")) {
-      throw new Error("Factory Git executable must be an absolute safe path.");
-    }
-    this.#gitExecutable = options.gitExecutable;
+    this.#git = new FactoryGitCommandRunner(runner, options);
     this.#createId = options.createId;
     this.#resourceOwner = options.resourceOwner;
-    this.#rootPath = safeWorktreeRoot(options.root);
+    this.#rootPath = resolveFactoryWorkspaceRoot(options.root);
   }
 
   public async create(input: CreateFactoryWorkspaceInput): Promise<FactoryWorkspace> {
     const parsed = createInputSchema.parse(input);
     const factoryRoot = await this.#factoryRoot();
     const repositoryRoot = await canonicalDirectory(parsed.repositoryRoot);
-    if (pathsOverlap(factoryRoot, repositoryRoot)) {
+    if (factoryPathsOverlap(factoryRoot, repositoryRoot)) {
       throw new Error(
         "Factory worktree storage and source repository must not contain each other."
       );
@@ -101,34 +108,40 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
       throw new Error("Factory workspace base revision did not resolve exactly.");
     }
 
-    const id = z.uuid().parse(this.#createId());
-    const taskDirectory = join(factoryRoot, parsed.taskId);
-    await mkdir(taskDirectory, { mode: 0o700, recursive: true });
-    await assertCanonicalOwnedDirectory(taskDirectory);
-    const target = join(taskDirectory, `${String(parsed.attempt)}-${id}`);
+    const id = parsed.workspaceId ?? z.uuid().parse(this.#createId());
+    const taskDirectory = await prepareFactoryWorkspaceTaskDirectory(factoryRoot, parsed.taskId);
+    const target = factoryWorkspaceTarget(factoryRoot, {
+      taskId: parsed.taskId,
+      attempt: parsed.attempt,
+      workspaceId: id
+    });
     await assertAbsent(target);
     let created = false;
     try {
-      await this.#runGit(repositoryRoot, [
-        "worktree",
-        "add",
-        "--detach",
-        "--no-checkout",
-        target,
-        parsed.baseRevision
-      ]);
+      await this.#runGit(
+        repositoryRoot,
+        ["worktree", "add", "--detach", "--no-checkout", target, parsed.baseRevision],
+        { lockDirectory: taskDirectory }
+      );
       created = true;
       const canonicalTarget = await canonicalDirectory(target);
       if (canonicalTarget !== target) throw new Error("Git worktree path is not canonical.");
-      await this.#runGit(canonicalTarget, ["read-tree", "--reset", parsed.baseRevision]);
-      await this.#rejectCheckoutFilters(canonicalTarget);
-      await this.#runGit(canonicalTarget, ["checkout", "--force", "--detach", parsed.baseRevision]);
-      const commonGitDirectory = await this.#commonGitDirectory(canonicalTarget);
+      await this.#runGit(canonicalTarget, ["read-tree", "--reset", parsed.baseRevision], {
+        lockDirectory: taskDirectory
+      });
+      await this.#rejectCheckoutFilters(canonicalTarget, taskDirectory);
+      await this.#runGit(
+        canonicalTarget,
+        ["checkout", "--force", "--detach", parsed.baseRevision],
+        { lockDirectory: taskDirectory }
+      );
+      const commonGitDirectory = await this.#commonGitDirectory(canonicalTarget, taskDirectory);
       await this.#verifyWorkspace(
         canonicalTarget,
         repositoryRoot,
         parsed.baseRevision,
-        commonGitDirectory
+        commonGitDirectory,
+        taskDirectory
       );
       const handle = new ManagedGitFactoryWorkspace(
         {
@@ -141,13 +154,13 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
         },
         () => this.#close(id)
       );
-      this.#owned.set(id, { handle, commonGitDirectory });
+      this.#owned.set(id, { handle, commonGitDirectory, lockDirectory: taskDirectory });
       this.#resourceOwner?.track(handle);
       return handle;
     } catch (error: unknown) {
       if (!created) throw error;
       try {
-        await this.#removeWorktree(repositoryRoot, target);
+        await this.#removeWorktree(repositoryRoot, target, taskDirectory);
       } catch (cleanupError: unknown) {
         throw new AggregateError([error, cleanupError], "Worktree creation and cleanup failed.", {
           cause: error
@@ -170,23 +183,27 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
       workspace.root,
       workspace.repositoryRoot,
       workspace.baseRevision,
-      owned.commonGitDirectory
+      owned.commonGitDirectory,
+      owned.lockDirectory
     );
-    await this.#rejectWorkingTreeFilters(workspace.root);
-    await this.#runGit(workspace.root, ["add", "--all", "--", "."]);
+    await this.#rejectWorkingTreeFilters(workspace.root, owned.lockDirectory);
+    await this.#runGit(workspace.root, ["add", "--all", "--", "."], {
+      lockDirectory: owned.lockDirectory
+    });
     await this.#verifyWorkspace(
       workspace.root,
       workspace.repositoryRoot,
       workspace.baseRevision,
-      owned.commonGitDirectory
+      owned.commonGitDirectory,
+      owned.lockDirectory
     );
 
-    const paths = parseNullList(
+    const paths = parseFactoryGitNullList(
       (
         await this.#runGit(
           workspace.root,
           ["diff", "--cached", "--name-only", "-z", "--no-renames", "HEAD", "--"],
-          maximumGitInventoryBytes
+          { lockDirectory: owned.lockDirectory, maxBufferBytes: maximumGitInventoryBytes }
         )
       ).stdout
     ).map((path) => repositoryRelativePathSchema.parse(path));
@@ -201,7 +218,7 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
         await this.#runGit(
           workspace.root,
           ["diff", "--cached", "--numstat", "-z", "--no-renames", "HEAD", "--"],
-          maximumGitInventoryBytes
+          { lockDirectory: owned.lockDirectory, maxBufferBytes: maximumGitInventoryBytes }
         )
       ).stdout
     );
@@ -230,7 +247,10 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
           "HEAD",
           "--"
         ],
-        parsedLimits.maximumPatchBytes
+        {
+          lockDirectory: owned.lockDirectory,
+          maxBufferBytes: parsedLimits.maximumPatchBytes
+        }
       )
     ).stdout;
     return {
@@ -266,40 +286,44 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
       workspace.root,
       workspace.repositoryRoot,
       workspace.baseRevision,
-      owned.commonGitDirectory
+      owned.commonGitDirectory,
+      owned.lockDirectory
     );
-    await this.#runGit(
-      workspace.root,
-      ["apply", "--index", "--whitespace=error-all", "--"],
-      4 * 1_024 * 1_024,
-      patch,
-      maximumPatchBytes
-    );
+    await this.#runGit(workspace.root, ["apply", "--index", "--whitespace=error-all", "--"], {
+      lockDirectory: owned.lockDirectory,
+      stdin: patch,
+      maxInputBytes: maximumPatchBytes
+    });
     await this.#verifyWorkspace(
       workspace.root,
       workspace.repositoryRoot,
       workspace.baseRevision,
-      owned.commonGitDirectory
+      owned.commonGitDirectory,
+      owned.lockDirectory
     );
   }
 
   async #factoryRoot(): Promise<string> {
-    this.#root ??= prepareFactoryRoot(this.#rootPath);
+    this.#root ??= prepareFactoryWorkspaceRoot(this.#rootPath);
     return this.#root;
   }
 
   async #close(id: string): Promise<void> {
     const owned = this.#owned.get(id);
     if (owned === undefined || owned.handle.closed) return;
-    await this.#removeWorktree(owned.handle.repositoryRoot, owned.handle.root);
+    await this.#removeWorktree(owned.handle.repositoryRoot, owned.handle.root, owned.lockDirectory);
     owned.handle.markClosed();
     this.#owned.delete(id);
     this.#resourceOwner?.release(owned.handle);
   }
 
-  async #removeWorktree(repositoryRoot: string, target: string): Promise<void> {
+  async #removeWorktree(
+    repositoryRoot: string,
+    target: string,
+    lockDirectory: string
+  ): Promise<void> {
     const factoryRoot = await this.#factoryRoot();
-    if (!pathWithin(factoryRoot, target)) {
+    if (!factoryPathWithin(factoryRoot, target)) {
       throw new Error("Refusing to clean a worktree outside factory-owned storage.");
     }
     const metadata = await lstat(target).catch((error: unknown) => {
@@ -311,11 +335,13 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
     }
     let removalError: unknown = null;
     try {
-      await this.#runGit(repositoryRoot, ["worktree", "remove", "--force", target]);
+      await this.#runGit(repositoryRoot, ["worktree", "remove", "--force", target], {
+        lockDirectory
+      });
     } catch (error: unknown) {
       removalError = error;
     }
-    const listed = await this.#listedWorktreePaths(repositoryRoot);
+    const listed = await this.#listedWorktreePaths(repositoryRoot, lockDirectory);
     const remaining = await lstat(target).catch((error: unknown) => {
       if (hasErrorCode(error, "ENOENT")) return null;
       throw error;
@@ -329,63 +355,77 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
     root: string,
     repositoryRoot: string,
     baseRevision: string,
-    expectedCommonDirectory: string
+    expectedCommonDirectory: string,
+    lockDirectory: string
   ): Promise<void> {
     const metadata = await lstat(join(root, ".git"));
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new Error("Factory worktree Git pointer is not a regular owned file.");
     }
     const topLevel = (
-      await this.#runGit(root, ["rev-parse", "--path-format=absolute", "--show-toplevel"])
+      await this.#runGit(root, ["rev-parse", "--path-format=absolute", "--show-toplevel"], {
+        lockDirectory
+      })
     ).stdout.trim();
     if (topLevel !== root) throw new Error("Factory worktree top-level path changed.");
-    const commonDirectory = await this.#commonGitDirectory(root);
+    const commonDirectory = await this.#commonGitDirectory(root, lockDirectory);
     if (commonDirectory !== expectedCommonDirectory) {
       throw new Error("Factory worktree common Git directory changed.");
     }
-    const sourceCommon = await this.#commonGitDirectory(repositoryRoot);
+    const sourceCommon = await this.#commonGitDirectory(repositoryRoot, lockDirectory);
     if (sourceCommon !== expectedCommonDirectory) {
       throw new Error("Factory worktree no longer belongs to its source repository.");
     }
-    const head = (await this.#runGit(root, ["rev-parse", "--verify", "HEAD"])).stdout.trim();
+    const head = (
+      await this.#runGit(root, ["rev-parse", "--verify", "HEAD"], { lockDirectory })
+    ).stdout.trim();
     if (head !== baseRevision) {
       throw new Error("Factory workers may propose a patch but may not commit or move HEAD.");
     }
-    const branch = (await this.#runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
+    const branch = (
+      await this.#runGit(root, ["rev-parse", "--abbrev-ref", "HEAD"], { lockDirectory })
+    ).stdout.trim();
     if (branch !== "HEAD") throw new Error("Factory worktree must remain detached.");
   }
 
-  async #commonGitDirectory(root: string): Promise<string> {
+  async #commonGitDirectory(root: string, lockDirectory: string): Promise<string> {
     const path = (
-      await this.#runGit(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+      await this.#runGit(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+        lockDirectory
+      })
     ).stdout.trim();
     return realpath(path);
   }
 
-  async #rejectCheckoutFilters(root: string): Promise<void> {
-    const files = parseNullList(
-      (await this.#runGit(root, ["ls-files", "-z"], maximumGitInventoryBytes)).stdout
-    );
-    await this.#rejectFiltersForPaths(root, files, true);
-  }
-
-  async #rejectWorkingTreeFilters(root: string): Promise<void> {
-    const files = parseNullList(
+  async #rejectCheckoutFilters(root: string, lockDirectory: string): Promise<void> {
+    const files = parseFactoryGitNullList(
       (
-        await this.#runGit(
-          root,
-          ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-          maximumGitInventoryBytes
-        )
+        await this.#runGit(root, ["ls-files", "-z"], {
+          lockDirectory,
+          maxBufferBytes: maximumGitInventoryBytes
+        })
       ).stdout
     );
-    await this.#rejectFiltersForPaths(root, files, false);
+    await this.#rejectFiltersForPaths(root, files, true, lockDirectory);
+  }
+
+  async #rejectWorkingTreeFilters(root: string, lockDirectory: string): Promise<void> {
+    const files = parseFactoryGitNullList(
+      (
+        await this.#runGit(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+          lockDirectory,
+          maxBufferBytes: maximumGitInventoryBytes
+        })
+      ).stdout
+    );
+    await this.#rejectFiltersForPaths(root, files, false, lockDirectory);
   }
 
   async #rejectFiltersForPaths(
     root: string,
     paths: readonly string[],
-    cached: boolean
+    cached: boolean,
+    lockDirectory: string
   ): Promise<void> {
     for (let index = 0; index < paths.length; index += maximumAttributeArgumentCount) {
       const chunk = paths.slice(index, index + maximumAttributeArgumentCount);
@@ -393,9 +433,9 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
       const result = await this.#runGit(
         root,
         ["check-attr", "-z", ...(cached ? ["--cached"] : []), "filter", "--", ...chunk],
-        maximumGitInventoryBytes
+        { lockDirectory, maxBufferBytes: maximumGitInventoryBytes }
       );
-      const fields = parseNullList(result.stdout);
+      const fields = parseFactoryGitNullList(result.stdout);
       if (fields.length !== chunk.length * 3) {
         throw new Error("Git filter-attribute inventory is malformed.");
       }
@@ -410,10 +450,16 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
     }
   }
 
-  async #listedWorktreePaths(repositoryRoot: string): Promise<readonly string[]> {
-    const output = (await this.#runGit(repositoryRoot, ["worktree", "list", "--porcelain", "-z"]))
-      .stdout;
-    return parseNullList(output).flatMap((field) =>
+  async #listedWorktreePaths(
+    repositoryRoot: string,
+    lockDirectory: string
+  ): Promise<readonly string[]> {
+    const output = (
+      await this.#runGit(repositoryRoot, ["worktree", "list", "--porcelain", "-z"], {
+        lockDirectory
+      })
+    ).stdout;
+    return parseFactoryGitNullList(output).flatMap((field) =>
       field.startsWith("worktree ") ? [field.slice("worktree ".length)] : []
     );
   }
@@ -421,42 +467,22 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
   #runGit(
     root: string,
     args: readonly string[],
-    maxBufferBytes = 4 * 1_024 * 1_024,
-    stdin?: string,
-    maxInputBytes?: number
+    options: {
+      readonly lockDirectory?: string;
+      readonly maxBufferBytes?: number;
+      readonly stdin?: string;
+      readonly maxInputBytes?: number;
+    } = {}
   ) {
-    return this.#runner.run(
-      this.#gitExecutable,
-      [
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "core.untrackedCache=false",
-        "-C",
-        root,
-        ...args
-      ],
-      {
-        timeoutMs: 60_000,
-        maxBufferBytes,
-        cleanupProcessTree: true,
-        ...(stdin === undefined ? {} : { stdin }),
-        ...(maxInputBytes === undefined ? {} : { maxInputBytes }),
-        environment: {
-          GIT_ATTR_NOSYSTEM: "1",
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: "/dev/null",
-          GIT_LFS_SKIP_SMUDGE: "1",
-          GIT_OPTIONAL_LOCKS: "0",
-          GIT_PAGER: "cat",
-          GIT_TERMINAL_PROMPT: "0",
-          LC_ALL: "C",
-          PATH: "/usr/local/bin:/usr/bin:/bin"
-        }
-      }
-    );
+    return this.#git.run(root, args, {
+      timeoutMs: 60_000,
+      maxBufferBytes: options.maxBufferBytes ?? 4 * 1_024 * 1_024,
+      ...(options.lockDirectory === undefined
+        ? {}
+        : { lock: { directory: options.lockDirectory, mode: "blocking" } as const }),
+      ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+      ...(options.maxInputBytes === undefined ? {} : { maxInputBytes: options.maxInputBytes })
+    });
   }
 }
 
@@ -501,7 +527,7 @@ interface NumstatEntry {
 }
 
 function parseNumstat(output: string): readonly NumstatEntry[] {
-  return parseNullList(output).map((record) => {
+  return parseFactoryGitNullList(output).map((record) => {
     const first = record.indexOf("\t");
     const second = record.indexOf("\t", first + 1);
     if (first < 1 || second < first + 2) throw new Error("Git numstat output is malformed.");
@@ -519,37 +545,10 @@ function parseNumstat(output: string): readonly NumstatEntry[] {
   });
 }
 
-function parseNullList(output: string): readonly string[] {
-  if (output.length === 0) return [];
-  if (!output.endsWith("\0")) throw new Error("Git NUL-delimited output is truncated.");
-  return output.slice(0, -1).split("\0");
-}
-
 function samePaths(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) return false;
   const rightSet = new Set(right);
   return rightSet.size === right.length && left.every((path) => rightSet.has(path));
-}
-
-async function prepareFactoryRoot(path: string): Promise<string> {
-  const absolute = safeWorktreeRoot(path);
-  await mkdir(absolute, { mode: 0o700, recursive: true });
-  const canonical = await realpath(absolute);
-  if (canonical !== absolute)
-    throw new Error("Factory worktree root must not be a symbolic-link alias.");
-  await chmod(canonical, 0o700);
-  return canonical;
-}
-
-function safeWorktreeRoot(path: string): string {
-  if (path.length === 0 || path.includes("\0")) {
-    throw new Error("Factory worktree root is invalid.");
-  }
-  const absolute = resolve(path);
-  if (absolute === parse(absolute).root) {
-    throw new Error("Factory worktree root must be a dedicated non-root path.");
-  }
-  return absolute;
 }
 
 async function canonicalDirectory(path: string): Promise<string> {
@@ -561,28 +560,12 @@ async function canonicalDirectory(path: string): Promise<string> {
   return canonical;
 }
 
-async function assertCanonicalOwnedDirectory(path: string): Promise<void> {
-  const canonical = await canonicalDirectory(path);
-  if (canonical !== resolve(path))
-    throw new Error("Factory task worktree directory is not canonical.");
-  await chmod(canonical, 0o700);
-}
-
 async function assertAbsent(path: string): Promise<void> {
   const metadata = await lstat(path).catch((error: unknown) => {
     if (hasErrorCode(error, "ENOENT")) return null;
     throw error;
   });
   if (metadata !== null) throw new Error("Factory worktree target already exists.");
-}
-
-function pathsOverlap(left: string, right: string): boolean {
-  return pathWithin(left, right) || pathWithin(right, left);
-}
-
-function pathWithin(parent: string, child: string): boolean {
-  const path = relative(parent, child);
-  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

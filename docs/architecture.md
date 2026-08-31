@@ -83,9 +83,16 @@ request are durable before a worktree or provider starts. Bounded output, usage,
 process isolation, canonical phase document, and run record are stored before a result event.
 Invalid output, incomplete usage, excess budget, missing identity, capability mismatch, cleanup
 uncertainty, replay, and artifact substitution fail closed. Retry count is authority-bound;
-`needs-human`, rejection, exhaustion, cancellation, and expiry are explicit terminal outcomes. Crash
-recovery may append abandonment only after an injected probe positively confirms both the provider
-execution and disposable workspace inactive.
+`needs-human`, rejection, exhaustion, cancellation, and expiry are explicit terminal outcomes. The
+durable execution ID is also the exact systemd-scope and disposable-worktree identity. Every
+worktree Git command holds the kernel lock on its canonical task directory, including an orphaned
+child after a control-plane crash. A local Linux reconciler may append abandonment only after
+repeated systemd proof that the exact scope is inactive, non-blocking acquisition of that lock,
+canonical source-repository and base-commit proof, exact factory-owned workspace cleanup, and
+post-cleanup proof that both process and Git/filesystem state are absent. Malformed, changing,
+symlinked, overlapping, locked, or otherwise ambiguous state remains in-flight and fails closed.
+Workspace creation failure and unconfirmed process-tree cleanup likewise leave the durable phase
+running.
 
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or
@@ -99,13 +106,13 @@ timestamps, digests, authority, policy, ledger events, evidence assertions, or a
 This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled, deployed, or
 enabled. Normal database migration creates only its inert local ledger tables. The repository
 currently lacks the approval and last-push protections required by the broker, so the adapter fails
-closed even if a future composition supplies credentials. Complete provider cost accounting, a
-concrete target-host preparation recovery probe, target-host sandbox preflight in CI, an isolated
-short-lived broker identity, and protected-path ownership also remain activation prerequisites.
-Public composition and operator commands, PR-head repair, scheduler/quotas, eval promotion, merge,
-release, canary, and incident automation remain later stages. Until an explicit activation change
-meets ADR 0006's prerequisites, user-visible behavior and the product network boundary remain
-unchanged.
+closed even if a future composition supplies credentials. The concrete recovery reconciler is also
+still an internal Linux adapter and has not run in the supported target-host CI lane. Complete
+provider cost accounting, target-host sandbox/recovery preflight, an isolated short-lived broker
+identity, and protected-path ownership remain activation prerequisites. Public composition and
+operator commands, PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and
+incident automation remain later stages. Until an explicit activation change meets ADR 0006's
+prerequisites, user-visible behavior and the product network boundary remain unchanged.
 
 ## Dependency map
 

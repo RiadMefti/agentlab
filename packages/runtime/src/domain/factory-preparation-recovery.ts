@@ -1,13 +1,28 @@
-import type { FactoryPreparationPhase } from "@agentlab/contracts";
+import type { FactoryPreparationPhase, GitObjectId } from "@agentlab/contracts";
 
 export interface FactoryPreparationRecoveryInput {
   readonly taskId: string;
   readonly executionId: string;
   readonly phase: FactoryPreparationPhase;
   readonly attempt: number;
+  readonly repositoryRoot: string;
+  readonly baseRevision: GitObjectId;
 }
 
-/** Proves that neither a provider process nor its disposable workspace remains live after a crash. */
-export interface FactoryPreparationRecoveryProbe {
-  confirmInactive(input: FactoryPreparationRecoveryInput): Promise<boolean>;
+export type FactoryPreparationRecoveryResult =
+  | { readonly status: "inactive" }
+  | {
+      readonly status: "uncertain";
+      readonly reasonCode:
+        | "preparation-process-not-inactive"
+        | "preparation-process-state-uncertain"
+        | "preparation-repository-identity-uncertain"
+        | "preparation-workspace-operation-uncertain"
+        | "preparation-workspace-identity-uncertain"
+        | "preparation-workspace-cleanup-unconfirmed";
+    };
+
+/** Reconciles the exact journal-owned process/workspace and proves both inactive after a crash. */
+export interface FactoryPreparationRecoveryReconciler {
+  reconcile(input: FactoryPreparationRecoveryInput): Promise<FactoryPreparationRecoveryResult>;
 }

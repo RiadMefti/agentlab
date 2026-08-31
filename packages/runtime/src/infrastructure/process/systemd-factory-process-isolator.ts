@@ -4,6 +4,7 @@ import { factoryProcessIsolationSchema, factoryResourceLimitsSchema } from "@age
 import { z } from "zod";
 
 import type { FactoryProcessIsolator } from "../../domain/factory-process-isolation.js";
+import { factorySystemdScopeName, systemdUserManagerEnvironment } from "./systemd-user-manager.js";
 
 const isolationInputSchema = z
   .object({
@@ -53,7 +54,9 @@ export class SystemdFactoryProcessIsolator implements FactoryProcessIsolator {
     this.#executable = options.executable;
     this.#environmentExecutable = options.environmentExecutable;
     this.#version = version;
-    this.#controllerEnvironment = controllerEnvironment(options.hostEnvironment ?? process.env);
+    this.#controllerEnvironment = systemdUserManagerEnvironment(
+      options.hostEnvironment ?? process.env
+    );
   }
 
   public isolate(inputValue: unknown) {
@@ -62,7 +65,7 @@ export class SystemdFactoryProcessIsolator implements FactoryProcessIsolator {
       if (!isAbsolute(input.command.executable)) {
         throw new Error("Factory resource isolation requires an absolute executable path.");
       }
-      const scopeName = `agentlab-factory-${input.isolationId.replaceAll("-", "")}.scope`;
+      const scopeName = factorySystemdScopeName(input.isolationId);
       const isolation = factoryProcessIsolationSchema.parse({
         isolationId: input.isolationId,
         mechanism: { id: "linux/systemd-user-scope", version: this.#version },
@@ -103,29 +106,6 @@ export class SystemdFactoryProcessIsolator implements FactoryProcessIsolator {
   }
 }
 
-function controllerEnvironment(environment: NodeJS.ProcessEnv): Readonly<Record<string, string>> {
-  const runtimeDirectory = environment.XDG_RUNTIME_DIR;
-  const busAddress = environment.DBUS_SESSION_BUS_ADDRESS;
-  if (
-    runtimeDirectory === undefined ||
-    !isAbsolute(runtimeDirectory) ||
-    !safeEnvironmentValue(runtimeDirectory)
-  ) {
-    throw new Error("Factory isolation requires a safe XDG_RUNTIME_DIR for the user manager.");
-  }
-  if (busAddress === undefined || !safeEnvironmentValue(busAddress)) {
-    throw new Error("Factory isolation requires a safe DBUS_SESSION_BUS_ADDRESS.");
-  }
-  return Object.freeze({
-    XDG_RUNTIME_DIR: runtimeDirectory,
-    DBUS_SESSION_BUS_ADDRESS: busAddress
-  });
-}
-
 function safeArgument(value: string): boolean {
   return !value.includes("\0");
-}
-
-function safeEnvironmentValue(value: string): boolean {
-  return value.length > 0 && value.length <= 4_096 && !/[\0\r\n]/u.test(value);
 }

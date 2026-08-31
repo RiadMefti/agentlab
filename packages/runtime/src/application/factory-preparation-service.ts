@@ -10,9 +10,10 @@ import {
 import { z } from "zod";
 
 import type { ConversationRepository } from "../domain/conversation-repository.js";
-import type {
-  FactoryAgentProviderResolver,
-  FactoryPreparationAgentExecutor
+import {
+  factoryProcessCleanupUnconfirmedErrorCode,
+  type FactoryAgentProviderResolver,
+  type FactoryPreparationAgentExecutor
 } from "../domain/factory-agent-executor.js";
 import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
 import type {
@@ -20,7 +21,7 @@ import type {
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
 import type { FactoryPolicyEngine } from "../domain/factory-policy.js";
-import type { FactoryPreparationRecoveryProbe } from "../domain/factory-preparation-recovery.js";
+import type { FactoryPreparationRecoveryReconciler } from "../domain/factory-preparation-recovery.js";
 import type {
   FactoryPreparationRepository,
   FactoryPreparationSnapshot
@@ -70,7 +71,7 @@ export interface FactoryPreparationServiceDependencies {
   readonly workspaces: FactoryWorkspaceManager;
   readonly agents: FactoryPreparationAgentExecutor;
   readonly providers: FactoryAgentProviderResolver;
-  readonly recovery: FactoryPreparationRecoveryProbe;
+  readonly recovery: FactoryPreparationRecoveryReconciler;
   readonly now: () => string;
   readonly createId: () => string;
   readonly controlPlaneActorId: string;
@@ -221,13 +222,16 @@ export class FactoryPreparationService {
     const startedEvent = requirePreparationStart(started.value);
 
     let workspace: FactoryWorkspace | null = null;
+    let cleanupState: PreparationRunCleanupState = "unconfirmed";
     try {
       workspace = await this.dependencies.workspaces.create({
         taskId: snapshot.request.taskId,
         attempt,
         repositoryRoot,
-        baseRevision: snapshot.request.repository.baseRevision
+        baseRevision: snapshot.request.repository.baseRevision,
+        workspaceId: executionId
       });
+      cleanupState = "workspace-owned";
       const output = await this.dependencies.agents.execute({
         request: runRequest.value,
         executable: provider.executable,
@@ -236,6 +240,10 @@ export class FactoryPreparationService {
         prompt,
         resourceLimits: this.dependencies.policy.requirements("R0", "execution").resourceLimits
       });
+      if (output.errorCode === factoryProcessCleanupUnconfirmedErrorCode) {
+        cleanupState = "unconfirmed";
+        throw new Error("Preparation process cleanup was not confirmed.");
+      }
       const result = await this.#runRecorder.capture({
         running,
         started: startedEvent,
@@ -245,12 +253,15 @@ export class FactoryPreparationService {
       });
       await workspace.closeAndWait();
       workspace = null;
+      cleanupState = "confirmed";
       return await this.#appendRunResult(running, result);
     } catch (error: unknown) {
-      if (workspace !== null) {
+      if (cleanupState !== "confirmed") {
+        if (cleanupState === "unconfirmed" || workspace === null) throw error;
         try {
           await workspace.closeAndWait();
           workspace = null;
+          cleanupState = "confirmed";
         } catch (cleanupError: unknown) {
           throw new AggregateError(
             [error, cleanupError],
@@ -283,13 +294,25 @@ export class FactoryPreparationService {
     if (started.kind !== "phase-started") {
       throw new Error("Running preparation does not end in a phase-started event.");
     }
-    const inactive = await this.dependencies.recovery.confirmInactive({
+    const conversation = await this.dependencies.conversations.findById(
+      snapshot.request.conversationId
+    );
+    const repositoryRoot =
+      conversation?.lifecycleState === "active" ? conversation.workspacePath : null;
+    if (repositoryRoot === null) {
+      throw new Error("Factory preparation recovery requires its active owning conversation.");
+    }
+    const recovery = await this.dependencies.recovery.reconcile({
       taskId: started.taskId,
       executionId: started.executionId,
       phase: started.phase,
-      attempt: started.attempt
+      attempt: started.attempt,
+      repositoryRoot,
+      baseRevision: snapshot.request.repository.baseRevision
     });
-    if (!inactive) throw new Error("Preparation execution is still live or cannot be disproved.");
+    if (recovery.status !== "inactive") {
+      throw new Error(`Preparation recovery is uncertain: ${recovery.reasonCode}.`);
+    }
     return this.#reconcileStoppedRun(snapshot, started, command);
   }
 
@@ -458,6 +481,8 @@ interface PreparationPredecessors {
   readonly qualification: CanonicalFactoryDocument<FactoryQualification> | null;
   readonly specification: CanonicalFactoryDocument<FactorySpecification> | null;
 }
+
+type PreparationRunCleanupState = "unconfirmed" | "workspace-owned" | "confirmed";
 
 const preparationRunRequestMediaType =
   "application/vnd.agentlab.preparation-run-request+json;version=1";
