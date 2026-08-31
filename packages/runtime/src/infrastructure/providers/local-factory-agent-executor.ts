@@ -1,5 +1,4 @@
 import {
-  factoryAgentRunRequestSchema,
   factoryResourceLimitsSchema,
   factoryTimestampSchema,
   type FactoryProcessIsolation
@@ -9,7 +8,9 @@ import type {
   FactoryAgentExecutionInput,
   FactoryAgentExecutionOutput,
   FactoryAgentExecutor,
-  FactoryAgentExecutorCapability
+  FactoryAgentExecutorCapability,
+  FactoryPreparationAgentExecutionInput,
+  FactoryPreparationAgentExecutor
 } from "../../domain/factory-agent-executor.js";
 import {
   narrowFactoryResourceLimits,
@@ -23,7 +24,11 @@ import {
 } from "../process/command-runner.js";
 import { claudeFactoryAgentAdapter } from "./claude-factory-agent.js";
 import { codexFactoryAgentAdapter } from "./codex-factory-agent.js";
-import { emptyFactoryBudgetUsage, type FactoryAgentAdapter } from "./factory-agent-adapter.js";
+import {
+  emptyFactoryBudgetUsage,
+  parseFactoryProviderRunRequest,
+  type FactoryAgentAdapter
+} from "./factory-agent-adapter.js";
 import { elapsedSeconds } from "./factory-agent-output.js";
 import { factoryAgentEnvironment } from "./factory-agent-environment.js";
 
@@ -37,7 +42,9 @@ export interface LocalFactoryAgentExecutorOptions {
 }
 
 /** Dispatches provider-native non-interactive harnesses behind one bounded execution port. */
-export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
+export class LocalFactoryAgentExecutor
+  implements FactoryAgentExecutor, FactoryPreparationAgentExecutor
+{
   readonly #runner: CommandRunner;
   readonly #now: () => string;
   readonly #hostEnvironment: NodeJS.ProcessEnv;
@@ -60,8 +67,10 @@ export class LocalFactoryAgentExecutor implements FactoryAgentExecutor {
     return [...this.#adapters.values()].map(({ capability }) => capability);
   }
 
-  public async execute(input: FactoryAgentExecutionInput): Promise<FactoryAgentExecutionOutput> {
-    const request = factoryAgentRunRequestSchema.parse(input.request);
+  public async execute(
+    input: FactoryAgentExecutionInput | FactoryPreparationAgentExecutionInput
+  ): Promise<FactoryAgentExecutionOutput> {
+    const request = parseFactoryProviderRunRequest(input.request);
     const adapter = this.#adapters.get(request.provider);
     if (adapter === undefined) {
       throw new Error(`Provider ${request.provider} has no autonomous factory adapter.`);

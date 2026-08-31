@@ -2,6 +2,8 @@ import type {
   FactoryActorRole,
   FactoryBudget,
   FactoryCapabilityGrant,
+  FactoryPreparationAuthority,
+  FactoryPreparationPhase,
   FactorySkillPackage,
   FactoryTaskState,
   ImmutableTaskContract,
@@ -11,6 +13,7 @@ import type {
 } from "@agentlab/contracts";
 
 import {
+  factoryBudgetFits,
   factoryCapabilitiesFit,
   factoryRiskRank,
   mergeFactoryCapabilities,
@@ -35,6 +38,38 @@ export interface FactorySkillSelection {
   readonly skills: readonly ResolvedFactorySkill[];
   readonly capabilities: FactoryCapabilityGrant;
   readonly budget: FactoryBudget;
+}
+
+export async function resolveFactoryPreparationSkill(
+  source: FactorySkillSource,
+  authority: FactoryPreparationAuthority,
+  phase: FactoryPreparationPhase
+): Promise<ResolvedFactorySkill> {
+  const profile = authority.preparationProfiles.find((candidate) => candidate.phase === phase);
+  const authorized = authority.skills.find(
+    (candidate) => candidate.manifest.id === profile?.skillId
+  );
+  if (profile === undefined || authorized?.phase !== phase) {
+    throw new Error(`Preparation authority has no pinned ${phase} skill and worker profile.`);
+  }
+  const resolved = await source.resolve(authorized.manifest.packageDigest);
+  if (
+    resolved.packageDigest !== authorized.manifest.packageDigest ||
+    !sameJsonValue(resolved.manifest, authorized.manifest)
+  ) {
+    throw new Error(`Preparation skill ${authorized.manifest.id} does not match its authority.`);
+  }
+  const compatibility = resolved.manifest.providerCompatibility;
+  if (compatibility.mode === "allowlist" && !compatibility.providers.includes(profile.provider)) {
+    throw new Error(`Preparation skill ${resolved.manifest.id} forbids its pinned provider.`);
+  }
+  if (!factoryCapabilitiesFit(resolved.manifest.requestedCapabilities, profile.capabilities)) {
+    throw new Error(`Preparation skill ${resolved.manifest.id} exceeds its worker capabilities.`);
+  }
+  if (!factoryBudgetFits(profile.budget, resolved.manifest.budgetCeiling)) {
+    throw new Error(`Preparation worker ${profile.id} exceeds its skill budget ceiling.`);
+  }
+  return resolved;
 }
 
 const phasePolicy: Readonly<
@@ -154,4 +189,30 @@ function topologicalSkillIds(contract: ImmutableTaskContract): readonly string[]
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value) => right.includes(value));
+}
+
+function sameJsonValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => sameJsonValue(value, right[index]))
+    );
+  }
+  if (!isJsonObject(left) || !isJsonObject(right)) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(right, key) && sameJsonValue(left[key], right[key])
+    )
+  );
+}
+
+function isJsonObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

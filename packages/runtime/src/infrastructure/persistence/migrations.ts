@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 5;
+export const latestSchemaVersion = 6;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -414,6 +414,213 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 5;
+      COMMIT;
+    `);
+  }
+
+  if (version < 6) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_preparations (
+        task_id TEXT PRIMARY KEY CHECK (length(task_id) = 36),
+        request_digest TEXT NOT NULL UNIQUE CHECK (
+          length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:'
+        ),
+        authority_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authority_digest) = 71 AND substr(authority_digest, 1, 7) = 'sha256:'
+        ),
+        conversation_id TEXT NOT NULL CHECK (length(conversation_id) = 36),
+        deduplication_key TEXT NOT NULL CHECK (
+          length(deduplication_key) = 71 AND substr(deduplication_key, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        created_at TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        request_json TEXT NOT NULL CHECK (
+          length(request_json) BETWEEN 2 AND 2097152 AND json_valid(request_json)
+        ),
+        authority_json TEXT NOT NULL CHECK (
+          length(authority_json) BETWEEN 2 AND 4194304 AND json_valid(authority_json)
+        ),
+        UNIQUE(repository_id, deduplication_key)
+      ) STRICT;
+      CREATE INDEX factory_preparations_conversation_idx
+        ON factory_preparations(conversation_id, created_at DESC, task_id DESC);
+      CREATE INDEX factory_preparations_repository_idx
+        ON factory_preparations(repository_id, created_at DESC, task_id DESC);
+
+      CREATE TABLE factory_preparation_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        task_id TEXT NOT NULL REFERENCES factory_preparations(task_id),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 1000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        request_digest TEXT NOT NULL CHECK (
+          length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:'
+        ),
+        authority_digest TEXT NOT NULL CHECK (
+          length(authority_digest) = 71 AND substr(authority_digest, 1, 7) = 'sha256:'
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'phase-started', 'phase-succeeded', 'phase-failed',
+          'phase-abandoned', 'needs-human', 'rejected', 'prepared', 'failed',
+          'cancelled', 'expired'
+        )),
+        phase TEXT CHECK (phase IS NULL OR phase IN ('qualify', 'specify', 'plan')),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        attempt INTEGER CHECK (attempt IS NULL OR attempt BETWEEN 1 AND 5),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'registered', 'qualifying', 'qualified', 'specifying', 'specified',
+            'planning', 'planned', 'prepared', 'needs-human', 'rejected', 'failed',
+            'cancelled', 'expired'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'registered', 'qualifying', 'qualified', 'specifying', 'specified',
+          'planning', 'planned', 'prepared', 'needs-human', 'rejected', 'failed',
+          'cancelled', 'expired'
+        )),
+        occurred_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 2097152 AND json_valid(event_json)
+        ),
+        UNIQUE(task_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_preparation_events_task_idx
+        ON factory_preparation_events(task_id, sequence);
+      CREATE INDEX factory_preparation_events_execution_idx
+        ON factory_preparation_events(task_id, execution_id)
+        WHERE execution_id IS NOT NULL;
+
+      CREATE TRIGGER factory_preparations_no_update
+      BEFORE UPDATE ON factory_preparations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparations are immutable');
+      END;
+      CREATE TRIGGER factory_preparations_no_delete
+      BEFORE DELETE ON factory_preparations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparations are immutable');
+      END;
+      CREATE TRIGGER factory_preparation_events_no_update
+      BEFORE UPDATE ON factory_preparation_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation events are append-only');
+      END;
+      CREATE TRIGGER factory_preparation_events_no_delete
+      BEFORE DELETE ON factory_preparation_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation events are append-only');
+      END;
+      CREATE TRIGGER factory_preparation_events_identity_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN
+        NEW.request_digest != (
+          SELECT request_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.authority_digest != (
+          SELECT authority_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation identity mismatch');
+      END;
+      CREATE TRIGGER factory_preparation_events_sequence_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN NEW.sequence != COALESCE(
+        (SELECT MAX(sequence) + 1 FROM factory_preparation_events WHERE task_id = NEW.task_id),
+        1
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation event sequence mismatch');
+      END;
+      CREATE TRIGGER factory_preparation_events_initial_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN
+        (NEW.sequence = 1 AND (
+          NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL OR
+          NEW.to_state != 'registered' OR NEW.kind != 'registered'
+        )) OR
+        (NEW.sequence > 1 AND (
+          NEW.previous_event_digest IS NULL OR NEW.from_state IS NULL OR NEW.kind = 'registered'
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'invalid factory preparation initial event');
+      END;
+      CREATE TRIGGER factory_preparation_events_digest_chain_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+        SELECT event_digest FROM factory_preparation_events
+        WHERE task_id = NEW.task_id ORDER BY sequence DESC LIMIT 1
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation event digest chain mismatch');
+      END;
+      CREATE TRIGGER factory_preparation_events_from_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN NEW.sequence > 1 AND NEW.from_state IS NOT (
+        SELECT to_state FROM factory_preparation_events
+        WHERE task_id = NEW.task_id ORDER BY sequence DESC LIMIT 1
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation previous state mismatch');
+      END;
+      CREATE TRIGGER factory_preparation_events_run_fields_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN
+        (NEW.kind IN (
+          'phase-started', 'phase-succeeded', 'phase-failed', 'phase-abandoned',
+          'needs-human', 'rejected'
+        ) AND (NEW.phase IS NULL OR NEW.execution_id IS NULL OR NEW.attempt IS NULL)) OR
+        (NEW.kind NOT IN (
+          'phase-started', 'phase-succeeded', 'phase-failed', 'phase-abandoned',
+          'needs-human', 'rejected'
+        ) AND (NEW.phase IS NOT NULL OR NEW.execution_id IS NOT NULL OR NEW.attempt IS NOT NULL))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory preparation event run fields mismatch');
+      END;
+      CREATE TRIGGER factory_preparation_events_transition_guard
+      BEFORE INSERT ON factory_preparation_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'registered') OR
+        (NEW.kind = 'phase-started' AND (
+          (NEW.phase = 'qualify' AND NEW.from_state = 'registered' AND NEW.to_state = 'qualifying') OR
+          (NEW.phase = 'specify' AND NEW.from_state = 'qualified' AND NEW.to_state = 'specifying') OR
+          (NEW.phase = 'plan' AND NEW.from_state = 'specified' AND NEW.to_state = 'planning')
+        )) OR
+        (NEW.kind = 'phase-succeeded' AND (
+          (NEW.phase = 'qualify' AND NEW.from_state = 'qualifying' AND NEW.to_state = 'qualified') OR
+          (NEW.phase = 'specify' AND NEW.from_state = 'specifying' AND NEW.to_state = 'specified') OR
+          (NEW.phase = 'plan' AND NEW.from_state = 'planning' AND NEW.to_state = 'planned')
+        )) OR
+        (NEW.kind IN ('phase-failed', 'phase-abandoned') AND (
+          (NEW.phase = 'qualify' AND NEW.from_state = 'qualifying' AND NEW.to_state = 'registered') OR
+          (NEW.phase = 'specify' AND NEW.from_state = 'specifying' AND NEW.to_state = 'qualified') OR
+          (NEW.phase = 'plan' AND NEW.from_state = 'planning' AND NEW.to_state = 'specified')
+        )) OR
+        (NEW.kind = 'needs-human' AND NEW.phase = 'qualify' AND
+          NEW.from_state = 'qualifying' AND NEW.to_state = 'needs-human') OR
+        (NEW.kind = 'rejected' AND NEW.phase = 'qualify' AND
+          NEW.from_state = 'qualifying' AND NEW.to_state = 'rejected') OR
+        (NEW.kind = 'prepared' AND NEW.from_state = 'planned' AND NEW.to_state = 'prepared') OR
+        (NEW.kind IN ('failed', 'cancelled', 'expired') AND
+          NEW.from_state IN (
+            'registered', 'qualifying', 'qualified', 'specifying', 'specified', 'planning', 'planned'
+          ) AND NEW.to_state = NEW.kind)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory preparation transition');
+      END;
+
+      PRAGMA user_version = 6;
       COMMIT;
     `);
   }

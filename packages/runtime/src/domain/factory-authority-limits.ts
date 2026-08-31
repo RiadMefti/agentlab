@@ -1,4 +1,9 @@
-import type { FactoryBudget, FactoryCapabilityGrant, FactoryRiskTier } from "@agentlab/contracts";
+import type {
+  FactoryBudget,
+  FactoryBudgetUsage,
+  FactoryCapabilityGrant,
+  FactoryRiskTier
+} from "@agentlab/contracts";
 
 /** Returns true only when every requested capability is contained by the trusted ceiling. */
 export function factoryCapabilitiesFit(
@@ -31,6 +36,23 @@ export function factoryBudgetFits(requested: FactoryBudget, ceiling: FactoryBudg
     requested.maxRepairAttempts <= ceiling.maxRepairAttempts &&
     requested.maxChangedFiles <= ceiling.maxChangedFiles &&
     requested.maxChangedLines <= ceiling.maxChangedLines
+  );
+}
+
+export function factoryUsageFits(usage: FactoryBudgetUsage, budget: FactoryBudget): boolean {
+  return (
+    usage.wallClockSeconds <= budget.wallClockSeconds &&
+    usage.agentTurns <= budget.maxAgentTurns &&
+    usage.toolCalls <= budget.maxToolCalls &&
+    usage.inputTokens <= budget.maxInputTokens &&
+    usage.outputTokens <= budget.maxOutputTokens &&
+    usage.costMicrousd <= budget.maxCostMicrousd &&
+    usage.processes <= budget.maxProcesses &&
+    usage.outputBytes <= budget.maxOutputBytes &&
+    usage.workers <= budget.maxWorkers &&
+    usage.repairAttempts <= budget.maxRepairAttempts &&
+    usage.changedFiles <= budget.maxChangedFiles &&
+    usage.changedLines <= budget.maxChangedLines
   );
 }
 

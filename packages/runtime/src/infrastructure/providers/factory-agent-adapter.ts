@@ -1,4 +1,11 @@
-import type { FactoryAgentRunRequest, FactoryBudgetUsage, ProviderId } from "@agentlab/contracts";
+import {
+  factoryAgentRunRequestSchema,
+  factoryPreparationRunRequestSchema,
+  type FactoryAgentRunRequest,
+  type FactoryBudgetUsage,
+  type FactoryPreparationRunRequest,
+  type ProviderId
+} from "@agentlab/contracts";
 
 import type { CommandSpec } from "../../domain/command.js";
 import type {
@@ -14,7 +21,7 @@ export interface FactoryAgentCommand {
 }
 
 export interface FactoryAgentParseInput {
-  readonly request: FactoryAgentRunRequest;
+  readonly request: FactoryProviderRunRequest;
   readonly providerVersion: string;
   readonly harnessVersion: string;
   readonly startedAt: string;
@@ -27,7 +34,7 @@ export interface FactoryAgentAdapter {
   readonly id: ProviderId;
   readonly capability: FactoryAgentExecutorCapability;
   build(
-    request: FactoryAgentRunRequest,
+    request: FactoryProviderRunRequest,
     executable: string,
     workspace: FactoryWorkspace,
     prompt: string
@@ -35,6 +42,19 @@ export interface FactoryAgentAdapter {
   parse(
     input: FactoryAgentParseInput
   ): Omit<FactoryAgentExecutionOutput, "exitCode" | "status" | "errorCode" | "isolation">;
+}
+
+export type FactoryProviderRunRequest = FactoryAgentRunRequest | FactoryPreparationRunRequest;
+
+export function parseFactoryProviderRunRequest(input: unknown): FactoryProviderRunRequest {
+  const execution = factoryAgentRunRequestSchema.safeParse(input);
+  return execution.success ? execution.data : factoryPreparationRunRequestSchema.parse(input);
+}
+
+export function isFactoryPreparationRunRequest(
+  request: FactoryProviderRunRequest
+): request is FactoryPreparationRunRequest {
+  return request.schemaVersion === "agentlab.preparation-run-request.v1";
 }
 
 export function emptyFactoryBudgetUsage(): FactoryBudgetUsage {

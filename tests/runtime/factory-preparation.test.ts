@@ -145,6 +145,28 @@ describe("FactoryPreparationCompiler", () => {
     );
   });
 
+  it("rejects preparation output from a substituted provider profile", () => {
+    const fixture = testFactoryPreparationFixture();
+    const substitutedRuns = fixture.bundle.runs.map((run, index) =>
+      index === 0
+        ? {
+            ...run,
+            provider: "claude" as const,
+            model: "claude-sonnet-4-6",
+            reasoning: "high"
+          }
+        : run
+    );
+
+    expectReason(
+      {
+        ...fixture,
+        input: { ...fixture.input, bundle: { ...fixture.bundle, runs: substitutedRuns } }
+      },
+      "preparation-profile-mismatch"
+    );
+  });
+
   it("raises protected scope to R3 and derives every approval from policy", () => {
     const fixture = testFactoryPreparationFixture({
       includePaths: [".github/workflows/ci.yml"],

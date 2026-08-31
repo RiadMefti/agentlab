@@ -2,11 +2,15 @@ import { z } from "zod";
 
 import {
   evidenceKindSchema,
+  factoryAgentRunStatusSchema,
   factoryActorSchema,
+  factoryArtifactReferenceSchema,
   factoryBudgetSchema,
+  factoryBudgetUsageSchema,
   factoryCapabilityGrantSchema,
   factoryExecutionRoleSchema,
   factoryIdentifierSchema,
+  factoryProcessIsolationSchema,
   factoryRiskTierSchema,
   factorySemanticVersionSchema,
   factorySkillPhaseSchema,
@@ -20,6 +24,26 @@ import {
   type FactoryTaskState
 } from "./factory.js";
 import { modelIdSchema, providerIdSchema, reasoningIdSchema } from "./provider.js";
+
+export const factoryPreparationPhaseSchema = z.enum(["qualify", "specify", "plan"]);
+export type FactoryPreparationPhase = z.infer<typeof factoryPreparationPhaseSchema>;
+
+export const factoryPreparationStateSchema = z.enum([
+  "registered",
+  "qualifying",
+  "qualified",
+  "specifying",
+  "specified",
+  "planning",
+  "planned",
+  "prepared",
+  "needs-human",
+  "rejected",
+  "failed",
+  "cancelled",
+  "expired"
+]);
+export type FactoryPreparationState = z.infer<typeof factoryPreparationStateSchema>;
 
 const statementSchema = z
   .string()
@@ -163,6 +187,44 @@ export const factoryQualificationSchema = z
   });
 export type FactoryQualification = z.infer<typeof factoryQualificationSchema>;
 
+const qualificationOutputBaseSchema = z.object({
+  schemaVersion: z.literal("agentlab.qualification-output.v1"),
+  assumptions: z.array(statementSchema).max(50)
+});
+
+export const factoryQualificationOutputSchema = z
+  .discriminatedUnion("disposition", [
+    qualificationOutputBaseSchema
+      .extend({
+        disposition: z.literal("ready"),
+        objective: statementSchema,
+        openQuestions: z.array(statementSchema).max(0),
+        rejectionReason: z.null()
+      })
+      .strict(),
+    qualificationOutputBaseSchema
+      .extend({
+        disposition: z.literal("needs-human"),
+        objective: statementSchema.nullable(),
+        openQuestions: z.array(statementSchema).min(1).max(50),
+        rejectionReason: z.null()
+      })
+      .strict(),
+    qualificationOutputBaseSchema
+      .extend({
+        disposition: z.literal("rejected"),
+        objective: statementSchema.nullable(),
+        openQuestions: z.array(statementSchema).max(50),
+        rejectionReason: statementSchema
+      })
+      .strict()
+  ])
+  .superRefine((qualification, context) => {
+    uniqueValues(qualification.assumptions, context, ["assumptions"]);
+    uniqueValues(qualification.openQuestions, context, ["openQuestions"]);
+  });
+export type FactoryQualificationOutput = z.infer<typeof factoryQualificationOutputSchema>;
+
 export const factorySpecificationSchema = z
   .object({
     schemaVersion: z.literal("agentlab.specification.v1"),
@@ -181,6 +243,21 @@ export const factorySpecificationSchema = z
     uniqueValues(specification.nonGoals, context, ["nonGoals"]);
   });
 export type FactorySpecification = z.infer<typeof factorySpecificationSchema>;
+
+export const factorySpecificationOutputSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.specification-output.v1"),
+    objective: statementSchema,
+    acceptanceCriteria: z.array(statementSchema).min(1).max(50),
+    nonGoals: z.array(statementSchema).max(50),
+    scope: scopeSchema
+  })
+  .strict()
+  .superRefine((specification, context) => {
+    uniqueValues(specification.acceptanceCriteria, context, ["acceptanceCriteria"]);
+    uniqueValues(specification.nonGoals, context, ["nonGoals"]);
+  });
+export type FactorySpecificationOutput = z.infer<typeof factorySpecificationOutputSchema>;
 
 export const factoryPlanSchema = z
   .object({
@@ -204,6 +281,24 @@ export const factoryPlanSchema = z
     uniqueValues(plan.requiredEvidence, context, ["requiredEvidence"]);
   });
 export type FactoryPlan = z.infer<typeof factoryPlanSchema>;
+
+export const factoryPlanOutputSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.plan-output.v1"),
+    proposedRiskTier: factoryRiskTierSchema,
+    selectedSkillIds: z.array(factoryIdentifierSchema).min(1).max(64),
+    selectedWorkerProfileIds: z.array(factoryIdentifierSchema).min(1).max(16),
+    capabilities: factoryCapabilityGrantSchema,
+    budget: factoryBudgetSchema,
+    requiredEvidence: z.array(evidenceKindSchema).max(32)
+  })
+  .strict()
+  .superRefine((plan, context) => {
+    uniqueValues(plan.selectedSkillIds, context, ["selectedSkillIds"]);
+    uniqueValues(plan.selectedWorkerProfileIds, context, ["selectedWorkerProfileIds"]);
+    uniqueValues(plan.requiredEvidence, context, ["requiredEvidence"]);
+  });
+export type FactoryPlanOutput = z.infer<typeof factoryPlanOutputSchema>;
 
 const authorizedSkillSchema = z
   .object({
@@ -241,6 +336,47 @@ const workerProfileSchema = z
     uniqueValues(profile.roles, context, ["roles"]);
   });
 
+export const factoryPreparationWorkerProfileSchema = z
+  .object({
+    id: factoryIdentifierSchema,
+    phase: factoryPreparationPhaseSchema,
+    skillId: factoryIdentifierSchema,
+    provider: providerIdSchema,
+    model: modelIdSchema,
+    reasoning: reasoningIdSchema.nullable(),
+    capabilities: factoryCapabilityGrantSchema,
+    budget: factoryBudgetSchema
+  })
+  .strict()
+  .superRefine((profile, context) => {
+    if (
+      profile.capabilities.filesystem !== "read" ||
+      profile.capabilities.git !== "read" ||
+      profile.capabilities.remoteRepository !== "none" ||
+      profile.capabilities.network.mode !== "off" ||
+      profile.capabilities.secretRefs.length > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: "Preparation workers are local, read-only, offline, and receive no secrets."
+      });
+    }
+    if (
+      profile.budget.maxWorkers !== 1 ||
+      profile.budget.maxRepairAttempts !== 0 ||
+      profile.budget.maxChangedFiles !== 0 ||
+      profile.budget.maxChangedLines !== 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["budget"],
+        message: "A preparation run cannot delegate, repair, or change repository files."
+      });
+    }
+  });
+export type FactoryPreparationWorkerProfile = z.infer<typeof factoryPreparationWorkerProfileSchema>;
+
 const approvalRolesSchema = z
   .object({
     execution: z.array(factoryIdentifierSchema).min(1).max(16),
@@ -256,9 +392,38 @@ const approvalRolesSchema = z
     uniqueValues(roles.release, context, ["release"]);
   });
 
+const authorityPolicyShape = {
+  allowedIncludePaths: z.array(repositoryPathPatternSchema).min(1).max(256),
+  protectedPaths: z.array(repositoryPathPatternSchema).max(256),
+  maximumRiskTier: factoryRiskTierSchema,
+  skills: z.array(authorizedSkillSchema).min(4).max(64),
+  preparationProfiles: z.array(factoryPreparationWorkerProfileSchema).length(3),
+  workerProfiles: z.array(workerProfileSchema).min(1).max(16),
+  capabilityCeiling: factoryCapabilityGrantSchema,
+  budgetCeiling: factoryBudgetSchema,
+  evidenceFloor: z.array(evidenceKindSchema).max(32),
+  approvalRoles: approvalRolesSchema,
+  maximumPreparationAttempts: z.number().int().min(1).max(5),
+  maximumContractLifetimeSeconds: z.number().int().min(60).max(604_800)
+} as const;
+
+export const factoryPreparationAuthorityGrantSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.preparation-authority-grant.v1"),
+    authorityId: factoryIdentifierSchema,
+    version: factorySemanticVersionSchema,
+    maximumAuthorityLifetimeSeconds: z.number().int().min(60).max(604_800),
+    ...authorityPolicyShape
+  })
+  .strict()
+  .superRefine(refineAuthorityPolicy);
+export type FactoryPreparationAuthorityGrant = z.infer<
+  typeof factoryPreparationAuthorityGrantSchema
+>;
+
 export const factoryPreparationAuthoritySchema = z
   .object({
-    schemaVersion: z.literal("agentlab.preparation-authority.v1"),
+    schemaVersion: z.literal("agentlab.preparation-authority.v2"),
     authorityId: factoryIdentifierSchema,
     version: factorySemanticVersionSchema,
     taskId: z.uuid(),
@@ -268,16 +433,7 @@ export const factoryPreparationAuthoritySchema = z
     expiresAt: factoryTimestampSchema,
     policyBundleDigest: sha256DigestSchema,
     repository: repositoryIdentitySchema,
-    allowedIncludePaths: z.array(repositoryPathPatternSchema).min(1).max(256),
-    protectedPaths: z.array(repositoryPathPatternSchema).max(256),
-    maximumRiskTier: factoryRiskTierSchema,
-    skills: z.array(authorizedSkillSchema).min(4).max(64),
-    workerProfiles: z.array(workerProfileSchema).min(1).max(16),
-    capabilityCeiling: factoryCapabilityGrantSchema,
-    budgetCeiling: factoryBudgetSchema,
-    evidenceFloor: z.array(evidenceKindSchema).max(32),
-    approvalRoles: approvalRolesSchema,
-    maximumContractLifetimeSeconds: z.number().int().min(60).max(604_800)
+    ...authorityPolicyShape
   })
   .strict()
   .superRefine((authority, context) => {
@@ -288,62 +444,104 @@ export const factoryPreparationAuthoritySchema = z
         message: "Preparation authority must expire after it is issued."
       });
     }
-    uniqueValues(authority.allowedIncludePaths, context, ["allowedIncludePaths"]);
-    uniqueValues(authority.protectedPaths, context, ["protectedPaths"]);
-    uniqueValues(authority.evidenceFloor, context, ["evidenceFloor"]);
-    uniqueValues(
-      authority.workerProfiles.map((profile) => profile.id),
-      context,
-      ["workerProfiles"]
-    );
-    const skillIds = authority.skills.map((skill) => skill.manifest.id);
-    uniqueValues(skillIds, context, ["skills"]);
-    uniqueValues(
-      authority.skills.map((skill) => skill.manifest.packageDigest),
-      context,
-      ["skills"]
-    );
-    const skills = new Map(authority.skills.map((skill) => [skill.manifest.id, skill]));
-    for (const [index, skill] of authority.skills.entries()) {
-      const dependencyDigests: string[] = [];
-      for (const dependencyId of skill.dependsOn) {
-        const dependency = skills.get(dependencyId);
-        if (dependency === undefined) {
-          context.addIssue({
-            code: "custom",
-            path: ["skills", index, "dependsOn"],
-            message: `Unknown authorized skill dependency ${dependencyId}.`
-          });
-        } else {
-          dependencyDigests.push(dependency.manifest.packageDigest);
-        }
-      }
-      if (!sameSet(dependencyDigests, skill.manifest.dependencyDigests)) {
-        context.addIssue({
-          code: "custom",
-          path: ["skills", index, "manifest", "dependencyDigests"],
-          message: "Authorized skill dependency IDs and package digests disagree."
-        });
-      }
-    }
-    if (skillGraphHasCycle(authority.skills)) {
-      context.addIssue({
-        code: "custom",
-        path: ["skills"],
-        message: "Authorized skill graph must be acyclic."
-      });
-    }
+    refineAuthorityPolicy(authority, context);
   });
 export type FactoryPreparationAuthority = z.infer<typeof factoryPreparationAuthoritySchema>;
 
+function refineAuthorityPolicy(
+  authority: {
+    readonly allowedIncludePaths: readonly string[];
+    readonly protectedPaths: readonly string[];
+    readonly evidenceFloor: readonly string[];
+    readonly workerProfiles: readonly { readonly id: string }[];
+    readonly preparationProfiles: readonly {
+      readonly id: string;
+      readonly phase: FactoryPreparationPhase;
+    }[];
+    readonly skills: readonly z.infer<typeof authorizedSkillSchema>[];
+  },
+  context: z.RefinementCtx
+): void {
+  uniqueValues(authority.allowedIncludePaths, context, ["allowedIncludePaths"]);
+  uniqueValues(authority.protectedPaths, context, ["protectedPaths"]);
+  uniqueValues(authority.evidenceFloor, context, ["evidenceFloor"]);
+  uniqueValues(
+    authority.workerProfiles.map((profile) => profile.id),
+    context,
+    ["workerProfiles"]
+  );
+  uniqueValues(
+    authority.preparationProfiles.map((profile) => profile.id),
+    context,
+    ["preparationProfiles"]
+  );
+  uniqueValues(
+    authority.preparationProfiles.map((profile) => profile.phase),
+    context,
+    ["preparationProfiles"]
+  );
+  for (const phase of factoryPreparationPhaseSchema.options) {
+    if (!authority.preparationProfiles.some((profile) => profile.phase === phase)) {
+      context.addIssue({
+        code: "custom",
+        path: ["preparationProfiles"],
+        message: `Preparation authority requires one ${phase} worker profile.`
+      });
+    }
+  }
+  const skillIds = authority.skills.map((skill) => skill.manifest.id);
+  uniqueValues(skillIds, context, ["skills"]);
+  uniqueValues(
+    authority.skills.map((skill) => skill.manifest.packageDigest),
+    context,
+    ["skills"]
+  );
+  const skills = new Map(authority.skills.map((skill) => [skill.manifest.id, skill]));
+  for (const [index, skill] of authority.skills.entries()) {
+    const dependencyDigests: string[] = [];
+    for (const dependencyId of skill.dependsOn) {
+      const dependency = skills.get(dependencyId);
+      if (dependency === undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["skills", index, "dependsOn"],
+          message: `Unknown authorized skill dependency ${dependencyId}.`
+        });
+      } else {
+        dependencyDigests.push(dependency.manifest.packageDigest);
+      }
+    }
+    if (!sameSet(dependencyDigests, skill.manifest.dependencyDigests)) {
+      context.addIssue({
+        code: "custom",
+        path: ["skills", index, "manifest", "dependencyDigests"],
+        message: "Authorized skill dependency IDs and package digests disagree."
+      });
+    }
+  }
+  if (skillGraphHasCycle(authority.skills)) {
+    context.addIssue({
+      code: "custom",
+      path: ["skills"],
+      message: "Authorized skill graph must be acyclic."
+    });
+  }
+}
+
 const preparationRunSchema = z
   .object({
-    phase: z.enum(["qualify", "specify", "plan"]),
+    executionId: z.uuid(),
+    phase: factoryPreparationPhaseSchema,
     skillId: factoryIdentifierSchema,
     skillPackageDigest: sha256DigestSchema,
+    workerProfileId: factoryIdentifierSchema,
+    provider: providerIdSchema,
+    model: modelIdSchema,
+    reasoning: reasoningIdSchema.nullable(),
     actor: factoryActorSchema,
     startedAt: factoryTimestampSchema,
     finishedAt: factoryTimestampSchema,
+    runRecordDigest: sha256DigestSchema,
     outputDigest: sha256DigestSchema
   })
   .strict()
@@ -370,7 +568,7 @@ const preparationRunSchema = z
 
 export const factoryPreparationBundleSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.preparation-bundle.v1"),
+    schemaVersion: z.literal("agentlab.preparation-bundle.v2"),
     taskId: z.uuid(),
     requestDigest: sha256DigestSchema,
     authorityDigest: sha256DigestSchema,
@@ -384,6 +582,16 @@ export const factoryPreparationBundleSchema = z
   .superRefine((bundle, context) => {
     uniqueValues(
       bundle.runs.map((run) => run.phase),
+      context,
+      ["runs"]
+    );
+    uniqueValues(
+      bundle.runs.map((run) => run.executionId),
+      context,
+      ["runs"]
+    );
+    uniqueValues(
+      bundle.runs.map((run) => run.runRecordDigest),
       context,
       ["runs"]
     );
@@ -411,6 +619,329 @@ export const factoryPreparationBundleSchema = z
   });
 export type FactoryPreparationBundle = z.infer<typeof factoryPreparationBundleSchema>;
 
+export const factoryPreparationRunRequestSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.preparation-run-request.v1"),
+    executionId: z.uuid(),
+    taskId: z.uuid(),
+    requestDigest: sha256DigestSchema,
+    authorityDigest: sha256DigestSchema,
+    phase: factoryPreparationPhaseSchema,
+    attempt: z.number().int().min(1).max(5),
+    provider: providerIdSchema,
+    model: modelIdSchema,
+    reasoning: reasoningIdSchema.nullable(),
+    repository: repositoryIdentitySchema,
+    skillId: factoryIdentifierSchema,
+    skillPackageDigest: sha256DigestSchema,
+    promptArtifact: factoryArtifactReferenceSchema,
+    inputArtifactDigests: z.array(sha256DigestSchema).min(1).max(16),
+    outputSchemaDigest: sha256DigestSchema,
+    capabilities: factoryCapabilityGrantSchema,
+    budget: factoryBudgetSchema
+  })
+  .strict()
+  .superRefine((request, context) => {
+    uniqueValues(request.inputArtifactDigests, context, ["inputArtifactDigests"]);
+    if (
+      request.capabilities.filesystem !== "read" ||
+      request.capabilities.git !== "read" ||
+      request.capabilities.remoteRepository !== "none" ||
+      request.capabilities.network.mode !== "off" ||
+      request.capabilities.secretRefs.length > 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["capabilities"],
+        message: "Preparation execution is local, read-only, offline, and receives no secrets."
+      });
+    }
+    if (
+      request.budget.maxWorkers !== 1 ||
+      request.budget.maxRepairAttempts !== 0 ||
+      request.budget.maxChangedFiles !== 0 ||
+      request.budget.maxChangedLines !== 0
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["budget"],
+        message: "Preparation execution cannot delegate, repair, or change repository files."
+      });
+    }
+  });
+export type FactoryPreparationRunRequest = z.infer<typeof factoryPreparationRunRequestSchema>;
+
+export const factoryPreparationRunRecordSchema = z
+  .object({
+    schemaVersion: z.literal("agentlab.preparation-run-record.v1"),
+    executionId: z.uuid(),
+    taskId: z.uuid(),
+    requestDigest: sha256DigestSchema,
+    authorityDigest: sha256DigestSchema,
+    phase: factoryPreparationPhaseSchema,
+    attempt: z.number().int().min(1).max(5),
+    provider: providerIdSchema,
+    providerVersion: z.string().trim().min(1).max(180),
+    harnessVersion: z.string().trim().min(1).max(180),
+    model: modelIdSchema,
+    reasoning: reasoningIdSchema.nullable(),
+    providerSessionId: z.string().trim().min(1).max(256).nullable(),
+    status: factoryAgentRunStatusSchema,
+    startedAt: factoryTimestampSchema,
+    finishedAt: factoryTimestampSchema,
+    exitCode: z.number().int().min(0).max(255).nullable(),
+    stdoutArtifact: factoryArtifactReferenceSchema,
+    stderrArtifact: factoryArtifactReferenceSchema,
+    finalOutputArtifact: factoryArtifactReferenceSchema.nullable(),
+    outputDocumentArtifact: factoryArtifactReferenceSchema.nullable(),
+    usage: factoryBudgetUsageSchema,
+    usageComplete: z.boolean(),
+    errorCode: factoryIdentifierSchema.nullable(),
+    isolation: factoryProcessIsolationSchema
+  })
+  .strict()
+  .superRefine((record, context) => {
+    if (record.finishedAt < record.startedAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["finishedAt"],
+        message: "Preparation run cannot finish before it starts."
+      });
+    }
+    if (
+      record.status === "succeeded" &&
+      (record.exitCode !== 0 ||
+        record.errorCode !== null ||
+        record.finalOutputArtifact === null ||
+        record.outputDocumentArtifact === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "A successful preparation run requires validated final and document artifacts."
+      });
+    }
+    if (
+      record.status !== "succeeded" &&
+      (record.errorCode === null || record.outputDocumentArtifact !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["errorCode"],
+        message: "An unsuccessful preparation run requires an error and no output document."
+      });
+    }
+  });
+export type FactoryPreparationRunRecord = z.infer<typeof factoryPreparationRunRecordSchema>;
+
+const activePreparationStateSchema = z.enum([
+  "registered",
+  "qualifying",
+  "qualified",
+  "specifying",
+  "specified",
+  "planning",
+  "planned"
+]);
+
+const preparationEventCommonShape = {
+  schemaVersion: z.literal("agentlab.preparation-event.v1"),
+  eventId: z.uuid(),
+  taskId: z.uuid(),
+  sequence: z.number().int().min(1).max(1_000),
+  requestDigest: sha256DigestSchema,
+  authorityDigest: sha256DigestSchema,
+  previousEventDigest: sha256DigestSchema.nullable(),
+  actor: factoryActorSchema,
+  occurredAt: factoryTimestampSchema,
+  reasonCode: factoryIdentifierSchema,
+  summary: requestTitleSchema.nullable(),
+  correlationId: z.uuid()
+} as const;
+
+const preparationRunLinkShape = {
+  phase: factoryPreparationPhaseSchema,
+  attempt: z.number().int().min(1).max(5),
+  executionId: z.uuid(),
+  runRequestDigest: sha256DigestSchema
+} as const;
+
+const factoryPreparationEventUnionSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...preparationEventCommonShape,
+      kind: z.literal("registered"),
+      from: z.null(),
+      to: z.literal("registered")
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("phase-started"),
+      from: activePreparationStateSchema,
+      to: activePreparationStateSchema,
+      skillId: factoryIdentifierSchema,
+      skillPackageDigest: sha256DigestSchema,
+      workerProfileId: factoryIdentifierSchema,
+      inputArtifactDigests: z.array(sha256DigestSchema).min(1).max(16)
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("phase-succeeded"),
+      from: activePreparationStateSchema,
+      to: activePreparationStateSchema,
+      runRecordArtifact: factoryArtifactReferenceSchema,
+      outputArtifact: factoryArtifactReferenceSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("phase-failed"),
+      from: activePreparationStateSchema,
+      to: activePreparationStateSchema,
+      runRecordArtifact: factoryArtifactReferenceSchema,
+      errorCode: factoryIdentifierSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("phase-abandoned"),
+      from: activePreparationStateSchema,
+      to: activePreparationStateSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("needs-human"),
+      from: z.literal("qualifying"),
+      to: z.literal("needs-human"),
+      runRecordArtifact: factoryArtifactReferenceSchema,
+      outputArtifact: factoryArtifactReferenceSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      ...preparationRunLinkShape,
+      kind: z.literal("rejected"),
+      from: z.literal("qualifying"),
+      to: z.literal("rejected"),
+      runRecordArtifact: factoryArtifactReferenceSchema,
+      outputArtifact: factoryArtifactReferenceSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      kind: z.literal("prepared"),
+      from: z.literal("planned"),
+      to: z.literal("prepared"),
+      preparationBundleDigest: sha256DigestSchema,
+      contractDigest: sha256DigestSchema,
+      evidenceBundleDigest: sha256DigestSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      kind: z.literal("failed"),
+      from: activePreparationStateSchema,
+      to: z.literal("failed"),
+      errorCode: factoryIdentifierSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      kind: z.literal("cancelled"),
+      from: activePreparationStateSchema,
+      to: z.literal("cancelled")
+    })
+    .strict(),
+  z
+    .object({
+      ...preparationEventCommonShape,
+      kind: z.literal("expired"),
+      from: activePreparationStateSchema,
+      to: z.literal("expired")
+    })
+    .strict()
+]);
+
+export const factoryPreparationEventSchema = factoryPreparationEventUnionSchema.superRefine(
+  (event, context) => {
+    if (
+      event.kind === "registered" &&
+      (event.sequence !== 1 || event.previousEventDigest !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["sequence"],
+        message: "Only the first preparation event may register a request."
+      });
+    }
+    if (
+      event.kind !== "registered" &&
+      (event.sequence === 1 || event.previousEventDigest === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["previousEventDigest"],
+        message: "Every later preparation event must link to its predecessor."
+      });
+    }
+    if ("inputArtifactDigests" in event) {
+      uniqueValues(event.inputArtifactDigests, context, ["inputArtifactDigests"]);
+    }
+    if (
+      (event.kind === "phase-started" ||
+        event.kind === "phase-succeeded" ||
+        event.kind === "phase-failed" ||
+        event.kind === "phase-abandoned") &&
+      !preparationPhaseTransitionMatches(event.phase, event.kind, event.from, event.to)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: "Preparation phase event does not match its deterministic state transition."
+      });
+    }
+    if ((event.kind === "needs-human" || event.kind === "rejected") && event.phase !== "qualify") {
+      context.addIssue({
+        code: "custom",
+        path: ["phase"],
+        message: "Only qualification may stop preparation before specification."
+      });
+    }
+    if (
+      (event.kind === "phase-succeeded" ||
+        event.kind === "needs-human" ||
+        event.kind === "rejected") &&
+      (event.actor.kind !== "agent" ||
+        event.actor.role !== phasePolicy[event.phase].role ||
+        event.actor.sessionId === null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["actor"],
+        message: "A completed preparation phase requires its session-bound agent actor."
+      });
+    }
+  }
+);
+export type FactoryPreparationEvent = z.infer<typeof factoryPreparationEventSchema>;
+
 const phasePolicy: Readonly<
   Record<
     FactorySkillPhase,
@@ -429,6 +960,24 @@ const phasePolicy: Readonly<
   review: { role: "reviewer", from: "reviewing", to: "pr-proposed" },
   repair: { role: "repairer", from: "repairing", to: "verifying" }
 };
+
+const preparationTransitions = {
+  qualify: { stable: "registered", running: "qualifying", complete: "qualified" },
+  specify: { stable: "qualified", running: "specifying", complete: "specified" },
+  plan: { stable: "specified", running: "planning", complete: "planned" }
+} as const;
+
+function preparationPhaseTransitionMatches(
+  phase: FactoryPreparationPhase,
+  kind: "phase-started" | "phase-succeeded" | "phase-failed" | "phase-abandoned",
+  from: FactoryPreparationState,
+  to: FactoryPreparationState
+): boolean {
+  const transition = preparationTransitions[phase];
+  if (kind === "phase-started") return from === transition.stable && to === transition.running;
+  if (kind === "phase-succeeded") return from === transition.running && to === transition.complete;
+  return from === transition.running && to === transition.stable;
+}
 
 function uniqueValues(
   values: readonly string[],

@@ -1,11 +1,12 @@
-import { factoryAgentRunRequestSchema, type FactoryAgentRunRequest } from "@agentlab/contracts";
-
 import type { FactoryWorkspace } from "../../domain/factory-workspace.js";
 import {
   emptyFactoryBudgetUsage,
+  isFactoryPreparationRunRequest,
+  parseFactoryProviderRunRequest,
   type FactoryAgentAdapter,
   type FactoryAgentCommand,
-  type FactoryAgentParseInput
+  type FactoryAgentParseInput,
+  type FactoryProviderRunRequest
 } from "./factory-agent-adapter.js";
 import {
   assertFactoryExecutable,
@@ -20,13 +21,14 @@ export const claudeFactoryAgentAdapter: FactoryAgentAdapter = {
   capability: {
     provider: "claude",
     roles: ["reviewer"],
+    preparationPhases: ["qualify", "specify", "plan"],
     maximumToolFilesystemAccess: "read-only",
     toolNetwork: "off",
     acceptsCommandAllowlist: false,
     acceptsSecrets: false
   },
   build(requestInput, executable, workspace, prompt) {
-    const request = factoryAgentRunRequestSchema.parse(requestInput);
+    const request = parseFactoryProviderRunRequest(requestInput);
     assertClaudeRequest(request, workspace);
     assertFactoryExecutable(executable);
     const args = [
@@ -65,9 +67,15 @@ export const claudeFactoryAgentAdapter: FactoryAgentAdapter = {
   }
 };
 
-function assertClaudeRequest(request: FactoryAgentRunRequest, workspace: FactoryWorkspace): void {
-  if (request.provider !== "claude" || request.role !== "reviewer") {
-    throw new Error("Claude factory adapter currently supports read-only review only.");
+function assertClaudeRequest(
+  request: FactoryProviderRunRequest,
+  workspace: FactoryWorkspace
+): void {
+  if (
+    request.provider !== "claude" ||
+    (!isFactoryPreparationRunRequest(request) && request.role !== "reviewer")
+  ) {
+    throw new Error("Claude factory adapter supports read-only review and preparation only.");
   }
   if (
     request.taskId !== workspace.taskId ||

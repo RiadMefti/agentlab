@@ -930,6 +930,7 @@ export const factoryArtifactReferenceSchema = z
     sizeBytes: z.number().int().min(0).max(10_737_418_240)
   })
   .strict();
+export type FactoryArtifactReference = z.infer<typeof factoryArtifactReferenceSchema>;
 
 export const evidenceItemSchema = z
   .object({

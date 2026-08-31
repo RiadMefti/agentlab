@@ -20,6 +20,8 @@ import {
 } from "./factory-authority-limits.js";
 import type { CanonicalFactoryDocument, FactoryDocumentCodec } from "./factory-documents.js";
 import type { FactoryPolicyEngine } from "./factory-policy.js";
+import { assertFactoryPreparationAuthorityPolicy } from "./factory-preparation-authority.js";
+import { factoryTimestampDifferenceSeconds } from "./factory-timestamp.js";
 
 export interface FactoryPreparationCompilationInput {
   readonly request: unknown;
@@ -64,6 +66,7 @@ export class FactoryPreparationCompiler {
     authorityInput: unknown
   ) {
     this.#authority = documents.preparationAuthority(authorityInput);
+    assertFactoryPreparationAuthorityPolicy(this.#authority.value);
     if (this.#authority.value.policyBundleDigest !== policy.bundleDigest) {
       deny(
         "policy-digest-mismatch",
@@ -309,8 +312,7 @@ export class FactoryPreparationCompiler {
     ) {
       deny("authority-expired", "Contract timing is outside the preparation authority window.");
     }
-    const lifetimeSeconds =
-      (timestampMilliseconds(contractExpiresAt) - timestampMilliseconds(contractCreatedAt)) / 1_000;
+    const lifetimeSeconds = factoryTimestampDifferenceSeconds(contractCreatedAt, contractExpiresAt);
     if (lifetimeSeconds > authority.maximumContractLifetimeSeconds) {
       deny("contract-lifetime-exceeded", "Contract lifetime exceeds the preparation authority.");
     }
@@ -349,10 +351,24 @@ export class FactoryPreparationCompiler {
     }
     for (const run of bundle.runs) {
       const skill = authorized.get(run.skillId);
+      const profile = authority.preparationProfiles.find(({ phase }) => phase === run.phase);
       if (skill?.phase !== run.phase || skill.manifest.packageDigest !== run.skillPackageDigest) {
         deny(
           "preparation-skill-not-authorized",
           `Preparation run ${run.phase} does not use its exact authorized skill package.`
+        );
+      }
+      if (
+        profile?.skillId !== run.skillId ||
+        profile.id !== run.workerProfileId ||
+        profile.provider !== run.provider ||
+        profile.model !== run.model ||
+        profile.reasoning !== run.reasoning ||
+        profile.id !== run.actor.id
+      ) {
+        deny(
+          "preparation-profile-mismatch",
+          `Preparation run ${run.phase} does not use its exact authorized worker profile.`
         );
       }
     }
@@ -467,27 +483,6 @@ function requiredRun(
   const run = runs.get(phase);
   if (run === undefined) deny("preparation-run-missing", `Preparation bundle has no ${phase} run.`);
   return run;
-}
-
-function timestampMilliseconds(timestamp: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/u.exec(timestamp);
-  if (match === null) deny("invalid-timestamp", "Expected a canonical UTC millisecond timestamp.");
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
-  const millisecond = Number(match[7]);
-  const adjustedYear = month <= 2 ? year - 1 : year;
-  const era = Math.floor(adjustedYear / 400);
-  const yearOfEra = adjustedYear - era * 400;
-  const adjustedMonth = month + (month > 2 ? -3 : 9);
-  const dayOfYear = Math.floor((153 * adjustedMonth + 2) / 5) + day - 1;
-  const dayOfEra =
-    yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
-  const daysSinceEpoch = era * 146_097 + dayOfEra - 719_468;
-  return (((daysSinceEpoch * 24 + hour) * 60 + minute) * 60 + second) * 1_000 + millisecond;
 }
 
 function unique<Value>(values: readonly Value[]): Value[] {

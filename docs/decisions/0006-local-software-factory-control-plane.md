@@ -133,9 +133,10 @@ source. Six canonical documents form the pre-contract boundary:
 - plan links the exact specification and proposes risk, authorized skill/profile IDs, capabilities,
   budget, and extra evidence—never gates, approvals, credentials, or policy;
 - preparation authority is issued by trusted policy for that exact task/request/base and pins the
-  predecessor contract, active policy digest, exact skill manifests/DAG, worker profiles, exact
-  include-path allowlist, protected paths, risk/capability/budget ceilings, evidence floor, approval
-  roles, and validity/lifetime limits;
+  predecessor contract, active policy digest, exact skill manifests/DAG, read-only preparation
+  profiles, execution worker profiles, exact include-path allowlist, protected paths,
+  risk/capability/budget ceilings, retry count, evidence floor, approval roles, and
+  validity/lifetime limits;
 - the preparation bundle links every artifact/authority digest and one session-bound agent run for
   each `qualify`, `specify`, and `plan` phase, including exact skill package and output digests.
 
@@ -149,10 +150,32 @@ at execution, and derives the gate profile, independent-review count, and every 
 pinned policy. The result is the existing `agentlab.task-contract.v1`; there is no second
 execution-authority format.
 
-The schemas and compiler now exist with adversarial tests. Provider execution of the three
-preparation skills, append-only storage of their artifacts, authenticated preparation evidence, and
-atomic materialization of the `intake → qualified → specified → planned` ledger remain activation
-work. Until those pieces exist, callers cannot use agent prose as a substitute for a compiled chain.
+The schemas, trusted authority issuer, compiler, provider-neutral preparation execution, and
+append-only SQLite preparation journal now exist with adversarial tests. Each run is pinned to an
+exact read-only/offline/no-secret worker profile, skill package, provider/model/reasoning setting,
+capability grant, budget, attempt, request/authority digest, predecessor artifacts, and OS resource
+profile. The journal records `phase-started` before side effects and captures canonical run
+requests, run records, outputs, usage, isolation, and terminal decisions. Recovery can abandon an
+in-flight run only after a narrow probe positively confirms it inactive.
+
+Materialization replays all referenced artifacts and rejects missing, changed, substituted,
+over-budget, or identity-mismatched data. One SQLite transaction then inserts the immutable
+contract, the complete `intake → qualified → specified → planned` task-event chain, initial
+evidence, and the preparation `prepared` marker. A forced late insert failure is tested to leave
+neither a partial task ledger nor a false prepared marker. These paths remain internal: a concrete
+host recovery probe, composition root, operator command/TUI, and activation controls are still
+required before a live request can invoke them.
+
+```text
+registered → qualifying → qualified → specifying → specified → planning → planned → prepared
+                 ↘ retry                 ↘ retry               ↘ retry
+registered/qualified/specified ← phase-failed or confirmed-abandoned
+qualifying → needs-human | rejected
+active preparation → failed | cancelled | expired
+```
+
+`prepared` is not appendable through the ordinary journal repository; only the atomic
+task-materialization port may create it.
 
 ### Skill manifest
 
@@ -390,14 +413,16 @@ metrics.
 
 ## Phased implementation
 
-Implementation status on 2026-08-30: phases 1–3, the governed request-to-contract compiler, and the
-internal, draft-only mechanics of phase 4 exist behind ports with focused fail-closed tests.
-Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource isolation are
-implemented; the adversarial live sandbox test passes on the current Linux development host. They
-are intentionally not wired into the public runtime or TUI. No live agent task or PR has been
-created by this code. Phase 4 activation remains blocked until repository governance requires at
-least one approval, dismisses stale reviews, requires approval of the latest push, applies rules to
-administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
+Implementation status on 2026-08-30: phases 1–3 and the internal, draft-only mechanics of phase 4
+exist behind ports with focused fail-closed tests. The governed request-to-contract path now also
+has trusted authority issuance, provider-neutral read-only workers, a crash-durable preparation
+journal, canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
+materialization. Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource
+isolation are implemented; the adversarial live sandbox test passes on the current Linux development
+host. They are intentionally not wired into the public runtime or TUI. No live agent task or PR has
+been created by this code. Phase 4 activation remains blocked until repository governance requires
+at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
+to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
 provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
 activation change must run the adversarial sandbox test in the supported target-host CI lane,
 configure protected-path ownership, and supply a separate short-lived broker identity.
@@ -411,10 +436,11 @@ configure protected-path ownership, and supply a separate short-lived broker ide
 3. **Isolated execution:** worktree and sandbox lifecycle, provider-neutral non-interactive runner,
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
    channels, cgroup CPU/memory/process enforcement, and bounded logs.
-4. **Minimal brokered-PR loop:** execute and durably ingest the governed preparation chain,
-   exact-base worktree, one implementer, deterministic `verify`, one distinct read-only reviewer,
-   hashed patch/evidence, separate least-privilege broker, draft PR only, current branch protection,
-   and human merge. No scheduler, auto-merge, release, or protected-path write.
+4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
+   deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, and separate
+   draft-only broker mechanics exist. Activation still requires a concrete crash-recovery probe,
+   public composition/operator boundary, current branch protection, isolated broker identity,
+   complete accounting, and human merge. No scheduler, auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, GitHub App
    identity, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and incident tooling.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,

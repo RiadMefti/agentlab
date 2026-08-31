@@ -68,26 +68,43 @@ or resource-isolation claims that do not match their canonical record, contract,
 and cgroup identity. Untrusted workers never receive any of those capabilities.
 
 The pre-contract boundary is explicit too. Strict canonical schemas represent raw intake,
-qualification, specification, plan, task-scoped preparation authority, and a three-run preparation
-bundle. Every derived artifact links the exact predecessor digest. Authority pins the request, task,
-repository/base commit, predecessor contract, active policy, exact skill packages and DAG, worker
-profiles, include-path allowlist, protected paths, maximum risk, capability/budget ceilings,
-evidence floor, approval roles, and validity window. A pure domain compiler recanonicalizes the
-whole chain. Its authority is supplied only at the trusted construction boundary and is absent from
-the preparation-output input. The compiler rejects unresolved requests or substitutions, permits
-only narrowing, raises risk from the complete prospective scope, derives gates/reviews/approvals
-from policy, and emits the existing immutable task contract. Model output cannot author or replace
-authority, policy, or approval fields.
+qualification, specification, plan, task-scoped preparation authority, phase run requests/records,
+an append-only preparation event chain, and a three-run preparation bundle. Every derived artifact
+links the exact predecessor digest. A trusted repository grant—not request or model text—issues
+authority for the exact task, request, repository/base commit, predecessor contract, active policy,
+skill packages/DAG, read-only preparation profiles, execution worker profiles, include-path
+allowlist, protected paths, maximum risk, capability/budget ceilings, attempt count, evidence floor,
+approval roles, and validity window.
+
+The dormant preparation application advances exactly one `qualify`, `specify`, or `plan` checkpoint
+at a time through a provider-neutral execution port. Codex and Claude adapters advertise these
+phases only as local, offline, no-secret, read-only work. A phase-start event and canonical run
+request are durable before a worktree or provider starts. Bounded output, usage, provider session,
+process isolation, canonical phase document, and run record are stored before a result event.
+Invalid output, incomplete usage, excess budget, missing identity, capability mismatch, cleanup
+uncertainty, replay, and artifact substitution fail closed. Retry count is authority-bound;
+`needs-human`, rejection, exhaustion, cancellation, and expiry are explicit terminal outcomes. Crash
+recovery may append abandonment only after an injected probe positively confirms both the provider
+execution and disposable workspace inactive.
+
+A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
+trusted construction boundary and is absent from agent output. It rejects unresolved requests or
+substitutions, permits only narrowing, raises risk from the complete prospective scope, derives
+gates/reviews/approvals from policy, and emits the existing immutable task contract. One SQLite
+transaction creates that contract, the complete `intake → qualified → specified → planned` task
+history, initial preparation evidence, and the preparation `prepared` marker. A late failure rolls
+all of them back; a lost response can be retried idempotently. Model output never authors identity,
+timestamps, digests, authority, policy, ledger events, evidence assertions, or approvals.
 
 This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled, deployed, or
 enabled. Normal database migration creates only its inert local ledger tables. The repository
 currently lacks the approval and last-push protections required by the broker, so the adapter fails
-closed even if a future composition supplies credentials. Complete provider cost accounting,
-target-host sandbox preflight in CI, an isolated short-lived broker identity, and protected-path
-ownership also remain activation prerequisites. Provider-neutral preparation-skill execution,
-durable preparation artifact/evidence ingestion, PR-head repair, scheduler/quotas, eval promotion,
-merge, release, canary, and incident automation remain later stages. Until an explicit activation
-change meets ADR 0006's prerequisites, user-visible behavior and the product network boundary remain
+closed even if a future composition supplies credentials. Complete provider cost accounting, a
+concrete target-host preparation recovery probe, target-host sandbox preflight in CI, an isolated
+short-lived broker identity, and protected-path ownership also remain activation prerequisites.
+Public composition and operator commands, PR-head repair, scheduler/quotas, eval promotion, merge,
+release, canary, and incident automation remain later stages. Until an explicit activation change
+meets ADR 0006's prerequisites, user-visible behavior and the product network boundary remain
 unchanged.
 
 ## Dependency map

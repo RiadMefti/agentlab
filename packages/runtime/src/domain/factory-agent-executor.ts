@@ -3,6 +3,8 @@ import type {
   FactoryAgentRunStatus,
   FactoryBudgetUsage,
   FactoryProcessIsolation,
+  FactoryPreparationPhase,
+  FactoryPreparationRunRequest,
   FactoryResourceLimits,
   ProviderId
 } from "@agentlab/contracts";
@@ -16,6 +18,13 @@ export interface FactoryAgentExecutionInput {
   readonly workspace: FactoryWorkspace;
   readonly prompt: string;
   readonly resourceLimits: FactoryResourceLimits;
+}
+
+export interface FactoryPreparationAgentExecutionInput extends Omit<
+  FactoryAgentExecutionInput,
+  "request"
+> {
+  readonly request: FactoryPreparationRunRequest;
 }
 
 export interface FactoryAgentExecutionOutput {
@@ -38,6 +47,7 @@ export interface FactoryAgentExecutionOutput {
 export interface FactoryAgentExecutorCapability {
   readonly provider: ProviderId;
   readonly roles: readonly ("implementer" | "repairer" | "reviewer")[];
+  readonly preparationPhases: readonly FactoryPreparationPhase[];
   readonly maximumToolFilesystemAccess: "read-only" | "workspace-write";
   readonly toolNetwork: "off";
   readonly acceptsCommandAllowlist: boolean;
@@ -47,6 +57,11 @@ export interface FactoryAgentExecutorCapability {
 export interface FactoryAgentExecutor {
   capabilities(): readonly FactoryAgentExecutorCapability[];
   execute(input: FactoryAgentExecutionInput): Promise<FactoryAgentExecutionOutput>;
+}
+
+export interface FactoryPreparationAgentExecutor {
+  capabilities(): readonly FactoryAgentExecutorCapability[];
+  execute(input: FactoryPreparationAgentExecutionInput): Promise<FactoryAgentExecutionOutput>;
 }
 
 export interface ResolvedFactoryAgentProvider {
