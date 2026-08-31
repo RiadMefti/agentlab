@@ -451,17 +451,18 @@ one shared rate-card artifact without giving a model-bearing process broker cred
 file produces a changed enclosing policy digest; tasks pinned to another digest fail closed. No live
 rates are committed in this repository.
 
-The only factory-authority CLI command is the non-authorizing
-`agentlab factory broker-preflight --config <absolute-path>`. It reports exact repository
-governance, policy digest, local authority state, and sorted blocker codes as one JSON line. It does
-not expose enablement or PR creation and makes no GitHub mutation. Normal SQLite initialization may
-still apply the repository's local schema migrations. A blocked result exits 2; an inspection or
-cleanup failure exits 1 without emitting a misleading readiness record. The authority switch still
-defaults off, and the broker command port intentionally cannot change it. A future authenticated
-human administration boundary must own enablement separately. Live key provisioning plus successful
-preflight are activation work, not assumptions. The broker derives cost readiness from its canonical
-policy bundle; an empty rate card both adds `cost-policy-unconfigured` to preflight and denies the
-draft mutation itself.
+The CLI has non-authorizing broker and worker preflight commands. They report deterministic
+non-secret JSON and close their runtimes before output. Normal SQLite initialization may still apply
+local schema migrations. A blocked result exits 2; an inspection or cleanup failure exits 1 without
+emitting a misleading readiness record. The separate `broker-open-draft` command is the only
+remote-write entry: exact argument order binds an owner-only config, task UUID, expected policy
+digest, and literal `--confirm-draft`. It does not call the write port unless broker preflight is
+clean and the policy pin matches; the inner service independently rechecks task state, exact
+evidence and complete usage, base revision, governance, authority, and policy around durable
+idempotent dispatch. The authority switch still defaults off, and no broker or worker command can
+change it. A future authenticated human administration boundary must own enablement separately. Live
+key provisioning plus successful preflights are activation work, not assumptions. An empty rate card
+both adds `cost-policy-unconfigured` to preflight and denies draft mutation itself.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -591,8 +592,9 @@ canonical owner-only artifact and worktree roots, an exact provider/gate invento
 serialized 32-command queue, recovery access under normal-work blockers, and retryable
 process/repository/lease shutdown. Its public closure is mechanically barred from GitHub, broker,
 tmux, terminal, interactive discovery, and every provider module except the explicit factory adapter
-allowlist. The default bundle remains empty. The normal TUI has no enable or PR command. No live
-agent task or PR has been created by this code.
+allowlist. The default bundle remains empty. The normal TUI has no enable or PR action; the explicit
+non-interactive draft command remains blocked by current controls. No live agent task or PR has been
+created by this code.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
@@ -617,10 +619,11 @@ than weakening them.
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
    recovery/sandbox CI, credentialless worker composition, isolated exact-repository credential
-   adapter, broker-only composition, owner-only key provisioning boundary, and operator preflights
-   now exist. Activation still requires the missing review protections, provisioned live key/config
-   and exact cost rules, passing live preflights, and human merge. No scheduler, auto-merge,
-   release, or protected-path write.
+   adapter, broker-only composition, owner-only key provisioning boundary, operator preflights, and
+   fail-closed explicit draft command now exist. Activation still requires the missing review
+   protections, provisioned live key/config and exact cost rules, passing live preflights, separate
+   human authority enablement, and human merge. No scheduler, auto-merge, release, or protected-path
+   write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
    incident tooling.
@@ -635,8 +638,8 @@ complete, with exact live cost rules provisioned. Activation also requires authe
 evidence-ingestion paths and OS-enforced process/CPU/memory ceilings for untrusted agent and
 repository code. Those mechanisms and the required target-host CI lane now exist; the configured
 broker preflight must still report ready under independently reviewed repository policy, including a
-reviewed non-empty rate card, before activation. Until then, authority remains default-off and the
-product CLI cannot invoke a write.
+reviewed non-empty rate card, before activation. Until then, authority remains default-off and
+preflight prevents the explicit CLI command from reaching the remote-write port.
 
 ## Consequences and fitness functions
 

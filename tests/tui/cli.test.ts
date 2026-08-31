@@ -20,7 +20,7 @@ describe("terminal CLI", () => {
     expect(parseCliArguments(["-v"])).toEqual({ kind: "version" });
   });
 
-  it("recognizes only the exact read-only factory broker preflight command", () => {
+  it("recognizes only exact factory readiness commands", () => {
     expect(
       parseCliArguments([
         "factory",
@@ -38,10 +38,73 @@ describe("terminal CLI", () => {
     expect(() =>
       parseCliArguments(["factory", "broker-preflight", "--enable", "/private/broker.json"])
     ).toThrow(/Usage/u);
+    expect(
+      parseCliArguments([
+        "factory",
+        "worker-preflight",
+        "--config",
+        "/private/agentlab/worker.json"
+      ])
+    ).toEqual({
+      kind: "factory-worker-preflight",
+      configPath: "/private/agentlab/worker.json"
+    });
   });
 
-  it("documents the broker preflight and child-mouse emergency kill switch", () => {
+  it("requires an exact task, policy pin, and confirmation for draft creation", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const policy = `sha256:${"a".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-open-draft",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy,
+        "--confirm-draft"
+      ])
+    ).toEqual({
+      kind: "factory-broker-open-draft",
+      configPath: "/private/agentlab/broker.json",
+      taskId,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "confirm-draft"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-open-draft",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-open-draft",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--task",
+        "not-a-task",
+        "--policy",
+        policy,
+        "--confirm-draft"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
+  it("documents explicit factory commands and the child-mouse emergency kill switch", () => {
     expect(helpText).toContain("factory broker-preflight --config");
+    expect(helpText).toContain("factory worker-preflight --config");
+    expect(helpText).toContain("factory broker-open-draft --config");
+    expect(helpText).toContain("--confirm-draft");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");
   });
