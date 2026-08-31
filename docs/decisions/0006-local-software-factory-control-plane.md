@@ -227,6 +227,15 @@ R1 task to `queued`; a denial or human requirement remains recorded without a st
 an already queued task is idempotent. The admission surface exposes neither control switches nor
 preparation-authority issuance.
 
+The worker configuration is an owner-only, strict `agentlab.local-factory-worker.v1` document with
+no remote-repository credentials or authority controls. It pins storage/worktree roots, Git and
+Linux isolation executables, the systemd version identity, non-root Bubblewrap runtime mounts, the
+exact seven external R1 gates and their evidence kinds, and supported provider executables by
+canonical path, SHA-256 digest, and exact version output. Its cost policy remains a separate
+owner-only document. Provider resolution revalidates the executable and runs `--version` with a
+fixed credentialless environment; unconfigured providers resolve to no capability. This boundary
+does not discover models dynamically or inherit GitHub/package/cloud secrets.
+
 ```text
 registered → qualifying → qualified → specifying → specified → planning → planned → prepared
                  ↘ retry                 ↘ retry               ↘ retry
