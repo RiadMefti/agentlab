@@ -1,0 +1,125 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  FactoryBrokerOperator,
+  type FactoryBrokerOperatorDependencies
+} from "../../packages/runtime/src/application/factory-broker-operator.js";
+import type {
+  FactoryRemoteRepositorySnapshot,
+  FactoryRepositoryGovernance
+} from "../../packages/runtime/src/domain/factory-pull-request-broker.js";
+
+const policyBundleDigest = `sha256:${"a".repeat(64)}`;
+
+describe("FactoryBrokerOperator", () => {
+  it("reports every repository and local-authority blocker without changing state", async () => {
+    const fixture = operatorFixture({
+      requiresPullRequest: false,
+      requiredApprovals: 0,
+      dismissesStaleReviews: false,
+      requiresCodeOwnerReviews: false,
+      requiresLastPushApproval: false,
+      enforcesAdmins: false,
+      allowsForcePushes: true,
+      allowsDeletions: true,
+      requiredStatusChecks: ["verify"]
+    });
+
+    const report = await fixture.operator.preflight();
+
+    expect(report).toMatchObject({
+      schemaVersion: "agentlab.broker-preflight.v1",
+      status: "blocked",
+      policyBundleDigest,
+      authorityEnabled: false
+    });
+    expect(report.reasonCodes).toEqual(
+      [
+        "pr-broker-disabled",
+        "repository-admin-bypass-enabled",
+        "repository-approval-rule-too-weak",
+        "repository-branch-deletion-enabled",
+        "repository-code-owner-review-rule-missing",
+        "repository-factory-sandbox-check-missing",
+        "repository-force-push-enabled",
+        "repository-last-push-rule-missing",
+        "repository-pr-rule-missing",
+        "repository-stale-review-rule-missing"
+      ].sort()
+    );
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+  });
+
+  it("reports ready only when remote governance and local authority are both strong", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+
+    await expect(fixture.operator.preflight()).resolves.toMatchObject({
+      status: "ready",
+      authorityEnabled: true,
+      reasonCodes: []
+    });
+  });
+
+  it("fails closed when the remote inspection returns another repository", async () => {
+    const fixture = operatorFixture(strongGovernance, true, "riadmefti/another");
+
+    await expect(fixture.operator.preflight()).rejects.toThrow(/another repository identity/u);
+  });
+
+  it("delegates draft creation only through the hardened pull-request service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const draftCommand = { taskId: "0198f005-4ec4-7000-8000-000000000001" };
+
+    await expect(fixture.operator.openDraft(draftCommand)).resolves.toEqual({
+      status: "denied",
+      reasonCodes: ["test-denial"],
+      decision: null
+    });
+    expect(fixture.openDraft).toHaveBeenCalledWith(draftCommand);
+  });
+});
+
+const strongGovernance: FactoryRepositoryGovernance = {
+  requiresPullRequest: true,
+  requiredApprovals: 1,
+  dismissesStaleReviews: true,
+  requiresCodeOwnerReviews: true,
+  requiresLastPushApproval: true,
+  enforcesAdmins: true,
+  allowsForcePushes: false,
+  allowsDeletions: false,
+  requiredStatusChecks: ["verify", "factory-sandbox"]
+};
+
+function operatorFixture(
+  governance: FactoryRepositoryGovernance,
+  prBroker = false,
+  inspectedRepositoryId = "riadmefti/agentlab"
+) {
+  const repository: FactoryRemoteRepositorySnapshot = {
+    repositoryId: inspectedRepositoryId,
+    baseBranch: "main",
+    baseRevision: "a".repeat(40),
+    governance
+  };
+  const inspect = vi.fn().mockResolvedValue(repository);
+  const state = vi.fn().mockResolvedValue({ scheduler: false, prBroker });
+  const openDraft = vi.fn().mockResolvedValue({
+    status: "denied" as const,
+    reasonCodes: ["test-denial"],
+    decision: null
+  });
+  const dependencies: FactoryBrokerOperatorDependencies = {
+    repositoryId: "riadmefti/agentlab",
+    policyBundleDigest,
+    remote: { inspect },
+    controls: { state },
+    pullRequests: { openDraft }
+  };
+  return {
+    operator: new FactoryBrokerOperator(dependencies),
+    inspect,
+    state,
+    openDraft
+  };
+}

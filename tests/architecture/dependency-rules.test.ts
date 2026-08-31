@@ -74,6 +74,48 @@ describe("architecture dependency rules", () => {
     ]);
   });
 
+  it("resolves each explicitly registered public package subpath", () => {
+    const report = architectureReport([
+      source("apps/tui/src/broker.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    expect(report.violations).toEqual([]);
+  });
+
+  it("keeps authority and model-bearing composition closures separate", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-broker.ts", [
+        local("./application/bridge.js", "packages/runtime/src/application/bridge.ts")
+      ]),
+      source("packages/runtime/src/application/bridge.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("packages/runtime/src/local-runtime.ts", [
+        local(
+          "./infrastructure/github/authority.js",
+          "packages/runtime/src/infrastructure/github/authority.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/github/authority.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(2);
+    expect(violations.map(({ message }) => message).join("\n")).toContain(
+      "application/bridge.ts -> packages/runtime/src/infrastructure/providers/model.ts"
+    );
+    expect(violations.map(({ target }) => target)).toContain(
+      "packages/runtime/src/infrastructure/github/authority.ts"
+    );
+  });
+
   it("detects cycles and unresolved local imports", () => {
     const report = architectureReport([
       source("packages/contracts/src/left.ts", [
@@ -500,10 +542,17 @@ function architectureFixture(): string {
   write(root, "packages/launcher/src/agentlab.ts", "export {};\n");
   writeJson(root, "packages/runtime/package.json", {
     name: "@agentlab/runtime",
-    exports: { ".": { default: "./dist/local-runtime.js", types: "./dist/local-runtime.d.ts" } }
+    exports: {
+      ".": { default: "./dist/local-runtime.js", types: "./dist/local-runtime.d.ts" },
+      "./factory-broker": {
+        default: "./dist/local-factory-broker.js",
+        types: "./dist/local-factory-broker.d.ts"
+      }
+    }
   });
   workspaceTsconfig(root, "packages/runtime", ["src/**/*.ts"]);
   write(root, "packages/runtime/src/local-runtime.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-broker.ts", "export {};\n");
   return root;
 }
 

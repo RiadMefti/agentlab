@@ -1092,11 +1092,12 @@ const strongGovernance: FactoryRepositoryGovernance = {
   requiresPullRequest: true,
   requiredApprovals: 1,
   dismissesStaleReviews: true,
+  requiresCodeOwnerReviews: true,
   requiresLastPushApproval: true,
   enforcesAdmins: true,
   allowsForcePushes: false,
   allowsDeletions: false,
-  requiredStatusChecks: ["verify"]
+  requiredStatusChecks: ["verify", "factory-sandbox"]
 };
 
 const requester = {

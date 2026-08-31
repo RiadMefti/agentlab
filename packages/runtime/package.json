@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/local-runtime.d.ts",
       "default": "./dist/local-runtime.js"
+    },
+    "./factory-broker": {
+      "types": "./dist/local-factory-broker.d.ts",
+      "default": "./dist/local-factory-broker.js"
     }
   },
   "files": [

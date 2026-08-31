@@ -193,6 +193,23 @@ describe("GitHubFactoryPullRequestBroker", () => {
     expect(fixture.runner.pushes).toBe(0);
   });
 
+  it.each(["code-owner review", "factory sandbox", "status-check app binding"] as const)(
+    "rejects live governance without required %s",
+    async (missingGovernance) => {
+      const fixture = brokerFixture({ missingGovernance });
+
+      await expect(
+        fixture.broker.openDraft({
+          proposal: fixture.proposal,
+          patch: fixture.patch,
+          repositoryRoot: fixture.repository
+        })
+      ).rejects.toThrow(/governance weakened/u);
+      expect(fixture.runner.pushes).toBe(0);
+      expect(fixture.api.createdPullRequests).toBe(0);
+    }
+  );
+
   it("closes a mismatched created PR and deletes only its unchanged broker branch", async () => {
     const fixture = brokerFixture({ mismatchedCreatedHead: true });
 
@@ -250,6 +267,8 @@ function brokerFixture(
     readonly failCreateBeforeRecordOnce?: boolean;
     readonly loseCreateResponseOnce?: boolean;
     readonly failPushOnce?: boolean;
+    readonly missingGovernance?:
+      "code-owner review" | "factory sandbox" | "status-check app binding";
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-github-broker-"));
@@ -277,7 +296,11 @@ function brokerFixture(
     api,
     documents,
     gitExecutable,
-    temporaryRoot: join(root, "broker")
+    temporaryRoot: join(root, "broker"),
+    trustedStatusChecks: [
+      { context: "verify", appId: 15_368 },
+      { context: "factory-sandbox", appId: 15_368 }
+    ]
   });
   return { api, baseRevision, broker, patch, proposal, repository, runner, state, tokenSource };
 }
@@ -377,6 +400,8 @@ class FakeGitHubApi implements GitHubRestApi {
       readonly mismatchedCreatedRef?: boolean;
       readonly failCreateBeforeRecordOnce?: boolean;
       readonly loseCreateResponseOnce?: boolean;
+      readonly missingGovernance?:
+        "code-owner review" | "factory sandbox" | "status-check app binding";
     }
   ) {}
 
@@ -405,9 +430,20 @@ class FakeGitHubApi implements GitHubRestApi {
         required_pull_request_reviews: {
           required_approving_review_count: 1,
           dismiss_stale_reviews: true,
+          require_code_owner_reviews: this.options.missingGovernance !== "code-owner review",
           require_last_push_approval: true
         },
-        required_status_checks: { checks: [{ context: "verify" }] },
+        required_status_checks: {
+          checks: [
+            {
+              context: "verify",
+              app_id: this.options.missingGovernance === "status-check app binding" ? 1 : 15_368
+            },
+            ...(this.options.missingGovernance === "factory sandbox"
+              ? []
+              : [{ context: "factory-sandbox", app_id: 15_368 }])
+          ]
+        },
         enforce_admins: { enabled: true },
         allow_force_pushes: { enabled: false },
         allow_deletions: { enabled: false }

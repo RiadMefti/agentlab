@@ -24,6 +24,11 @@ async function main(): Promise<void> {
     process.stdout.write(`${appVersion}\n`);
     return;
   }
+  if (action.kind === "factory-broker-preflight") {
+    const { runFactoryBrokerPreflight } = await import("./run-factory-broker-preflight.js");
+    process.exitCode = await runFactoryBrokerPreflight(action.configPath);
+    return;
+  }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
   if (invocation.kind === "direct") {

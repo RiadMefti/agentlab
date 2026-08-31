@@ -20,7 +20,28 @@ describe("terminal CLI", () => {
     expect(parseCliArguments(["-v"])).toEqual({ kind: "version" });
   });
 
-  it("documents the child-mouse emergency kill switch", () => {
+  it("recognizes only the exact read-only factory broker preflight command", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-preflight",
+        "--config",
+        "/private/agentlab/broker.json"
+      ])
+    ).toEqual({
+      kind: "factory-broker-preflight",
+      configPath: "/private/agentlab/broker.json"
+    });
+    expect(() =>
+      parseCliArguments(["factory", "broker-preflight", "--config", "broker.json"])
+    ).toThrow(/Usage/u);
+    expect(() =>
+      parseCliArguments(["factory", "broker-preflight", "--enable", "/private/broker.json"])
+    ).toThrow(/Usage/u);
+  });
+
+  it("documents the broker preflight and child-mouse emergency kill switch", () => {
+    expect(helpText).toContain("factory broker-preflight --config");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");
   });

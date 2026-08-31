@@ -129,7 +129,9 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `packages/runtime/src/domain` owns conversation, session, command, and terminal ports.
 - `packages/runtime/src/infrastructure` implements SQLite, provider discovery/launching, tmux, and
   Bun's native PTY.
-- `packages/runtime/src/local-runtime.ts` is the only concrete runtime composition root.
+- `packages/runtime/src/local-runtime.ts` composes the interactive runtime;
+  `local-factory-broker.ts` is a separate broker-only composition exported only through
+  `@agentlab/runtime/factory-broker`.
 - `packages/contracts` owns provider, conversation, session, and dormant software-factory schemas
   shared across local layers.
 
@@ -141,11 +143,13 @@ lines held by the embedded terminal varies with encoded content. Focused tests e
 multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
-The repository also contains a tested, staged software-factory safety kernel and draft-PR broker
-design. It is not connected to the current TUI/runtime, scheduled, or enabled. Normal database
-migration creates only its inert local ledger tables; no new user-visible or remote behavior is
-active. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented
-controls, activation blockers, and later phases.
+The repository also contains a tested, staged software-factory safety kernel and draft-PR broker. It
+is not connected to the interactive runtime, scheduled, or enabled. The only product-facing operator
+action is a separate, non-authorizing `agentlab factory broker-preflight --config <absolute-path>`
+command that makes no GitHub mutation; authority remains default-off, and the CLI cannot enable it
+or open a PR. Normal database migration creates only inert local ledger tables. See
+[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
+activation blockers, and later phases.
 
 ## Development
 
@@ -160,8 +164,10 @@ executable. See [Contributing](CONTRIBUTING.md) for the engineering contract.
 
 ## Security
 
-AgentLab opens no network listener. The npm launcher only connects to GitHub when its exact binary
-is missing and to npm when you explicitly request an update. Managed session identities and all
-local command input are validated before process boundaries; child processes receive argument
-arrays, and the one tmux shell-command boundary uses tested POSIX quoting. Published executables are
-immutable. See [Security](SECURITY.md) for reporting guidance.
+AgentLab opens no network listener. The npm launcher connects to GitHub only when its exact binary
+is missing and to npm when you explicitly request an update. The separate factory broker preflight
+connects to GitHub only when explicitly invoked with an owner-only local config; it performs no
+remote write. Managed session identities and all local command input are validated before process
+boundaries; child processes receive argument arrays, and the one tmux shell-command boundary uses
+tested POSIX quoting. Published executables are immutable. See [Security](SECURITY.md) for reporting
+guidance.

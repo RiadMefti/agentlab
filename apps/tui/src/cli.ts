@@ -1,5 +1,10 @@
+import { isAbsolute, resolve } from "node:path";
+
 export type CliAction =
-  { readonly kind: "help" } | { readonly kind: "version" } | { readonly kind: "run" };
+  | { readonly kind: "help" }
+  | { readonly kind: "version" }
+  | { readonly kind: "run" }
+  | { readonly kind: "factory-broker-preflight"; readonly configPath: string };
 
 export function parseCliArguments(input: readonly string[]): CliAction {
   if (input.length === 0) return { kind: "run" };
@@ -8,7 +13,24 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
   }
-  throw new Error("Usage: agentlab");
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "broker-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (
+      configPath !== undefined &&
+      isAbsolute(configPath) &&
+      !configPath.includes("\0") &&
+      Buffer.byteLength(configPath) <= 4_096 &&
+      resolve(configPath) === configPath
+    ) {
+      return { kind: "factory-broker-preflight", configPath };
+    }
+  }
+  throw new Error("Usage: agentlab [factory broker-preflight --config <absolute-path>]");
 }
 
 export function assertSupportedTerminalRuntime(
@@ -23,6 +45,10 @@ export function assertSupportedTerminalRuntime(
 export const helpText = `agentlab
 
 Open the local terminal UI, then choose or add a project folder.
+
+Factory authority:
+  agentlab factory broker-preflight --config <absolute-path>
+      Read configuration and report broker/governance readiness without changing GitHub.
 
 Environment:
   AGENTLAB_DATABASE_PATH   Override the local SQLite database path

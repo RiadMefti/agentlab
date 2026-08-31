@@ -393,13 +393,33 @@ labels, reviewers, and one PR per deduplication key.
 
 The concrete GitHub App credential adapter is bound at construction to one lowercase repository, its
 numeric repository ID, one installation, and one App client ID. For each mint it loads the RSA
-private key only at the signer boundary, issues GitHub's bounded JWT, and calls only the fixed
-installation-token endpoint with the exact repository ID and `contents:write` plus
-`pull_requests:write`. It accepts the result only when GitHub reports that exact selected
-repository, no broader permissions, and a safe short lifetime. Concurrent requests coalesce; the
-token is refreshed five minutes before expiry and invalidated after an HTTP 401 or failed Git push.
-The variable-length token is never placed in a URL, argv, artifact, or error. This adapter is still
-internal: an operator-facing secret/key source and composition switch must exist before activation.
+private key only at the signer boundary, issues GitHub's bounded JWT, erases both mutable key
+buffers after signing, and calls only the fixed installation-token endpoint with the exact
+repository ID and `contents:write` plus `pull_requests:write`. It accepts the result only when
+GitHub reports that exact selected repository, no broader permissions, and a safe short lifetime.
+Concurrent requests coalesce; the token is refreshed five minutes before expiry and invalidated
+after an HTTP 401 or failed Git push. The variable-length token is never placed in a URL, argv,
+artifact, or error.
+
+The authority plane now has its own exact package entry, `@agentlab/runtime/factory-broker`, and is
+absent from the interactive runtime entry. Its strict `agentlab.local-factory-broker.v1`
+configuration binds the database, artifact and temporary roots, lowercase repository name and
+numeric ID, broker ID, absolute Git executable, App client and installation IDs, private-key path,
+and exact trusted GitHub App ID for each required `verify` and `factory-sandbox` status context. A
+same-named check from another App is treated as missing. The config and key must be canonical
+owner-only regular files with one link; reads are bounded and reject metadata changes. A retryable
+owner drains admitted work, clears cached credentials, closes all three SQLite repositories in
+reverse order, and releases the writer lease only after repository closure is confirmed.
+
+The only factory-authority CLI command is the non-authorizing
+`agentlab factory broker-preflight --config <absolute-path>`. It reports exact repository
+governance, policy digest, local authority state, and sorted blocker codes as one JSON line. It does
+not expose enablement or PR creation and makes no GitHub mutation. Normal SQLite initialization may
+still apply the repository's local schema migrations. A blocked result exits 2; an inspection or
+cleanup failure exits 1 without emitting a misleading readiness record. The authority switch still
+defaults off, and the broker command port intentionally cannot change it. A future authenticated
+human administration boundary must own enablement separately. Live key provisioning plus successful
+preflight are activation work, not assumptions.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -426,9 +446,11 @@ independent review. Exhausted budget becomes `needs-attention`.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
 stale-review dismissal, last-push approval, CODEOWNERS for protected paths, linear history, and a
-merge queue where enabled. The current repository already requires the strict `verify` check and
-protects history, but its required approval count is zero; that is a blocker for agent-originated
-PRs until at least one approval and protected-path ownership are configured.
+merge queue where enabled. The current repository already requires the strict `verify` check and the
+distinct live `factory-sandbox` check, dismisses stale reviews, applies protection to
+administrators, forbids branch deletion and force-push, and protects linear history. Its required
+approval count is zero, latest-push approval is off, and no CODEOWNERS policy or required code-owner
+review exists. All are explicit preflight blockers for agent-originated PRs.
 
 The existing release workflow, asset names, checksums, SBOMs, build and SBOM attestations, immutable
 release, registry comparison, and OIDC publishing remain unchanged. Release automation accepts only
@@ -500,10 +522,10 @@ metrics.
 
 ## Phased implementation
 
-Implementation status on 2026-08-30: phases 1–3 and the internal, draft-only mechanics of phase 4
-exist behind ports with focused fail-closed tests. The governed request-to-contract path now also
-has trusted authority issuance, provider-neutral read-only workers, a crash-durable preparation
-journal, canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
+Implementation status on 2026-08-31: phases 1–3 and the draft-only mechanics of phase 4 exist behind
+ports with focused fail-closed tests. The governed request-to-contract path now also has trusted
+authority issuance, provider-neutral read-only workers, a crash-durable preparation journal,
+canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
 materialization. Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource
 isolation are implemented. The target-host CI lane now exercises both cgroup enforcement and the
 Bubblewrap filesystem/network boundary. Post-contract execution now has an immutable run header,
@@ -512,15 +534,17 @@ and deterministic restart recovery through the shared reconciler. The live sandb
 recovery, and multi-operation execution recovery preflights pass on the current Linux development
 host. Draft-PR dispatch now also has an immutable exact-proposal run, SQLite v8 checkpoint journal,
 deterministic branch/PR reconciliation, injected recovery tests spanning remote creation, evidence
-append, and task-ledger transition, and an exact-repository GitHub App installation-token source.
-These paths are intentionally not wired into the public runtime or TUI. No live agent task or PR has
-been created by this code. Phase 4 activation remains blocked until repository governance requires
-at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
-to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
-provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
-activation change must make the passing `factory-sandbox` job required, configure protected-path
-ownership, compose the broker behind an operator boundary, and supply the App key from a separate
-broker-only secret source.
+append, and task-ledger transition, and an exact-repository GitHub App installation-token source. An
+exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
+non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
+The normal TUI has no enable or PR command. No live agent task or PR has been created by this code.
+
+Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
+dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
+activation remains blocked by zero required approvals, missing latest-push approval, missing
+CODEOWNERS and required code-owner review, unprovisioned live broker config/key, and incomplete
+provider cost accounting. An incomplete usage record already denies PR creation. The non-authorizing
+preflight reports these governance and default-off-authority blockers rather than weakening them.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -535,12 +559,13 @@ broker-only secret source.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
-   recovery/sandbox CI and isolated exact-repository credential adapter now exist. Activation still
-   requires the public composition/operator boundary, current branch protection including the
-   sandbox check, broker-only key provisioning, complete accounting, and human merge. No scheduler,
-   auto-merge, release, or protected-path write.
-5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, GitHub App
-   identity, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and incident tooling.
+   recovery/sandbox CI, isolated exact-repository credential adapter, broker-only composition,
+   owner-only key provisioning boundary, and operator preflight now exist. Activation still requires
+   the missing review protections, provisioned live key/config, complete accounting, a passing live
+   preflight, and human merge. No scheduler, auto-merge, release, or protected-path write.
+5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
+   rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
+   incident tooling.
 6. **Eval and canary program:** golden suites, repeated trials, shadow cohorts, production sampling,
    provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
@@ -549,9 +574,10 @@ broker-only secret source.
 The minimal loop is safe enough to enable brokered draft-PR creation only when phases 1–4, the
 repository-governance blocker, isolated broker identity, and complete usage accounting are all
 complete. Activation also requires authenticated evidence-ingestion paths and OS-enforced
-process/CPU/memory ceilings for untrusted agent and repository code. Those mechanisms now exist; the
-target-host CI lane and operator preflight must execute the live adversarial test before activation.
-Until then, its authority switches default off and no public composition can invoke it.
+process/CPU/memory ceilings for untrusted agent and repository code. Those mechanisms and the
+required target-host CI lane now exist; the configured broker preflight must still report ready
+under independently reviewed repository policy before activation. Until then, authority remains
+default-off and the product CLI cannot invoke a write.
 
 ## Consequences and fitness functions
 
