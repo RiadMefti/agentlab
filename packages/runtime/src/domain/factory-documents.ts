@@ -1,6 +1,9 @@
 import type {
   EvidenceBundle,
   FactoryControlEvent,
+  FactoryAgentRunRequest,
+  FactoryExecutionEvent,
+  FactoryExecutionRun,
   FactoryAgentRunRecord,
   FactoryGateObservation,
   FactoryPatchProposal,
@@ -47,10 +50,13 @@ export interface FactoryDocumentCodec {
   taskEvent(input: unknown): CanonicalFactoryDocument<TaskEvent>;
   evidenceBundle(input: unknown): CanonicalFactoryDocument<EvidenceBundle>;
   controlEvent(input: unknown): CanonicalFactoryDocument<FactoryControlEvent>;
+  executionRun(input: unknown): CanonicalFactoryDocument<FactoryExecutionRun>;
+  executionEvent(input: unknown): CanonicalFactoryDocument<FactoryExecutionEvent>;
   policyDecision(input: unknown): CanonicalFactoryDocument<FactoryPolicyDecision>;
   policyEvaluation(input: unknown): CanonicalFactoryDocument<FactoryPolicyEvaluationRecord>;
   skillPackage(input: unknown): CanonicalFactoryDocument<FactorySkillPackage>;
   agentRun(input: unknown): CanonicalFactoryDocument<FactoryAgentRunRecord>;
+  agentRunRequest(input: unknown): CanonicalFactoryDocument<FactoryAgentRunRequest>;
   gateObservation(input: unknown): CanonicalFactoryDocument<FactoryGateObservation>;
   resourceIsolation(input: unknown): CanonicalFactoryDocument<FactoryResourceIsolationRecord>;
   patchProposal(input: unknown): CanonicalFactoryDocument<FactoryPatchProposal>;

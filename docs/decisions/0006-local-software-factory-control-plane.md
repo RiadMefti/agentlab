@@ -168,6 +168,37 @@ repository mismatch, and unconfirmed cleanup preserve the running journal state.
 acquisition failure and a process runner that cannot confirm tree cleanup also remain in-flight
 rather than manufacturing completion.
 
+Execution after contract materialization has a separate, deliberately small durable journal rather
+than overloading task state. `agentlab.execution-run.v1` immutably binds one run to the exact task,
+contract digest, repository/base commit, correlation ID, and `maxRepairAttempts + 1` workspace
+ceiling. `agentlab.execution-event.v1` is append-only and hash chained:
+
+```text
+ready → workspace-active → operation-active → workspace-active → ready → completed
+  │             │                 │                 │
+  └─────────────┴─────────────────┴─────────────────┴────────────→ abandoned
+```
+
+The control plane appends `attempt-started` with a caller-generated workspace UUID before worktree
+creation. It appends `operation-started` with the exact agent execution UUID or gate isolation UUID
+before the process adapter is invoked. Agent requests are canonical, content-addressed documents.
+The gate executor must use the caller's UUID and throws when process-tree cleanup is unconfirmed;
+the execution service rejects any returned isolation identity that differs from the journal. Only
+after confirmed process cleanup and canonical evidence publication may `operation-finished` be
+appended. Only after confirmed worktree removal may `attempt-closed` be appended. SQLite version 7
+materializes and independently constrains identities, event sequence, digest links, legal state
+edges, resource-coordinate fields, operation descriptors, and the contract-derived attempt limit;
+triggers forbid update or deletion.
+
+Recovery reuses one provider-neutral workspace-recovery port and the same local Linux adapter as
+preparation. A `ready` run has no live resource. For `workspace-active`, recovery owns the exact
+workspace UUID; for `operation-active`, it additionally owns the exact process UUID. The reconciler
+must prove every supplied systemd scope inactive, acquire the task worktree lock non-blockingly,
+re-prove source repository and base commit identity, remove only the derived worktree, and prove
+final process/Git/filesystem absence. It then appends `execution-abandoned` and moves an active task
+to `failed` or `needs-attention` as its task-state edge permits. Any uncertainty leaves both task
+and journal recoverable and nonterminal. A repeated recovery is idempotent after abandonment.
+
 Materialization replays all referenced artifacts and rejects missing, changed, substituted,
 over-budget, or identity-mismatched data. One SQLite transaction then inserts the immutable
 contract, the complete `intake → qualified → specified → planned` task-event chain, initial
@@ -335,7 +366,9 @@ within that scope, and the wrapper removes its user-manager environment before t
 Each successful execution and gate emits a canonical resource-isolation record, and policy denies a
 PR when any successful worker or sandboxed gate lacks matching provenance.
 `npm run test:factory-sandbox` is the adversarial host test: it reads the live process cgroup to
-verify exact CPU/memory/process ceilings and confirms an over-memory workload is killed.
+verify exact CPU/memory/process ceilings, confirms an over-memory workload is killed, and exercises
+both single-process preparation recovery and multi-operation execution-workspace recovery against
+the live systemd user manager.
 
 The model-bearing job never receives remote write authority. It emits a content-addressed patch and
 structured proposal. A separate broker process/job, with no provider key and a short-lived
@@ -429,14 +462,17 @@ exist behind ports with focused fail-closed tests. The governed request-to-contr
 has trusted authority issuance, provider-neutral read-only workers, a crash-durable preparation
 journal, canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
 materialization. Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource
-isolation are implemented; the live sandbox and preparation-recovery preflights pass on the current
-Linux development host. They are intentionally not wired into the public runtime or TUI. No live
-agent task or PR has been created by this code. Phase 4 activation remains blocked until repository
-governance requires at least one approval, dismisses stale reviews, requires approval of the latest
-push, applies rules to administrators, forbids force-push/deletion, and requires the exact `verify`
-check. Complete provider cost accounting must also be configured; an incomplete usage record denies
-PR creation. The activation change must run `test:factory-sandbox` in the supported target-host CI
-lane, configure protected-path ownership, and supply a separate short-lived broker identity.
+isolation are implemented. Post-contract execution now has an immutable run header, append-only
+resource journal, caller-owned worktree/agent/gate identities, canonical agent requests, and
+deterministic restart recovery through the shared reconciler. The live sandbox, preparation
+recovery, and multi-operation execution recovery preflights pass on the current Linux development
+host. They are intentionally not wired into the public runtime or TUI. No live agent task or PR has
+been created by this code. Phase 4 activation remains blocked until repository governance requires
+at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
+to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
+provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
+activation change must run `test:factory-sandbox` in the supported target-host CI lane, configure
+protected-path ownership, and supply a separate short-lived broker identity.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -446,7 +482,8 @@ lane, configure protected-path ownership, and supply a separate short-lived brok
    audit queries, and kill switch.
 3. **Isolated execution:** worktree and sandbox lifecycle, provider-neutral non-interactive runner,
    digest-pinned skill resolver, implement/verify/review/repair attempts, authenticated evidence
-   channels, cgroup CPU/memory/process enforcement, and bounded logs.
+   channels, cgroup CPU/memory/process enforcement, bounded logs, durable resource coordinates, and
+   deterministic crash recovery.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
    crash reconciler, and separate draft-only broker mechanics exist. Activation still requires the

@@ -94,6 +94,20 @@ symlinked, overlapping, locked, or otherwise ambiguous state remains in-flight a
 Workspace creation failure and unconfirmed process-tree cleanup likewise leave the durable phase
 running.
 
+The implementation/review path now applies the same crash invariant. One immutable execution-run
+header binds the task contract, repository/base commit, correlation ID, and contract-derived attempt
+ceiling. Its append-only, digest-chained journal persists an exact workspace ID before worktree
+creation and an exact operation ID before every agent or deterministic gate process. Agent run
+requests are canonical artifacts; gate callers—not adapters—own the isolation ID. A process result
+becomes complete only after cleanup is confirmed, its canonical observation is published, and the
+matching operation-finished event is appended. Worktree cleanup is positively confirmed before
+attempt closure. A crash or append failure therefore leaves either no external resource or one exact
+recoverable workspace/process coordinate; it can never manufacture completion. The shared Linux
+reconciler checks every active journal-owned systemd scope, obtains the same non-blocking worktree
+lock, verifies repository/base identity, removes only the derived workspace, and repeats absence
+checks. Proven interruption becomes an append-only abandonment plus a safe terminal task transition;
+uncertain host state remains active for a later recovery pass.
+
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or
 substitutions, permits only narrowing, raises risk from the complete prospective scope, derives
@@ -107,7 +121,8 @@ This path is not composed into `local-runtime.ts`, exposed by the TUI, scheduled
 enabled. Normal database migration creates only its inert local ledger tables. The repository
 currently lacks the approval and last-push protections required by the broker, so the adapter fails
 closed even if a future composition supplies credentials. The concrete recovery reconciler is also
-still an internal Linux adapter and has not run in the supported target-host CI lane. Complete
+still an internal Linux adapter; preparation and multi-operation execution recovery pass live on the
+current Linux development host but have not run in the supported target-host CI lane. Complete
 provider cost accounting, target-host sandbox/recovery preflight, an isolated short-lived broker
 identity, and protected-path ownership remain activation prerequisites. Public composition and
 operator commands, PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and

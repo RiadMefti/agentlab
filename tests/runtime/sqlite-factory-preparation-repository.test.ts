@@ -13,6 +13,7 @@ import type {
 
 import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain/factory-documents.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryPreparationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { testDigest } from "../helpers/factory.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
@@ -187,6 +188,8 @@ describe("SqliteFactoryPreparationRepository", () => {
     const historical = new DatabaseSync(databasePath);
     try {
       historical.exec(`
+        DROP TABLE factory_execution_events;
+        DROP TABLE factory_execution_runs;
         DROP TABLE factory_preparation_events;
         DROP TABLE factory_preparations;
         PRAGMA user_version = 5;
@@ -215,7 +218,7 @@ describe("SqliteFactoryPreparationRepository", () => {
     try {
       expect(
         (migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
-      ).toBe(6);
+      ).toBe(latestSchemaVersion);
       expect(
         (
           migrated.prepare("SELECT COUNT(*) AS count FROM factory_control_events").get() as {
@@ -228,6 +231,11 @@ describe("SqliteFactoryPreparationRepository", () => {
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
           .get("factory_preparations")
       ).toMatchObject({ name: "factory_preparations" });
+      expect(
+        migrated
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+          .get("factory_execution_runs")
+      ).toMatchObject({ name: "factory_execution_runs" });
     } finally {
       migrated.close();
     }

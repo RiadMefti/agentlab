@@ -91,6 +91,17 @@ describe("LocalFactoryGateExecutor", () => {
       timestamps()
     );
     await expect(unavailable.execute(gateInput("/work"))).rejects.toThrow(/sandbox unavailable/u);
+
+    const cleanupUnconfirmed = new LocalFactoryGateExecutor(
+      [testGate],
+      passthroughSandbox,
+      passthroughProcessIsolator,
+      new FakeRunner(new Error("cleanup failed")),
+      timestamps()
+    );
+    await expect(cleanupUnconfirmed.execute(gateInput("/work"))).rejects.toThrow(
+      /cleanup could not be confirmed/u
+    );
   });
 });
 
@@ -286,7 +297,12 @@ function timestamps() {
 }
 
 function gateInput(root: string) {
-  return { gateId: "test", workspace: fakeWorkspace(root), resourceLimits };
+  return {
+    gateId: "test",
+    isolationId: "77777777-7777-4777-8777-777777777777",
+    workspace: fakeWorkspace(root),
+    resourceLimits
+  };
 }
 
 function commandError(kind: "exit" | "timeout", exitCode: number | null): Error {

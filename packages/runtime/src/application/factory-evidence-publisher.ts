@@ -242,7 +242,7 @@ export class FactoryEvidencePublisher {
     subjectDigest: Sha256Digest,
     output: FactoryGateExecutionOutput,
     attempt: number
-  ): Promise<void> {
+  ): Promise<ReturnType<FactoryDocumentCodec["gateObservation"]>> {
     const stdoutArtifact = await this.#textArtifact(output.stdout, "text/plain");
     const stderrArtifact = await this.#textArtifact(output.stderr, "text/plain");
     const observation = this.dependencies.documents.gateObservation(
@@ -310,6 +310,7 @@ export class FactoryEvidencePublisher {
         ])
       })
     ]);
+    return observation;
   }
 
   public async internalGate(

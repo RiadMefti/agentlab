@@ -2,8 +2,11 @@ import { createHash } from "node:crypto";
 
 import {
   evidenceBundleSchema,
+  factoryAgentRunRequestSchema,
   factoryAgentRunRecordSchema,
   factoryControlEventSchema,
+  factoryExecutionEventSchema,
+  factoryExecutionRunSchema,
   factoryGateObservationSchema,
   factoryPatchProposalSchema,
   factoryPlanSchema,
@@ -85,6 +88,14 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
     return encodeCanonicalDocument(factoryControlEventSchema.parse(input));
   }
 
+  public executionRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExecutionRunSchema.parse(input));
+  }
+
+  public executionEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExecutionEventSchema.parse(input));
+  }
+
   public policyDecision(input: unknown) {
     return encodeCanonicalDocument(factoryPolicyDecisionSchema.parse(input));
   }
@@ -99,6 +110,10 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public agentRun(input: unknown) {
     return encodeCanonicalDocument(factoryAgentRunRecordSchema.parse(input));
+  }
+
+  public agentRunRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryAgentRunRequestSchema.parse(input));
   }
 
   public gateObservation(input: unknown) {

@@ -32,7 +32,6 @@ const gateDefinitionSchema = z
 
 export interface LocalFactoryGateExecutorOptions {
   readonly now: () => string;
-  readonly createId: () => string;
 }
 
 /** Executes only administrator-installed gate definitions through a mandatory sandbox. */
@@ -63,7 +62,7 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
     const sandboxedCommand = await this.sandbox.wrap(definition.command, input.workspace);
     const isolated = await this.processIsolator.isolate({
       command: sandboxedCommand,
-      isolationId: this.options.createId(),
+      isolationId: z.uuid().parse(input.isolationId),
       limits: factoryResourceLimitsSchema.parse(input.resourceLimits)
     });
     const command = isolated.command;
@@ -97,14 +96,17 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
       };
     } catch (error: unknown) {
       const details = commandFailureDetails(error);
+      if (details === null) {
+        throw new Error("Factory gate process cleanup could not be confirmed.", { cause: error });
+      }
       const finishedAt = this.#timestamp();
       return {
         gateId: definition.id,
         evidenceKind: definition.evidenceKind,
         command,
         result:
-          details?.kind === "timeout" ? "timed-out" : details?.kind === "exit" ? "fail" : "error",
-        exitCode: details?.exitCode ?? null,
+          details.kind === "timeout" ? "timed-out" : details.kind === "exit" ? "fail" : "error",
+        exitCode: details.exitCode,
         startedAt,
         finishedAt,
         wallClockSeconds: elapsedSeconds(startedAt, finishedAt),
