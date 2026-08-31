@@ -2,6 +2,7 @@ import { request as httpsRequest } from "node:https";
 
 export interface GitHubTokenSource {
   token(repositoryId: string): Promise<string>;
+  invalidate?(repositoryId: string, token: string): void;
 }
 
 export interface GitHubRestApi {
@@ -95,7 +96,7 @@ export class GitHubRestClient implements GitHubRestApi {
             Accept: "application/vnd.github+json",
             Authorization: `Bearer ${token}`,
             "User-Agent": this.#userAgent,
-            "X-GitHub-Api-Version": "2022-11-28",
+            "X-GitHub-Api-Version": "2026-03-10",
             ...(payload === null
               ? {}
               : {
@@ -123,6 +124,8 @@ export class GitHubRestClient implements GitHubRestApi {
             const status = response.statusCode ?? 0;
             const text = Buffer.concat(chunks).toString("utf8");
             if (status < 200 || status >= 300) {
+              if (status === 401)
+                this.options.tokenSource.invalidate?.(this.options.repositoryId, token);
               fail(new GitHubApiError(status, githubErrorMessage(status, text)));
               return;
             }

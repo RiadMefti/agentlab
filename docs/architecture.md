@@ -61,6 +61,15 @@ starting the target. Deterministic gates run Bubblewrap inside that scope. The m
 subprocess environment is allowlisted and excludes repository, cloud, and package credentials. The
 broker credential is acquired only at the separate broker boundary.
 
+That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
+requests an installation token for one configured numeric repository ID with only `contents:write`
+and `pull_requests:write`. The response must name that exact selected repository, must not widen the
+permission map, and must expire within the bounded installation-token window. Tokens coalesce in
+memory, refresh before expiry, and are invalidated on authentication or push failure. Neither the
+App key nor installation token crosses into a model-bearing process. The adapter remains dormant
+until an operator-facing composition boundary can provision the key to a separate broker process and
+all activation policy is satisfied.
+
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
 ingress rejects an unknown capability, cross-channel producer impersonation, a mismatched artifact,
@@ -126,6 +135,14 @@ are then recorded as separate checkpoints. A crash after any one of them resumes
 checkpoint without creating a second PR or manufacturing completion. A checkpoint that observes
 broker revocation performs no new write. If revocation races an already in-flight remote call, its
 exact result is journaled but the task cannot advance; the dispatch remains recoverable.
+
+The supported Linux-host preflight is a distinct `factory-sandbox` CI job. It executes the live
+systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash recovery, and
+a Bubblewrap probe that proves the source checkout is hidden, dependencies are read-only, the
+worktree remains writable, and the child occupies a distinct network namespace. Activation must make
+this exact job a required repository check; ordinary unit tests do not satisfy the host proof. The
+credentialless ephemeral CI runner explicitly permits unprivileged user namespaces; production hosts
+must meet the same Bubblewrap precondition through their governed host configuration.
 
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or

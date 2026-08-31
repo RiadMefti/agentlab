@@ -130,6 +130,26 @@ describe("GitHubFactoryPullRequestBroker", () => {
     expect(fixture.api.createdPullRequests).toBe(1);
   });
 
+  it("invalidates the exact credential after a failed push and safely retries", async () => {
+    const fixture = brokerFixture({ failPushOnce: true });
+    const input = {
+      proposal: fixture.proposal,
+      patch: fixture.patch,
+      repositoryRoot: fixture.repository
+    };
+
+    await expect(fixture.broker.openDraft(input)).rejects.toThrow(/Injected push failure/u);
+    expect(fixture.tokenSource.invalidations).toEqual([{ repositoryId, token: "test-token" }]);
+    expect(fixture.state.branchHead).toBeNull();
+
+    await expect(fixture.broker.openDraft(input)).resolves.toMatchObject({
+      created: true,
+      record: { number: 42 }
+    });
+    expect(fixture.runner.pushes).toBe(2);
+    expect(fixture.api.createdPullRequests).toBe(1);
+  });
+
   it("reconciles the exact draft when GitHub accepted creation but its response was lost", async () => {
     const fixture = brokerFixture({ loseCreateResponseOnce: true });
 
@@ -229,6 +249,7 @@ function brokerFixture(
     readonly mismatchedCreatedRef?: boolean;
     readonly failCreateBeforeRecordOnce?: boolean;
     readonly loseCreateResponseOnce?: boolean;
+    readonly failPushOnce?: boolean;
   } = {}
 ) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-github-broker-"));
@@ -245,19 +266,20 @@ function brokerFixture(
   const patch = git(repository, ["diff", "--binary", "--full-index", "--no-ext-diff"]);
   const proposal = proposalFor(baseRevision, patch);
   const state: RemoteState = { branchHead: null };
-  const runner = new RecordingPushRunner(state);
+  const runner = new RecordingPushRunner(state, options.failPushOnce === true);
   const api = new FakeGitHubApi(baseRevision, state, options);
   const documents = new NodeFactoryDocumentCodec();
+  const tokenSource = new RecordingTokenSource();
   const broker = new GitHubFactoryPullRequestBroker(runner, {
     repositoryId,
     brokerId: "github-app/test",
-    tokenSource: { token: () => Promise.resolve("test-token") },
+    tokenSource,
     api,
     documents,
     gitExecutable,
     temporaryRoot: join(root, "broker")
   });
-  return { api, baseRevision, broker, patch, proposal, repository, runner, state };
+  return { api, baseRevision, broker, patch, proposal, repository, runner, state, tokenSource };
 }
 
 function proposalFor(baseRevision: string, patch: string): FactoryPullRequestProposal {
@@ -298,8 +320,12 @@ class RecordingPushRunner implements CommandRunner {
   public pushes = 0;
   public pushArguments: readonly string[] = [];
   public authorizationHeader: string | null = null;
+  #failedPush = false;
 
-  public constructor(private readonly state: RemoteState) {}
+  public constructor(
+    private readonly state: RemoteState,
+    private readonly failPushOnce: boolean
+  ) {}
 
   public run(
     executable: string,
@@ -310,12 +336,28 @@ class RecordingPushRunner implements CommandRunner {
       this.pushes += 1;
       this.pushArguments = args;
       this.authorizationHeader = options?.environment?.GIT_CONFIG_VALUE_0 ?? null;
+      if (this.failPushOnce && !this.#failedPush) {
+        this.#failedPush = true;
+        return Promise.reject(new Error("Injected push failure."));
+      }
       const root = args[args.indexOf("-C") + 1];
       if (root === undefined) throw new Error("Test broker push omitted its workspace.");
       this.state.branchHead = git(root, ["rev-parse", "HEAD"]).trim();
       return Promise.resolve({ stdout: "ok", stderr: "" });
     }
     return this.#delegate.run(executable, args, options);
+  }
+}
+
+class RecordingTokenSource {
+  public readonly invalidations: { readonly repositoryId: string; readonly token: string }[] = [];
+
+  public token(): Promise<string> {
+    return Promise.resolve("test-token");
+  }
+
+  public invalidate(repository: string, token: string): void {
+    this.invalidations.push({ repositoryId: repository, token });
   }
 }
 
