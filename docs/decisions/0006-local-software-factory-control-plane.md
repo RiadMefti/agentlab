@@ -219,6 +219,14 @@ paths remain internal: the Linux recovery adapter is not composed or exercised i
 target-host CI lane, and a composition root, operator command/TUI, and activation controls are still
 required before a live request can invoke them.
 
+Execution admission is deterministic and separate from execution. Its command accepts only a task
+UUID. The service reloads the planned task and active conversation, obtains the current commit from
+a hardened Git adapter that verifies the canonical repository top level, and supplies that observed
+revision to policy with an empty change set and zero complete usage. It transitions only an allowed
+R1 task to `queued`; a denial or human requirement remains recorded without a state transition, and
+an already queued task is idempotent. The admission surface exposes neither control switches nor
+preparation-authority issuance.
+
 ```text
 registered → qualifying → qualified → specifying → specified → planning → planned → prepared
                  ↘ retry                 ↘ retry               ↘ retry

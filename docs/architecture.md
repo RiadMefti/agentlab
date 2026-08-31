@@ -192,6 +192,13 @@ failure rolls all of them back; a lost response can be retried idempotently. Mod
 authors identity, timestamps, digests, authority, policy, ledger events, evidence assertions, or
 approvals.
 
+Execution admission is a separate deterministic application service. It accepts only a task UUID,
+loads the planned immutable contract and its active conversation, and reads the repository's current
+commit through a hardened Git adapter; a caller cannot supply the revision used for policy. It
+evaluates the execution stage with zero pre-execution usage and an empty change set, queues only an
+allowed R1 task, and otherwise leaves the task planned with the denial recorded as evidence.
+Already-queued work is idempotent. The service cannot enable scheduler or broker authority.
+
 This path is not composed into `local-runtime.ts`, scheduled, deployed, published, or enabled.
 Normal database migration creates only its inert local ledger tables. A separate broker composition,
 owner-only key source, and non-authorizing operator preflight now exist, but the normal TUI cannot
