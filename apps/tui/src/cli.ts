@@ -26,6 +26,19 @@ export type CliAction =
       readonly confirmation: "assess-eval";
     }
   | {
+      readonly kind: "factory-eval-sign";
+      readonly configPath: string;
+      readonly runPath: string;
+      readonly confirmation: "sign-eval";
+    }
+  | {
+      readonly kind: "factory-eval-attest";
+      readonly configPath: string;
+      readonly assessmentDigest: `sha256:${string}`;
+      readonly attestationPath: string;
+      readonly confirmation: "attest-eval";
+    }
+  | {
       readonly kind: "factory-eval-inspect";
       readonly configPath: string;
       readonly assessmentDigest: `sha256:${string}`;
@@ -112,6 +125,46 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 7 &&
+    input[0] === "factory" &&
+    input[1] === "eval-sign" &&
+    input[2] === "--config" &&
+    input[4] === "--run" &&
+    input[6] === "--confirm-sign"
+  ) {
+    const configPath = input[3];
+    const runPath = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
+      return { kind: "factory-eval-sign", configPath, runPath, confirmation: "sign-eval" };
+    }
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "eval-attest" &&
+    input[2] === "--config" &&
+    input[4] === "--assessment" &&
+    input[6] === "--attestation" &&
+    input[8] === "--confirm-attest"
+  ) {
+    const configPath = input[3];
+    const assessmentDigest = input[5];
+    const attestationPath = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(assessmentDigest) &&
+      isNormalizedAbsolutePath(attestationPath)
+    ) {
+      return {
+        kind: "factory-eval-attest",
+        configPath,
+        assessmentDigest,
+        attestationPath,
+        confirmation: "attest-eval"
+      };
+    }
   }
   if (
     input.length === 7 &&
@@ -496,7 +549,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-assess ...|eval-inspect ...|canary-authorize ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -548,6 +601,10 @@ Factory authority:
       Register one owner-authored feature or bug report for explicit or autonomous execution.
   agentlab factory eval-assess --config <absolute-path> --run <absolute-path> --confirm-assess
       Record complete matched trials and compute a deterministic promotion assessment; no model or remote access.
+  agentlab factory eval-sign --config <absolute-path> --run <absolute-path> --confirm-sign
+      Sign one fresh eval run in an isolated key-bearing process with no database or remote access.
+  agentlab factory eval-attest --config <absolute-path> --assessment <sha256> --attestation <absolute-path> --confirm-attest
+      Verify one DSSE artifact against a pinned public key and exact immutable assessment, then record it.
   agentlab factory eval-inspect --config <absolute-path> --assessment <sha256>
       Inspect compact metrics and policy reasons for one immutable assessment.
   agentlab factory canary-authorize --config <absolute-path> --assessment <sha256> --request <absolute-path> --confirm-authorize-canary

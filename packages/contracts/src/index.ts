@@ -1,4 +1,5 @@
 export * from "./conversation.js";
+export * from "./factory-eval-attestation.js";
 export * from "./factory-execution.js";
 export * from "./factory-pull-request-observation.js";
 export * from "./factory-pull-request-repair.js";

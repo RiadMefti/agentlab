@@ -16,25 +16,24 @@ const absolutePathSchema = z
 
 const configSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.local-factory-evaluator.v2"),
-    databasePath: absolutePathSchema,
+    schemaVersion: z.literal("agentlab.local-factory-eval-attestor.v1"),
     runnerId: factoryIdentifierSchema,
-    trustedPublicKeyPath: absolutePathSchema,
-    trustedKeyId: sha256DigestSchema,
-    maximumIssuanceDelaySeconds: z.number().int().min(1).max(86_400),
-    maximumAttestationLifetimeSeconds: z.number().int().min(60).max(604_800)
+    privateKeyPath: absolutePathSchema,
+    keyId: sha256DigestSchema,
+    attestationLifetimeSeconds: z.number().int().min(60).max(604_800),
+    maximumIssuanceDelaySeconds: z.number().int().min(1).max(86_400)
   })
   .strict();
 
-export type LocalFactoryEvaluatorConfig = z.infer<typeof configSchema>;
+export type LocalFactoryEvalAttestorConfig = z.infer<typeof configSchema>;
 
-/** Loads the durable ledger, evaluator identity, and one pinned public verification key. */
-export async function loadLocalFactoryEvaluatorConfig(
+/** Loads only runner identity, timing bounds, and an owner-only signing-key coordinate. */
+export async function loadLocalFactoryEvalAttestorConfig(
   pathInput: string
-): Promise<LocalFactoryEvaluatorConfig> {
-  const path = privateLocalFilePath(pathInput, "Local factory evaluator config");
+): Promise<LocalFactoryEvalAttestorConfig> {
+  const path = privateLocalFilePath(pathInput, "Local factory eval attestor config");
   const content = await readPrivateLocalFile(path, {
-    label: "Local factory evaluator config",
+    label: "Local factory eval attestor config",
     minimumBytes: 2,
     maximumBytes: 16 * 1_024
   });
@@ -49,6 +48,6 @@ function parseJson(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch (error: unknown) {
-    throw new Error("Local factory evaluator config is not valid JSON.", { cause: error });
+    throw new Error("Local factory eval attestor config is not valid JSON.", { cause: error });
   }
 }

@@ -4,6 +4,9 @@
 
 **Date:** 2026-08-31
 
+> [ADR 0009](0009-isolated-eval-attestation.md) later adds isolated DSSE signing and immutable
+> verification records. The cohort remains dormant and unconsumed.
+
 ## Context
 
 The daily scheduler and governed worker can produce reviewed local proposals, and the broker can

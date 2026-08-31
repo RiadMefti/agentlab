@@ -1,38 +1,83 @@
-# Local factory evaluation and canary-authority operations
+# Local factory evaluation, attestation, and canary-authority operations
 
 This runbook covers the dormant offline promotion ledger accepted by
-[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md). It does not run an eval
+[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and the isolated signing
+boundary in [ADR 0009](decisions/0009-isolated-eval-attestation.md). It does not run an eval
 harness, consume a cohort, contact GitHub, merge, release, deploy, or roll back production.
 
 ## Trust boundary
 
-Use a dedicated non-shared local operating-system account. Keep the SQLite database outside the
-source repository. Config, eval-run, and canary-request files must be canonical owner-only regular
-files with one link; symlinks, hard links, group/world permissions, unstable reads, unknown fields,
+Use distinct non-shared operating-system accounts for the external harness, key-bearing attestor,
+credentialless evaluator/verifier, and human release controller. Only the attestor account receives
+the private key. Only the evaluator and human authority receive sequential access to the durable
+SQLite ledger. Keep all files outside the source repository.
+
+Config, eval-run, signed-artifact, and canary-request files must be canonical owner-only regular
+files with one link. Symlinks, hard links, group/world permissions, unstable reads, unknown fields,
 and oversized input are rejected.
 
 ```text
 install -d -m 700 /absolute/private/agentlab
-chmod 600 /absolute/private/agentlab/*.json
+chmod 600 /absolute/private/agentlab/*.{json,pem}
 ```
 
-The runner and operator IDs are audit identities, not authentication credentials. File ownership and
-the exclusive local writer lease are the current authorization boundary. Preserve the input
-documents and their upstream grader artifacts under the organization's retention policy.
+Runner and operator IDs are audit identities. Authentication comes from operating-system isolation,
+file ownership, private-key custody, the pinned public-key ID, and the exclusive writer lease. A
+signature authenticates exact bytes; it does not prove that the external harness honestly ran the
+trials. Preserve raw runs, grader evidence, signed artifacts, public keys, and ledger backups under
+the organization's retention policy.
 
-## Evaluator configuration
+## Provision one Ed25519 trust root
 
-`evaluator.json` is strict `agentlab.local-factory-evaluator.v1`:
+Generate keys under a restrictive umask. The SHA-256 key ID is the digest of the public SPKI DER
+bytes and must be prefixed with `sha256:` in both configs.
+
+```text
+umask 077
+openssl genpkey -algorithm ED25519 -out /absolute/private/attestor/eval-private.pem
+openssl pkey -in /absolute/private/attestor/eval-private.pem \
+  -pubout -out /absolute/private/evaluator/eval-public.pem
+openssl pkey -pubin -in /absolute/private/evaluator/eval-public.pem -outform DER \
+  | sha256sum
+```
+
+Transfer the public key without granting the evaluator access to the private-key directory. Record
+the calculated key ID through a reviewed channel. Do not reuse provider, GitHub, SSH, or release
+keys. Rotation requires a new key ID, fresh evaluation/signature, and an explicit later authority
+decision; retained records still require their original trust root for re-verification.
+
+## Strict configurations
+
+`attestor.json` is `agentlab.local-factory-eval-attestor.v1` and belongs only to the signing
+account:
 
 ```json
 {
-  "schemaVersion": "agentlab.local-factory-evaluator.v1",
-  "databasePath": "/absolute/private/agentlab/agentlab.sqlite",
-  "runnerId": "trusted-eval-runner"
+  "schemaVersion": "agentlab.local-factory-eval-attestor.v1",
+  "runnerId": "trusted-eval-runner",
+  "privateKeyPath": "/absolute/private/attestor/eval-private.pem",
+  "keyId": "sha256:...",
+  "attestationLifetimeSeconds": 3600,
+  "maximumIssuanceDelaySeconds": 300
 }
 ```
 
-The eval harness must emit a complete `agentlab.eval-run.v1`. Its top-level fields are:
+`evaluator.json` is `agentlab.local-factory-evaluator.v2`. Its independent limits may be narrower
+than the signer's and can never exceed one day for issuance delay or seven days for lifetime:
+
+```json
+{
+  "schemaVersion": "agentlab.local-factory-evaluator.v2",
+  "databasePath": "/absolute/private/evaluator/agentlab.sqlite",
+  "runnerId": "trusted-eval-runner",
+  "trustedPublicKeyPath": "/absolute/private/evaluator/eval-public.pem",
+  "trustedKeyId": "sha256:...",
+  "maximumIssuanceDelaySeconds": 300,
+  "maximumAttestationLifetimeSeconds": 3600
+}
+```
+
+The eval harness must emit a complete `agentlab.eval-run.v1` with:
 
 ```text
 schemaVersion, runId, suiteDigest, suite,
@@ -41,127 +86,125 @@ challengerCandidateDigest, challengerCandidate,
 samples, actor, startedAt, completedAt, correlationId
 ```
 
-The actor must be a `gate-runner` of kind `ci` or `control-plane`, and its ID must equal the
-config's `runnerId`. Candidate and suite digests are SHA-256 hashes of AgentLab canonical JSON, not
-hashes of arbitrary serialization. Samples must be ordered exactly by suite case ID and then trial
-1..N. Each coordinate includes one matched baseline/challenger result, unique seed digest, stable
-per-case fixture digest, grader-evidence digest, output/trace digests, task and safety outcomes,
-micro-USD, and latency. Do not submit summaries in place of raw samples.
+The actor must be a `gate-runner` of kind `ci` or `control-plane`, and its ID must equal both
+configs' `runnerId`. Candidate and suite digests hash AgentLab canonical JSON. Samples are ordered
+exactly by suite case ID and trial 1..N. Each coordinate includes matched baseline/challenger
+results, unique seed, stable per-case fixture, grader evidence, outputs, traces, cost, latency, task
+and safety outcomes. Never substitute summaries for raw samples.
 
-The current repository does not produce this document. Treat any external harness as a separately
-reviewed trusted producer; owner-only input protects local admission but is not supply-chain
-attestation.
+## Assess, sign, verify, and inspect
 
-## Assess and inspect
-
-Assess once, then retain the emitted assessment digest:
+The evaluator first records the exact run and deterministic assessment:
 
 ```text
 agentlab factory eval-assess \
-  --config /absolute/private/agentlab/evaluator.json \
-  --run /absolute/private/agentlab/eval-run.json \
+  --config /absolute/private/evaluator/evaluator.json \
+  --run /absolute/private/evaluator/eval-run.json \
   --confirm-assess
 ```
 
-The command prints one compact JSON record only after the runtime closes. It contains candidate and
-run coordinates, sample count, deterministic metrics, decision, maximum eligible stage, reason
-codes, and assessment digest. It deliberately omits samples and traces. Exact retries return the
-existing assessment; the same run ID with different content is a conflict.
+The compact output contains run/candidate coordinates, sample count, deterministic metrics,
+decision, maximum eligible stage, reason codes, and assessment digest. It omits samples and traces.
+Exact retries return the existing assessment; changed content under one run ID conflicts.
 
-Inspect an immutable result without resubmitting samples:
+Within the configured completion-to-issuance window, invoke signing under the isolated attestor
+account. A restrictive umask ensures shell redirection creates an owner-only artifact:
+
+```text
+umask 077
+agentlab factory eval-sign \
+  --config /absolute/private/attestor/attestor.json \
+  --run /absolute/private/attestor/eval-run.json \
+  --confirm-sign \
+  > /absolute/private/attestor/signed-attestation.json
+chmod 600 /absolute/private/attestor/signed-attestation.json
+```
+
+Transfer the signed artifact—not the private key—to the evaluator account. Record it against the
+exact assessment digest while it is valid:
+
+```text
+agentlab factory eval-attest \
+  --config /absolute/private/evaluator/evaluator.json \
+  --assessment sha256:... \
+  --attestation /absolute/private/evaluator/signed-attestation.json \
+  --confirm-attest
+```
+
+The verifier authenticates DSSE bytes with the configured public key, checks canonical statement and
+envelope digests, binds the subject and predicate to the exact immutable run, independently checks
+issuance delay/lifetime/current validity, binds the exact assessment, and appends one schema 13
+record. The compact output includes attestation, assessment, run, key, issuance, expiry, and
+verification coordinates; it omits the signature and embedded report. A second different artifact
+for one run conflicts. Every service read re-verifies the signature and lineage.
+
+Inspect the deterministic assessment separately:
 
 ```text
 agentlab factory eval-inspect \
-  --config /absolute/private/agentlab/evaluator.json \
+  --config /absolute/private/evaluator/evaluator.json \
   --assessment sha256:...
 ```
 
-A pass grants no task, scheduler, broker, merge, or release authority. Before any human approval,
-review the full matched sample set and the artifacts named by `humanSampleReviewDigest`; confirm the
-case bank is representative and that grader calibration is current.
+A passing assessment or valid attestation grants no task, scheduler, broker, merge, or release
+authority. Review the full matched sample set and artifacts named by `humanSampleReviewDigest`;
+confirm case-bank representativeness and grader calibration.
 
-## Human canary authority
+## Human canary authority remains dormant
 
-Use a separate `canary-authority.json` and, operationally, a distinct release-controller account:
+Use a separate `canary-authority.json` and release-controller account:
 
 ```json
 {
   "schemaVersion": "agentlab.local-factory-canary-authority.v1",
-  "databasePath": "/absolute/private/agentlab/agentlab.sqlite",
+  "databasePath": "/absolute/private/evaluator/agentlab.sqlite",
   "operatorId": "release-controller"
 }
 ```
 
-Create one strict owner-only `canary-request.json`. Every budget field is an aggregate cohort
-ceiling and must fit inside the evaluated suite's canary limits:
-
-```json
-{
-  "schemaVersion": "agentlab.canary-request.v1",
-  "stage": "brokered-draft-pr",
-  "repositoryIds": ["agentlab"],
-  "maximumRiskTier": "R1",
-  "maximumTasks": 2,
-  "budget": {
-    "wallClockSeconds": 1800,
-    "maxAgentTurns": 20,
-    "maxToolCalls": 100,
-    "maxInputTokens": 200000,
-    "maxOutputTokens": 20000,
-    "maxCostMicrousd": 2000000,
-    "maxProcesses": 8,
-    "maxOutputBytes": 2000000,
-    "maxWorkers": 1,
-    "maxRepairAttempts": 1,
-    "maxChangedFiles": 10,
-    "maxChangedLines": 200
-  },
-  "humanSampleReviewDigest": "sha256:...",
-  "humanSampleSize": 4,
-  "expiresAt": "2026-09-01T12:00:00.000Z",
-  "reason": "Reviewed bounded promotion."
-}
-```
-
-Issue the cohort with the exact passing assessment pin:
+The owner-only `agentlab.canary-request.v1` still contains stage, one repository, R0/R1 ceiling,
+task count, complete aggregate budget, human-review digest/size, expiry, and reason. Its budget must
+fit inside the evaluated suite limits. Issue only after independent human review:
 
 ```text
 agentlab factory canary-authorize \
-  --config /absolute/private/agentlab/canary-authority.json \
+  --config /absolute/private/release/canary-authority.json \
   --assessment sha256:... \
-  --request /absolute/private/agentlab/canary-request.json \
+  --request /absolute/private/release/canary-request.json \
   --confirm-authorize-canary
 ```
 
-The result must report the requested stage, one repository, R0/R1 limit, task and budget ceilings,
-expiry, human review digest/size, and `autoMerge:false`, `release:false`. An exact retry reports
-`existing`; any changed request for the same assessment conflicts. `read-only-shadow` requires R0;
-`local-proposal` and `brokered-draft-pr` require R1.
-
-No shipped component reads this cohort to execute work. Do not interpret issuance as a running
-canary or manually bypass the existing intake, task policy, broker preflight, repository rules, or
-human merge controls.
+The result structurally fixes `autoMerge:false` and `release:false`. `read-only-shadow` requires R0;
+`local-proposal` and `brokered-draft-pr` require R1. Important: the current canary-authority command
+still resolves the deterministic assessment, not the attestation record. No shipped component reads
+the cohort to execute work. Do not interpret issuance as a running canary or bypass intake, task
+policy, broker preflight, repository governance, or human merge controls.
 
 ## Failure, recovery, and incident handling
 
-Each run/assessment and approval/cohort pair commits atomically. On command failure, preserve the
-database and all source evidence, inspect by the emitted or known digest, and retry only the exact
-same input. Never update or delete factory eval/canary rows; SQLite triggers reject both.
+Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
+On failure, preserve the database and source evidence and retry only exact input. SQLite rejects
+updates and deletes. Stop if key ID, signature, payload, statement, run/assessment linkage, sample
+order, fixture/seed integrity, policy recomputation, freshness, expiry, stage, repository, risk,
+human sample, task count, or budget differs. A critical safety violation is unconditional denial.
 
-If runner identity, sample order, fixture/seed integrity, policy recomputation, predecessor links,
-expiry, stage, repository, risk, task count, human sample, lifetime, or any budget differs, stop and
-investigate the producer or request. A critical safety violation is an unconditional denial.
+For suspected key or harness compromise:
 
-During an incident, disable the existing scheduler and broker switches, preserve ledger/input
-hashes, quarantine affected candidates and derived work, rotate any unrelated credentials that may
-have been exposed, and revert the configured factory components to the last-known-good digests. The
-current slice does not automate rollback or incident notification.
+1. Disable scheduler and broker switches; stop evaluation, signing, and canary commands.
+2. Preserve database/WAL, runs, artifacts, key IDs, grader evidence, and relevant logs read-only.
+3. Quarantine affected candidates and all work derived from them; determine the first bad run.
+4. Rotate the signing key and any independently exposed credentials. Never rewrite old records.
+5. Repair the harness, rerun representative matched trials, sign with the new key, independently
+   review, and require a fresh explicit authority decision.
+
+The current slice does not automate revocation, rollback, notification, or incident paging.
 
 ## Activation gaps
 
-Before a cohort may drive even shadow execution, AgentLab still needs a sandboxed, attested harness
-producer; content-addressed grader artifacts; a cohort consumer that reserves aggregate usage and
-binds every task; telemetry and control/challenger comparison; expiry and revocation enforcement;
+Before any cohort drives even shadow work, AgentLab still needs a sandboxed harness producer;
+content-addressed grader artifacts; stronger runner identity or hardware-backed key custody where
+required; a crash-durable cohort consumer that requires a currently valid attestation, reserves
+aggregate usage, and binds every task; telemetry/control comparison; expiry/revocation enforcement;
 alerting; rollback drills; and incident automation. Brokered PR creation remains separately
-human-confirmed and blocked by repository governance and live cost-policy prerequisites described in
+human-confirmed and blocked by repository governance and live cost-policy prerequisites in
 [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

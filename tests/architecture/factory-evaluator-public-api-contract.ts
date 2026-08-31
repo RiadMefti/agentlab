@@ -30,14 +30,22 @@ type Equal<Left, Right> = [Left] extends [Right]
 type Assert<Value extends true> = Value;
 
 interface ExpectedConfig {
-  schemaVersion: "agentlab.local-factory-evaluator.v1";
+  schemaVersion: "agentlab.local-factory-evaluator.v2";
   databasePath: string;
   runnerId: string;
+  trustedPublicKeyPath: string;
+  trustedKeyId: string;
+  maximumIssuanceDelaySeconds: number;
+  maximumAttestationLifetimeSeconds: number;
 }
 
 interface ExpectedOptions {
   readonly databasePath: string;
   readonly runnerId: string;
+  readonly trustedPublicKeyPath: string;
+  readonly trustedKeyId: string;
+  readonly maximumIssuanceDelaySeconds: number;
+  readonly maximumAttestationLifetimeSeconds: number;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
@@ -45,7 +53,7 @@ interface ExpectedOptions {
 export type FactoryEvaluatorPublicApiAssertions = [
   Assert<Equal<LocalFactoryEvaluatorConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryEvaluatorOptions, ExpectedOptions>>,
-  Assert<Equal<keyof FactoryEvaluatorCommandPort, "assess" | "inspect">>,
+  Assert<Equal<keyof FactoryEvaluatorCommandPort, "assess" | "attest" | "inspect">>,
   Assert<Equal<keyof LocalFactoryEvaluatorRuntime, "commands" | "close">>,
   Assert<
     Equal<

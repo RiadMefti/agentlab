@@ -96,6 +96,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         default: "./dist/local-factory-evaluator.js",
         types: "./dist/local-factory-evaluator.d.ts"
       },
+      "./factory-eval-attestor": {
+        source: "packages/runtime/src/local-factory-eval-attestor.ts",
+        default: "./dist/local-factory-eval-attestor.js",
+        types: "./dist/local-factory-eval-attestor.d.ts"
+      },
       "./factory-canary-authority": {
         source: "packages/runtime/src/local-factory-canary-authority.ts",
         default: "./dist/local-factory-canary-authority.js",
@@ -375,6 +380,7 @@ function compositionBoundaryViolations(
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -389,6 +395,7 @@ function compositionBoundaryViolations(
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -401,6 +408,7 @@ function compositionBoundaryViolations(
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -422,6 +430,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-evaluator.ts",
       description: "credentialless evaluator composition",
       forbidden: evaluatorCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-eval-attestor.ts",
+      description: "isolated eval attestor composition",
+      forbidden: evalAttestorCommandForbidden
     },
     {
       entry: "packages/runtime/src/local-factory-canary-authority.ts",
@@ -467,6 +480,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-evaluator.ts",
       description: "credentialless evaluator command",
       forbidden: evaluatorCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-eval-attestor.ts",
+      description: "isolated eval attestor command",
+      forbidden: evalAttestorCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-canary-authority.ts",
@@ -516,6 +534,7 @@ function brokerCommandForbidden(path: string): boolean {
     isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -530,6 +549,7 @@ function workerCommandForbidden(path: string): boolean {
     isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -617,6 +637,7 @@ function intakeCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path)
   ) {
     return true;
@@ -637,6 +658,7 @@ function authorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     path === "packages/runtime/src/local-factory-intake.ts" ||
     isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path)
   ) {
     return true;
@@ -651,6 +673,7 @@ function authorityCommandForbidden(path: string): boolean {
 }
 
 const factoryEvaluatorApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
   "packages/runtime/src/application/factory-evaluation-service.ts",
   "packages/runtime/src/application/local-factory-evaluator-coordinator.ts",
   "packages/runtime/src/application/local-runtime-construction.ts",
@@ -659,13 +682,18 @@ const factoryEvaluatorApplicationModules = new Set([
 ]);
 
 const factoryEvaluatorInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
   "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-signed-eval-attestation.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
@@ -673,9 +701,9 @@ const factoryEvaluatorInfrastructureModules = new Set([
 function isFactoryEvaluatorModule(path: string): boolean {
   return (
     path === "packages/runtime/src/local-factory-evaluator.ts" ||
+    path === "packages/runtime/src/application/factory-eval-attestation-service.ts" ||
     path === "packages/runtime/src/application/factory-evaluation-service.ts" ||
     path === "packages/runtime/src/application/local-factory-evaluator-coordinator.ts" ||
-    path === "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts" ||
     path === "packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.ts"
   );
 }
@@ -687,6 +715,7 @@ function evaluatorCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvalAttestorModule(path) ||
     isFactoryCanaryAuthorityModule(path)
   ) {
     return true;
@@ -696,6 +725,54 @@ function evaluatorCommandForbidden(path: string): boolean {
   }
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryEvaluatorInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryEvalAttestorApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-attestor-service.ts",
+  "packages/runtime/src/application/local-factory-eval-attestor-coordinator.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryEvalAttestorInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts"
+]);
+
+function isFactoryEvalAttestorModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
+    path === "packages/runtime/src/application/factory-eval-attestor-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-eval-attestor-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.ts" ||
+    path === "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"
+  );
+}
+
+function evalAttestorCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryCanaryAuthorityModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryEvalAttestorApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryEvalAttestorInfrastructureModules.has(path);
   }
   return false;
 }
@@ -739,7 +816,8 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
-    isFactoryEvaluatorModule(path)
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path)
   ) {
     return true;
   }
@@ -765,6 +843,7 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-authority.ts" ||
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-evaluator.ts" ||
+    path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
     path === "packages/runtime/src/local-factory-canary-authority.ts"
   ) {
     return "runtime-composition";

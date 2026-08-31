@@ -109,6 +109,9 @@ npm run package
 ./release/agentlab-vVERSION-linux-x64 --help
 ```
 
+Packaging smoke-runs the new binary inside a disposable private home/data/state/cache/tmux sandbox;
+it never opens the database or provider credentials from your normal AgentLab environment.
+
 ## Configuration
 
 | Variable                 | Default                                   | Purpose                         |
@@ -138,14 +141,20 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   has no scheduler execution, provider, process, or GitHub port. The separate
   `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local feature or
   bug reports under repository-owned policy; it has no model or remote authority. The credentialless
-  `@agentlab/runtime/factory-evaluator` records complete matched eval reports and deterministic
-  assessments, while the separate human-only `@agentlab/runtime/factory-canary-authority` can issue
-  only an expiring R0/R1 cohort with `autoMerge:false` and `release:false`. Neither can execute a
-  model, contact GitHub, merge, or release.
+  `@agentlab/runtime/factory-evaluator` records complete matched eval reports, deterministic
+  assessments, and public-key-verified attestation records. The isolated
+  `@agentlab/runtime/factory-eval-attestor` can only sign a fresh exact run and cannot reach SQLite.
+  The separate human-only `@agentlab/runtime/factory-canary-authority` can issue only an expiring
+  R0/R1 cohort with `autoMerge:false` and `release:false`. None can execute a model, contact GitHub,
+  merge, or release.
 - `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
   candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
   regression, flake, cost, and latency metrics from raw samples, and atomically records one
   pass/deny assessment. `eval-inspect` emits the compact immutable result without samples or traces.
+- `agentlab factory eval-sign --config ... --run ... --confirm-sign` emits one Ed25519 DSSE in-toto
+  artifact from a signer composition with no database or remote capability. `eval-attest` verifies
+  it against a pinned public key, exact run/assessment lineage, and independent timing bounds before
+  one immutable schema-13 append.
 - `agentlab factory canary-authorize --config ... --assessment ... --request ... --confirm-authorize-canary`
   requires a passing assessment and separate owner-only human request, then records one bounded
   non-executing cohort. No shipped component consumes that cohort yet.
@@ -209,17 +218,19 @@ process cannot run agents or contact GitHub. The two remote-write commands requi
 UUID, an operator-pinned policy digest, and literal confirmation: one opens the initial draft and
 one advances an authorization-bound repaired branch. Both invoke only the broker after a clean
 preflight, and their inner services recheck policy, evidence, base revision, governance, and the
-broker kill switch. Both switches remain default-off. The eval slice accepts a trusted owner-only
-matched report and can issue a structurally non-merge/non-release cohort after human sample review,
-but it does not yet provide the harness producer or a cohort consumer. Provider-neutral per-run and
-per-tick reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
+broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
+matched report, signs and verifies its exact bytes through disjoint local compositions, and can
+issue a structurally non-merge/non-release cohort after human sample review. It does not yet provide
+the harness producer or an attestation-gated cohort consumer. Provider-neutral per-run and per-tick
+reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
 intentionally empty. Owner-only worker and broker config can load the same separate strict
 cost-policy file without sharing broker credentials. The current repository governance blocks the
 write commands. No live factory task or PR has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
-separation. The dormant procedures are in
+separation, and [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing
+boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
