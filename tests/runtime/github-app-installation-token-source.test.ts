@@ -73,12 +73,25 @@ describe("GitHubAppInstallationTokenSource", () => {
 
   it.each([
     {
+      name: "missing checks-read permission",
+      response: {
+        ...tokenResponse("ghs_missing_checks"),
+        permissions: { contents: "write", pull_requests: "write" }
+      },
+      message: /permissions.*boundary/u
+    },
+    {
       name: "extra permission",
       response: {
         ...tokenResponse("ghs_extra_permission"),
-        permissions: { contents: "write", pull_requests: "write", issues: "write" }
+        permissions: {
+          checks: "read",
+          contents: "write",
+          pull_requests: "write",
+          issues: "write"
+        }
       },
-      message: /permissions exceed/u
+      message: /permissions.*boundary/u
     },
     {
       name: "different repository",
@@ -210,7 +223,12 @@ function tokenResponse(token: string) {
   return {
     token,
     expires_at: new Date(nowMilliseconds + 60 * 60 * 1_000).toISOString(),
-    permissions: { contents: "write", metadata: "read", pull_requests: "write" },
+    permissions: {
+      checks: "read",
+      contents: "write",
+      metadata: "read",
+      pull_requests: "write"
+    },
     repository_selection: "selected",
     repositories: [{ id: repositoryNumericId, full_name: "RiadMefti/AgentLab" }]
   };

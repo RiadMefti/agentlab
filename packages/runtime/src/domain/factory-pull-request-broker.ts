@@ -1,5 +1,6 @@
 import type {
   FactoryPullRequestProposal,
+  FactoryPullRequestObservation,
   FactoryPullRequestRecord,
   GitObjectId
 } from "@agentlab/contracts";
@@ -42,6 +43,16 @@ export interface OpenFactoryDraftPullRequestResult {
 export interface VerifyFactoryDraftPullRequestInput {
   readonly proposal: FactoryPullRequestProposal;
   readonly record: FactoryPullRequestRecord;
+}
+
+export interface ObserveFactoryPullRequestInput {
+  readonly record: FactoryPullRequestRecord;
+}
+
+/** Credentialed read-only port. Returned feedback is untrusted evidence, never authority. */
+export interface FactoryPullRequestObserver {
+  identity(): FactoryPullRequestBrokerIdentity;
+  observe(input: ObserveFactoryPullRequestInput): Promise<FactoryPullRequestObservation>;
 }
 
 /** Sole remote-write port. Implementations carry no model/provider credential. */

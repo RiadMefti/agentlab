@@ -93,6 +93,18 @@ describe("FactoryBrokerOperator", () => {
     });
     expect(fixture.openDraft).toHaveBeenCalledWith(draftCommand);
   });
+
+  it("delegates PR observation only through the facts-only observation service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = { taskId: "0198f005-4ec4-7000-8000-000000000001" };
+
+    await expect(fixture.operator.observePullRequest(command)).resolves.toEqual({
+      status: "denied",
+      reasonCodes: ["pr-broker-disabled"]
+    });
+    expect(fixture.observe).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+  });
 });
 
 const strongGovernance: FactoryRepositoryGovernance = {
@@ -126,18 +138,24 @@ function operatorFixture(
     reasonCodes: ["test-denial"],
     decision: null
   });
+  const observe = vi.fn().mockResolvedValue({
+    status: "denied" as const,
+    reasonCodes: ["pr-broker-disabled"] as const
+  });
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
     costPolicyConfigured,
     remote: { inspect },
     controls: { state },
-    pullRequests: { openDraft }
+    pullRequests: { openDraft },
+    pullRequestObservations: { observe }
   };
   return {
     operator: new FactoryBrokerOperator(dependencies),
     inspect,
     state,
-    openDraft
+    openDraft,
+    observe
   };
 }

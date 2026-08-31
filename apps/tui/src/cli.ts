@@ -41,6 +41,13 @@ export type CliAction =
       readonly taskId: string;
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
       readonly confirmation: "confirm-draft";
+    }
+  | {
+      readonly kind: "factory-broker-observe-pr";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+      readonly confirmation: "confirm-observe";
     };
 
 export function parseCliArguments(input: readonly string[]): CliAction {
@@ -49,6 +56,32 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "broker-observe-pr" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--policy" &&
+    input[8] === "--confirm-observe"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    const expectedPolicyBundleDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-observe-pr",
+        configPath,
+        taskId,
+        expectedPolicyBundleDigest,
+        confirmation: "confirm-observe"
+      };
+    }
   }
   if (
     input.length === 9 &&
@@ -205,7 +238,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|authority-status|broker-authority ...|broker-open-draft ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|authority-status|broker-authority ...|broker-open-draft ...|broker-observe-pr ...]"
   );
 }
 
@@ -258,6 +291,8 @@ Factory authority:
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
+  agentlab factory broker-observe-pr --config <absolute-path> --task <uuid> --policy <sha256> --confirm-observe
+      Record bounded checks and untrusted PR feedback as local evidence; never repair or write GitHub.
 
 Environment:
   AGENTLAB_DATABASE_PATH   Override the local SQLite database path

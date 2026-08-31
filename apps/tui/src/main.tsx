@@ -85,6 +85,17 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-observe-pr") {
+    const { runFactoryBrokerObservePullRequest } =
+      await import("./run-factory-broker-observe-pr.js");
+    process.exitCode = await runFactoryBrokerObservePullRequest(
+      action.configPath,
+      action.taskId,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
 
   assertSupportedTerminalRuntime(process.platform, process.env);
   if (invocation.kind === "direct") {

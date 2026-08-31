@@ -141,6 +141,11 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
   remains a separate broker command and authority boundary.
+- `agentlab factory broker-observe-pr --config ... --task ... --policy ... --confirm-observe` reads
+  only the exact durable PR record, trusted checks, formal reviews, inline review comments, and PR
+  conversation comments. It stores bounded feedback as explicitly untrusted content-addressed
+  evidence, prints only counts and a deterministic disposition, and has no repair, merge, or release
+  path.
 - `packages/contracts` owns provider, conversation, session, and software-factory schemas shared
   across local layers.
 
