@@ -91,23 +91,33 @@ expected-state check and append one transaction. OS file ownership is the local 
 boundary; the configured operator identifier is audit metadata, not independent proof of a person,
 so production use requires a dedicated non-shared operating-system account.
 
-The product CLI exposes separate authority inspection, broker and worker preflight, and broker
-authority compare-and-set commands. Each loads only its exact runtime, emits one deterministically
-ordered non-secret JSON record after clean shutdown, and exits with 0 for success/ready, 2 for a
-policy-blocked preflight, or 1 for an operational failure. Authority mutation requires the exact
-expected and desired opposite states, a bounded reason, and the matching literal enable/disable
-confirmation. The explicit `broker-open-draft` command additionally requires a task UUID, the
-operator's expected policy digest, and the literal `--confirm-draft`. It never calls the write port
-unless broker preflight is clean and the digest matches. The service then rechecks the exact task,
-policy, evidence, complete usage, base revision, remote governance, and kill switch around its
-durable idempotent dispatch. The broker command port deliberately has no authority-switch command,
-and the authority port has no remote-write command, so broker and human enablement duties remain
-separate. Scheduler has no CLI enable path. All switches remain default-off. An empty rate card adds
-`cost-policy-unconfigured` to preflight and independently denies draft mutation, so readiness is not
-merely advisory. The safe manual ceremony is: inspect; require broker preflight to report only
-`pr-broker-disabled`; enable with compare-and-set; issue the exact draft command; then
-compare-and-set disable even when the draft attempt fails. The broker's immediate preflight and
-inner rechecks remain authoritative throughout.
+The product CLI exposes separate authority inspection, broker and worker preflight, a manual worker
+task command, and broker authority compare-and-set commands. Each loads only its exact runtime,
+emits one deterministically ordered non-secret JSON record after clean shutdown, and exits with 0
+for success/ready, 2 for a policy-blocked preflight, or 1 for an operational failure. Authority
+mutation requires the exact expected and desired opposite states, a bounded reason, and the matching
+literal enable/disable confirmation. The explicit `broker-open-draft` command additionally requires
+a task UUID, the operator's expected policy digest, and the literal `--confirm-draft`. It never
+calls the write port unless broker preflight is clean and the digest matches. The service then
+rechecks the exact task, policy, evidence, complete usage, base revision, remote governance, and
+kill switch around its durable idempotent dispatch. The broker command port deliberately has no
+authority-switch command, and the authority port has no remote-write command, so broker and human
+enablement duties remain separate. Scheduler has no CLI enable path. All switches remain
+default-off. An empty rate card adds `cost-policy-unconfigured` to preflight and independently
+denies draft mutation, so readiness is not merely advisory. The safe manual ceremony is: inspect;
+require broker preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the
+exact draft command; then compare-and-set disable even when the draft attempt fails. The broker's
+immediate preflight and inner rechecks remain authoritative throughout.
+
+The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
+policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
+manual-work denial; every other preflight reason remains blocking. Under the worker's existing
+single-writer queue, a resumable application runner reconciles interrupted preparation and execution
+journals, advances the bounded qualify/specify/plan chain, atomically materializes the contract,
+rechecks execution admission, and invokes the existing implement/gate/review/repair service. Durable
+identity disagreement fails closed. The command stops at `pr-proposed`, emits only a compact
+non-secret report, and cannot reach GitHub, broker credentials, control mutation, merge, or release
+capability.
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -255,21 +265,23 @@ readiness, user-manager reachability, and the observed scheduler switch. A maxim
 commands execute serially against one SQLite writer lease. Recovery remains callable when normal
 work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
 repositories and the lease are released. The port exposes no intake-authority issuer, control
-switch, GitHub adapter, or broker credential. A separate broker composition, owner-only key source,
-readiness command, and explicit draft-only command also exist. The isolated human authority
-composition and non-interactive CLI can change only the broker switch; the normal TUI cannot invoke
-factory authority, worker, or broker commands. Current branch protection requires exact `verify` and
-`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
-and deletion. It still has zero required approvals, does not require approval of the latest push,
-and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
-blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
-owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
-prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
-refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
-intake configuration or task has been provisioned. No live agent task or PR has been created by this
-code. PR-head repair, scheduler/quotas, eval promotion, merge, release, canary, and incident
-automation remain later stages.
+switch, GitHub adapter, or broker credential. An explicit policy-pinned `worker-run` command can
+resume one already registered task through those existing services and stops at broker readiness; it
+does not enable the scheduler or perform a remote write. A separate broker composition, owner-only
+key source, readiness command, and explicit draft-only command also exist. The isolated human
+authority composition and non-interactive CLI can change only the broker switch; the normal TUI
+cannot invoke factory authority, worker, or broker commands. Current branch protection requires
+exact `verify` and `factory-sandbox` checks, dismisses stale reviews, enforces administrators, and
+forbids force-push and deletion. It still has zero required approvals, does not require approval of
+the latest push, and has neither a CODEOWNERS policy nor required code-owner review. Preflight
+therefore reports blocked for those controls and `cost-policy-unconfigured`. The cost-accounting
+mechanism exists, but the repository ships no live config or provider/model rates. Config v2 can now
+provision a reviewed owner-only rate card; actual rate, authority config, and broker-key
+provisioning remain activation prerequisites. An incomplete usage record already denies PR creation,
+and the explicit write command refuses a blocked preflight or unexpected policy digest. Governed
+intake is implemented but no live intake configuration or task has been provisioned. No live agent
+task or PR has been created by this code. PR-head repair, scheduler/quotas, eval promotion, merge,
+release, canary, and incident automation remain later stages.
 
 ## Dependency map
 

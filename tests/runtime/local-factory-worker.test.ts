@@ -30,7 +30,8 @@ describe("local factory worker composition", () => {
       "materializePreparation",
       "preflight",
       "recoverExecution",
-      "recoverPreparation"
+      "recoverPreparation",
+      "runTask"
     ]);
     await expect(runtime.commands.preflight()).resolves.toMatchObject({
       schemaVersion: "agentlab.worker-preflight.v1",

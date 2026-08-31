@@ -146,6 +146,42 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("requires an exact task, policy pin, and confirmation for worker execution", () => {
+    const taskId = "0198f005-4ec4-7000-8000-000000000001";
+    const policy = `sha256:${"b".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "worker-run",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy,
+        "--confirm-run"
+      ])
+    ).toEqual({
+      kind: "factory-worker-run",
+      configPath: "/private/agentlab/worker.json",
+      taskId,
+      expectedPolicyBundleDigest: policy,
+      confirmation: "run-task"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "worker-run",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--task",
+        taskId,
+        "--policy",
+        policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires exact compare-and-set state, reason, and matching broker confirmation", () => {
     expect(
       parseCliArguments([
@@ -217,11 +253,13 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory intake-preflight --config");
     expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
+    expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory broker-open-draft --config");
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
+    expect(helpText).toContain("--confirm-run");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");
   });

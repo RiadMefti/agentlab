@@ -49,6 +49,16 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryWorkerPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-worker-run") {
+    const { runFactoryWorkerTask } = await import("./run-factory-worker-task.js");
+    process.exitCode = await runFactoryWorkerTask(
+      action.configPath,
+      action.taskId,
+      action.expectedPolicyBundleDigest,
+      action.confirmation
+    );
+    return;
+  }
   if (action.kind === "factory-authority-status") {
     const { runFactoryAuthorityStatus } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryAuthorityStatus(action.configPath);

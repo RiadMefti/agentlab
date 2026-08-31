@@ -5,6 +5,10 @@ import type { FactoryExecutionRecoveryOutcome } from "./factory-execution-recove
 import type { FactoryExecutionOutcome } from "./factory-execution-service.js";
 import type { FactoryPreparationMaterializationResult } from "./factory-preparation-materializer.js";
 import type { FactoryWorkerOperator, FactoryWorkerPreflight } from "./factory-worker-operator.js";
+import type {
+  FactoryWorkerTaskRunner,
+  FactoryWorkerTaskRunReport
+} from "./factory-worker-task-runner.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeResourceOwner } from "./runtime-resource-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
@@ -19,6 +23,7 @@ export interface FactoryWorkerCommandPort {
   admitExecution(input: unknown): Promise<FactoryExecutionAdmissionOutcome>;
   execute(input: unknown): Promise<FactoryExecutionOutcome>;
   recoverExecution(input: unknown): Promise<FactoryExecutionRecoveryOutcome>;
+  runTask(input: unknown): Promise<FactoryWorkerTaskRunReport>;
 }
 
 export interface LocalFactoryWorkerRuntime {
@@ -28,6 +33,7 @@ export interface LocalFactoryWorkerRuntime {
 
 export interface LocalFactoryWorkerCoordinatorDependencies {
   readonly operator: FactoryWorkerOperator;
+  readonly taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
   readonly tasks: RuntimeTaskOwner;
   readonly resources: Pick<RuntimeResourceOwner, "closeAll">;
   readonly repositories: RuntimeRepositoryOwner;
@@ -39,6 +45,7 @@ export interface LocalFactoryWorkerCoordinatorDependencies {
 export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime {
   public readonly commands: FactoryWorkerCommandPort;
   readonly #operator: FactoryWorkerOperator;
+  readonly #taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
   readonly #tasks: RuntimeTaskOwner;
   readonly #resources: Pick<RuntimeResourceOwner, "closeAll">;
   readonly #repositories: RuntimeRepositoryOwner;
@@ -54,6 +61,7 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
 
   public constructor(dependencies: LocalFactoryWorkerCoordinatorDependencies) {
     this.#operator = dependencies.operator;
+    this.#taskRunner = dependencies.taskRunner;
     this.#tasks = dependencies.tasks;
     this.#resources = dependencies.resources;
     this.#repositories = dependencies.repositories;
@@ -71,7 +79,8 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
         this.#run(() => this.#operator.materializePreparation(input)),
       admitExecution: (input) => this.#run(() => this.#operator.admitExecution(input)),
       execute: (input) => this.#run(() => this.#operator.execute(input)),
-      recoverExecution: (input) => this.#run(() => this.#operator.recoverExecution(input))
+      recoverExecution: (input) => this.#run(() => this.#operator.recoverExecution(input)),
+      runTask: (input) => this.#run(() => this.#taskRunner.run(input))
     };
   }
 

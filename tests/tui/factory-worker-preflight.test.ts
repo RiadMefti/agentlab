@@ -143,7 +143,8 @@ function workerRuntime(
       materializePreparation: noResult,
       admitExecution: noResult,
       execute: noResult,
-      recoverExecution: noResult
+      recoverExecution: noResult,
+      runTask: noResult
     },
     close
   };

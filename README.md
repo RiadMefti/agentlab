@@ -137,6 +137,10 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   `@agentlab/runtime/factory-authority`; it has no scheduler, provider, process, or GitHub port. The
   separate `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local
   feature or bug reports under repository-owned policy; it has no model or remote authority.
+- `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
+  registered task through preparation, immutable contract materialization, isolated implementation,
+  strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
+  remains a separate broker command and authority boundary.
 - `packages/contracts` owns provider, conversation, session, and software-factory schemas shared
   across local layers.
 
@@ -155,17 +159,18 @@ a strict owner-only `feature` or `bug` submission, derives task identity and the
 itself, verifies every pinned skill package and exact-model cost rule, and registers an immutable
 preparation journal only after literal confirmation and an operator-pinned policy digest. The worker
 has a bounded serialized command port and read-only host preflight covering its pinned toolchain and
-owner-only storage roots, but no GitHub or authority-control capability. Separate CLI commands
-inspect intake and local authority and report broker and worker readiness. The sole remote-write
-command requires an exact task UUID, an operator-pinned policy digest, and the literal
-`--confirm-draft`; it invokes only the draft broker after a clean preflight, then the broker
-rechecks policy, evidence, base revision, governance, and the kill switch. A separate owner-only
-human CLI can atomically compare-and-set only the broker switch with an explicit reason and matching
-confirmation; it cannot enable scheduling or contact GitHub. Authority remains default-off.
-Provider-neutral per-run cost accounting is policy-pinned and fail-closed, and the shipped live rate
-card is intentionally empty. Owner-only worker and broker config can load the same separate strict
-cost-policy file without sharing broker credentials. The current repository governance blocks the
-write command. No live factory task or PR has been created. See
+owner-only storage roots, but no GitHub or authority-control capability. Its explicit policy-pinned
+task runner is crash-resumable and stops before remote writes. Separate CLI commands inspect intake
+and local authority and report broker and worker readiness. The sole remote-write command requires
+an exact task UUID, an operator-pinned policy digest, and the literal `--confirm-draft`; it invokes
+only the draft broker after a clean preflight, then the broker rechecks policy, evidence, base
+revision, governance, and the kill switch. A separate owner-only human CLI can atomically
+compare-and-set only the broker switch with an explicit reason and matching confirmation; it cannot
+enable scheduling or contact GitHub. Authority remains default-off. Provider-neutral per-run cost
+accounting is policy-pinned and fail-closed, and the shipped live rate card is intentionally empty.
+Owner-only worker and broker config can load the same separate strict cost-policy file without
+sharing broker credentials. The current repository governance blocks the write command. No live
+factory task or PR has been created. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases.
 

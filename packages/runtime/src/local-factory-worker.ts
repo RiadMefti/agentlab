@@ -18,6 +18,7 @@ import {
   FactoryWorkerOperator,
   validateFactoryWorkerInventory
 } from "./application/factory-worker-operator.js";
+import { FactoryWorkerTaskRunner } from "./application/factory-worker-task-runner.js";
 import {
   LocalFactoryWorkerCoordinator,
   type LocalFactoryWorkerRuntime
@@ -305,8 +306,16 @@ export function createLocalFactoryWorker(
       execution,
       executionRecovery
     });
+    const taskRunner = new FactoryWorkerTaskRunner({
+      policyBundleDigest: policyBundle.digest,
+      preparations,
+      tasks: factory,
+      executions,
+      worker: operator
+    });
     return new LocalFactoryWorkerCoordinator({
       operator,
+      taskRunner,
       tasks: new RuntimeTaskOwner(),
       resources,
       repositories,
@@ -350,6 +359,7 @@ export type {
   LocalFactoryWorkerRuntime
 } from "./application/local-factory-worker-coordinator.js";
 export type { FactoryWorkerPreflight } from "./application/factory-worker-operator.js";
+export type { FactoryWorkerTaskRunReport } from "./application/factory-worker-task-runner.js";
 export type { FactoryGateDefinition } from "./domain/factory-gate.js";
 export {
   loadLocalFactoryWorkerConfig,
