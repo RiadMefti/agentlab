@@ -140,7 +140,9 @@ The supported Linux-host preflight is a distinct `factory-sandbox` CI job. It ex
 systemd/cgroup resource tests, memory-limit kill test, preparation and execution crash recovery, and
 a Bubblewrap probe that proves the source checkout is hidden, dependencies are read-only, the
 worktree remains writable, and the child occupies a distinct network namespace. Activation must make
-this exact job a required repository check; ordinary unit tests do not satisfy the host proof.
+this exact job a required repository check; ordinary unit tests do not satisfy the host proof. The
+credentialless ephemeral CI runner explicitly permits unprivileged user namespaces; production hosts
+must meet the same Bubblewrap precondition through their governed host configuration.
 
 A pure compiler recanonicalizes the whole source chain. Its authority is supplied only at the
 trusted construction boundary and is absent from agent output. It rejects unresolved requests or

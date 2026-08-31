@@ -380,7 +380,9 @@ Bubblewrap with a distinct network namespace, writable workspace, hidden source 
 read-only dependencies. It also exercises both single-process preparation recovery and
 multi-operation execution-workspace recovery against the live systemd user manager. The distinct
 `factory-sandbox` Ubuntu CI job provisions those host dependencies and runs the same command; a
-unit-only pass is not a substitute for that job.
+unit-only pass is not a substitute for that job. Its credentialless ephemeral runner explicitly
+permits unprivileged user namespaces before invoking Bubblewrap; production hosts must satisfy the
+same preflight through their own narrowly governed host policy.
 
 The model-bearing job never receives remote write authority. It emits a content-addressed patch and
 structured proposal. A separate broker process/job, with no provider key and a short-lived

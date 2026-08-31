@@ -54,6 +54,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y bubblewrap dbus-user-session
+      - name: Permit unprivileged Bubblewrap namespaces on the ephemeral runner
+        run: sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
       - run: npm ci
       - name: Start the unprivileged user manager and run live isolation tests
         shell: bash
