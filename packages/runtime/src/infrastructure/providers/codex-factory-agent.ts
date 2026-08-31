@@ -11,7 +11,7 @@ import {
 import {
   assertFactoryExecutable,
   elapsedSeconds,
-  nonnegativeInteger,
+  nonnegativeIntegerOrNull,
   objectValue,
   parseProviderJsonLines
 } from "./factory-agent-output.js";
@@ -131,15 +131,24 @@ function parseCodexOutput(input: FactoryAgentParseInput) {
   let toolCalls = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  let sawCompletedTurn = false;
+  let usageMeasurementsComplete = true;
   for (const event of events) {
     if (event.type === "thread.started" && typeof event.thread_id === "string") {
       providerSessionId = event.thread_id;
     }
     if (event.type === "turn.completed") {
+      sawCompletedTurn = true;
       agentTurns += 1;
       const usage = objectValue(event.usage);
-      inputTokens += nonnegativeInteger(usage?.input_tokens);
-      outputTokens += nonnegativeInteger(usage?.output_tokens);
+      const turnInputTokens = nonnegativeIntegerOrNull(usage?.input_tokens);
+      const turnOutputTokens = nonnegativeIntegerOrNull(usage?.output_tokens);
+      if (turnInputTokens === null || turnOutputTokens === null) {
+        usageMeasurementsComplete = false;
+      } else {
+        inputTokens += turnInputTokens;
+        outputTokens += turnOutputTokens;
+      }
     }
     if (event.type === "item.completed") {
       const item = objectValue(event.item);
@@ -170,7 +179,8 @@ function parseCodexOutput(input: FactoryAgentParseInput) {
       processes: 1,
       outputBytes: Buffer.byteLength(input.stdout) + Buffer.byteLength(input.stderr)
     },
-    usageComplete: false
+    usageMeasurementsComplete: sawCompletedTurn && usageMeasurementsComplete,
+    reportedCostMicrousd: null
   };
 }
 

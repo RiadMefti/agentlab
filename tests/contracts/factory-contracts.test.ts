@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   evidenceBundleSchema,
   factoryBudgetUsageSchema,
+  factoryCostPolicySchema,
   factoryPullRequestProposalSchema,
   factoryResourceIsolationRecordSchema,
   factoryResourceLimitsSchema,
@@ -132,6 +133,37 @@ const baseContract = {
 };
 
 describe("factory contracts", () => {
+  it("accepts only unique exact-model cost rules", () => {
+    const policy = {
+      schemaVersion: "agentlab.cost-policy.v1" as const,
+      id: "agentlab/test-costs",
+      version: "1.0.0",
+      rules: [
+        {
+          provider: "codex" as const,
+          model: "gpt-5.4",
+          accounting: {
+            mode: "token-rate" as const,
+            inputMicrousdPerMillionTokens: 1_000_000,
+            outputMicrousdPerMillionTokens: 2_000_000
+          }
+        }
+      ]
+    };
+    expect(factoryCostPolicySchema.parse(policy)).toEqual(policy);
+    expect(
+      factoryCostPolicySchema.safeParse({ ...policy, rules: [...policy.rules, policy.rules[0]] })
+        .success
+    ).toBe(false);
+    expect(
+      factoryCostPolicySchema.safeParse({
+        ...policy,
+        rules: [{ ...policy.rules[0], model: "gpt-*" }]
+      }).success
+    ).toBe(false);
+    expect(factoryCostPolicySchema.safeParse({ ...policy, fallbackRate: 0 }).success).toBe(false);
+  });
+
   it("accepts a strict, content-addressed skill manifest", () => {
     expect(skillManifestSchema.parse(baseSkillManifest)).toEqual(baseSkillManifest);
   });

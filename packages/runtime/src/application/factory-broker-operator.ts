@@ -23,6 +23,7 @@ export interface FactoryBrokerPreflight {
 export interface FactoryBrokerOperatorDependencies {
   readonly repositoryId: string;
   readonly policyBundleDigest: Sha256Digest;
+  readonly costPolicyConfigured: boolean;
   readonly remote: Pick<FactoryDraftPullRequestBroker, "inspect">;
   readonly controls: Pick<FactoryControlRepository, "state">;
   readonly pullRequests: Pick<FactoryPullRequestService, "openDraft">;
@@ -40,8 +41,11 @@ export class FactoryBrokerOperator {
     if (repository.repositoryId !== this.dependencies.repositoryId) {
       throw new Error("Broker preflight returned another repository identity.");
     }
-    const reasons = factoryRepositoryGovernanceDenials(repository.governance);
-    const reasonCodes = authority.prBroker ? reasons : [...reasons, "pr-broker-disabled"].sort();
+    const reasonCodes = [
+      ...factoryRepositoryGovernanceDenials(repository.governance),
+      ...(this.dependencies.costPolicyConfigured ? [] : ["cost-policy-unconfigured"]),
+      ...(authority.prBroker ? [] : ["pr-broker-disabled"])
+    ].sort();
     return {
       schemaVersion: "agentlab.broker-preflight.v1",
       status: reasonCodes.length === 0 ? "ready" : "blocked",
@@ -53,6 +57,13 @@ export class FactoryBrokerOperator {
   }
 
   public openDraft(input: unknown): Promise<FactoryPullRequestOutcome> {
+    if (!this.dependencies.costPolicyConfigured) {
+      return Promise.resolve({
+        status: "denied",
+        reasonCodes: ["cost-policy-unconfigured"],
+        decision: null
+      });
+    }
     return this.dependencies.pullRequests.openDraft(input);
   }
 }

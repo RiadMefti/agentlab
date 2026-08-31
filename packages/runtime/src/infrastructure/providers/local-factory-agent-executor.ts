@@ -8,11 +8,13 @@ import {
   factoryProcessCleanupUnconfirmedErrorCode,
   type FactoryAgentExecutionInput,
   type FactoryAgentExecutionOutput,
+  type FactoryAgentExecutionPreflight,
   type FactoryAgentExecutor,
   type FactoryAgentExecutorCapability,
   type FactoryPreparationAgentExecutionInput,
   type FactoryPreparationAgentExecutor
 } from "../../domain/factory-agent-executor.js";
+import type { FactoryCostAccounting } from "../../domain/factory-cost-accounting.js";
 import {
   narrowFactoryResourceLimits,
   type FactoryProcessIsolator
@@ -38,6 +40,7 @@ const maximumPromptBytes = 1024 * 1024;
 export interface LocalFactoryAgentExecutorOptions {
   readonly now: () => string;
   readonly processIsolator: FactoryProcessIsolator;
+  readonly costAccountant: FactoryCostAccounting;
   readonly adapters?: readonly FactoryAgentAdapter[];
   readonly hostEnvironment?: NodeJS.ProcessEnv;
 }
@@ -50,6 +53,7 @@ export class LocalFactoryAgentExecutor
   readonly #now: () => string;
   readonly #hostEnvironment: NodeJS.ProcessEnv;
   readonly #adapters: ReadonlyMap<string, FactoryAgentAdapter>;
+  readonly #costAccountant: FactoryCostAccounting;
   readonly #processIsolator: FactoryProcessIsolator;
 
   public constructor(runner: CommandRunner, options: LocalFactoryAgentExecutorOptions) {
@@ -57,6 +61,7 @@ export class LocalFactoryAgentExecutor
     this.#now = options.now;
     this.#hostEnvironment = options.hostEnvironment ?? process.env;
     this.#processIsolator = options.processIsolator;
+    this.#costAccountant = options.costAccountant;
     const adapters = options.adapters ?? [codexFactoryAgentAdapter, claudeFactoryAgentAdapter];
     if (new Set(adapters.map(({ id }) => id)).size !== adapters.length) {
       throw new Error("Factory agent adapters must have unique provider IDs.");
@@ -68,10 +73,19 @@ export class LocalFactoryAgentExecutor
     return [...this.#adapters.values()].map(({ capability }) => capability);
   }
 
+  public preflight(input: FactoryAgentExecutionPreflight): void {
+    this.#costAccountant.preflight(input);
+  }
+
   public async execute(
     input: FactoryAgentExecutionInput | FactoryPreparationAgentExecutionInput
   ): Promise<FactoryAgentExecutionOutput> {
     const request = parseFactoryProviderRunRequest(input.request);
+    this.preflight({
+      provider: request.provider,
+      model: request.model,
+      policyBundleDigest: input.policyBundleDigest
+    });
     const adapter = this.#adapters.get(request.provider);
     if (adapter === undefined) {
       throw new Error(`Provider ${request.provider} has no autonomous factory adapter.`);
@@ -122,21 +136,48 @@ export class LocalFactoryAgentExecutor
     }
     const finishedAt = this.#timestamp();
     try {
-      return {
-        ...adapter.parse({
-          request,
-          providerVersion: input.providerVersion,
-          harnessVersion: invocation.harnessVersion,
+      const parsed = adapter.parse({
+        request,
+        providerVersion: input.providerVersion,
+        harnessVersion: invocation.harnessVersion,
+        startedAt,
+        finishedAt,
+        stdout: result.stdout,
+        stderr: result.stderr
+      });
+      try {
+        const accounted = this.#costAccountant.account({
+          provider: request.provider,
+          model: request.model,
+          policyBundleDigest: input.policyBundleDigest,
+          usage: parsed.usage,
+          usageMeasurementsComplete: parsed.usageMeasurementsComplete,
+          reportedCostMicrousd: parsed.reportedCostMicrousd
+        });
+        const { usageMeasurementsComplete, reportedCostMicrousd, ...providerOutput } = parsed;
+        void usageMeasurementsComplete;
+        void reportedCostMicrousd;
+        return {
+          ...providerOutput,
+          usage: accounted.usage,
+          usageComplete: accounted.usageComplete,
+          status: "succeeded",
+          exitCode: 0,
+          errorCode: null,
+          isolation: isolated.isolation
+        };
+      } catch {
+        return failedOutput(
+          new Error("Provider usage could not be cost-accounted."),
+          input.providerVersion,
+          invocation.harnessVersion,
           startedAt,
           finishedAt,
-          stdout: result.stdout,
-          stderr: result.stderr
-        }),
-        status: "succeeded",
-        exitCode: 0,
-        errorCode: null,
-        isolation: isolated.isolation
-      };
+          isolated.isolation,
+          result,
+          "cost-accounting-invalid"
+        );
+      }
     } catch {
       return failedOutput(
         new Error("Provider output could not be validated."),

@@ -26,8 +26,8 @@ export function objectValue(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-export function nonnegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+export function nonnegativeIntegerOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 export function elapsedSeconds(startedAt: string, finishedAt: string): number {

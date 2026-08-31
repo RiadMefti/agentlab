@@ -27,6 +27,7 @@ import { buildCaptainSessionName } from "../../packages/runtime/src/domain/agent
 import type {
   FactoryAgentExecutionInput,
   FactoryAgentExecutionOutput,
+  FactoryAgentExecutionPreflight,
   FactoryAgentExecutor,
   FactoryAgentProviderResolver
 } from "../../packages/runtime/src/domain/factory-agent-executor.js";
@@ -94,6 +95,18 @@ describe("FactoryExecutionService", () => {
       expect(result.reviews).toHaveLength(1);
       expect(fixture.workspaces.closedAttempts).toEqual([1]);
       expect(fixture.agents.roles).toEqual(["implementer", "reviewer"]);
+      expect(fixture.agents.preflights).toEqual([
+        {
+          provider: "codex",
+          model: "gpt-5.4",
+          policyBundleDigest: fixture.policyDigest
+        },
+        {
+          provider: "claude",
+          model: "claude-sonnet-4-6",
+          policyBundleDigest: fixture.policyDigest
+        }
+      ]);
       await expect(fixture.executions.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toMatchObject({
         state: "completed",
         lastEvent: { kind: "execution-finished", taskState: "pr-proposed" }
@@ -102,6 +115,20 @@ describe("FactoryExecutionService", () => {
       expect(executionEvents.filter(({ kind }) => kind === "attempt-started")).toHaveLength(1);
       expect(executionEvents.filter(({ kind }) => kind === "operation-started")).toHaveLength(9);
       expect(executionEvents.filter(({ kind }) => kind === "operation-finished")).toHaveLength(9);
+      const executionEvidence = (await fixture.repository.listEvidence(TEST_FACTORY_TASK_ID))
+        .flatMap(({ bundle }) => bundle.items)
+        .filter(({ kind }) => kind === "execution");
+      expect(executionEvidence).toHaveLength(2);
+      for (const item of executionEvidence) {
+        expect(item.claims).toEqual(
+          expect.arrayContaining([
+            { name: "policy-bundle-digest", value: fixture.policyDigest },
+            { name: "model", value: expect.any(String) },
+            { name: "usage-complete", value: "true" },
+            { name: "cost-microusd", value: "0" }
+          ])
+        );
+      }
 
       await fixture.controlPlane.setAuthority({
         control: "pr-broker",
@@ -638,6 +665,7 @@ async function executionFixture(
     workspaceRecovery,
     recovery,
     task,
+    policyDigest: policyBundle.digest,
     close: () => {
       dispatches.close();
       executions.close();
@@ -693,6 +721,7 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
 class FakeAgentExecutor implements FactoryAgentExecutor {
   public readonly roles: string[] = [];
   public readonly executionIds: string[] = [];
+  public readonly preflights: FactoryAgentExecutionPreflight[] = [];
 
   public constructor(
     private readonly missingReviewerIdentity: boolean,
@@ -720,6 +749,10 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
         acceptsSecrets: false as const
       }
     ];
+  }
+
+  public preflight(input: FactoryAgentExecutionPreflight): void {
+    this.preflights.push(input);
   }
 
   public execute(input: FactoryAgentExecutionInput): Promise<FactoryAgentExecutionOutput> {

@@ -362,18 +362,31 @@ sandbox. The default is no network, no secrets, repository read, and only an exp
 An implementer receives workspace write only inside that worktree. Limits apply to the whole process
 tree, output, time, tokens, tools, cost, changed files/lines, concurrency, and repair count.
 
-Baseline policy 1.3 conservatively intersects every allowed write-scope glob with the protected-path
-rules before execution and binds request/qualification/specification/plan evidence to the compiled
-contract digest. Exclusions cannot lower this ceiling: a broad or ambiguous scope receives the
-highest tier it could reach, while the exact changed paths are classified again after execution.
-This prevents an under-classified worker from touching an R3/R4 path before the post-run diff
-exists. The policy also pins instantaneous resource profiles by risk tier. The narrower task/skill
-process count wins. On supported Linux hosts, every provider and gate command must first be wrapped
-in a unique transient systemd user scope with cgroup `TasksMax`, `MemoryMax`, zero swap, and
-`CPUQuota`; there is no no-op fallback. Deterministic repository commands then run inside Bubblewrap
-within that scope, and the wrapper removes its user-manager environment before the target starts.
-Each successful execution and gate emits a canonical resource-isolation record, and policy denies a
-PR when any successful worker or sandboxed gate lacks matching provenance.
+Baseline gate profiles 1.3 conservatively intersect every allowed write-scope glob with the
+protected-path rules before execution and bind request/qualification/specification/plan evidence to
+the compiled contract digest. Exclusions cannot lower this ceiling: a broad or ambiguous scope
+receives the highest tier it could reach, while the exact changed paths are classified again after
+execution. This prevents an under-classified worker from touching an R3/R4 path before the post-run
+diff exists. The policy also pins instantaneous resource profiles by risk tier. The narrower
+task/skill process count wins. On supported Linux hosts, every provider and gate command must first
+be wrapped in a unique transient systemd user scope with cgroup `TasksMax`, `MemoryMax`, zero swap,
+and `CPUQuota`; there is no no-op fallback. Deterministic repository commands then run inside
+Bubblewrap within that scope, and the wrapper removes its user-manager environment before the target
+starts. Each successful execution and gate emits a canonical resource-isolation record, and policy
+denies a PR when any successful worker or sandboxed gate lacks matching provenance.
+
+Policy bundle 1.4 uses `agentlab.factory-policy.v2` to pin a strict `agentlab.cost-policy.v1`. Every
+rule names one exact provider/model coordinate and selects either integer token-rate accounting or
+provider-reported cost; wildcard/default pricing is forbidden. Both preparation and execution
+preflight the pinned policy digest and exact model before a durable run-start or provider process.
+The executor repeats that check, then replaces adapter cost with the policy-accounted micro-USD
+value. Token rates use overflow-checked integer arithmetic and round up. Provider-reported cost is
+accepted only with complete structural usage; Claude totals aggregate all per-model direct and
+cached tokens and reject an explicitly unknown pricing basis. The unchanged v1 run artifacts remain
+replayable because their existing contract/authority digest already pins this policy. Evidence adds
+the policy digest, completeness bit, and final cost. The repository default contains no live rate
+rules, so autonomous runs remain fail-closed until reviewed rates are provisioned.
+
 `npm run test:factory-sandbox` is the adversarial host test: it reads the live process cgroup to
 verify exact CPU/memory/process ceilings, confirms an over-memory workload is killed, and exercises
 Bubblewrap with a distinct network namespace, writable workspace, hidden source repository, and
@@ -419,7 +432,9 @@ still apply the repository's local schema migrations. A blocked result exits 2; 
 cleanup failure exits 1 without emitting a misleading readiness record. The authority switch still
 defaults off, and the broker command port intentionally cannot change it. A future authenticated
 human administration boundary must own enablement separately. Live key provisioning plus successful
-preflight are activation work, not assumptions.
+preflight are activation work, not assumptions. The broker derives cost readiness from its canonical
+policy bundle; an empty rate card both adds `cost-policy-unconfigured` to preflight and denies the
+draft mutation itself.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -466,6 +481,10 @@ one distinct reviewer, 45 minutes, two repair attempts, 500 tool calls per worke
 500 changed lines, no network, no agent secrets, at most three draft PRs and a configured cost
 ceiling per day. R2 increases require an explicit repository profile; R3 write work is
 human-approved; R4 never writes.
+
+Per-run accounting is now implemented. Repository/day and organization/day reservations and
+scheduler admission are still phase-5 work; post-run task policy alone is not represented as a
+provider-side hard spending guarantee.
 
 Any secret access/exfiltration signal, remote-write attempt from an execution worker, protected-path
 bypass, attestation mismatch, policy tampering, or critical sandbox failure immediately quarantines
@@ -537,14 +556,17 @@ deterministic branch/PR reconciliation, injected recovery tests spanning remote 
 append, and task-ledger transition, and an exact-repository GitHub App installation-token source. An
 exact broker-only package entry, owner-only config/key loader, retryable resource owner, and
 non-authorizing CLI preflight now compose that authority plane without importing provider adapters.
-The normal TUI has no enable or PR command. No live agent task or PR has been created by this code.
+The provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also
+exist behind dormant execution ports, while the default rate card remains empty. The normal TUI has
+no enable or PR command. No live agent task or PR has been created by this code.
 
 Branch protection now requires both exact GitHub Actions checks, `verify` and `factory-sandbox`,
 dismisses stale reviews, applies rules to administrators, and forbids force-push/deletion. Phase 4
 activation remains blocked by zero required approvals, missing latest-push approval, missing
-CODEOWNERS and required code-owner review, unprovisioned live broker config/key, and incomplete
-provider cost accounting. An incomplete usage record already denies PR creation. The non-authorizing
-preflight reports these governance and default-off-authority blockers rather than weakening them.
+CODEOWNERS and required code-owner review, unprovisioned live broker config/key, and incomplete live
+cost-policy provisioning. An incomplete usage record already denies PR creation. The non-authorizing
+preflight reports these governance, empty-cost-policy, and default-off-authority blockers rather
+than weakening them.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -561,7 +583,7 @@ preflight reports these governance and default-off-authority blockers rather tha
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
    recovery/sandbox CI, isolated exact-repository credential adapter, broker-only composition,
    owner-only key provisioning boundary, and operator preflight now exist. Activation still requires
-   the missing review protections, provisioned live key/config, complete accounting, a passing live
+   the missing review protections, provisioned live key/config and exact cost rules, a passing live
    preflight, and human merge. No scheduler, auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, credential
    rotation/monitoring, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and
@@ -573,11 +595,12 @@ preflight reports these governance and default-off-authority blockers rather tha
 
 The minimal loop is safe enough to enable brokered draft-PR creation only when phases 1–4, the
 repository-governance blocker, isolated broker identity, and complete usage accounting are all
-complete. Activation also requires authenticated evidence-ingestion paths and OS-enforced
-process/CPU/memory ceilings for untrusted agent and repository code. Those mechanisms and the
-required target-host CI lane now exist; the configured broker preflight must still report ready
-under independently reviewed repository policy before activation. Until then, authority remains
-default-off and the product CLI cannot invoke a write.
+complete, with exact live cost rules provisioned. Activation also requires authenticated
+evidence-ingestion paths and OS-enforced process/CPU/memory ceilings for untrusted agent and
+repository code. Those mechanisms and the required target-host CI lane now exist; the configured
+broker preflight must still report ready under independently reviewed repository policy, including a
+reviewed non-empty rate card, before activation. Until then, authority remains default-off and the
+product CLI cannot invoke a write.
 
 ## Consequences and fitness functions
 

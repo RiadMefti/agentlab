@@ -39,9 +39,15 @@ export interface FactoryAgentAdapter {
     workspace: FactoryWorkspace,
     prompt: string
   ): FactoryAgentCommand;
-  parse(
-    input: FactoryAgentParseInput
-  ): Omit<FactoryAgentExecutionOutput, "exitCode" | "status" | "errorCode" | "isolation">;
+  parse(input: FactoryAgentParseInput): FactoryAgentAdapterOutput;
+}
+
+export interface FactoryAgentAdapterOutput extends Omit<
+  FactoryAgentExecutionOutput,
+  "exitCode" | "status" | "errorCode" | "isolation" | "usageComplete"
+> {
+  readonly usageMeasurementsComplete: boolean;
+  readonly reportedCostMicrousd: number | null;
 }
 
 export type FactoryProviderRunRequest = FactoryAgentRunRequest | FactoryPreparationRunRequest;

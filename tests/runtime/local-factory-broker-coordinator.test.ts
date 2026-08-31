@@ -105,6 +105,7 @@ function createOperator(
   return new FactoryBrokerOperator({
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
+    costPolicyConfigured: false,
     remote: { inspect },
     controls: {
       state: () => Promise.resolve({ scheduler: false, prBroker: false })
