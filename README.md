@@ -221,17 +221,20 @@ preflight, and their inner services recheck policy, evidence, base revision, gov
 broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
 matched report, signs and verifies its exact bytes through disjoint local compositions, and can
 issue a structurally non-merge/non-release cohort after human sample review. It does not yet provide
-the harness producer or an attestation-gated cohort consumer. Provider-neutral per-run and per-tick
-reservation accounting are policy-pinned and fail-closed, and the shipped live rate card is
-intentionally empty. Owner-only worker and broker config can load the same separate strict
-cost-policy file without sharing broker credentials. The current repository governance blocks the
-write commands. No live factory task or PR has been created through these factory commands. See
+the harness producer or an attestation-gated cohort consumer. Scheduled config v3 and eval signing
+now pin one canonical role policy: distinct non-root worker/signer UIDs plus the exact signer key
+and runner, with the policy digest carried in every signed eval predicate. No accounts are
+provisioned or activated. Provider-neutral per-run and per-tick reservation accounting are
+policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
+worker and broker config can load the same separate strict cost-policy file without sharing broker
+credentials. The current repository governance blocks the write commands. No live factory task or PR
+has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
-separation, and [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing
-boundary. The dormant procedures are in
-[Local factory scheduler operations](docs/factory-operations.md) and
+separation, [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary,
+and [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities.
+The dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development

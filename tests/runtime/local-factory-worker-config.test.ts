@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryWorkerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-worker-config.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testEvalDigest, testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const temporaryRoots: string[] = [];
@@ -51,6 +53,45 @@ describe("local factory worker configuration boundary", () => {
     });
 
     await chmod(schedulePolicyPath, 0o644);
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/owner-only/u);
+  });
+
+  it("loads v3 only with a digest-pinned signer/worker identity policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v3" as const,
+      schedulePolicyPath,
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest
+    };
+    await writePrivateJson(costPolicyPath, costPolicy);
+    await writePrivateJson(schedulePolicyPath, schedulePolicy);
+    await writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy);
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      roleIdentityPolicy
+    });
+
+    await chmod(roleIdentityPolicyPath, 0o644);
     await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/owner-only/u);
   });
 

@@ -2,15 +2,35 @@
 
 This runbook covers the dormant one-shot scheduler boundary. AgentLab does not install a timer,
 provision live policy, enable either authority switch, open a PR automatically, merge, or release.
-Use a dedicated non-shared OS account and retain the SQLite ledger; file ownership is the local
-authorization boundary.
+Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership plus the
+reviewed role-identity policy is the local authorization boundary.
 
 ## Reviewed inputs
 
-The worker must use `agentlab.local-factory-worker.v2`. It has the v1 database, artifact/worktree,
-Git/flock, systemd, Bubblewrap, provider, gate, and cost-policy pins plus one normalized absolute
-`schedulePolicyPath`. Config, cost policy, and schedule policy must be canonical owner-only regular
-files. A v1 config cannot attach a schedule policy.
+The worker must use `agentlab.local-factory-worker.v3`. It has the v1 database, artifact/worktree,
+Git/flock, systemd, Bubblewrap, provider, gate, and cost-policy pins plus normalized absolute
+`roleIdentityPolicyPath`, an `expectedRoleIdentityPolicyDigest`, and—when scheduling—one
+`schedulePolicyPath`. Config and policy files must be owner-only regular files. V3 may omit the
+schedule path for manual work, but a scheduler tick requires it. V1 and legacy v2 remain
+diagnostic/recovery inputs and cannot invoke new model work without the identity policy.
+
+The exact policy content must match the independent attestor and evaluator copies. Replace example
+UIDs and key ID through reviewed provisioning; root and a shared worker/attestor UID are invalid:
+
+```json
+{
+  "schemaVersion": "agentlab.role-identity-policy.v1",
+  "id": "agentlab/production-role-identities",
+  "version": "1.0.0",
+  "worker": { "kind": "posix-uid", "userId": 1001 },
+  "evalAttestor": {
+    "kind": "posix-uid",
+    "userId": 1002,
+    "runnerId": "trusted-eval-runner",
+    "keyId": "sha256:..."
+  }
+}
+```
 
 The schedule file is strict and command-free:
 
@@ -50,7 +70,8 @@ provider rate.
 
 ## Admission ceremony
 
-1. Run worker preflight and record its exact `schedulePolicyDigest` and `policyBundleDigest`:
+1. Run worker preflight under the configured worker UID and record its exact
+   `roleIdentityPolicyDigest`, `schedulePolicyDigest`, and `policyBundleDigest`:
 
    ```text
    agentlab factory worker-preflight --config /absolute/worker.json
@@ -83,14 +104,15 @@ written only after worker cleanup.
 
 An owner-managed timer may invoke exactly that fixed-argument command at the policy's UTC time.
 Duplicate invocation is safe: the SQLite key is `(schedulePolicyId, scheduledFor)`, while the run
-also pins the exact policy digest. One writer lease prevents overlap, and a completed slot cannot
-select work again. Changing a policy version cannot manufacture a second tick for the same schedule
-ID and day; drift blocks for review. A late persistent timer may invoke the command, but a new stale
-slot is refused after `startDeadlineSeconds`. An existing active slot can resume using its durable
-task correlation, including after a UTC day boundary. The oldest open run always reconciles before a
-new slot. Multiple open runs are treated as ledger corruption; schedule or factory policy drift on
-an open run blocks new work until an operator investigates. A clock earlier than the open slot or
-its latest journal event also blocks; correct the host clock without editing the ledger.
+also pins the exact role-identity, schedule, and factory-policy digests. One writer lease prevents
+overlap, and a completed slot cannot select work again. Changing a policy version cannot manufacture
+a second tick for the same schedule ID and day; drift blocks for review. A late persistent timer may
+invoke the command, but a new stale slot is refused after `startDeadlineSeconds`. An existing active
+slot can resume using its durable task correlation, including after a UTC day boundary. The oldest
+open run always reconciles before a new slot. Multiple open runs are treated as ledger corruption;
+role, schedule, or factory policy drift on an open run blocks new work until an operator
+investigates. A clock earlier than the open slot or its latest journal event also blocks; correct
+the host clock without editing the ledger.
 
 ## Authority and incident stop
 
@@ -110,7 +132,7 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No timer unit, live rate card, live worker/authority configuration, repository/day or
+No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
 maintenance discovery, attested eval-harness producer, cohort consumer, auto-broker, merge,
 telemetry-driven canary, rollback controller, or incident automation is shipped. A separate dormant

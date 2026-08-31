@@ -1,6 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 
-import type { FactoryEvalAttestationRecord, Sha256Digest } from "@agentlab/contracts";
+import {
+  sha256DigestSchema,
+  type FactoryEvalAttestationRecord,
+  type Sha256Digest
+} from "@agentlab/contracts";
 
 import type { FactoryDsseVerifier } from "../../domain/factory-eval-attestation-crypto.js";
 import { assertFactoryEvalAttestationRecord } from "../../domain/factory-eval-attestation-integrity.js";
@@ -42,6 +46,7 @@ export interface SqliteFactoryEvalAttestationRepositoryOptions extends SqliteDat
   readonly documents?: FactoryDocumentCodec;
   readonly evaluations: Pick<FactoryEvaluationRepository, "findByRunId">;
   readonly verifier: FactoryDsseVerifier;
+  readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
 }
 
 /** SQLite-backed immutable record of one cryptographically verified eval run. */
@@ -50,12 +55,16 @@ export class SqliteFactoryEvalAttestationRepository implements FactoryEvalAttest
   readonly #documents: FactoryDocumentCodec;
   readonly #evaluations: Pick<FactoryEvaluationRepository, "findByRunId">;
   readonly #verifier: FactoryDsseVerifier;
+  readonly #expectedRoleIdentityPolicyDigest: Sha256Digest;
 
   public constructor(databasePath: string, options: SqliteFactoryEvalAttestationRepositoryOptions) {
     this.#database = openSqliteDatabase(databasePath, options);
     this.#documents = options.documents ?? new NodeFactoryDocumentCodec();
     this.#evaluations = options.evaluations;
     this.#verifier = options.verifier;
+    this.#expectedRoleIdentityPolicyDigest = sha256DigestSchema.parse(
+      options.expectedRoleIdentityPolicyDigest
+    );
   }
 
   public async record(
@@ -142,7 +151,8 @@ export class SqliteFactoryEvalAttestationRepository implements FactoryEvalAttest
       record,
       signed.digest,
       verification,
-      this.#documents
+      this.#documents,
+      this.#expectedRoleIdentityPolicyDigest
     );
   }
 

@@ -38,10 +38,12 @@ export async function runFactorySchedulerTick(
   }
   const config = await dependencies.loadConfig(configPath);
   if (
-    config.schemaVersion !== "agentlab.local-factory-worker.v2" ||
+    config.schemaVersion !== "agentlab.local-factory-worker.v3" ||
     config.schedulePolicy === undefined
   ) {
-    throw new Error("Factory scheduler requires a v2 worker config with a schedule policy.");
+    throw new Error(
+      "Factory scheduler requires a v3 worker config with schedule and role identity policies."
+    );
   }
   const runtime = dependencies.createRuntime(config);
   let report: FactorySchedulerTickReport;

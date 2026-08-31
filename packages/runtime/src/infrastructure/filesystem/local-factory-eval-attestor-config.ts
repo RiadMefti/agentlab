@@ -1,9 +1,14 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { factoryIdentifierSchema, sha256DigestSchema } from "@agentlab/contracts";
+import {
+  factoryIdentifierSchema,
+  sha256DigestSchema,
+  type FactoryRoleIdentityPolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 
 const absolutePathSchema = z
   .string()
@@ -20,12 +25,17 @@ const configSchema = z
     runnerId: factoryIdentifierSchema,
     privateKeyPath: absolutePathSchema,
     keyId: sha256DigestSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
     attestationLifetimeSeconds: z.number().int().min(60).max(604_800),
     maximumIssuanceDelaySeconds: z.number().int().min(1).max(86_400)
   })
   .strict();
 
-export type LocalFactoryEvalAttestorConfig = z.infer<typeof configSchema>;
+type ParsedLocalFactoryEvalAttestorConfig = z.infer<typeof configSchema>;
+export type LocalFactoryEvalAttestorConfig = ParsedLocalFactoryEvalAttestorConfig & {
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+};
 
 /** Loads only runner identity, timing bounds, and an owner-only signing-key coordinate. */
 export async function loadLocalFactoryEvalAttestorConfig(
@@ -38,7 +48,11 @@ export async function loadLocalFactoryEvalAttestorConfig(
     maximumBytes: 16 * 1_024
   });
   try {
-    return configSchema.parse(parseJson(content.toString("utf8")));
+    const config = configSchema.parse(parseJson(content.toString("utf8")));
+    return {
+      ...config,
+      roleIdentityPolicy: await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
+    };
   } finally {
     content.fill(0);
   }

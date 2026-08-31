@@ -1,8 +1,10 @@
 import {
   factoryEvalAttestationPayloadType,
   factoryIdentifierSchema,
+  sha256DigestSchema,
   factoryTimestampSchema,
-  type FactorySignedEvalAttestation
+  type FactorySignedEvalAttestation,
+  type Sha256Digest
 } from "@agentlab/contracts";
 
 import type { FactoryDsseSigner } from "../domain/factory-eval-attestation-crypto.js";
@@ -18,6 +20,7 @@ export interface FactoryEvalAttestorServiceDependencies {
   readonly runnerId: string;
   readonly attestationLifetimeSeconds: number;
   readonly maximumIssuanceDelaySeconds: number;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
   readonly signer: FactoryDsseSigner;
   readonly documents: Pick<
     FactoryDocumentCodec,
@@ -36,6 +39,7 @@ export class FactoryEvalAttestorService {
   readonly #runnerId: string;
   readonly #attestationLifetimeSeconds: number;
   readonly #maximumIssuanceDelaySeconds: number;
+  readonly #roleIdentityPolicyDigest: Sha256Digest;
 
   public constructor(private readonly dependencies: FactoryEvalAttestorServiceDependencies) {
     this.#runnerId = factoryIdentifierSchema.parse(dependencies.runnerId);
@@ -45,6 +49,9 @@ export class FactoryEvalAttestorService {
     });
     this.#attestationLifetimeSeconds = dependencies.attestationLifetimeSeconds;
     this.#maximumIssuanceDelaySeconds = dependencies.maximumIssuanceDelaySeconds;
+    this.#roleIdentityPolicyDigest = sha256DigestSchema.parse(
+      dependencies.roleIdentityPolicyDigest
+    );
   }
 
   public async attest(input: unknown): Promise<FactorySignedEvalAttestation> {
@@ -79,6 +86,7 @@ export class FactoryEvalAttestorService {
         challengerHarnessDigest: run.value.challengerCandidate.harnessDigest,
         baselineCandidateDigest: run.value.baselineCandidateDigest,
         challengerCandidateDigest: run.value.challengerCandidateDigest,
+        roleIdentityPolicyDigest: this.#roleIdentityPolicyDigest,
         startedAt: run.value.startedAt,
         completedAt: run.value.completedAt,
         issuedAt,

@@ -11,6 +11,8 @@ import {
   type LocalFactoryWorkerConfig,
   type LocalFactoryWorkerOptions
 } from "../../packages/runtime/src/local-factory-worker.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testEvalDigest, testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const executableContent =
@@ -40,15 +42,20 @@ describe("local factory worker composition", () => {
       "runTask"
     ]);
     await expect(runtime.commands.preflight()).resolves.toMatchObject({
-      schemaVersion: "agentlab.worker-preflight.v2",
+      schemaVersion: "agentlab.worker-preflight.v3",
       status: "blocked",
       schedulePolicyDigest: null,
+      roleIdentityPolicyDigest: null,
       schedulerEnabled: false,
       costPolicyConfigured: true,
-      hostReady: true,
+      hostReady: false,
       configuredProviders: ["codex"],
       gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-      reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
+      reasonCodes: [
+        "role-identity-policy-unconfigured",
+        "schedule-policy-unconfigured",
+        "scheduler-disabled"
+      ]
     });
     await expect(runtime.commands.runScheduledTick({})).rejects.toThrow(
       /scheduler policy is not configured/u
@@ -76,6 +83,68 @@ describe("local factory worker composition", () => {
         schedulePolicy: testFactorySchedulePolicy()
       } as unknown as LocalFactoryWorkerConfig)
     ).toThrow(/v1 configuration cannot attach/u);
+  });
+
+  it("blocks legacy scheduled config and wrong worker identity before persistence", () => {
+    const fixture = workerOptions();
+    expect(() =>
+      createConfiguredLocalFactoryWorker({
+        ...fixture.options,
+        schemaVersion: "agentlab.local-factory-worker.v2",
+        costPolicyPath: "/private/agentlab/cost-policy.json",
+        schedulePolicyPath: "/private/agentlab/schedule-policy.json",
+        schedulePolicy: testFactorySchedulePolicy()
+      } as unknown as LocalFactoryWorkerConfig)
+    ).toThrow(/without enforced role identity/u);
+
+    const wrongWorkerUserId = process.getuid?.() === 1 ? 2 : 1;
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: wrongWorkerUserId,
+      attestorUserId: wrongWorkerUserId === 2 ? 3 : 2
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    expect(() =>
+      createLocalFactoryWorker({
+        ...fixture.options,
+        schedulePolicy: testFactorySchedulePolicy(),
+        roleIdentityPolicy,
+        expectedRoleIdentityPolicyDigest
+      })
+    ).toThrow(/process identity/u);
+    expect(existsSync(`${fixture.options.databasePath}.agentlab-writer-lock.sqlite`)).toBe(false);
+  });
+
+  it("allows an identity-bound v3 manual worker without enabling a scheduler", async () => {
+    const processUserId = process.getuid?.();
+    if (processUserId === undefined || processUserId < 1) {
+      throw new Error("This identity-bound composition test requires a non-root POSIX user.");
+    }
+    const fixture = workerOptions();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: processUserId,
+      attestorUserId: processUserId === 1 ? 2 : 1
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const runtime = createConfiguredLocalFactoryWorker({
+      ...fixture.options,
+      schemaVersion: "agentlab.local-factory-worker.v3",
+      costPolicyPath: "/private/agentlab/cost-policy.json",
+      roleIdentityPolicyPath: "/private/agentlab/role-identities.json",
+      expectedRoleIdentityPolicyDigest,
+      roleIdentityPolicy
+    } as LocalFactoryWorkerConfig);
+
+    await expect(runtime.commands.preflight()).resolves.toMatchObject({
+      roleIdentityPolicyDigest: expectedRoleIdentityPolicyDigest,
+      reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
+    });
+    await runtime.close();
   });
 
   it("rejects overlapping owned roots before acquiring persistence authority", () => {

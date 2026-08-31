@@ -52,8 +52,10 @@ encoding and public-key-ID helpers are shared.
 The signed object is a strict `agentlab.signed-eval-attestation.v1` containing a canonical in-toto
 Statement v1 under predicate type `https://agentlab.dev/attestations/eval-run/v1` and one DSSE
 signature. The subject is the exact canonical eval-run SHA-256 digest. The predicate binds runner,
-run, suite, case bank, baseline and challenger harnesses, both candidate digests, run timestamps,
-issuance, and expiry. V1 accepts exactly one Ed25519 signature and canonical padded base64.
+run, suite, case bank, baseline and challenger harnesses, both candidate digests, the enforced
+role-identity-policy digest, run timestamps, issuance, and expiry. V1 accepts exactly one Ed25519
+signature and canonical padded base64. [ADR 0011](0011-enforced-signer-worker-identities.md) defines
+the deployment identity binding added before activation.
 
 The verifier trusts only its configured public key. The envelope `keyid` is a selection hint and
 must equal the independently derived SHA-256 digest of the configured SPKI DER key. Verification

@@ -164,7 +164,7 @@ function serializeEvaluation(status: "assessed" | "inspected", snapshot: Factory
 function serializeAttestation(result: FactoryEvalAttestationRecordResult): string {
   const statement = result.attestation.signedAttestation.statement;
   return JSON.stringify({
-    schemaVersion: "agentlab.eval-attestation-command-result.v1",
+    schemaVersion: "agentlab.eval-attestation-command-result.v2",
     status: result.status,
     attestationId: result.attestation.attestationId,
     attestationDigest: result.attestationDigest,
@@ -172,6 +172,7 @@ function serializeAttestation(result: FactoryEvalAttestationRecordResult): strin
     runId: result.attestation.runId,
     runDigest: result.attestation.runDigest,
     keyId: result.attestation.keyId,
+    roleIdentityPolicyDigest: statement.predicate.roleIdentityPolicyDigest,
     issuedAt: statement.predicate.issuedAt,
     expiresAt: statement.predicate.expiresAt,
     verifiedAt: result.attestation.verifiedAt

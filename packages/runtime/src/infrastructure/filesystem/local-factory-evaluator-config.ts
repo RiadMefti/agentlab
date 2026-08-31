@@ -1,9 +1,14 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { factoryIdentifierSchema, sha256DigestSchema } from "@agentlab/contracts";
+import {
+  factoryIdentifierSchema,
+  sha256DigestSchema,
+  type FactoryRoleIdentityPolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 
 const absolutePathSchema = z
   .string()
@@ -21,12 +26,17 @@ const configSchema = z
     runnerId: factoryIdentifierSchema,
     trustedPublicKeyPath: absolutePathSchema,
     trustedKeyId: sha256DigestSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
     maximumIssuanceDelaySeconds: z.number().int().min(1).max(86_400),
     maximumAttestationLifetimeSeconds: z.number().int().min(60).max(604_800)
   })
   .strict();
 
-export type LocalFactoryEvaluatorConfig = z.infer<typeof configSchema>;
+type ParsedLocalFactoryEvaluatorConfig = z.infer<typeof configSchema>;
+export type LocalFactoryEvaluatorConfig = ParsedLocalFactoryEvaluatorConfig & {
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+};
 
 /** Loads the durable ledger, evaluator identity, and one pinned public verification key. */
 export async function loadLocalFactoryEvaluatorConfig(
@@ -39,7 +49,11 @@ export async function loadLocalFactoryEvaluatorConfig(
     maximumBytes: 16 * 1_024
   });
   try {
-    return configSchema.parse(parseJson(content.toString("utf8")));
+    const config = configSchema.parse(parseJson(content.toString("utf8")));
+    return {
+      ...config,
+      roleIdentityPolicy: await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
+    };
   } finally {
     content.fill(0);
   }

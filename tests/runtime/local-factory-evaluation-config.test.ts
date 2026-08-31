@@ -9,10 +9,12 @@ import { loadLocalFactoryCanaryRequest } from "../../packages/runtime/src/infras
 import { loadLocalFactoryEvalRun } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.js";
 import { loadLocalFactoryEvalAttestorConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.js";
 import { loadLocalFactoryEvaluatorConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import {
   testEvalDigest,
   testFactoryEvalBudget,
-  testFactoryEvalRun
+  testFactoryEvalRun,
+  testFactoryRoleIdentityPolicy
 } from "../helpers/factory-evaluation.js";
 
 const temporaryRoots: string[] = [];
@@ -28,12 +30,23 @@ describe("local factory evaluation file boundaries", () => {
     const root = await temporaryRoot();
     const evaluatorPath = join(root, "evaluator.json");
     const canaryPath = join(root, "canary-authority.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
     const evaluator = {
       schemaVersion: "agentlab.local-factory-evaluator.v2",
       databasePath: join(root, "agentlab.sqlite"),
       runnerId: "trusted-eval-runner",
       trustedPublicKeyPath: join(root, "eval-public.pem"),
       trustedKeyId: testEvalDigest(901),
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest,
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: 3_600
     } as const;
@@ -43,6 +56,8 @@ describe("local factory evaluation file boundaries", () => {
       runnerId: "trusted-eval-runner",
       privateKeyPath: join(root, "eval-private.pem"),
       keyId: testEvalDigest(901),
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest,
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 300
     } as const;
@@ -53,10 +68,17 @@ describe("local factory evaluation file boundaries", () => {
     } as const;
     await writePrivateJson(evaluatorPath, evaluator);
     await writePrivateJson(attestorPath, attestor);
+    await writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy);
     await writePrivateJson(canaryPath, canary);
 
-    await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).resolves.toEqual(evaluator);
-    await expect(loadLocalFactoryEvalAttestorConfig(attestorPath)).resolves.toEqual(attestor);
+    await expect(loadLocalFactoryEvaluatorConfig(evaluatorPath)).resolves.toEqual({
+      ...evaluator,
+      roleIdentityPolicy
+    });
+    await expect(loadLocalFactoryEvalAttestorConfig(attestorPath)).resolves.toEqual({
+      ...attestor,
+      roleIdentityPolicy
+    });
     await expect(loadLocalFactoryCanaryAuthorityConfig(canaryPath)).resolves.toEqual(canary);
 
     await writePrivateJson(evaluatorPath, { ...evaluator, githubToken: "forbidden" });
@@ -99,12 +121,24 @@ describe("local factory evaluation file boundaries", () => {
   it("rejects public, symlinked, and hard-linked authority input", async () => {
     const root = await temporaryRoot();
     const path = join(root, "evaluator.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    await writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy);
     await writePrivateJson(path, {
       schemaVersion: "agentlab.local-factory-evaluator.v2",
       databasePath: join(root, "agentlab.sqlite"),
       runnerId: "trusted-eval-runner",
       trustedPublicKeyPath: join(root, "eval-public.pem"),
       trustedKeyId: testEvalDigest(901),
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest,
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: 3_600
     });

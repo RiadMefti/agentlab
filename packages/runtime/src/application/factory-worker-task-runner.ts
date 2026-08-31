@@ -61,6 +61,7 @@ type FactoryWorkerTaskOperations = Pick<
 
 export interface FactoryWorkerTaskRunnerDependencies {
   readonly policyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
   readonly preparations: Pick<FactoryPreparationRepository, "findById">;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly executions: Pick<FactoryExecutionRepository, "findByTaskId">;
@@ -68,11 +69,12 @@ export interface FactoryWorkerTaskRunnerDependencies {
 }
 
 export interface FactoryWorkerTaskRunReport {
-  readonly schemaVersion: "agentlab.worker-task-run.v1";
+  readonly schemaVersion: "agentlab.worker-task-run.v2";
   readonly status: "ready-for-broker" | "already-advanced" | "stopped";
   readonly taskId: string;
   readonly correlationId: string;
   readonly policyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
   readonly preparationState: FactoryPreparationState;
   readonly taskState: FactoryTaskState | null;
   readonly contractDigest: Sha256Digest | null;
@@ -278,11 +280,12 @@ export class FactoryWorkerTaskRunner {
     correlationId: string
   ): FactoryWorkerTaskRunReport {
     return {
-      schemaVersion: "agentlab.worker-task-run.v1",
+      schemaVersion: "agentlab.worker-task-run.v2",
       status: "stopped",
       taskId: preparation.request.taskId,
       correlationId,
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
       preparationState: preparation.state,
       taskState: null,
       contractDigest: null,
@@ -301,11 +304,12 @@ export class FactoryWorkerTaskRunner {
     reasonCodes: readonly string[]
   ): FactoryWorkerTaskRunReport {
     return {
-      schemaVersion: "agentlab.worker-task-run.v1",
+      schemaVersion: "agentlab.worker-task-run.v2",
       status,
       taskId: task.contract.taskId,
       correlationId,
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
       preparationState: preparation.state,
       taskState: task.state,
       contractDigest: task.contractDigest,

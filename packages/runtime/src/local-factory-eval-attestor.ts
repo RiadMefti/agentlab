@@ -1,4 +1,4 @@
-import type { Sha256Digest } from "@agentlab/contracts";
+import type { FactoryRoleIdentityPolicy, Sha256Digest } from "@agentlab/contracts";
 
 import { FactoryEvalAttestorService } from "./application/factory-eval-attestor-service.js";
 import {
@@ -6,6 +6,7 @@ import {
   type LocalFactoryEvalAttestorRuntime
 } from "./application/local-factory-eval-attestor-coordinator.js";
 import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
+import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import type { LocalFactoryEvalAttestorConfig } from "./infrastructure/filesystem/local-factory-eval-attestor-config.js";
 import { FileFactoryEvalAttestationKeySource } from "./infrastructure/filesystem/file-factory-eval-attestation-key-source.js";
 import { NodeFactoryDsseSigner } from "./infrastructure/crypto/node-factory-dsse-signer.js";
@@ -17,6 +18,8 @@ export interface LocalFactoryEvalAttestorOptions {
   readonly keyId: Sha256Digest;
   readonly attestationLifetimeSeconds: number;
   readonly maximumIssuanceDelaySeconds: number;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
   readonly now?: () => string;
 }
 
@@ -25,6 +28,17 @@ export function createLocalFactoryEvalAttestor(
   options: LocalFactoryEvalAttestorOptions
 ): LocalFactoryEvalAttestorRuntime {
   const documents = new NodeFactoryDocumentCodec();
+  const identityPolicy = documents.roleIdentityPolicy(options.roleIdentityPolicy);
+  if (identityPolicy.digest !== options.expectedRoleIdentityPolicyDigest) {
+    throw new Error("Factory eval attestor role identity policy changed after review.");
+  }
+  if (
+    identityPolicy.value.evalAttestor.runnerId !== options.runnerId ||
+    identityPolicy.value.evalAttestor.keyId !== options.keyId
+  ) {
+    throw new Error("Factory eval attestor coordinates do not match its role identity policy.");
+  }
+  assertFactoryProcessRoleIdentity(identityPolicy.value, "eval-attestor", process.getuid?.());
   const signer = new NodeFactoryDsseSigner(
     new FileFactoryEvalAttestationKeySource(options.privateKeyPath, "private"),
     options.keyId
@@ -34,6 +48,7 @@ export function createLocalFactoryEvalAttestor(
       runnerId: options.runnerId,
       attestationLifetimeSeconds: options.attestationLifetimeSeconds,
       maximumIssuanceDelaySeconds: options.maximumIssuanceDelaySeconds,
+      roleIdentityPolicyDigest: identityPolicy.digest,
       signer,
       documents,
       now: options.now ?? (() => new Date().toISOString())

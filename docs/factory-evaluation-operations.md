@@ -12,7 +12,7 @@ credentialless evaluator/verifier, and human release controller. Only the attest
 the private key. Only the evaluator and human authority receive sequential access to the durable
 SQLite ledger. Keep all files outside the source repository.
 
-Config, eval-run, signed-artifact, and canary-request files must be canonical owner-only regular
+Config, role-policy, eval-run, signed-artifact, and canary-request files must be owner-only regular
 files with one link. Symlinks, hard links, group/world permissions, unstable reads, unknown fields,
 and oversized input are rejected.
 
@@ -48,6 +48,11 @@ decision; retained records still require their original trust root for re-verifi
 
 ## Strict configurations
 
+Provision identical canonical copies of `agentlab.role-identity-policy.v1` under the worker,
+attestor, and evaluator accounts. Each copy is owner-only; each config pins the same canonical
+SHA-256 digest. The policy shape is shown in the scheduler runbook. Its attestor UID, runner ID, and
+key ID must match the signing account and both eval configs, and its worker UID must be distinct.
+
 `attestor.json` is `agentlab.local-factory-eval-attestor.v1` and belongs only to the signing
 account:
 
@@ -57,6 +62,8 @@ account:
   "runnerId": "trusted-eval-runner",
   "privateKeyPath": "/absolute/private/attestor/eval-private.pem",
   "keyId": "sha256:...",
+  "roleIdentityPolicyPath": "/absolute/private/attestor/role-identities.json",
+  "expectedRoleIdentityPolicyDigest": "sha256:...",
   "attestationLifetimeSeconds": 3600,
   "maximumIssuanceDelaySeconds": 300
 }
@@ -72,6 +79,8 @@ than the signer's and can never exceed one day for issuance delay or seven days 
   "runnerId": "trusted-eval-runner",
   "trustedPublicKeyPath": "/absolute/private/evaluator/eval-public.pem",
   "trustedKeyId": "sha256:...",
+  "roleIdentityPolicyPath": "/absolute/private/evaluator/role-identities.json",
+  "expectedRoleIdentityPolicyDigest": "sha256:...",
   "maximumIssuanceDelaySeconds": 300,
   "maximumAttestationLifetimeSeconds": 3600
 }
@@ -132,11 +141,12 @@ agentlab factory eval-attest \
 ```
 
 The verifier authenticates DSSE bytes with the configured public key, checks canonical statement and
-envelope digests, binds the subject and predicate to the exact immutable run, independently checks
-issuance delay/lifetime/current validity, binds the exact assessment, and appends one schema 13
-record. The compact output includes attestation, assessment, run, key, issuance, expiry, and
-verification coordinates; it omits the signature and embedded report. A second different artifact
-for one run conflicts. Every service read re-verifies the signature and lineage.
+envelope digests, binds the subject and predicate to the exact immutable run and reviewed
+role-policy digest, independently checks issuance delay/lifetime/current validity, binds the exact
+assessment, and appends one schema 13 record. The compact output includes attestation, assessment,
+run, key, issuance, expiry, and verification coordinates; it omits the signature and embedded
+report. A second different artifact for one run conflicts. Every service read re-verifies the
+signature and lineage.
 
 Inspect the deterministic assessment separately:
 
@@ -202,9 +212,10 @@ The current slice does not automate revocation, rollback, notification, or incid
 ## Activation gaps
 
 Before any cohort drives even shadow work, AgentLab still needs a sandboxed harness producer;
-content-addressed grader artifacts; stronger runner identity or hardware-backed key custody where
-required; a crash-durable cohort consumer that requires a currently valid attestation, reserves
-aggregate usage, and binds every task; telemetry/control comparison; expiry/revocation enforcement;
-alerting; rollback drills; and incident automation. Brokered PR creation remains separately
-human-confirmed and blocked by repository governance and live cost-policy prerequisites in
+content-addressed grader artifacts; a brokered multi-account storage boundary for the shared ledger;
+stronger runner identity or hardware-backed key custody where required; a crash-durable cohort
+consumer that requires a currently valid attestation, reserves aggregate usage, and binds every
+task; telemetry/control comparison; expiry/revocation enforcement; alerting; rollback drills; and
+incident automation. Brokered PR creation remains separately human-confirmed and blocked by
+repository governance and live cost-policy prerequisites in
 [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

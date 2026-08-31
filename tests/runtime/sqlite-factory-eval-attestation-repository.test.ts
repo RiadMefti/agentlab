@@ -16,7 +16,11 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryEvalAttestationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.js";
 import { SqliteFactoryEvaluationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.js";
-import { testEvalDigest, testFactoryEvalDocuments } from "../helpers/factory-evaluation.js";
+import {
+  TEST_ROLE_IDENTITY_POLICY_DIGEST,
+  testEvalDigest,
+  testFactoryEvalDocuments
+} from "../helpers/factory-evaluation.js";
 
 const documents = new NodeFactoryDocumentCodec();
 const attestationId = "10000000-0000-4000-8000-000000000006";
@@ -37,12 +41,14 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
     const attestations = new SqliteFactoryEvalAttestationRepository(databasePath, {
       evaluations,
       verifier,
+      expectedRoleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       documents
     });
     const attestor = new FactoryEvalAttestorService({
       runnerId: "trusted-eval-runner",
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       signer: new NodeFactoryDsseSigner(new StaticKeySource(key.privatePem), key.keyId),
       documents,
       now: () => "2026-08-30T11:31:00.000Z"
@@ -54,6 +60,7 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
       verifier,
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: 3_600,
+      expectedRoleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       documents,
       now: () => "2026-08-30T11:32:00.000Z",
       createId: vi.fn(() => attestationId)
@@ -91,6 +98,7 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
         new StaticKeySource(wrongKey.publicPem),
         wrongKey.keyId
       ),
+      expectedRoleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       documents
     });
     await expect(

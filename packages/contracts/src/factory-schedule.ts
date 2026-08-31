@@ -50,19 +50,33 @@ export const factoryScheduleRunStateSchema = z.enum(["ready", "task-active", "co
 export type FactoryScheduleRunState = z.infer<typeof factoryScheduleRunStateSchema>;
 
 /** Immutable identity for one exact daily slot under one schedule and factory policy. */
+const factoryScheduleRunShape = {
+  runId: z.uuid(),
+  schedulePolicyDigest: sha256DigestSchema,
+  schedulePolicy: factorySchedulePolicySchema,
+  factoryPolicyBundleDigest: sha256DigestSchema,
+  scheduledFor: factoryTimestampSchema,
+  deadlineAt: factoryTimestampSchema,
+  createdAt: factoryTimestampSchema,
+  correlationId: z.uuid()
+} as const;
+
 export const factoryScheduleRunSchema = z
-  .object({
-    schemaVersion: z.literal("agentlab.schedule-run.v1"),
-    runId: z.uuid(),
-    schedulePolicyDigest: sha256DigestSchema,
-    schedulePolicy: factorySchedulePolicySchema,
-    factoryPolicyBundleDigest: sha256DigestSchema,
-    scheduledFor: factoryTimestampSchema,
-    deadlineAt: factoryTimestampSchema,
-    createdAt: factoryTimestampSchema,
-    correlationId: z.uuid()
-  })
-  .strict()
+  .discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.schedule-run.v1"),
+        ...factoryScheduleRunShape
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.schedule-run.v2"),
+        ...factoryScheduleRunShape,
+        roleIdentityPolicyDigest: sha256DigestSchema
+      })
+      .strict()
+  ])
   .superRefine((run, context) => {
     if (run.deadlineAt <= run.scheduledFor) {
       context.addIssue({

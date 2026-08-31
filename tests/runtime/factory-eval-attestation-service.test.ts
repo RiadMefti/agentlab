@@ -26,6 +26,7 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import {
   TEST_EVAL_ASSESSMENT_ID,
   TEST_EVAL_RUN_ID,
+  TEST_ROLE_IDENTITY_POLICY_DIGEST,
   testEvalDigest,
   testFactoryEvalDocuments,
   testFactoryEvalRun
@@ -125,6 +126,7 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
       runnerId: "trusted-eval-runner",
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       signer: fixture.signer,
       documents,
       now: () => "2026-08-30T11:33:00.000Z"
@@ -136,6 +138,28 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
         signedAttestation: later
       })
     ).rejects.toThrow(/different immutable signed attestation/u);
+  });
+
+  it("rejects a valid signature bound to another role identity policy", async () => {
+    const fixture = await services();
+    const otherPolicyAttestor = new FactoryEvalAttestorService({
+      runnerId: "trusted-eval-runner",
+      attestationLifetimeSeconds: 3_600,
+      maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicyDigest: testEvalDigest(998),
+      signer: fixture.signer,
+      documents,
+      now: () => "2026-08-30T11:31:00.000Z"
+    });
+    const signed = await otherPolicyAttestor.attest(fixture.evaluation.run);
+
+    await expect(
+      fixture.verification.record({
+        assessmentDigest: fixture.evaluation.assessmentDigest,
+        signedAttestation: signed
+      })
+    ).rejects.toThrow(/role identity policy/u);
+    expect(fixture.attestations.recordCalls).toBe(0);
   });
 
   it("fails closed before issuance, at expiry, after expiry, and without an assessment", async () => {
@@ -181,6 +205,7 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
       runnerId: "trusted-eval-runner",
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       signer,
       documents,
       now: () => "2026-08-30T11:31:00.000Z"
@@ -195,6 +220,7 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
           runnerId: "trusted-eval-runner",
           attestationLifetimeSeconds: 59,
           maximumIssuanceDelaySeconds: 300,
+          roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
           signer,
           documents,
           now: () => "2026-08-30T11:31:00.000Z"
@@ -205,6 +231,7 @@ describe("FactoryEvalAttestorService and FactoryEvalAttestationService", () => {
       runnerId: "trusted-eval-runner",
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 30,
+      roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       signer,
       documents,
       now: () => "2026-08-30T11:30:31.000Z"
@@ -311,6 +338,7 @@ async function services(
     runnerId: "trusted-eval-runner",
     attestationLifetimeSeconds: 3_600,
     maximumIssuanceDelaySeconds: 300,
+    roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
     signer,
     documents,
     now: () => "2026-08-30T11:31:00.000Z"
@@ -330,6 +358,7 @@ async function services(
       verifier,
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: options.maximumAttestationLifetimeSeconds ?? 3_600,
+      expectedRoleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
       documents,
       now: () => options.verifierNow ?? "2026-08-30T11:32:00.000Z",
       createId

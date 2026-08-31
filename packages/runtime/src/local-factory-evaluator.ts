@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Sha256Digest } from "@agentlab/contracts";
+import type { FactoryRoleIdentityPolicy, Sha256Digest } from "@agentlab/contracts";
 
 import { FactoryEvaluationService } from "./application/factory-evaluation-service.js";
 import { FactoryEvalAttestationService } from "./application/factory-eval-attestation-service.js";
@@ -27,6 +27,8 @@ export interface LocalFactoryEvaluatorOptions {
   readonly trustedKeyId: Sha256Digest;
   readonly maximumIssuanceDelaySeconds: number;
   readonly maximumAttestationLifetimeSeconds: number;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
@@ -35,13 +37,23 @@ export interface LocalFactoryEvaluatorOptions {
 export function createLocalFactoryEvaluator(
   options: LocalFactoryEvaluatorOptions
 ): LocalFactoryEvaluatorRuntime {
+  const documents = new NodeFactoryDocumentCodec();
+  const identityPolicy = documents.roleIdentityPolicy(options.roleIdentityPolicy);
+  if (identityPolicy.digest !== options.expectedRoleIdentityPolicyDigest) {
+    throw new Error("Factory evaluator role identity policy changed after review.");
+  }
+  if (
+    identityPolicy.value.evalAttestor.runnerId !== options.runnerId ||
+    identityPolicy.value.evalAttestor.keyId !== options.trustedKeyId
+  ) {
+    throw new Error("Factory evaluator trust coordinates do not match its role identity policy.");
+  }
   const writerLease = acquireSqliteWriterLease(options.databasePath);
   const repositories = new RuntimeRepositoryOwner();
   try {
     if (writerLease.databasePath === ":memory:") {
       throw new Error("The local factory evaluator requires a durable SQLite database.");
     }
-    const documents = new NodeFactoryDocumentCodec();
     const evaluations = repositories.track(
       new SqliteFactoryEvaluationRepository(writerLease.databasePath, { documents })
     );
@@ -53,6 +65,7 @@ export function createLocalFactoryEvaluator(
       new SqliteFactoryEvalAttestationRepository(writerLease.databasePath, {
         evaluations,
         verifier,
+        expectedRoleIdentityPolicyDigest: options.expectedRoleIdentityPolicyDigest,
         documents
       })
     );
@@ -69,6 +82,7 @@ export function createLocalFactoryEvaluator(
       verifier,
       maximumIssuanceDelaySeconds: options.maximumIssuanceDelaySeconds,
       maximumAttestationLifetimeSeconds: options.maximumAttestationLifetimeSeconds,
+      expectedRoleIdentityPolicyDigest: options.expectedRoleIdentityPolicyDigest,
       documents,
       now: options.now ?? (() => new Date().toISOString()),
       createId: options.createId ?? randomUUID

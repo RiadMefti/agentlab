@@ -41,10 +41,11 @@ const schedulerTickCommandSchema = z
   .strict();
 
 export interface FactorySchedulerTickReport {
-  readonly schemaVersion: "agentlab.scheduler-tick-result.v1";
+  readonly schemaVersion: "agentlab.scheduler-tick-result.v2";
   readonly status: "completed" | "already-completed" | "missed-deadline" | "blocked";
   readonly schedulePolicyDigest: Sha256Digest;
   readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
   readonly scheduledFor: string;
   readonly deadlineAt: string;
   readonly runId: string | null;
@@ -59,6 +60,7 @@ export interface FactorySchedulerTickReport {
 export interface FactorySchedulerServiceDependencies {
   readonly schedulePolicy: CanonicalFactoryDocument<FactorySchedulePolicy>;
   readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
   readonly schedules: FactoryScheduleRepository;
   readonly preparations: Pick<FactoryPreparationRepository, "listScheduled">;
   readonly worker: Pick<FactoryWorkerOperator, "preflight">;
@@ -112,6 +114,7 @@ export class FactorySchedulerService {
           "missed-deadline",
           this.dependencies.schedulePolicy.digest,
           this.dependencies.factoryPolicyBundleDigest,
+          this.dependencies.roleIdentityPolicyDigest,
           slot.scheduledFor,
           slot.deadlineAt,
           ["schedule-start-deadline-missed"]
@@ -126,6 +129,7 @@ export class FactorySchedulerService {
             "blocked",
             this.dependencies.schedulePolicy.digest,
             this.dependencies.factoryPolicyBundleDigest,
+            this.dependencies.roleIdentityPolicyDigest,
             slot.scheduledFor,
             slot.deadlineAt,
             preflight.reasonCodes
@@ -182,6 +186,7 @@ export class FactorySchedulerService {
     if (
       preflight.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest ||
       preflight.schedulePolicyDigest !== this.dependencies.schedulePolicy.digest ||
+      preflight.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest ||
       !preflight.schedulerEnabled ||
       !preflight.costPolicyConfigured ||
       !preflight.hostReady
@@ -196,11 +201,12 @@ export class FactorySchedulerService {
     createdAt: string
   ): Promise<FactoryScheduleRunSnapshot> {
     const run = this.dependencies.documents.scheduleRun({
-      schemaVersion: "agentlab.schedule-run.v1",
+      schemaVersion: "agentlab.schedule-run.v2",
       runId: this.dependencies.createId(),
       schedulePolicyDigest: this.dependencies.schedulePolicy.digest,
       schedulePolicy: this.dependencies.schedulePolicy.value,
       factoryPolicyBundleDigest: this.dependencies.factoryPolicyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
       scheduledFor,
       deadlineAt,
       createdAt,
@@ -361,9 +367,11 @@ export class FactorySchedulerService {
   #runUsesCurrentPolicies(snapshot: FactoryScheduleRunSnapshot): boolean {
     const storedPolicy = this.dependencies.documents.schedulePolicy(snapshot.run.schedulePolicy);
     return (
+      snapshot.run.schemaVersion === "agentlab.schedule-run.v2" &&
       storedPolicy.digest === snapshot.run.schedulePolicyDigest &&
       snapshot.run.schedulePolicyDigest === this.dependencies.schedulePolicy.digest &&
-      snapshot.run.factoryPolicyBundleDigest === this.dependencies.factoryPolicyBundleDigest
+      snapshot.run.factoryPolicyBundleDigest === this.dependencies.factoryPolicyBundleDigest &&
+      snapshot.run.roleIdentityPolicyDigest === this.dependencies.roleIdentityPolicyDigest
     );
   }
 
@@ -385,7 +393,8 @@ export class FactorySchedulerService {
     if (
       result.taskId !== claim.taskId ||
       result.correlationId !== claim.taskCorrelationId ||
-      result.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest
+      result.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest ||
+      result.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest
     ) {
       throw new Error("Factory scheduled worker returned different durable coordinates.");
     }
@@ -397,10 +406,11 @@ export class FactorySchedulerService {
     reasonCodes: readonly string[]
   ): FactorySchedulerTickReport {
     return {
-      schemaVersion: "agentlab.scheduler-tick-result.v1",
+      schemaVersion: "agentlab.scheduler-tick-result.v2",
       status,
       schedulePolicyDigest: snapshot.run.schedulePolicyDigest,
       factoryPolicyBundleDigest: snapshot.run.factoryPolicyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
       scheduledFor: snapshot.run.scheduledFor,
       deadlineAt: snapshot.run.deadlineAt,
       runId: snapshot.run.runId,
@@ -449,15 +459,17 @@ function emptyReport(
   status: FactorySchedulerTickReport["status"],
   schedulePolicyDigest: Sha256Digest,
   factoryPolicyBundleDigest: Sha256Digest,
+  roleIdentityPolicyDigest: Sha256Digest,
   scheduledFor: string,
   deadlineAt: string,
   reasonCodes: readonly string[]
 ): FactorySchedulerTickReport {
   return {
-    schemaVersion: "agentlab.scheduler-tick-result.v1",
+    schemaVersion: "agentlab.scheduler-tick-result.v2",
     status,
     schedulePolicyDigest,
     factoryPolicyBundleDigest,
+    roleIdentityPolicyDigest,
     scheduledFor,
     deadlineAt,
     runId: null,

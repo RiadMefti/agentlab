@@ -5,7 +5,9 @@ import {
   factoryCostPolicySchema,
   factorySchedulePolicySchema,
   type FactoryCostPolicy,
-  type FactorySchedulePolicy
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy,
+  type Sha256Digest
 } from "@agentlab/contracts";
 
 import { ArtifactFactorySkillSource } from "./application/artifact-factory-skill-source.js";
@@ -36,6 +38,7 @@ import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.j
 import { RuntimeResourceOwner } from "./application/runtime-resource-owner.js";
 import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
 import { FactoryCostAccountant } from "./domain/factory-cost-accounting.js";
+import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import type { FactoryGateDefinition } from "./domain/factory-gate.js";
 import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
@@ -93,6 +96,8 @@ export interface LocalFactoryWorkerOptions {
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
@@ -102,6 +107,7 @@ export interface LocalFactoryWorkerOptions {
 export function createLocalFactoryWorker(
   options: LocalFactoryWorkerOptions
 ): LocalFactoryWorkerRuntime {
+  const documents = new NodeFactoryDocumentCodec();
   const costPolicy = factoryCostPolicySchema.parse(
     options.costPolicy ?? defaultFactoryPolicyBundle.costPolicy
   );
@@ -109,6 +115,25 @@ export function createLocalFactoryWorker(
     options.schedulePolicy === undefined
       ? null
       : factorySchedulePolicySchema.parse(options.schedulePolicy);
+  const identityPolicy =
+    options.roleIdentityPolicy === undefined
+      ? null
+      : documents.roleIdentityPolicy(options.roleIdentityPolicy);
+  if ((identityPolicy === null) !== (options.expectedRoleIdentityPolicyDigest === undefined)) {
+    throw new Error("Factory worker role identity policy and reviewed digest must be paired.");
+  }
+  if (
+    identityPolicy !== null &&
+    identityPolicy.digest !== options.expectedRoleIdentityPolicyDigest
+  ) {
+    throw new Error("Factory worker role identity policy changed after review.");
+  }
+  if (schedulePolicy !== null && identityPolicy === null) {
+    throw new Error("Scheduled factory work requires an enforced role identity policy.");
+  }
+  if (identityPolicy !== null) {
+    assertFactoryProcessRoleIdentity(identityPolicy.value, "worker", process.getuid?.());
+  }
   if (factoryPathsOverlap(options.artifactRoot, options.workspaceRoot)) {
     throw new Error("Factory artifact and worktree roots must not overlap.");
   }
@@ -122,7 +147,6 @@ export function createLocalFactoryWorker(
     if (writerLease.databasePath === ":memory:") {
       throw new Error("The local factory worker requires a durable SQLite database.");
     }
-    const documents = new NodeFactoryDocumentCodec();
     const schedulePolicyDocument =
       schedulePolicy === null ? null : documents.schedulePolicy(schedulePolicy);
     const databasePath = writerLease.databasePath;
@@ -361,11 +385,15 @@ export function createLocalFactoryWorker(
       gates: options.gates,
       configuredProviders: options.providers.map(({ provider }) => provider),
       providers,
-      hostEnvironment
+      hostEnvironment,
+      ...(identityPolicy === null
+        ? {}
+        : { expectedWorkerUserId: identityPolicy.value.worker.userId })
     });
     const operator = new FactoryWorkerOperator({
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
       costPolicyConfigured: costPolicy.rules.length > 0,
       configuredProviders: options.providers.map(({ provider }) => provider),
       gateIds: gates.availableGateIds(),
@@ -381,17 +409,26 @@ export function createLocalFactoryWorker(
     });
     const taskRunner = new FactoryWorkerTaskRunner({
       policyBundleDigest: policyBundle.digest,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
       preparations,
       tasks: factory,
       executions,
       worker: operator
     });
-    const scheduler =
+    const scheduledPolicies =
       schedulePolicyDocument === null
         ? null
+        : {
+            schedule: schedulePolicyDocument,
+            identity: requiredRoleIdentityPolicy(identityPolicy)
+          };
+    const scheduler =
+      scheduledPolicies === null
+        ? null
         : new FactorySchedulerService({
-            schedulePolicy: schedulePolicyDocument,
+            schedulePolicy: scheduledPolicies.schedule,
             factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
             schedules,
             preparations,
             worker: operator,
@@ -425,6 +462,15 @@ export function createLocalFactoryWorker(
   }
 }
 
+function requiredRoleIdentityPolicy(
+  policy: ReturnType<NodeFactoryDocumentCodec["roleIdentityPolicy"]> | null
+): ReturnType<NodeFactoryDocumentCodec["roleIdentityPolicy"]> {
+  if (policy === null) {
+    throw new Error("Scheduled factory work lost its enforced role identity policy.");
+  }
+  return policy;
+}
+
 export function createConfiguredLocalFactoryWorker(
   config: LocalFactoryWorkerConfig
 ): LocalFactoryWorkerRuntime {
@@ -440,6 +486,37 @@ export function createConfiguredLocalFactoryWorker(
   ) {
     throw new Error("Factory worker v2 configuration requires its loaded schedule policy.");
   }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v2") {
+    throw new Error("Factory worker v2 cannot run scheduled work without enforced role identity.");
+  }
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v3" &&
+    config.roleIdentityPolicy === undefined
+  ) {
+    throw new Error("Factory worker v3 configuration requires its role identity policy.");
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v3") {
+    const schedulePolicy = config.schedulePolicy;
+    const roleIdentityPolicy = config.roleIdentityPolicy;
+    if (roleIdentityPolicy === undefined) {
+      throw new Error("Factory worker v3 configuration lost its loaded role identity policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      ...(schedulePolicy === undefined ? {} : { schedulePolicy }),
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+    });
+  }
   return createLocalFactoryWorker({
     databasePath: config.databasePath,
     artifactRoot: config.artifactRoot,
@@ -450,8 +527,7 @@ export function createConfiguredLocalFactoryWorker(
     sandbox: config.sandbox,
     providers: config.providers,
     gates: config.gates,
-    costPolicy: config.costPolicy,
-    ...(config.schedulePolicy === undefined ? {} : { schedulePolicy: config.schedulePolicy })
+    costPolicy: config.costPolicy
   });
 }
 

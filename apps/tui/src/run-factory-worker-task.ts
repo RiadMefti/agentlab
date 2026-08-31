@@ -47,6 +47,7 @@ export async function runFactoryWorkerTask(
         (reasonCode) =>
           reasonCode !== "scheduler-disabled" && reasonCode !== "schedule-policy-unconfigured"
       ),
+      ...(preflight.roleIdentityPolicyDigest === null ? ["role-identity-policy-unconfigured"] : []),
       ...(preflight.policyBundleDigest === expectedPolicyBundleDigest
         ? []
         : ["policy-bundle-digest-mismatch"])
@@ -97,6 +98,7 @@ function assertReportIdentity(
     report.taskId !== taskId ||
     report.correlationId !== correlationId ||
     report.policyBundleDigest !== preflight.policyBundleDigest ||
+    report.roleIdentityPolicyDigest !== preflight.roleIdentityPolicyDigest ||
     (report.taskState === null) !== (report.contractDigest === null)
   ) {
     throw new Error("Factory worker result does not match the confirmed command or preflight.");
@@ -110,10 +112,11 @@ function serializeResult(
   reasonCodes: readonly string[]
 ): string {
   return JSON.stringify({
-    schemaVersion: "agentlab.worker-run-command-result.v1",
+    schemaVersion: "agentlab.worker-run-command-result.v2",
     status: report?.status ?? "blocked",
     taskId,
     policyBundleDigest: preflight.policyBundleDigest,
+    roleIdentityPolicyDigest: preflight.roleIdentityPolicyDigest,
     reasonCodes: [...new Set(reasonCodes)].sort(),
     run:
       report === null
@@ -121,6 +124,7 @@ function serializeResult(
         : {
             schemaVersion: report.schemaVersion,
             correlationId: report.correlationId,
+            roleIdentityPolicyDigest: report.roleIdentityPolicyDigest,
             preparationState: report.preparationState,
             taskState: report.taskState,
             contractDigest: report.contractDigest

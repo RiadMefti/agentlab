@@ -688,6 +688,7 @@ const factoryEvaluatorInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-signed-eval-attestation.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
@@ -741,6 +742,7 @@ const factoryEvalAttestorInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts"
 ]);

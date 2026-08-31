@@ -34,6 +34,7 @@ import {
 } from "../helpers/factory-schedule.js";
 
 const factoryPolicyBundleDigest = testFactoryPreparationFixture().policyDigest;
+const roleIdentityPolicyDigest = testDigest("8");
 const expectedCommand = (schedulePolicyDigest: Sha256Digest) => ({
   expectedSchedulePolicyDigest: schedulePolicyDigest,
   expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest
@@ -71,14 +72,20 @@ describe("FactorySchedulerService", () => {
     });
     expect(fixture.runTask).toHaveBeenCalledOnce();
     expect(fixture.listScheduled).toHaveBeenCalledOnce();
-    expect(
-      (
-        await fixture.schedules.findBySlot(
-          fixture.schedulePolicy.value.id,
-          TEST_FACTORY_SCHEDULED_FOR
-        )
-      )?.events.map(({ kind }) => kind)
-    ).toEqual(["registered", "task-claimed", "task-finished", "completed"]);
+    const stored = await fixture.schedules.findBySlot(
+      fixture.schedulePolicy.value.id,
+      TEST_FACTORY_SCHEDULED_FOR
+    );
+    expect(stored?.run).toMatchObject({
+      schemaVersion: "agentlab.schedule-run.v2",
+      roleIdentityPolicyDigest
+    });
+    expect(stored?.events.map(({ kind }) => kind)).toEqual([
+      "registered",
+      "task-claimed",
+      "task-finished",
+      "completed"
+    ]);
   });
 
   it("reuses a durable task claim after an ambiguous crash", async () => {
@@ -313,6 +320,7 @@ function schedulerFixture(
   const service = new FactorySchedulerService({
     schedulePolicy,
     factoryPolicyBundleDigest,
+    roleIdentityPolicyDigest,
     schedules,
     preparations: { listScheduled },
     worker: { preflight },
@@ -326,10 +334,11 @@ function schedulerFixture(
 
 function readyPreflight(schedulePolicyDigest: Sha256Digest): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v2",
+    schemaVersion: "agentlab.worker-preflight.v3",
     status: "ready",
     policyBundleDigest: factoryPolicyBundleDigest,
     schedulePolicyDigest,
+    roleIdentityPolicyDigest,
     schedulerEnabled: true,
     costPolicyConfigured: true,
     hostReady: true,
@@ -341,11 +350,12 @@ function readyPreflight(schedulePolicyDigest: Sha256Digest): FactoryWorkerPrefli
 
 function taskResult(taskId: string, correlationId: string): FactoryWorkerTaskRunReport {
   return {
-    schemaVersion: "agentlab.worker-task-run.v1",
+    schemaVersion: "agentlab.worker-task-run.v2",
     status: "stopped",
     taskId,
     correlationId,
     policyBundleDigest: factoryPolicyBundleDigest,
+    roleIdentityPolicyDigest,
     preparationState: "needs-human",
     taskState: null,
     contractDigest: null,

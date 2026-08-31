@@ -129,6 +129,7 @@ function fixture() {
       challengerHarnessDigest: run.value.challengerCandidate.harnessDigest,
       baselineCandidateDigest: run.value.baselineCandidateDigest,
       challengerCandidateDigest: run.value.challengerCandidateDigest,
+      roleIdentityPolicyDigest: testEvalDigest(903),
       startedAt: run.value.startedAt,
       completedAt: run.value.completedAt,
       issuedAt: "2026-08-30T11:31:00.000Z",

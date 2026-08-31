@@ -93,6 +93,18 @@ describe("LocalFactoryWorkerHostInspector", () => {
       reasonCodes: ["artifact-root-unavailable"]
     });
   });
+
+  it("reports a reviewed worker process identity mismatch", async () => {
+    const currentUserId = process.getuid?.();
+    const fixture = hostFixture({
+      expectedWorkerUserId: currentUserId === 1 ? 2 : 1
+    });
+
+    await expect(fixture.inspector.inspect()).resolves.toEqual({
+      status: "blocked",
+      reasonCodes: ["worker-process-identity-mismatch"]
+    });
+  });
 });
 
 class VersionRunner implements CommandRunner {
@@ -115,7 +127,12 @@ class VersionRunner implements CommandRunner {
   }
 }
 
-function hostFixture(options: { readonly systemdVersion?: string } = {}) {
+function hostFixture(
+  options: {
+    readonly systemdVersion?: string;
+    readonly expectedWorkerUserId?: number;
+  } = {}
+) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-worker-host-"));
   temporaryRoots.push(root);
   const executable = join(root, "tool");
@@ -180,7 +197,10 @@ function hostFixture(options: { readonly systemdVersion?: string } = {}) {
       hostEnvironment: {
         XDG_RUNTIME_DIR: "/run/user/1000",
         DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus"
-      }
+      },
+      ...(options.expectedWorkerUserId === undefined
+        ? {}
+        : { expectedWorkerUserId: options.expectedWorkerUserId })
     });
   }
 }

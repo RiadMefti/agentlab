@@ -223,11 +223,12 @@ function scheduleDocuments(
 ) {
   const policy = codec.schedulePolicy(testFactorySchedulePolicy());
   const run = codec.scheduleRun({
-    schemaVersion: "agentlab.schedule-run.v1",
+    schemaVersion: "agentlab.schedule-run.v2",
     runId: ids.runId ?? "10000000-0000-4000-8000-000000000001",
     schedulePolicyDigest: policy.digest,
     schedulePolicy: policy.value,
     factoryPolicyBundleDigest: testFactoryPreparationFixture().policyDigest,
+    roleIdentityPolicyDigest: testDigest("8"),
     scheduledFor: ids.scheduledFor ?? TEST_FACTORY_SCHEDULED_FOR,
     deadlineAt: ids.deadlineAt ?? TEST_FACTORY_SCHEDULE_DEADLINE,
     createdAt: ids.createdAt ?? TEST_FACTORY_SCHEDULE_NOW,

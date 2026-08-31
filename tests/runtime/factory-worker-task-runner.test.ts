@@ -18,6 +18,7 @@ import {
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const policyBundleDigest = testFactoryPreparationFixture().policyDigest;
+const roleIdentityPolicyDigest = testDigest("f");
 const command = {
   taskId: TEST_FACTORY_TASK_ID,
   correlationId: TEST_FACTORY_CORRELATION_ID,
@@ -76,11 +77,12 @@ describe("FactoryWorkerTaskRunner", () => {
     });
 
     await expect(runner.run(command)).resolves.toEqual({
-      schemaVersion: "agentlab.worker-task-run.v1",
+      schemaVersion: "agentlab.worker-task-run.v2",
       status: "ready-for-broker",
       taskId: TEST_FACTORY_TASK_ID,
       correlationId: TEST_FACTORY_CORRELATION_ID,
       policyBundleDigest,
+      roleIdentityPolicyDigest,
       preparationState: "prepared",
       taskState: "pr-proposed",
       contractDigest: testDigest("c"),
@@ -231,6 +233,7 @@ function taskRunner(
 ): FactoryWorkerTaskRunner {
   return new FactoryWorkerTaskRunner({
     policyBundleDigest,
+    roleIdentityPolicyDigest,
     preparations: { findById: () => Promise.resolve(preparation("registered")) },
     tasks: { findById: () => Promise.resolve(null) },
     executions: { findByTaskId: () => Promise.resolve(null) },

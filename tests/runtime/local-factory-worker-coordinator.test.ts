@@ -149,6 +149,7 @@ function coordinator(
   const operator = new FactoryWorkerOperator({
     policyBundleDigest,
     schedulePolicyDigest,
+    roleIdentityPolicyDigest: `sha256:${"c".repeat(64)}`,
     costPolicyConfigured: true,
     configuredProviders: ["codex"],
     gateIds,

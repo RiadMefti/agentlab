@@ -17,7 +17,8 @@ export function assertFactorySignedEvalAttestation(
   run: CanonicalFactoryDocument<FactoryEvalRun>,
   signed: CanonicalFactoryDocument<FactorySignedEvalAttestation>,
   verification: FactoryDsseVerificationResult,
-  documents: AttestationDocuments
+  documents: AttestationDocuments,
+  expectedRoleIdentityPolicyDigest: Sha256Digest
 ): void {
   const statement = documents.evalAttestationStatement(signed.value.statement);
   const envelope = documents.dsseEnvelope(signed.value.envelope);
@@ -40,10 +41,13 @@ export function assertFactorySignedEvalAttestation(
     predicate.challengerHarnessDigest !== run.value.challengerCandidate.harnessDigest ||
     predicate.baselineCandidateDigest !== run.value.baselineCandidateDigest ||
     predicate.challengerCandidateDigest !== run.value.challengerCandidateDigest ||
+    predicate.roleIdentityPolicyDigest !== expectedRoleIdentityPolicyDigest ||
     predicate.startedAt !== run.value.startedAt ||
     predicate.completedAt !== run.value.completedAt
   ) {
-    throw new Error("Signed factory eval attestation does not match its exact eval run.");
+    throw new Error(
+      "Signed factory eval attestation does not match its exact eval run or role identity policy."
+    );
   }
 }
 
@@ -53,10 +57,17 @@ export function assertFactoryEvalAttestationRecord(
   record: CanonicalFactoryDocument<FactoryEvalAttestationRecord>,
   signedDigest: Sha256Digest,
   verification: FactoryDsseVerificationResult,
-  documents: AttestationDocuments
+  documents: AttestationDocuments,
+  expectedRoleIdentityPolicyDigest: Sha256Digest
 ): void {
   const signed = documents.signedEvalAttestation(record.value.signedAttestation);
-  assertFactorySignedEvalAttestation(run, signed, verification, documents);
+  assertFactorySignedEvalAttestation(
+    run,
+    signed,
+    verification,
+    documents,
+    expectedRoleIdentityPolicyDigest
+  );
   const expected = documents.evalAttestationRecord({
     ...record.value,
     assessmentDigest,

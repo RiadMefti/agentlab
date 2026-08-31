@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -8,15 +8,20 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createLocalFactoryCanaryAuthority } from "../../packages/runtime/src/local-factory-canary-authority.js";
 import { createLocalFactoryEvalAttestor } from "../../packages/runtime/src/local-factory-eval-attestor.js";
-import { createLocalFactoryEvaluator } from "../../packages/runtime/src/local-factory-evaluator.js";
+import {
+  createConfiguredLocalFactoryEvaluator,
+  createLocalFactoryEvaluator
+} from "../../packages/runtime/src/local-factory-evaluator.js";
 import { loadLocalFactorySignedEvalAttestation } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-signed-eval-attestation.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import {
   TEST_CANARY_APPROVAL_ID,
   TEST_CANARY_COHORT_ID,
   TEST_EVAL_ASSESSMENT_ID,
   testEvalDigest,
   testFactoryEvalBudget,
-  testFactoryEvalRun
+  testFactoryEvalRun,
+  testFactoryRoleIdentityPolicy
 } from "../helpers/factory-evaluation.js";
 
 const temporaryRoots: string[] = [];
@@ -26,9 +31,82 @@ afterEach(() => {
 });
 
 describe("local factory evaluation compositions", () => {
+  it("rejects unreviewed or wrong-process signer identity before opening a key", () => {
+    const keyId = testEvalDigest(901);
+    const wrongAttestorUserId = process.getuid?.() === 1 ? 2 : 1;
+    const policy = testFactoryRoleIdentityPolicy({
+      keyId,
+      workerUserId: wrongAttestorUserId === 2 ? 3 : 2,
+      attestorUserId: wrongAttestorUserId
+    });
+    const digest = new NodeFactoryDocumentCodec().roleIdentityPolicy(policy).digest;
+    const options = {
+      runnerId: "trusted-eval-runner",
+      privateKeyPath: "/key-must-not-be-opened.pem",
+      keyId,
+      attestationLifetimeSeconds: 3_600,
+      maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicy: policy,
+      expectedRoleIdentityPolicyDigest: digest
+    } as const;
+
+    expect(() =>
+      createLocalFactoryEvalAttestor({
+        ...options,
+        expectedRoleIdentityPolicyDigest: testEvalDigest(999)
+      })
+    ).toThrow(/changed after review/u);
+    expect(() => createLocalFactoryEvalAttestor(options)).toThrow(/process identity/u);
+    expect(existsSync(options.privateKeyPath)).toBe(false);
+  });
+
+  it("rejects evaluator trust coordinates outside the reviewed identity policy", () => {
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const digest = new NodeFactoryDocumentCodec().roleIdentityPolicy(roleIdentityPolicy).digest;
+    const config = {
+      schemaVersion: "agentlab.local-factory-evaluator.v2" as const,
+      databasePath: "/database-must-not-be-opened.sqlite",
+      runnerId: "trusted-eval-runner",
+      trustedPublicKeyPath: "/key-must-not-be-opened.pem",
+      trustedKeyId: testEvalDigest(901),
+      roleIdentityPolicyPath: "/role-policy-must-not-be-opened.json",
+      expectedRoleIdentityPolicyDigest: digest,
+      maximumIssuanceDelaySeconds: 300,
+      maximumAttestationLifetimeSeconds: 3_600,
+      roleIdentityPolicy
+    };
+
+    expect(() =>
+      createConfiguredLocalFactoryEvaluator({
+        ...config,
+        expectedRoleIdentityPolicyDigest: testEvalDigest(999)
+      })
+    ).toThrow(/changed after review/u);
+    expect(() =>
+      createConfiguredLocalFactoryEvaluator({ ...config, trustedKeyId: testEvalDigest(902) })
+    ).toThrow(/trust coordinates/u);
+    expect(existsSync(config.databasePath)).toBe(false);
+  });
+
   it("assesses, signs in isolation, verifies immutably, then issues a separate non-release cohort", async () => {
     const databasePath = temporaryDatabase();
     const key = writeSigningKey(dirname(databasePath));
+    const processUserId = process.getuid?.();
+    if (processUserId === undefined || processUserId < 1) {
+      throw new Error("This identity-bound composition test requires a non-root POSIX user.");
+    }
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: key.keyId,
+      workerUserId: processUserId === 1 ? 2 : 1,
+      attestorUserId: processUserId
+    });
+    const roleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
     const evaluatorIds = [TEST_EVAL_ASSESSMENT_ID, "10000000-0000-4000-8000-000000000006"];
     const evaluator = createLocalFactoryEvaluator({
       databasePath,
@@ -37,6 +115,8 @@ describe("local factory evaluation compositions", () => {
       trustedKeyId: key.keyId,
       maximumIssuanceDelaySeconds: 300,
       maximumAttestationLifetimeSeconds: 3_600,
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
       now: () => "2026-08-30T11:32:00.000Z",
       createId: () => evaluatorIds.shift() ?? "10000000-0000-4000-8000-000000000099"
     });
@@ -52,6 +132,8 @@ describe("local factory evaluation compositions", () => {
       keyId: key.keyId,
       attestationLifetimeSeconds: 3_600,
       maximumIssuanceDelaySeconds: 300,
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
       now: () => "2026-08-30T11:31:00.000Z"
     });
     expect(Object.keys(attestor.commands)).toEqual(["sign"]);
@@ -121,6 +203,11 @@ describe("local factory evaluation compositions", () => {
   });
 
   it("refuses ephemeral databases for both authority-bearing compositions", () => {
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
     expect(() =>
       createLocalFactoryEvaluator({
         databasePath: ":memory:",
@@ -128,7 +215,11 @@ describe("local factory evaluation compositions", () => {
         trustedPublicKeyPath: "/private/eval-public.pem",
         trustedKeyId: testEvalDigest(901),
         maximumIssuanceDelaySeconds: 300,
-        maximumAttestationLifetimeSeconds: 3_600
+        maximumAttestationLifetimeSeconds: 3_600,
+        roleIdentityPolicy,
+        expectedRoleIdentityPolicyDigest: new NodeFactoryDocumentCodec().roleIdentityPolicy(
+          roleIdentityPolicy
+        ).digest
       })
     ).toThrow(/durable SQLite/u);
     expect(() =>

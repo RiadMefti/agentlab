@@ -44,6 +44,7 @@ function serializePreflight(report: FactoryWorkerPreflight): string {
     status: report.status,
     policyBundleDigest: report.policyBundleDigest,
     schedulePolicyDigest: report.schedulePolicyDigest,
+    roleIdentityPolicyDigest: report.roleIdentityPolicyDigest,
     schedulerEnabled: report.schedulerEnabled,
     costPolicyConfigured: report.costPolicyConfigured,
     hostReady: report.hostReady,

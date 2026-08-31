@@ -20,6 +20,7 @@ import {
 const configPath = "/private/agentlab/worker.json";
 const schedulePolicyDigest = testDigest("1");
 const factoryPolicyBundleDigest = testDigest("2");
+const roleIdentityPolicyDigest = testDigest("4");
 
 describe("factory scheduler tick CLI runner", () => {
   it("passes exact policy pins and emits only after clean shutdown", async () => {
@@ -87,7 +88,7 @@ describe("factory scheduler tick CLI runner", () => {
         createRuntime,
         write: vi.fn()
       })
-    ).rejects.toThrow(/v2 worker config/u);
+    ).rejects.toThrow(/v3 worker config/u);
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
@@ -153,7 +154,7 @@ function runtime(
 
 function config(): LocalFactoryWorkerConfig {
   return {
-    schemaVersion: "agentlab.local-factory-worker.v2",
+    schemaVersion: "agentlab.local-factory-worker.v3",
     schedulePolicy: testFactorySchedulePolicy()
   } as unknown as LocalFactoryWorkerConfig;
 }
@@ -163,10 +164,11 @@ function report(
   reasonCodes: readonly string[] = []
 ): FactorySchedulerTickReport {
   return {
-    schemaVersion: "agentlab.scheduler-tick-result.v1",
+    schemaVersion: "agentlab.scheduler-tick-result.v2",
     status,
     schedulePolicyDigest,
     factoryPolicyBundleDigest,
+    roleIdentityPolicyDigest,
     scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
     deadlineAt: TEST_FACTORY_SCHEDULE_DEADLINE,
     runId:

@@ -41,11 +41,12 @@ describe("factory schedule contracts", () => {
 
   it("binds an immutable run to one admitted slot window", () => {
     const run = {
-      schemaVersion: "agentlab.schedule-run.v1",
+      schemaVersion: "agentlab.schedule-run.v2",
       runId,
       schedulePolicyDigest: testDigest("1"),
       schedulePolicy: testFactorySchedulePolicy(),
       factoryPolicyBundleDigest: testDigest("2"),
+      roleIdentityPolicyDigest: testDigest("8"),
       scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
       deadlineAt: TEST_FACTORY_SCHEDULE_DEADLINE,
       createdAt: TEST_FACTORY_SCHEDULE_NOW,
@@ -53,6 +54,21 @@ describe("factory schedule contracts", () => {
     } as const;
 
     expect(factoryScheduleRunSchema.parse(run)).toEqual(run);
+    const legacyRun = {
+      schemaVersion: "agentlab.schedule-run.v1",
+      runId: run.runId,
+      schedulePolicyDigest: run.schedulePolicyDigest,
+      schedulePolicy: run.schedulePolicy,
+      factoryPolicyBundleDigest: run.factoryPolicyBundleDigest,
+      scheduledFor: run.scheduledFor,
+      deadlineAt: run.deadlineAt,
+      createdAt: run.createdAt,
+      correlationId: run.correlationId
+    } as const;
+    expect(factoryScheduleRunSchema.safeParse(legacyRun).success).toBe(true);
+    expect(
+      factoryScheduleRunSchema.safeParse({ ...legacyRun, schemaVersion: run.schemaVersion }).success
+    ).toBe(false);
     expect(
       factoryScheduleRunSchema.safeParse({ ...run, createdAt: "2026-08-31T12:31:00.000Z" }).success
     ).toBe(false);

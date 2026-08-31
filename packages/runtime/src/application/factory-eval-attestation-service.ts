@@ -40,6 +40,7 @@ export interface FactoryEvalAttestationServiceDependencies {
   readonly verifier: FactoryDsseVerifier;
   readonly maximumIssuanceDelaySeconds: number;
   readonly maximumAttestationLifetimeSeconds: number;
+  readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
   readonly documents: Pick<
     FactoryDocumentCodec,
     | "evalRun"
@@ -55,6 +56,7 @@ export interface FactoryEvalAttestationServiceDependencies {
 /** Verifies DSSE bytes and semantic run lineage before writing one immutable trust record. */
 export class FactoryEvalAttestationService {
   readonly #timingPolicy: FactoryEvalAttestationTimingPolicy;
+  readonly #expectedRoleIdentityPolicyDigest: Sha256Digest;
 
   public constructor(private readonly dependencies: FactoryEvalAttestationServiceDependencies) {
     this.#timingPolicy = {
@@ -62,6 +64,9 @@ export class FactoryEvalAttestationService {
       maximumAttestationLifetimeSeconds: dependencies.maximumAttestationLifetimeSeconds
     };
     assertFactoryEvalAttestationTimingPolicy(this.#timingPolicy);
+    this.#expectedRoleIdentityPolicyDigest = sha256DigestSchema.parse(
+      dependencies.expectedRoleIdentityPolicyDigest
+    );
   }
 
   public async record(input: unknown): Promise<FactoryEvalAttestationRecordResult> {
@@ -91,7 +96,13 @@ export class FactoryEvalAttestationService {
     }
     const verifiedAt = this.#now();
     const verification = await this.dependencies.verifier.verify(signed.value.envelope);
-    assertFactorySignedEvalAttestation(run, signed, verification, this.dependencies.documents);
+    assertFactorySignedEvalAttestation(
+      run,
+      signed,
+      verification,
+      this.dependencies.documents,
+      this.#expectedRoleIdentityPolicyDigest
+    );
     const predicate = signed.value.statement.predicate;
     assertFactoryEvalAttestationTiming(
       predicate.completedAt,
@@ -127,7 +138,8 @@ export class FactoryEvalAttestationService {
       record,
       signed.digest,
       verification,
-      this.dependencies.documents
+      this.dependencies.documents,
+      this.#expectedRoleIdentityPolicyDigest
     );
     try {
       return result("recorded", await this.dependencies.attestations.record(record));
@@ -181,7 +193,8 @@ export class FactoryEvalAttestationService {
       record,
       signed.digest,
       verification,
-      this.dependencies.documents
+      this.dependencies.documents,
+      this.#expectedRoleIdentityPolicyDigest
     );
     const predicate = signed.value.statement.predicate;
     assertFactoryEvalAttestationTiming(

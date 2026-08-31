@@ -1,4 +1,4 @@
-import type { FactoryEvalRun } from "@agentlab/contracts";
+import type { FactoryEvalRun, FactoryRoleIdentityPolicy } from "@agentlab/contracts";
 import {
   createConfiguredLocalFactoryEvaluator,
   createLocalFactoryEvaluator,
@@ -35,8 +35,11 @@ interface ExpectedConfig {
   runnerId: string;
   trustedPublicKeyPath: string;
   trustedKeyId: string;
+  roleIdentityPolicyPath: string;
+  expectedRoleIdentityPolicyDigest: string;
   maximumIssuanceDelaySeconds: number;
   maximumAttestationLifetimeSeconds: number;
+  roleIdentityPolicy: FactoryRoleIdentityPolicy;
 }
 
 interface ExpectedOptions {
@@ -46,6 +49,8 @@ interface ExpectedOptions {
   readonly trustedKeyId: string;
   readonly maximumIssuanceDelaySeconds: number;
   readonly maximumAttestationLifetimeSeconds: number;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest: string;
   readonly now?: () => string;
   readonly createId?: () => string;
 }

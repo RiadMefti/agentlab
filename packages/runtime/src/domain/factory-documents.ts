@@ -40,6 +40,7 @@ import type {
   FactoryQualification,
   FactoryReviewResult,
   FactoryResourceIsolationRecord,
+  FactoryRoleIdentityPolicy,
   FactoryScheduleEvent,
   FactorySchedulePolicy,
   FactoryScheduleRun,
@@ -94,6 +95,7 @@ export interface FactoryDocumentCodec {
   agentRunRequest(input: unknown): CanonicalFactoryDocument<FactoryAgentRunRequest>;
   gateObservation(input: unknown): CanonicalFactoryDocument<FactoryGateObservation>;
   resourceIsolation(input: unknown): CanonicalFactoryDocument<FactoryResourceIsolationRecord>;
+  roleIdentityPolicy(input: unknown): CanonicalFactoryDocument<FactoryRoleIdentityPolicy>;
   schedulePolicy(input: unknown): CanonicalFactoryDocument<FactorySchedulePolicy>;
   scheduleRun(input: unknown): CanonicalFactoryDocument<FactoryScheduleRun>;
   scheduleEvent(input: unknown): CanonicalFactoryDocument<FactoryScheduleEvent>;

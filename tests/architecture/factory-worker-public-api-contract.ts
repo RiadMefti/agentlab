@@ -1,4 +1,9 @@
-import type { FactoryCostPolicy, FactorySchedulePolicy, Sha256Digest } from "@agentlab/contracts";
+import type {
+  FactoryCostPolicy,
+  FactoryRoleIdentityPolicy,
+  FactorySchedulePolicy,
+  Sha256Digest
+} from "@agentlab/contracts";
 import {
   createConfiguredLocalFactoryWorker,
   createLocalFactoryWorker,
@@ -71,16 +76,19 @@ interface ExpectedOptions {
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
 
 interface ExpectedPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v2";
+  readonly schemaVersion: "agentlab.worker-preflight.v3";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
   readonly schedulePolicyDigest: Sha256Digest | null;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -90,11 +98,12 @@ interface ExpectedPreflight {
 }
 
 interface ExpectedTaskRunReport {
-  readonly schemaVersion: "agentlab.worker-task-run.v1";
+  readonly schemaVersion: "agentlab.worker-task-run.v2";
   readonly status: "ready-for-broker" | "already-advanced" | "stopped";
   readonly taskId: string;
   readonly correlationId: string;
   readonly policyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
   readonly preparationState:
     | "registered"
     | "qualifying"
@@ -143,10 +152,11 @@ interface ExpectedTaskRunReport {
 }
 
 interface ExpectedSchedulerTickReport {
-  readonly schemaVersion: "agentlab.scheduler-tick-result.v1";
+  readonly schemaVersion: "agentlab.scheduler-tick-result.v2";
   readonly status: "completed" | "already-completed" | "missed-deadline" | "blocked";
   readonly schedulePolicyDigest: Sha256Digest;
   readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
   readonly scheduledFor: string;
   readonly deadlineAt: string;
   readonly runId: string | null;
@@ -184,7 +194,8 @@ type ExpectedConfigKeys =
   | "providers"
   | "gates"
   | "costPolicy"
-  | "schedulePolicy";
+  | "schedulePolicy"
+  | "roleIdentityPolicy";
 
 export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<FactoryAgentProviderBinding, ExpectedProviderBinding>>,

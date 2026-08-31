@@ -56,6 +56,7 @@ export const factoryEvalAttestationStatementSchema = z
         challengerHarnessDigest: sha256DigestSchema,
         baselineCandidateDigest: sha256DigestSchema,
         challengerCandidateDigest: sha256DigestSchema,
+        roleIdentityPolicyDigest: sha256DigestSchema,
         startedAt: factoryTimestampSchema,
         completedAt: factoryTimestampSchema,
         issuedAt: factoryTimestampSchema,

@@ -198,17 +198,21 @@ registered/ready
 ```
 
 Only intake requests whose immutable trigger is `scheduled` are eligible. Before selection,
-preflight requires the scheduler switch, exact schedule and factory policy pins, complete cost
-policy, and a healthy isolated worker host. Each claim durably binds the request and authority
-digests, reserves the task's complete authority budget ceiling against the per-tick aggregate quota,
-and records a fresh task correlation before any model work. A crash or lost result leaves
-`task-active`; retry invokes the existing journal-aware task runner with that same correlation.
-Duplicate ticks read the completed slot without selecting or running work again. The single SQLite
-writer lease prevents overlapping local schedulers, and database uniqueness remains the final
-idempotency guard. The scheduler has no broker, remote credential, authority mutation, merge, or
-release capability and stops every successful task at `pr-proposed`. AgentLab does not install a
-timer; an owner-governed system timer must invoke this one-shot command with the reviewed digests.
-See [Local factory scheduler operations](factory-operations.md).
+preflight requires the scheduler switch, exact role-identity, schedule, and factory policy pins,
+complete cost policy, and a healthy isolated worker host. Each claim durably binds the request and
+authority digests, reserves the task's complete authority budget ceiling against the per-tick
+aggregate quota, and records a fresh task correlation before any model work. A crash or lost result
+leaves `task-active`; retry invokes the existing journal-aware task runner with that same
+correlation. Duplicate ticks read the completed slot without selecting or running work again. The
+single SQLite writer lease prevents overlapping local schedulers, and database uniqueness remains
+the final idempotency guard. The scheduler has no broker, remote credential, authority mutation,
+merge, or release capability and stops every successful task at `pr-proposed`. AgentLab does not
+install a timer; an owner-governed system timer must invoke this one-shot command with the reviewed
+digests. Scheduled activation requires worker config v3 and a canonical policy that proves a
+non-root worker UID distinct from the eval-attestor UID before persistence is opened; preflight
+rechecks and reports that policy digest, and schedule-run v2 persists it across crashes. See
+[ADR 0011](decisions/0011-enforced-signer-worker-identities.md) and
+[Local factory scheduler operations](factory-operations.md).
 
 Configuration promotion is a separate three-process boundary accepted by
 [ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and
@@ -222,11 +226,14 @@ It has no signer, provider executor, process runner, worktree, GitHub, authority
 release port.
 
 The exact `@agentlab/runtime/factory-eval-attestor` composition receives only the same strict run,
-runner identity, private-key coordinate, key ID, and timing bounds. It emits one portable signed
-artifact and has no database, verifier ledger, provider, process, repository, GitHub, broker,
-authority, merge, release, or canary port. Signing and verification are separate crypto modules and
-separate transitive executable allowlists. A signature authenticates exact bytes and key custody;
-the repository still does not ship the harness that proves trials were honestly executed.
+runner identity, private-key coordinate, key ID, role-identity policy, and timing bounds. It proves
+the configured non-root signer UID before key access, emits one portable signed artifact, and has no
+database, verifier ledger, provider, process, repository, GitHub, broker, authority, merge, release,
+or canary port. Signing and verification are separate crypto modules and separate transitive
+executable allowlists. A signature authenticates exact bytes and key custody; the repository still
+does not ship the harness that proves trials were honestly executed. Each predicate binds the shared
+role-policy digest, and the evaluator independently pins it; this prevents a valid signer key from
+silently authenticating a different signer/worker deployment.
 
 The distinct `@agentlab/runtime/factory-canary-authority` composition resolves only a passing
 assessment and one strict owner-only human request. It can issue one expiring cohort for exactly one

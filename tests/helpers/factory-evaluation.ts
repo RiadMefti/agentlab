@@ -10,6 +10,7 @@ import {
   type FactoryEvalRun,
   type FactoryEvalSample,
   type FactoryEvalSuite,
+  type FactoryRoleIdentityPolicy,
   type Sha256Digest
 } from "@agentlab/contracts";
 
@@ -25,6 +26,26 @@ export const TEST_EVAL_CORRELATION_ID = "10000000-0000-4000-8000-000000000002";
 export const TEST_EVAL_ASSESSMENT_ID = "10000000-0000-4000-8000-000000000003";
 export const TEST_CANARY_APPROVAL_ID = "10000000-0000-4000-8000-000000000004";
 export const TEST_CANARY_COHORT_ID = "10000000-0000-4000-8000-000000000005";
+export const TEST_ROLE_IDENTITY_POLICY_DIGEST = `sha256:${"9".repeat(64)}`;
+
+export function testFactoryRoleIdentityPolicy(input: {
+  readonly keyId: Sha256Digest;
+  readonly workerUserId: number;
+  readonly attestorUserId: number;
+}): FactoryRoleIdentityPolicy {
+  return {
+    schemaVersion: "agentlab.role-identity-policy.v1",
+    id: "agentlab/test-role-identities",
+    version: "1.0.0",
+    worker: { kind: "posix-uid", userId: input.workerUserId },
+    evalAttestor: {
+      kind: "posix-uid",
+      userId: input.attestorUserId,
+      runnerId: "trusted-eval-runner",
+      keyId: input.keyId
+    }
+  };
+}
 
 export function testEvalDigest(index: number): Sha256Digest {
   if (!Number.isSafeInteger(index) || index < 0) throw new Error("Digest index must be positive.");

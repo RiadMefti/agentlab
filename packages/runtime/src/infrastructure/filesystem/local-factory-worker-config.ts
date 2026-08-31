@@ -3,6 +3,7 @@ import { isAbsolute, parse, resolve } from "node:path";
 import {
   sha256DigestSchema,
   type FactoryCostPolicy,
+  type FactoryRoleIdentityPolicy,
   type FactorySchedulePolicy
 } from "@agentlab/contracts";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import type { FactoryAgentProviderBinding } from "../providers/pinned-factory-ag
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
 import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -100,7 +102,16 @@ const configV2Schema = commonConfigSchema
   })
   .superRefine(validateWorkerConfig);
 
-const configSchema = z.union([configV1Schema, configV2Schema]);
+const configV3Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v3"),
+    schedulePolicyPath: absolutePathSchema.optional(),
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema]);
 
 const requiredGateEvidence = {
   format: "test",
@@ -147,6 +158,7 @@ type ParsedLocalFactoryWorkerConfig = z.infer<typeof configSchema>;
 export type LocalFactoryWorkerConfig = ParsedLocalFactoryWorkerConfig & {
   readonly costPolicy: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
 };
@@ -171,10 +183,20 @@ export async function loadLocalFactoryWorkerConfig(
   const schedulePolicy =
     config.schemaVersion === "agentlab.local-factory-worker.v2"
       ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+      : config.schemaVersion === "agentlab.local-factory-worker.v3" &&
+          config.schedulePolicyPath !== undefined
+        ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+        : undefined;
+  const roleIdentityPolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v3"
+      ? await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
       : undefined;
-  return schedulePolicy === undefined
-    ? { ...config, costPolicy }
-    : { ...config, costPolicy, schedulePolicy };
+  return {
+    ...config,
+    costPolicy,
+    ...(schedulePolicy === undefined ? {} : { schedulePolicy }),
+    ...(roleIdentityPolicy === undefined ? {} : { roleIdentityPolicy })
+  };
 }
 
 function uniqueBy<Value>(

@@ -141,6 +141,7 @@ describe("factory evaluation CLI runners", () => {
         signedAttestation: {
           statement: {
             predicate: {
+              roleIdentityPolicyDigest: `sha256:${"b".repeat(64)}`,
               issuedAt: "2026-08-30T11:31:00.000Z",
               expiresAt: "2026-08-30T12:31:00.000Z"
             }
@@ -181,10 +182,11 @@ describe("factory evaluation CLI runners", () => {
     });
     const output = JSON.parse(String(write.mock.calls[0]?.[0])) as Record<string, unknown>;
     expect(output).toMatchObject({
-      schemaVersion: "agentlab.eval-attestation-command-result.v1",
+      schemaVersion: "agentlab.eval-attestation-command-result.v2",
       status: "recorded",
       assessmentDigest: evaluation.assessmentDigest,
-      runDigest: evaluation.runDigest
+      runDigest: evaluation.runDigest,
+      roleIdentityPolicyDigest: `sha256:${"b".repeat(64)}`
     });
     expect(JSON.stringify(output)).not.toContain("signature");
     expect(close).toHaveBeenCalledTimes(1);
@@ -253,25 +255,48 @@ describe("factory canary authority CLI runner", () => {
 });
 
 function evaluatorConfig(): LocalFactoryEvaluatorConfig {
+  const roleIdentityPolicy = testRoleIdentityPolicy();
   return {
     schemaVersion: "agentlab.local-factory-evaluator.v2",
     databasePath: "/private/agentlab.sqlite",
     runnerId: "trusted-eval-runner",
     trustedPublicKeyPath: "/private/eval-public.pem",
     trustedKeyId: `sha256:${"a".repeat(64)}`,
+    roleIdentityPolicyPath: "/private/role-identities.json",
+    expectedRoleIdentityPolicyDigest: `sha256:${"b".repeat(64)}`,
     maximumIssuanceDelaySeconds: 300,
-    maximumAttestationLifetimeSeconds: 3_600
+    maximumAttestationLifetimeSeconds: 3_600,
+    roleIdentityPolicy
   };
 }
 
 function attestorConfig(): LocalFactoryEvalAttestorConfig {
+  const roleIdentityPolicy = testRoleIdentityPolicy();
   return {
     schemaVersion: "agentlab.local-factory-eval-attestor.v1",
     runnerId: "trusted-eval-runner",
     privateKeyPath: "/private/eval-private.pem",
     keyId: `sha256:${"a".repeat(64)}`,
+    roleIdentityPolicyPath: "/private/role-identities.json",
+    expectedRoleIdentityPolicyDigest: `sha256:${"b".repeat(64)}`,
     attestationLifetimeSeconds: 3_600,
-    maximumIssuanceDelaySeconds: 300
+    maximumIssuanceDelaySeconds: 300,
+    roleIdentityPolicy
+  };
+}
+
+function testRoleIdentityPolicy() {
+  return {
+    schemaVersion: "agentlab.role-identity-policy.v1" as const,
+    id: "agentlab/test-role-identities",
+    version: "1.0.0",
+    worker: { kind: "posix-uid" as const, userId: 1001 },
+    evalAttestor: {
+      kind: "posix-uid" as const,
+      userId: 1002,
+      runnerId: "trusted-eval-runner",
+      keyId: `sha256:${"a".repeat(64)}`
+    }
   };
 }
 
