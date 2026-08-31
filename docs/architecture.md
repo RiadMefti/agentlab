@@ -199,6 +199,15 @@ evaluates the execution stage with zero pre-execution usage and an empty change 
 allowed R1 task, and otherwise leaves the task planned with the denial recorded as evidence.
 Already-queued work is idempotent. The service cannot enable scheduler or broker authority.
 
+The worker's local configuration is a separate owner-only v1 document. It pins the database,
+artifact/worktree roots, hardened Git tools, systemd isolation identity, Bubblewrap/runtime mounts,
+the exact seven external R1 gate commands and evidence kinds, and one or more supported provider
+executables by canonical path, SHA-256 digest, and exact `--version` output. Its separately
+protected cost policy is loaded through the same fail-closed rate-card boundary as broker config v2.
+Provider resolution rechecks file identity/digest and version for each use under a fixed environment
+that contains no GitHub, package-registry, or cloud credential variables. The schema has no GitHub
+App, remote-repository, or authority-control field, and the sandbox refuses `/` as a runtime mount.
+
 This path is not composed into `local-runtime.ts`, scheduled, deployed, published, or enabled.
 Normal database migration creates only its inert local ledger tables. A separate broker composition,
 owner-only key source, and non-authorizing operator preflight now exist, but the normal TUI cannot

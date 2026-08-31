@@ -106,6 +106,12 @@ describe("LocalFactoryGateExecutor", () => {
 });
 
 describe("BubblewrapFactoryGateSandbox", () => {
+  it("rejects the host filesystem root as a trusted runtime mount", () => {
+    expect(
+      () => new BubblewrapFactoryGateSandbox({ executable: "/usr/bin/bwrap", runtimeRoots: ["/"] })
+    ).toThrow(/bounded list of absolute paths/u);
+  });
+
   it("hides the host root, disables networking, and mounts dependencies read-only", async () => {
     const root = mkdtempSync(join(tmpdir(), "agentlab-gate-sandbox-"));
     temporaryRoots.push(root);

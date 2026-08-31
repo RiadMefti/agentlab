@@ -1,5 +1,5 @@
 import { lstat, mkdir, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, parse, relative, sep } from "node:path";
 
 import type { CommandSpec } from "../../domain/command.js";
 import type { FactoryGateSandbox } from "../../domain/factory-gate.js";
@@ -20,7 +20,12 @@ export class BubblewrapFactoryGateSandbox implements FactoryGateSandbox {
     if (!isAbsolute(options.executable) || options.executable.includes("\0")) {
       throw new Error("Bubblewrap executable must be an absolute safe path.");
     }
-    if (options.runtimeRoots.length > 8 || options.runtimeRoots.some((root) => !isAbsolute(root))) {
+    if (
+      options.runtimeRoots.length > 8 ||
+      options.runtimeRoots.some(
+        (root) => !isAbsolute(root) || root.includes("\0") || root === parse(root).root
+      )
+    ) {
       throw new Error("Factory gate runtime roots must be a bounded list of absolute paths.");
     }
     this.#executable = options.executable;
