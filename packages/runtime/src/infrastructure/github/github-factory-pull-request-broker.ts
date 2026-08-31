@@ -258,11 +258,16 @@ export class GitHubFactoryPullRequestBroker implements FactoryDraftPullRequestBr
     if (priorReference === null) {
       const token = validateToken(await this.options.tokenSource.token(this.#repositoryId));
       const authorizationHeader = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-      await prepared.push({
-        repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
-        branchName: proposal.branchName,
-        authorizationHeader
-      });
+      try {
+        await prepared.push({
+          repositoryUrl: `https://github.com/${this.#repositoryId}.git`,
+          branchName: proposal.branchName,
+          authorizationHeader
+        });
+      } catch (error: unknown) {
+        this.options.tokenSource.invalidate?.(this.#repositoryId, token);
+        throw error;
+      }
     } else if (priorReference.object.sha !== headRevision) {
       throw new Error("Broker branch exists with a different head revision.");
     }

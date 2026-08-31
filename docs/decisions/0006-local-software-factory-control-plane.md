@@ -65,7 +65,10 @@ API:
 - GitHub's REST API exposes exact branch-reference and pull-request readback but no create-PR
   idempotency key, so crash recovery must reconcile the deterministic branch/head/PR tuple. GitHub
   App installation tokens can be restricted to selected repositories and permissions and expire
-  after one hour. See [Git references](https://docs.github.com/en/rest/git/refs),
+  after one hour. App authentication uses a bounded RS256 JWT, and the installation-token request
+  can pin both `repository_ids` and the requested permission map. See
+  [generating a JWT](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app),
+  [Git references](https://docs.github.com/en/rest/git/refs),
   [pull requests](https://docs.github.com/en/rest/pulls/pulls), and
   [installation access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
 - SLSA requires provenance verification against expected builder, source, build type, and
@@ -373,8 +376,11 @@ Each successful execution and gate emits a canonical resource-isolation record, 
 PR when any successful worker or sandboxed gate lacks matching provenance.
 `npm run test:factory-sandbox` is the adversarial host test: it reads the live process cgroup to
 verify exact CPU/memory/process ceilings, confirms an over-memory workload is killed, and exercises
-both single-process preparation recovery and multi-operation execution-workspace recovery against
-the live systemd user manager.
+Bubblewrap with a distinct network namespace, writable workspace, hidden source repository, and
+read-only dependencies. It also exercises both single-process preparation recovery and
+multi-operation execution-workspace recovery against the live systemd user manager. The distinct
+`factory-sandbox` Ubuntu CI job provisions those host dependencies and runs the same command; a
+unit-only pass is not a substitute for that job.
 
 The model-bearing job never receives remote write authority. It emits a content-addressed patch and
 structured proposal. A separate broker process/job, with no provider key and a short-lived
@@ -382,6 +388,16 @@ repository-scoped token, independently verifies contract/policy digests, base SH
 protected paths, patch size, required successful evidence, reviewer independence, expiry, and
 budget. It may then open or update only a draft PR. Broker limits bound title/body size, file count,
 labels, reviewers, and one PR per deduplication key.
+
+The concrete GitHub App credential adapter is bound at construction to one lowercase repository, its
+numeric repository ID, one installation, and one App client ID. For each mint it loads the RSA
+private key only at the signer boundary, issues GitHub's bounded JWT, and calls only the fixed
+installation-token endpoint with the exact repository ID and `contents:write` plus
+`pull_requests:write`. It accepts the result only when GitHub reports that exact selected
+repository, no broader permissions, and a safe short lifetime. Concurrent requests coalesce; the
+token is refreshed five minutes before expiry and invalidated after an HTTP 401 or failed Git push.
+The variable-length token is never placed in a URL, argv, artifact, or error. This adapter is still
+internal: an operator-facing secret/key source and composition switch must exist before activation.
 
 Remote dispatch is itself durable and replayable. `agentlab.pull-request-dispatch.v1` binds one task
 to the exact canonical proposal, proposal digest, broker identity, creation time, and correlation ID
@@ -487,20 +503,22 @@ exist behind ports with focused fail-closed tests. The governed request-to-contr
 has trusted authority issuance, provider-neutral read-only workers, a crash-durable preparation
 journal, canonical run capture/replay, bounded retries and terminal states, and atomic task/evidence
 materialization. Authenticated channel-bound evidence ingress and mandatory systemd/cgroup resource
-isolation are implemented. Post-contract execution now has an immutable run header, append-only
-resource journal, caller-owned worktree/agent/gate identities, canonical agent requests, and
-deterministic restart recovery through the shared reconciler. The live sandbox, preparation
+isolation are implemented. The target-host CI lane now exercises both cgroup enforcement and the
+Bubblewrap filesystem/network boundary. Post-contract execution now has an immutable run header,
+append-only resource journal, caller-owned worktree/agent/gate identities, canonical agent requests,
+and deterministic restart recovery through the shared reconciler. The live sandbox, preparation
 recovery, and multi-operation execution recovery preflights pass on the current Linux development
 host. Draft-PR dispatch now also has an immutable exact-proposal run, SQLite v8 checkpoint journal,
-deterministic branch/PR reconciliation, and injected recovery tests spanning remote creation,
-evidence append, and task-ledger transition. These paths are intentionally not wired into the public
-runtime or TUI. No live agent task or PR has been created by this code. Phase 4 activation remains
-blocked until repository governance requires at least one approval, dismisses stale reviews,
-requires approval of the latest push, applies rules to administrators, forbids force-push/deletion,
-and requires the exact `verify` check. Complete provider cost accounting must also be configured; an
-incomplete usage record denies PR creation. The activation change must run `test:factory-sandbox` in
-the supported target-host CI lane, configure protected-path ownership, and supply a separate
-short-lived broker identity.
+deterministic branch/PR reconciliation, injected recovery tests spanning remote creation, evidence
+append, and task-ledger transition, and an exact-repository GitHub App installation-token source.
+These paths are intentionally not wired into the public runtime or TUI. No live agent task or PR has
+been created by this code. Phase 4 activation remains blocked until repository governance requires
+at least one approval, dismisses stale reviews, requires approval of the latest push, applies rules
+to administrators, forbids force-push/deletion, and requires the exact `verify` check. Complete
+provider cost accounting must also be configured; an incomplete usage record denies PR creation. The
+activation change must make the passing `factory-sandbox` job required, configure protected-path
+ownership, compose the broker behind an operator boundary, and supply the App key from a separate
+broker-only secret source.
 
 1. **Safety kernel:** versioned intake/qualification/specification/plan/authority/skill/task/event/
    evidence schemas, digest-linked preparation compiler, explicit state machine, this ADR, and
@@ -514,9 +532,10 @@ short-lived broker identity.
    deterministic crash recovery.
 4. **Minimal brokered-PR loop:** the internal preparation, exact-base worktree, one implementer,
    deterministic `verify`, one distinct read-only reviewer, hashed patch/evidence, concrete local
-   crash reconciler, and separate draft-only broker mechanics exist. Activation still requires the
-   public composition/operator boundary, target-host recovery/sandbox preflight, current branch
-   protection, isolated broker identity, complete accounting, and human merge. No scheduler,
+   crash reconciler, and separate draft-only broker mechanics exist. The target-host
+   recovery/sandbox CI and isolated exact-repository credential adapter now exist. Activation still
+   requires the public composition/operator boundary, current branch protection including the
+   sandbox check, broker-only key provisioning, complete accounting, and human merge. No scheduler,
    auto-merge, release, or protected-path write.
 5. **CI repair and operations:** PR-head reconciliation, bounded fresh repair attempts, GitHub App
    identity, CODEOWNERS/last-push/approval rules, dashboards, alerts, quotas, and incident tooling.
