@@ -364,6 +364,45 @@ redacted failed run when persistence is available. An `agent-review-candidate` r
 queue classification: this lane does not review, check out, repair, comment, approve, merge,
 release, issue authority, or install a timer.
 
+## External pull-request review evidence
+
+Run external review under the reviewed non-root worker UID, never the read-only GitHub App or
+write-broker UID. Before a tick, an administrator-controlled local repository must already contain
+the exact base and head commit objects recorded by discovery. This process never fetches and no
+remote credential belongs in its environment. Keep its database, artifact root, worktree root, and
+source repository pairwise disjoint.
+
+The owner-only config schema is `agentlab.local-factory-external-pull-request-review.v1`. It pins
+`repositoryId` and local `repositoryRoot`; database/artifact/workspace roots; review, cost, and
+role-identity policy paths and expected canonical digests; exact reviewed skill-package paths;
+Git/flock/systemd executables; and provider executable hashes, versions, and IDs. The review policy
+schema is `agentlab.external-pull-request-review-policy.v1`; it pins the ADR-0023 discovery-policy
+digest, ordered reviewer profiles and skill digests, quorum, candidate/patch/prompt ceilings,
+individual and aggregate token/tool/time/process/output/cost/change budgets, cgroup
+memory/CPU/process limits, and recovery attempts. Every profile must grant exactly read-only
+filesystem/Git with no remote repository, network, secrets, command allowlist, or workspace write.
+
+```text
+agentlab factory external-pr-review-preflight --config /absolute/external-pr-review.json
+agentlab factory external-pr-review-tick --config /absolute/external-pr-review.json --review-policy sha256:... --discovery-policy sha256:... --cost-policy sha256:...
+```
+
+Preflight resolves and publishes the exact skill inventory, verifies pinned provider binaries and
+exact-model cost rules, and checks capability availability without running a model or recording a
+review. A tick first recovers active journal-owned scopes/worktrees, then admits a bounded candidate
+page. Missing local objects, changed-path disagreement, incomplete usage, invalid strict JSON,
+provider-session reuse, budget exhaustion, or uncertain cleanup fails closed. Workspace mutation is
+quarantined. Only unanimous verdicts aggregate to `approved` or `changes-requested`; disagreement
+becomes `human-review-required`. Treat all three as local evidence only. Do not translate them into
+a GitHub review, comment, branch write, merge, deployment, or release without a separately designed
+and approved authority boundary.
+
+On interruption, preserve SQLite schema v21, the artifact root, and worktree root. The next tick
+proves exact recorded systemd scopes inactive and removes only the journal-owned worktree before a
+bounded retry. If it cannot prove inactivity or cleanup, stop the lane and investigate; never delete
+the journal or reuse an execution/session identity. No live config, timer, skill inventory, rate
+card, provider account, or object-mirroring service is installed by this repository.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -393,8 +432,8 @@ telemetry-driven canary, rollback controller, or incident automation is shipped.
 sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
 discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
-bounded read-only external pull-request inventory, and a content-addressed separated-service
-renderer exist but are not provisioned or activated. External code review, isolated checkout, review
-evidence, feedback publication, and repair admission are not yet implemented. See
+bounded read-only external pull-request inventory, credentialless isolated external review evidence,
+and a content-addressed separated-service renderer exist but are not provisioned or activated.
+External review feedback publication and repair admission are not yet implemented. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

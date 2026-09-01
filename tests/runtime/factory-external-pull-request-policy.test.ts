@@ -81,6 +81,25 @@ describe("external pull-request discovery policy", () => {
       }).disposition
     ).toBe("deferred");
   });
+
+  it("routes an empty authenticated change set to a human instead of creating unreviewable work", () => {
+    const fixture = testExternalPullRequestDiscoveryFixture();
+    const candidate = testExternalPullRequestCandidate({
+      totalChangedFiles: 0,
+      changedFiles: [],
+      additions: 0,
+      deletions: 0,
+      changedLines: 0
+    });
+    const classified = classifyExternalPullRequest({
+      pullRequest: withoutDisposition(candidate),
+      policy: fixture.policy,
+      factoryOwned: false,
+      observedAt: "2026-09-01T12:06:00.000Z"
+    });
+    expect(classified.disposition).toBe("human-review-required");
+    expect(classified.reasonCodes).toContain("empty-change-set");
+  });
 });
 
 function withoutDisposition(candidate: ReturnType<typeof testExternalPullRequestCandidate>) {

@@ -61,6 +61,23 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-external-pull-request-review-preflight") {
+    const { runFactoryExternalPullRequestReviewPreflight } =
+      await import("./run-factory-external-pull-request-review.js");
+    process.exitCode = await runFactoryExternalPullRequestReviewPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-review-tick") {
+    const { runFactoryExternalPullRequestReviewTick } =
+      await import("./run-factory-external-pull-request-review.js");
+    process.exitCode = await runFactoryExternalPullRequestReviewTick(
+      action.configPath,
+      action.expectedReviewPolicyDigest,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedCostPolicyDigest
+    );
+    return;
+  }
   if (action.kind === "factory-maintenance-discovery-tick") {
     const { runFactoryMaintenanceDiscoveryTick } =
       await import("./run-factory-maintenance-discovery.js");

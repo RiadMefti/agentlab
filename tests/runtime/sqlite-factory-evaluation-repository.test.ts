@@ -154,6 +154,9 @@ describe("SQLite factory evaluation repositories", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_review_bundles;
+        DROP TABLE factory_external_pr_review_events;
+        DROP TABLE factory_external_pr_review_runs;
         DROP TABLE factory_external_pr_discovery_candidates;
         DROP TABLE factory_external_pr_discovery_snapshots;
         DROP TABLE factory_external_pr_discovery_events;
@@ -258,6 +261,9 @@ describe("SQLite factory evaluation repositories", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_review_bundles;
+        DROP TABLE factory_external_pr_review_events;
+        DROP TABLE factory_external_pr_review_runs;
         DROP TABLE factory_external_pr_discovery_candidates;
         DROP TABLE factory_external_pr_discovery_snapshots;
         DROP TABLE factory_external_pr_discovery_events;

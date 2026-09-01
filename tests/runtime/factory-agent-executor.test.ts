@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import {
   factoryAgentRunRequestSchema,
   factoryCostPolicySchema,
+  factoryExternalPullRequestReviewerRequestSchema,
   factoryMaintenanceDiscoveryRunRequestSchema,
   factoryPreparationRunRequestSchema,
   type FactoryAgentRunRequest,
+  type FactoryExternalPullRequestReviewerRequest,
   type FactoryMaintenanceDiscoveryRunRequest,
   type FactoryPreparationRunRequest
 } from "@agentlab/contracts";
@@ -25,6 +27,7 @@ import type {
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { testDigest, testFactoryContract } from "../helpers/factory.js";
 import { testFactoryMaintenanceDiscoveryFixture } from "../helpers/factory-maintenance-discovery.js";
+import { testExternalPullRequestReviewFixture } from "../helpers/factory-external-pull-request-review.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const prompt = "Implement only the immutable task contract.";
@@ -137,6 +140,26 @@ describe("factory agent adapters", () => {
         expect.objectContaining({ provider: "claude", maintenanceDiscovery: true })
       ])
     );
+  });
+
+  it("forces external pull-request review through the same credentialless read-only harnesses", () => {
+    for (const provider of ["codex", "claude"] as const) {
+      const request = externalPullRequestReviewRequest(provider);
+      const reviewWorkspace = {
+        ...workspace,
+        id: "44444444-4444-4444-8444-444444444445",
+        taskId: request.reviewRunId,
+        baseRevision: request.pullRequest.headRevision
+      };
+      const invocation =
+        provider === "codex"
+          ? codexFactoryAgentAdapter.build(request, "/opt/codex", reviewWorkspace, prompt)
+          : claudeFactoryAgentAdapter.build(request, "/opt/claude", reviewWorkspace, prompt);
+      expect(invocation.command.args).toContain(
+        provider === "codex" ? "read-only" : "--restricted"
+      );
+      expect(invocation.command.args).not.toContain(prompt);
+    }
   });
 
   it("parses provider JSONL without treating it as authority", () => {
@@ -625,6 +648,49 @@ function maintenanceDiscoveryRunRequest(
       process: provider === "claude" ? "none" : "sandboxed"
     },
     budget: fixture.skill.budgetCeiling
+  });
+}
+
+function externalPullRequestReviewRequest(
+  provider: "codex" | "claude"
+): FactoryExternalPullRequestReviewerRequest {
+  const fixture = testExternalPullRequestReviewFixture();
+  const profile = fixture.policy.reviewerProfiles.find(
+    (candidate) => candidate.provider === provider
+  );
+  if (profile === undefined) throw new Error("External review fixture has no provider profile.");
+  return factoryExternalPullRequestReviewerRequestSchema.parse({
+    schemaVersion: "agentlab.external-pull-request-reviewer-request.v1",
+    executionId: "33333333-3333-4333-8333-333333333333",
+    reviewRunId: fixture.run.value.runId,
+    taskId: fixture.run.value.runId,
+    contractDigest: fixture.run.digest,
+    candidateDigest: fixture.run.value.candidateDigest,
+    reviewerId: profile.id,
+    role: "reviewer",
+    attempt: 1,
+    provider,
+    model: profile.model,
+    reasoning: profile.reasoning,
+    repository: {
+      id: fixture.run.value.repositoryId,
+      baseRevision: fixture.candidate.head.revision
+    },
+    pullRequest: {
+      number: fixture.candidate.pullRequestNumber,
+      baseRevision: fixture.candidate.base.revision,
+      headRevision: fixture.candidate.head.revision,
+      patchDigest: testDigest("7")
+    },
+    promptArtifact: {
+      digest: digestOf(prompt),
+      mediaType: "text/plain",
+      sizeBytes: Buffer.byteLength(prompt)
+    },
+    outputSchemaDigest: testDigest("8"),
+    skillDigests: profile.skillDigests,
+    capabilities: profile.capabilities,
+    budget: profile.budget
   });
 }
 

@@ -24,6 +24,13 @@ import type {
   FactoryExternalPullRequestDiscoveryPolicy,
   FactoryExternalPullRequestDiscoveryRun,
   FactoryExternalPullRequestDiscoverySnapshot,
+  FactoryExternalPullRequestReviewBundle,
+  FactoryExternalPullRequestReviewEvent,
+  FactoryExternalPullRequestReviewPolicy,
+  FactoryExternalPullRequestReviewResult,
+  FactoryExternalPullRequestReviewerRecord,
+  FactoryExternalPullRequestReviewerRequest,
+  FactoryExternalPullRequestReviewRun,
   FactoryEvalRun,
   FactoryEvalSuite,
   FactoryDsseEnvelope,
@@ -85,6 +92,27 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestReviewPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewPolicy>;
+  externalPullRequestReviewRun(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewRun>;
+  externalPullRequestReviewEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewEvent>;
+  externalPullRequestReviewerRequest(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewerRequest>;
+  externalPullRequestReviewerRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewerRecord>;
+  externalPullRequestReviewResult(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewResult>;
+  externalPullRequestReviewBundle(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewBundle>;
   externalPullRequestDiscoveryPolicy(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestDiscoveryPolicy>;

@@ -55,6 +55,10 @@
     "./factory-external-pull-request-discovery": {
       "types": "./dist/local-factory-external-pull-request-discovery.d.ts",
       "default": "./dist/local-factory-external-pull-request-discovery.js"
+    },
+    "./factory-external-pull-request-review": {
+      "types": "./dist/local-factory-external-pull-request-review.d.ts",
+      "default": "./dist/local-factory-external-pull-request-review.js"
     }
   },
   "files": [

@@ -115,6 +115,38 @@ describe("terminal CLI", () => {
       expectedDiscoveryPolicyDigest: discoveryPolicy,
       expectedSchedulePolicyDigest: schedulePolicy
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-review-preflight",
+        "--config",
+        "/private/agentlab/pr-reviewer.json"
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-review-preflight",
+      configPath: "/private/agentlab/pr-reviewer.json"
+    });
+    const costPolicy = `sha256:${"c".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-review-tick",
+        "--config",
+        "/private/agentlab/pr-reviewer.json",
+        "--review-policy",
+        discoveryPolicy,
+        "--discovery-policy",
+        schedulePolicy,
+        "--cost-policy",
+        costPolicy
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-review-tick",
+      configPath: "/private/agentlab/pr-reviewer.json",
+      expectedReviewPolicyDigest: discoveryPolicy,
+      expectedDiscoveryPolicyDigest: schedulePolicy,
+      expectedCostPolicyDigest: costPolicy
+    });
   });
 
   it("requires exact eval and human canary authority coordinates", () => {
@@ -1039,6 +1071,8 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory orchestration-render --config");
     expect(helpText).toContain("factory maintenance-discovery-preflight --config");
     expect(helpText).toContain("factory maintenance-discovery-tick --config");
+    expect(helpText).toContain("factory external-pr-review-preflight --config");
+    expect(helpText).toContain("factory external-pr-review-tick --config");
     expect(helpText).toContain("factory canary-admission-tick --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory scheduler-tick --config");

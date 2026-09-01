@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 20;
+export const latestSchemaVersion = 21;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -4092,6 +4092,287 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidate identity mismatch'); END;
 
       PRAGMA user_version = 20;
+      COMMIT;
+    `);
+  }
+
+  if (version < 21) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_review_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        candidate_digest TEXT NOT NULL CHECK (
+          length(candidate_digest) = 71 AND substr(candidate_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_run_id TEXT NOT NULL CHECK (length(discovery_run_id) = 36),
+        discovery_run_digest TEXT NOT NULL CHECK (
+          length(discovery_run_digest) = 71 AND substr(discovery_run_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_snapshot_digest TEXT NOT NULL CHECK (
+          length(discovery_snapshot_digest) = 71 AND substr(discovery_snapshot_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        review_policy_digest TEXT NOT NULL CHECK (
+          length(review_policy_digest) = 71 AND substr(review_policy_digest, 1, 7) = 'sha256:'
+        ),
+        cost_policy_digest TEXT NOT NULL CHECK (
+          length(cost_policy_digest) = 71 AND substr(cost_policy_digest, 1, 7) = 'sha256:'
+        ),
+        workspace_id TEXT NOT NULL CHECK (length(workspace_id) = 36),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 16777216 AND json_valid(run_json)
+        ),
+        UNIQUE(candidate_digest, review_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_review_runs_policy_idx
+        ON factory_external_pr_review_runs(repository_id, review_policy_digest, created_at, run_id);
+
+      CREATE TABLE factory_external_pr_review_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_review_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 64),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'workspace-started', 'workspace-prepared', 'reviewer-started',
+          'reviewer-finished', 'recovered', 'bundle-recorded', 'completed', 'failed', 'quarantined'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'reviewing', 'reviewer-active', 'recorded',
+            'completed', 'failed', 'quarantined'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'reviewing', 'reviewer-active', 'recorded',
+          'completed', 'failed', 'quarantined'
+        )),
+        patch_digest TEXT CHECK (
+          patch_digest IS NULL OR
+          (length(patch_digest) = 71 AND substr(patch_digest, 1, 7) = 'sha256:')
+        ),
+        patch_artifact_json TEXT CHECK (
+          patch_artifact_json IS NULL OR json_valid(patch_artifact_json)
+        ),
+        reviewer_id TEXT CHECK (reviewer_id IS NULL OR length(reviewer_id) BETWEEN 1 AND 128),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_record_digest TEXT CHECK (
+          reviewer_record_digest IS NULL OR
+          (length(reviewer_record_digest) = 71 AND substr(reviewer_record_digest, 1, 7) = 'sha256:')
+        ),
+        review_result_digest TEXT CHECK (
+          review_result_digest IS NULL OR
+          (length(review_result_digest) = 71 AND substr(review_result_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_digest TEXT CHECK (
+          bundle_digest IS NULL OR
+          (length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_artifact_json TEXT CHECK (
+          bundle_artifact_json IS NULL OR json_valid(bundle_artifact_json)
+        ),
+        decision TEXT CHECK (
+          decision IS NULL OR decision IN ('approved', 'changes-requested', 'human-review-required')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_review_bundles (
+        run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_review_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (
+          decision IN ('approved', 'changes-requested', 'human-review-required')
+        ),
+        bundle_json TEXT NOT NULL CHECK (
+          length(bundle_json) BETWEEN 2 AND 16777216 AND json_valid(bundle_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_review_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_review_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_review_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.candidateDigest') IS NOT NEW.candidate_digest OR
+        json_extract(NEW.run_json, '$.discoveryRunId') IS NOT NEW.discovery_run_id OR
+        json_extract(NEW.run_json, '$.discoveryRunDigest') IS NOT NEW.discovery_run_digest OR
+        json_extract(NEW.run_json, '$.discoverySnapshotDigest') IS NOT NEW.discovery_snapshot_digest OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.reviewPolicyDigest') IS NOT NEW.review_policy_digest OR
+        json_extract(NEW.run_json, '$.costPolicyDigest') IS NOT NEW.cost_policy_digest OR
+        json_extract(NEW.run_json, '$.workspaceId') IS NOT NEW.workspace_id OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_discovery_candidates AS candidate
+          JOIN factory_external_pr_discovery_runs AS discovery
+            ON discovery.run_id = candidate.run_id
+          JOIN factory_external_pr_discovery_snapshots AS snapshot
+            ON snapshot.run_id = candidate.run_id
+          WHERE candidate.run_id = NEW.discovery_run_id
+            AND candidate.candidate_digest = NEW.candidate_digest
+            AND candidate.repository_id = NEW.repository_id
+            AND candidate.pull_request_number = NEW.pull_request_number
+            AND candidate.disposition = 'agent-review-candidate'
+            AND discovery.run_digest = NEW.discovery_run_digest
+            AND discovery.discovery_policy_digest = NEW.discovery_policy_digest
+            AND snapshot.snapshot_digest = NEW.discovery_snapshot_digest
+            AND json(candidate.candidate_json) = json_extract(NEW.run_json, '$.candidate')
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_discovery_events AS event
+              WHERE event.run_id = candidate.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_review_events_no_update
+      BEFORE UPDATE ON factory_external_pr_review_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_review_events_no_delete
+      BEFORE DELETE ON factory_external_pr_review_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_review_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_review_events WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_review_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.reviewRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.patchDigest') IS NOT NEW.patch_digest OR
+        json(NEW.patch_artifact_json) IS NOT json_extract(NEW.event_json, '$.patchArtifact') OR
+        json_extract(NEW.event_json, '$.reviewerId') IS NOT NEW.reviewer_id OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.event_json, '$.reviewerRecordDigest') IS NOT NEW.reviewer_record_digest OR
+        json_extract(NEW.event_json, '$.reviewResultDigest') IS NOT NEW.review_result_digest OR
+        json_extract(NEW.event_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json(NEW.bundle_artifact_json) IS NOT json_extract(NEW.event_json, '$.bundleArtifact') OR
+        json_extract(NEW.event_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT json_extract(run_json, '$.reviewPolicy.id')
+          FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_review_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'workspace-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'workspace-prepared' AND NEW.from_state = 'workspace-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'reviewer-started' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'reviewer-active') OR
+        (NEW.kind = 'reviewer-finished' AND NEW.from_state = 'reviewer-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'recovered' AND NEW.from_state IN ('workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'bundle-recorded' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'failed') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'quarantined')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR review transition'); END;
+      CREATE TRIGGER factory_external_pr_review_events_time_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_review_bundles_no_update
+      BEFORE UPDATE ON factory_external_pr_review_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_bundles_no_delete
+      BEFORE DELETE ON factory_external_pr_review_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_bundles_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_bundles
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.bundle_json, '$.reviewRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.bundle_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.bundle_json, '$.decision') IS NOT NEW.decision
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundle identity mismatch'); END;
+
+      PRAGMA user_version = 21;
       COMMIT;
     `);
   }

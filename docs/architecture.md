@@ -167,6 +167,19 @@ SQLite schema v20 appends immutable run, event, snapshot, and candidate records.
 dispositions only create inventory for a future review stage; they confer no execution or GitHub
 write authority.
 
+The separate `external-pr-review-tick` command consumes only those immutable
+`agent-review-candidate` records through `@agentlab/runtime/factory-external-pull-request-review`.
+This composition is model-capable but credentialless: architecture rules permit pinned provider
+adapters, systemd process isolation, local Git, SQLite, and artifacts while forbidding every GitHub,
+broker, tmux, interactive, merge, and release path. It never fetches. Exact base/head objects must
+already exist in the configured local repository; a detached head worktree reconstructs the
+merge-base patch and its changed paths must equal the authenticated discovery inventory. Ordered,
+skill-pinned reviewer profiles run with read-only filesystem/Git, no network, secrets, commands, or
+remote repository capability. Distinct provider sessions, complete exact-model cost accounting,
+aggregate budgets, cgroup ceilings, strict JSON, and a clean worktree are mandatory. SQLite schema
+v21 journals recovery-bounded state and a content-addressed quorum bundle. Split verdicts route to a
+human; no result grants GitHub authority.
+
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
 literal `--confirm-repair`. The application revalidates the task, completed dispatch, canonical PR
@@ -565,21 +578,24 @@ broker consumer publishes those proposals through the existing durable non-force
 returns them to exact-head observation. Durable bounded daily maintenance discovery, automatic
 consumption of pre-existing human cohort authority, and a separate offline sandboxed eval producer
 are implemented. A separate bounded external pull-request inventory now journals stable heads and
-changed paths with a read-only App, but it does not review code, check out branches, repair, or
-publish feedback. The producer is not part of the daily chain and has no provisioned harness,
-fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
-hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
-merge, release, rollback, and incident automation remain later stages. A read-only daily-cycle
-compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab executable
-digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It emits a
-content-addressed system-level systemd bundle whose non-persistent UTC timer chains fixed-argv
-one-shot services across separate UIDs, stops on any nonzero result, signals an incident target, and
-finally re-observes the last published head. Every stage first runs fixed `/usr/bin/sha256sum` argv
-against the generated exact executable check record, so binary drift stops before AgentLab runs. The
-renderer cannot write or install artifacts, call the service manager, change authority, or touch the
-ledger. Deterministic assessment, bounded non-release cohort authority, durable admission,
-reservation-bound scheduled execution, draft dispatch, PR maintenance, repair consumption,
-repaired-branch publication, and dormant orchestration rendering exist but remain unactivated.
+changed paths with a read-only App. A separate credentialless consumer can reconstruct exact locally
+present patches, run independent reviewed skills in isolated provider sessions, and journal complete
+local review evidence, but it cannot fetch, publish feedback, approve, repair, push, merge, or
+release. Neither external-PR stage is part of the daily chain or provisioned with live policy,
+skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness, fixture,
+candidate, job, or account. Repository/day and organization/day quotas, a secretless hosted-provider
+eval gateway, owner-provisioned activation, telemetry-driven canary comparison, merge, release,
+rollback, and incident automation remain later stages. A read-only daily-cycle compiler now verifies
+one owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
+broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
+systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
+UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
+published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
+executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
+install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
+assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
+execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
+dormant orchestration rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -598,6 +614,8 @@ eval signer ────────▶ @agentlab/runtime/factory-eval-attestor 
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
 canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
 maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
+external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
+external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
 unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
@@ -673,25 +691,26 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                                      |
-| ------------------------------------------------------------ | ------------------------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                                          |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                 |
-| Product use case or coordination policy                      | `packages/runtime/src/application`                            |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                         |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                       |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                |
-| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                |
-| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`             |
-| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                |
-| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`             |
-| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`         |
-| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`         |
-| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`      |
-| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`      |
-| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts` |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                                    |
-| Installer, cache, or binary handoff                          | `packages/launcher`                                           |
+| Change                                                       | Location                                                             |
+| ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                                                 |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                        |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                                   |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                                |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                              |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                       |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                       |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`                    |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                       |
+| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`                    |
+| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`                |
+| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`                |
+| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`             |
+| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`             |
+| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts`        |
+| External PR review construction and resource lifetime        | `packages/runtime/src/local-factory-external-pull-request-review.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                                           |
+| Installer, cache, or binary handoff                          | `packages/launcher`                                                  |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

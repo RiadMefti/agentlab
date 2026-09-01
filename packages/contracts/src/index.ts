@@ -4,6 +4,7 @@ export * from "./factory-maintenance-discovery.js";
 export * from "./factory-eval-attestation.js";
 export * from "./factory-eval-production.js";
 export * from "./factory-external-pull-request-discovery.js";
+export * from "./factory-external-pull-request-review.js";
 export * from "./factory-execution.js";
 export * from "./factory-pull-request-observation.js";
 export * from "./factory-pull-request-repair.js";

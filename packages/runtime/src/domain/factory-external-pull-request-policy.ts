@@ -33,6 +33,7 @@ export function classifyExternalPullRequest(input: {
   }
 
   const reasons: string[] = [];
+  if (pullRequest.totalChangedFiles === 0) reasons.push("empty-change-set");
   if (!policy.allowedBaseBranches.includes(pullRequest.base.branchName)) {
     reasons.push("base-branch-not-admitted");
   }

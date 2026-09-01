@@ -32,6 +32,17 @@ export type CliAction =
       readonly expectedSchedulePolicyDigest: `sha256:${string}`;
     }
   | {
+      readonly kind: "factory-external-pull-request-review-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-review-tick";
+      readonly configPath: string;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+      readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-maintenance-discovery-tick";
       readonly configPath: string;
       readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
@@ -253,6 +264,45 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         configPath,
         expectedDiscoveryPolicyDigest,
         expectedSchedulePolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-review-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-review-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-review-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--review-policy" &&
+    input[6] === "--discovery-policy" &&
+    input[8] === "--cost-policy"
+  ) {
+    const configPath = input[3];
+    const expectedReviewPolicyDigest = input[5];
+    const expectedDiscoveryPolicyDigest = input[7];
+    const expectedCostPolicyDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedReviewPolicyDigest) &&
+      isSha256Digest(expectedDiscoveryPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-review-tick",
+        configPath,
+        expectedReviewPolicyDigest,
+        expectedDiscoveryPolicyDigest,
+        expectedCostPolicyDigest
       };
     }
   }
@@ -950,7 +1000,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -1000,6 +1050,10 @@ Factory authority:
       Verify the exact repository and read-only GitHub App boundary without recording inventory.
   agentlab factory external-pr-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256>
       Record one bounded immutable inventory of external open PR heads; never review, repair, or write GitHub.
+  agentlab factory external-pr-review-preflight --config <absolute-path>
+      Verify pinned local objects, providers, cost rules, read-only skills, and worker identity without running a model.
+  agentlab factory external-pr-review-tick --config <absolute-path> --review-policy <sha256> --discovery-policy <sha256> --cost-policy <sha256>
+      Produce bounded independent local review evidence; never fetch, comment, repair, approve, or write GitHub.
   agentlab factory maintenance-discovery-preflight --config <absolute-path>
       Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
   agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>

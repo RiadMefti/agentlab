@@ -156,8 +156,20 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   composition uses a dedicated read-only GitHub App identity to inventory a bounded page of open
   pull requests and changed paths into an immutable daily journal. It treats titles, bodies, and
   paths as untrusted evidence and can only classify work for later agent or human review; it cannot
-  invoke a model, check out code, comment, approve, repair, merge, or release. Evaluator and
-  authority compositions cannot execute a model, contact GitHub, merge, or release.
+  invoke a model, check out code, comment, approve, repair, merge, or release. The separate
+  `@agentlab/runtime/factory-external-pull-request-review` composition can invoke pinned models
+  under resource ceilings against exact locally present objects, but has no GitHub credential or
+  remote port. Evaluator and authority compositions cannot execute a model, contact GitHub, merge,
+  or release.
+- `agentlab factory external-pr-review-preflight --config ...` validates the separate non-root
+  worker identity, exact review/discovery/cost policy pins, reviewed skill inventory, pinned
+  provider executables, and read-only capabilities without running a model.
+  `external-pr-review-tick` consumes only immutable admitted discovery candidates, requires exact
+  base/head objects already present in local Git, reconstructs and authenticates a bounded patch in
+  a detached worktree, and records an ordered independent-review quorum in SQLite v21. Reviewers
+  have no network, secrets, commands, workspace write, remote repository, or GitHub credential;
+  disagreement routes to a human and no result can comment, approve, repair, push, merge, deploy, or
+  release.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -320,7 +332,9 @@ brokered repair publication; and
 maintenance intake and bounded cohort consumption; and
 [ADR 0022](docs/decisions/0022-sandboxed-eval-evidence-production.md) for offline eval production;
 and [ADR 0023](docs/decisions/0023-read-only-external-pull-request-discovery.md) for bounded
-external pull-request inventory. The dormant procedures are in
+external pull-request inventory; and
+[ADR 0024](docs/decisions/0024-credentialless-external-pull-request-review-evidence.md) for isolated
+local external-review evidence. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

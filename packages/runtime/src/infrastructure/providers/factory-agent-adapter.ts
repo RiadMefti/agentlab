@@ -1,8 +1,10 @@
 import {
   factoryAgentRunRequestSchema,
+  factoryExternalPullRequestReviewerRequestSchema,
   factoryPreparationRunRequestSchema,
   factoryMaintenanceDiscoveryRunRequestSchema,
   type FactoryAgentRunRequest,
+  type FactoryExternalPullRequestReviewerRequest,
   type FactoryBudgetUsage,
   type FactoryPreparationRunRequest,
   type FactoryMaintenanceDiscoveryRunRequest,
@@ -53,11 +55,16 @@ export interface FactoryAgentAdapterOutput extends Omit<
 }
 
 export type FactoryProviderRunRequest =
-  FactoryAgentRunRequest | FactoryPreparationRunRequest | FactoryMaintenanceDiscoveryRunRequest;
+  | FactoryAgentRunRequest
+  | FactoryExternalPullRequestReviewerRequest
+  | FactoryPreparationRunRequest
+  | FactoryMaintenanceDiscoveryRunRequest;
 
 export function parseFactoryProviderRunRequest(input: unknown): FactoryProviderRunRequest {
   const execution = factoryAgentRunRequestSchema.safeParse(input);
   if (execution.success) return execution.data;
+  const externalReview = factoryExternalPullRequestReviewerRequestSchema.safeParse(input);
+  if (externalReview.success) return externalReview.data;
   const preparation = factoryPreparationRunRequestSchema.safeParse(input);
   return preparation.success
     ? preparation.data
@@ -74,6 +81,7 @@ export function isFactoryReadOnlyRunRequest(request: FactoryProviderRunRequest):
   return (
     isFactoryPreparationRunRequest(request) ||
     isFactoryMaintenanceDiscoveryRunRequest(request) ||
+    request.schemaVersion === "agentlab.external-pull-request-reviewer-request.v1" ||
     request.role === "reviewer"
   );
 }

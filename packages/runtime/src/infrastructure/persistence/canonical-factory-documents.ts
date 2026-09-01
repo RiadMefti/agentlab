@@ -28,6 +28,13 @@ import {
   factoryExternalPullRequestDiscoveryPolicySchema,
   factoryExternalPullRequestDiscoveryRunSchema,
   factoryExternalPullRequestDiscoverySnapshotSchema,
+  factoryExternalPullRequestReviewBundleSchema,
+  factoryExternalPullRequestReviewEventSchema,
+  factoryExternalPullRequestReviewPolicySchema,
+  factoryExternalPullRequestReviewResultSchema,
+  factoryExternalPullRequestReviewerRecordSchema,
+  factoryExternalPullRequestReviewerRequestSchema,
+  factoryExternalPullRequestReviewRunSchema,
   factoryEvalRunSchema,
   factoryEvalSuiteSchema,
   factoryDsseEnvelopeSchema,
@@ -84,6 +91,34 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public externalPullRequestReviewPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewPolicySchema.parse(input));
+  }
+
+  public externalPullRequestReviewRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewRunSchema.parse(input));
+  }
+
+  public externalPullRequestReviewEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewEventSchema.parse(input));
+  }
+
+  public externalPullRequestReviewerRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewerRequestSchema.parse(input));
+  }
+
+  public externalPullRequestReviewerRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewerRecordSchema.parse(input));
+  }
+
+  public externalPullRequestReviewResult(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewResultSchema.parse(input));
+  }
+
+  public externalPullRequestReviewBundle(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewBundleSchema.parse(input));
+  }
+
   public externalPullRequestDiscoveryPolicy(input: unknown) {
     return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryPolicySchema.parse(input));
   }

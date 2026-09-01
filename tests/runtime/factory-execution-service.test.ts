@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   evidenceItemSchema,
   immutableTaskContractSchema,
-  type FactoryAgentRunRequest,
   type FactoryBudgetUsage,
   type FactoryPullRequestDispatchEvent,
   type FactoryPullRequestUpdateEvent,
@@ -1842,7 +1841,7 @@ function skillPackage(
 }
 
 function successfulRun(
-  request: FactoryAgentRunRequest,
+  request: FactoryAgentExecutionInput["request"],
   resourceLimits: FactoryResourceLimits,
   missingProviderSession = false
 ): FactoryAgentExecutionOutput {
