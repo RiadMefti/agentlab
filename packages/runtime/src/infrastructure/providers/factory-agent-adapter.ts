@@ -1,10 +1,12 @@
 import {
   factoryAgentRunRequestSchema,
   factoryExternalPullRequestReviewerRequestSchema,
+  factoryExternalPullRequestRepairerRequestSchema,
   factoryPreparationRunRequestSchema,
   factoryMaintenanceDiscoveryRunRequestSchema,
   type FactoryAgentRunRequest,
   type FactoryExternalPullRequestReviewerRequest,
+  type FactoryExternalPullRequestRepairerRequest,
   type FactoryBudgetUsage,
   type FactoryPreparationRunRequest,
   type FactoryMaintenanceDiscoveryRunRequest,
@@ -57,6 +59,7 @@ export interface FactoryAgentAdapterOutput extends Omit<
 export type FactoryProviderRunRequest =
   | FactoryAgentRunRequest
   | FactoryExternalPullRequestReviewerRequest
+  | FactoryExternalPullRequestRepairerRequest
   | FactoryPreparationRunRequest
   | FactoryMaintenanceDiscoveryRunRequest;
 
@@ -65,6 +68,8 @@ export function parseFactoryProviderRunRequest(input: unknown): FactoryProviderR
   if (execution.success) return execution.data;
   const externalReview = factoryExternalPullRequestReviewerRequestSchema.safeParse(input);
   if (externalReview.success) return externalReview.data;
+  const externalRepair = factoryExternalPullRequestRepairerRequestSchema.safeParse(input);
+  if (externalRepair.success) return externalRepair.data;
   const preparation = factoryPreparationRunRequestSchema.safeParse(input);
   return preparation.success
     ? preparation.data

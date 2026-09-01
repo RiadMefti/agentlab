@@ -222,6 +222,49 @@ describe("terminal CLI", () => {
       expectedRoleIdentityPolicyDigest: rolePolicy,
       expectedGateProfileDigest: gateProfile
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-repair-execution-preflight",
+        "--config",
+        "/private/agentlab/pr-repair-execution.json"
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-repair-execution-preflight",
+      configPath: "/private/agentlab/pr-repair-execution.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-repair-execution-tick",
+        "--config",
+        "/private/agentlab/pr-repair-execution.json",
+        "--repair-execution-policy",
+        executionPolicy,
+        "--admission-policy",
+        repairPolicy,
+        "--review-policy",
+        discoveryPolicy,
+        "--feedback-policy",
+        schedulePolicy,
+        "--cost-policy",
+        costPolicy,
+        "--role-policy",
+        rolePolicy,
+        "--gate-profile",
+        gateProfile
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-repair-execution-tick",
+      configPath: "/private/agentlab/pr-repair-execution.json",
+      expectedRepairExecutionPolicyDigest: executionPolicy,
+      expectedAdmissionPolicyDigest: repairPolicy,
+      expectedReviewPolicyDigest: discoveryPolicy,
+      expectedFeedbackPolicyDigest: schedulePolicy,
+      expectedCostPolicyDigest: costPolicy,
+      expectedRoleIdentityPolicyDigest: rolePolicy,
+      expectedGateProfileDigest: gateProfile
+    });
   });
 
   it("requires exact eval and human canary authority coordinates", () => {
@@ -1152,6 +1195,8 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory external-pr-feedback-tick --config");
     expect(helpText).toContain("factory external-pr-repair-admission-preflight --config");
     expect(helpText).toContain("factory external-pr-repair-admission-tick --config");
+    expect(helpText).toContain("factory external-pr-repair-execution-preflight --config");
+    expect(helpText).toContain("factory external-pr-repair-execution-tick --config");
     expect(helpText).toContain("factory canary-admission-tick --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory scheduler-tick --config");

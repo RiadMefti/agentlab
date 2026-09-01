@@ -68,6 +68,21 @@ export type CliAction =
       readonly expectedGateProfileDigest: `sha256:${string}`;
     }
   | {
+      readonly kind: "factory-external-pull-request-repair-execution-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-execution-tick";
+      readonly configPath: string;
+      readonly expectedRepairExecutionPolicyDigest: `sha256:${string}`;
+      readonly expectedAdmissionPolicyDigest: `sha256:${string}`;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+      readonly expectedFeedbackPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedGateProfileDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-maintenance-discovery-tick";
       readonly configPath: string;
       readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
@@ -341,6 +356,61 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         expectedReviewPolicyDigest,
         expectedFeedbackPolicyDigest,
         expectedRepairExecutionPolicyDigest,
+        expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-execution-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-repair-execution-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 18 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-execution-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--repair-execution-policy" &&
+    input[6] === "--admission-policy" &&
+    input[8] === "--review-policy" &&
+    input[10] === "--feedback-policy" &&
+    input[12] === "--cost-policy" &&
+    input[14] === "--role-policy" &&
+    input[16] === "--gate-profile"
+  ) {
+    const configPath = input[3];
+    const expectedRepairExecutionPolicyDigest = input[5];
+    const expectedAdmissionPolicyDigest = input[7];
+    const expectedReviewPolicyDigest = input[9];
+    const expectedFeedbackPolicyDigest = input[11];
+    const expectedCostPolicyDigest = input[13];
+    const expectedRoleIdentityPolicyDigest = input[15];
+    const expectedGateProfileDigest = input[17];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedRepairExecutionPolicyDigest) &&
+      isSha256Digest(expectedAdmissionPolicyDigest) &&
+      isSha256Digest(expectedReviewPolicyDigest) &&
+      isSha256Digest(expectedFeedbackPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedGateProfileDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-repair-execution-tick",
+        configPath,
+        expectedRepairExecutionPolicyDigest,
+        expectedAdmissionPolicyDigest,
+        expectedReviewPolicyDigest,
+        expectedFeedbackPolicyDigest,
         expectedCostPolicyDigest,
         expectedRoleIdentityPolicyDigest,
         expectedGateProfileDigest
@@ -1115,7 +1185,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -1179,6 +1249,10 @@ Factory authority:
 
   agentlab factory external-pr-repair-admission-tick --config <absolute-path> --admission-policy <sha256> --review-policy <sha256> --feedback-policy <sha256> --repair-execution-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
       Record bounded replacement-draft repair authority from exact completed feedback; never execute, write remotely, merge, or release.
+  agentlab factory external-pr-repair-execution-preflight --config <absolute-path>
+      Verify the credentialless repair worker, exact policies, provider, skills, and scheduler without running a model.
+  agentlab factory external-pr-repair-execution-tick --config <absolute-path> --repair-execution-policy <sha256> --admission-policy <sha256> --review-policy <sha256> --feedback-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
+      Consume one admitted finding set in an isolated exact-head worktree and emit only a local patch bundle; never push, merge, deploy, or release.
   agentlab factory maintenance-discovery-preflight --config <absolute-path>
       Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
   agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>

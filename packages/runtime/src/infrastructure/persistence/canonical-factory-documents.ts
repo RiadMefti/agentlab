@@ -30,7 +30,13 @@ import {
   factoryExternalPullRequestFeedbackRunSchema,
   factoryExternalPullRequestRepairAdmissionPolicySchema,
   factoryExternalPullRequestRepairAuthorizationSchema,
+  factoryExternalPullRequestRepairBundleSchema,
   factoryExternalPullRequestRepairDecisionSchema,
+  factoryExternalPullRequestRepairExecutionEventSchema,
+  factoryExternalPullRequestRepairExecutionPolicySchema,
+  factoryExternalPullRequestRepairExecutionRunSchema,
+  factoryExternalPullRequestRepairerRecordSchema,
+  factoryExternalPullRequestRepairerRequestSchema,
   factoryExternalPullRequestDiscoveryEventSchema,
   factoryExternalPullRequestDiscoveryPolicySchema,
   factoryExternalPullRequestDiscoveryRunSchema,
@@ -98,6 +104,34 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public externalPullRequestRepairExecutionPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairExecutionPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairExecutionRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairExecutionRunSchema.parse(input));
+  }
+
+  public externalPullRequestRepairExecutionEvent(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairExecutionEventSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairerRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairerRequestSchema.parse(input));
+  }
+
+  public externalPullRequestRepairerRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairerRecordSchema.parse(input));
+  }
+
+  public externalPullRequestRepairBundle(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairBundleSchema.parse(input));
+  }
+
   public externalPullRequestRepairAdmissionPolicy(input: unknown) {
     return encodeCanonicalDocument(
       factoryExternalPullRequestRepairAdmissionPolicySchema.parse(input)

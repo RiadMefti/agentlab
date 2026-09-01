@@ -67,6 +67,10 @@
     "./factory-external-pull-request-repair-admission": {
       "types": "./dist/local-factory-external-pull-request-repair-admission.d.ts",
       "default": "./dist/local-factory-external-pull-request-repair-admission.js"
+    },
+    "./factory-external-pull-request-repair-execution": {
+      "types": "./dist/local-factory-external-pull-request-repair-execution.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-execution.js"
     }
   },
   "files": [

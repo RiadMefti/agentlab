@@ -27,7 +27,7 @@ describe("SqliteFactoryExternalPullRequestRepairAdmissionRepository", () => {
   it("roots one immutable authorization in completed review and feedback journals", async () => {
     const fixture = testExternalPullRequestRepairAdmissionFixture();
     const databasePath = temporaryDatabase();
-    await seedCompletedFeedback(databasePath, fixture);
+    await seedCompletedExternalPullRequestFeedback(databasePath, fixture);
     const repository = new SqliteFactoryExternalPullRequestRepairAdmissionRepository(databasePath, {
       documents: fixture.feedback.review.documents,
       now: () => "2026-09-01T12:24:00.000Z"
@@ -146,7 +146,7 @@ describe("SqliteFactoryExternalPullRequestRepairAdmissionRepository", () => {
   });
 });
 
-async function seedCompletedFeedback(
+export async function seedCompletedExternalPullRequestFeedback(
   databasePath: string,
   fixture: ReturnType<typeof testExternalPullRequestRepairAdmissionFixture>
 ): Promise<void> {

@@ -162,8 +162,10 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   remote port. The separate `@agentlab/runtime/factory-external-pull-request-feedback` composition
   consumes only completed review bundles and can publish one deterministic advisory `COMMENT` review
   through a dedicated PR-only GitHub App; it cannot approve, repair, push, merge, deploy, or
-  release. Evaluator and authority compositions cannot execute a model, contact GitHub, merge, or
-  release.
+  release. The separate `@agentlab/runtime/factory-external-pull-request-repair-execution`
+  composition can run one credentialless repairer against exact local objects and emit a local patch
+  bundle, but has no GitHub or remote-write port. Evaluator and authority compositions cannot
+  execute a model, contact GitHub, merge, or release.
 - `agentlab factory external-pr-review-preflight --config ...` validates the separate non-root
   worker identity, exact review/discovery/cost policy pins, reviewed skill inventory, pinned
   provider executables, and read-only capabilities without running a model.
@@ -187,6 +189,16 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   selects findings by identity without copying untrusted prose, permits one future credentialless
   repair, requires replacement-draft publication, and grants no remote write, merge, deployment, or
   release authority.
+- `agentlab factory external-pr-repair-execution-preflight --config ...` verifies the separate
+  credentialless worker identity, exact execution/admission/cost/role/gate pins, ordered repair
+  skills, provider executable, local paths, and scheduler without running a model.
+  `external-pr-repair-execution-tick` consumes one unexpired schema-v23 authorization, authenticates
+  already-local base/head objects and the original patch without fetching, resolves only selected
+  finding IDs from exact review evidence, and permits one isolated workspace-writing repairer.
+  SQLite v24 journals intent before the agent starts and records an immutable patch bundle only
+  after the workspace closes. Pre-agent workspace setup may recover within policy; a post-start
+  uncertain outcome is quarantined and never retried under the same authorization. The command has
+  no GitHub credential or remote-write port and cannot push, publish, merge, deploy, or release.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -355,7 +367,9 @@ local external-review evidence; and
 [ADR 0025](docs/decisions/0025-feedback-only-external-pull-request-review-publication.md) for the
 separate advisory publication boundary; and
 [ADR 0026](docs/decisions/0026-deterministic-external-pull-request-repair-admission.md) for the
-selectors-only external repair authority boundary. The dormant procedures are in
+selectors-only external repair authority boundary; and
+[ADR 0027](docs/decisions/0027-credentialless-external-pull-request-repair-execution.md) for the
+one-attempt isolated repair and patch-bundle boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

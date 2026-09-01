@@ -26,7 +26,13 @@ import type {
   FactoryExternalPullRequestFeedbackRun,
   FactoryExternalPullRequestRepairAdmissionPolicy,
   FactoryExternalPullRequestRepairAuthorization,
+  FactoryExternalPullRequestRepairBundle,
   FactoryExternalPullRequestRepairDecision,
+  FactoryExternalPullRequestRepairExecutionEvent,
+  FactoryExternalPullRequestRepairExecutionPolicy,
+  FactoryExternalPullRequestRepairExecutionRun,
+  FactoryExternalPullRequestRepairerRecord,
+  FactoryExternalPullRequestRepairerRequest,
   FactoryExternalPullRequestDiscoveryEvent,
   FactoryExternalPullRequestDiscoveryPolicy,
   FactoryExternalPullRequestDiscoveryRun,
@@ -99,6 +105,24 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestRepairExecutionPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairExecutionPolicy>;
+  externalPullRequestRepairExecutionRun(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairExecutionRun>;
+  externalPullRequestRepairExecutionEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairExecutionEvent>;
+  externalPullRequestRepairerRequest(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairerRequest>;
+  externalPullRequestRepairerRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairerRecord>;
+  externalPullRequestRepairBundle(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairBundle>;
   externalPullRequestRepairAdmissionPolicy(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairAdmissionPolicy>;

@@ -7,6 +7,7 @@ import type {
   FactoryPreparationRunRequest,
   FactoryMaintenanceDiscoveryRunRequest,
   FactoryExternalPullRequestReviewerRequest,
+  FactoryExternalPullRequestRepairerRequest,
   FactoryResourceLimits,
   ProviderId,
   Sha256Digest
@@ -17,7 +18,10 @@ import type { FactoryWorkspace } from "./factory-workspace.js";
 export const factoryProcessCleanupUnconfirmedErrorCode = "process-cleanup-failed";
 
 export interface FactoryAgentExecutionInput {
-  readonly request: FactoryAgentRunRequest | FactoryExternalPullRequestReviewerRequest;
+  readonly request:
+    | FactoryAgentRunRequest
+    | FactoryExternalPullRequestReviewerRequest
+    | FactoryExternalPullRequestRepairerRequest;
   readonly policyBundleDigest: Sha256Digest;
   readonly executable: string;
   readonly providerVersion: string;

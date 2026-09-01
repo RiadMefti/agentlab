@@ -501,6 +501,42 @@ replacement draft. They grant no remote write, merge, deployment, or release aut
 scheduler to stop new admissions; existing immutable decisions remain evidence and must not be
 deleted or edited.
 
+## External pull-request repair execution
+
+Run repair execution under a dedicated non-root worker account, never the discovery, feedback, or
+branch-write GitHub App account. The owner-only config schema is
+`agentlab.local-factory-external-pull-request-repair-execution.v1`. It pins the execution,
+admission, cost, and role-policy files and digests; ordered repair skill packages; exact repository,
+artifact, database, and non-overlapping worktree roots; Git/flock/systemd executables; and the
+reviewed provider executable digest and version. It contains no GitHub key or token. The configured
+local repository must already contain the authorized base and head objects; this command never
+fetches.
+
+The execution policy must use schema `agentlab.external-pull-request-repair-execution-policy.v1`,
+R1, one worker, one repair attempt, `replacement-draft`, and false remote-write/auto-merge/release
+flags. Its repairer grant is exactly workspace-write, worktree-write, sandboxed process, network
+off, no commands, no secrets, and no remote repository access. Keep protected paths and file, line,
+patch, prompt, cost, token, process, memory, CPU, deadline, per-tick, and recovery ceilings narrow.
+
+```text
+agentlab factory external-pr-repair-execution-preflight --config /absolute/external-pr-repair-execution.json
+agentlab factory external-pr-repair-execution-tick --config /absolute/external-pr-repair-execution.json --repair-execution-policy sha256:... --admission-policy sha256:... --review-policy sha256:... --feedback-policy sha256:... --cost-policy sha256:... --role-policy sha256:... --gate-profile sha256:...
+```
+
+Preflight does not create a worktree or run a model. A tick consumes at most the reviewed candidate
+limit, rechecks the scheduler before each new candidate and immediately before model execution, and
+stores canonical prompt, request, execution record, patch, and bundle artifacts. SQLite schema v24
+is append-only. Existing journals reconcile before scheduler/provider blockers stop fresh work.
+Recovery can discard and recreate only pre-agent workspaces within the policy limit. Treat
+`repairer-active` without a provable outcome as quarantined; do not delete its journal, reuse its
+authorization, or manually retry it. Disable the scheduler to stop new executions, preserve the
+database/artifacts/worktree evidence during incident analysis, and rotate policy or issue a newly
+reviewed authorization for any later attempt.
+
+A completed bundle is local evidence, not publication authority. Do not push it manually. Strict
+post-repair gates, an independent reviewer, authenticated replacement-draft lineage, and a separate
+credential-bearing broker are still required before external repaired code can become a PR.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -531,8 +567,9 @@ sandboxed eval producer with content-addressed evidence now exists. Durable read
 discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
 bounded read-only external pull-request inventory, credentialless isolated external review evidence,
-feedback-only external review publication, deterministic external repair admission, and a
-content-addressed separated-service renderer exist but are not provisioned or activated. External
-repair execution and safe contributor/fork replacement-draft publication are not yet implemented.
-See [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining
-controls are required before calling the factory self-maintaining.
+feedback-only external review publication, deterministic external repair admission, credentialless
+one-attempt external repair execution, and a content-addressed separated-service renderer exist but
+are not provisioned or activated. Strict post-repair quality/review admission and safe
+contributor/fork replacement-draft publication are not yet implemented. See
+[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
+are required before calling the factory self-maintaining.

@@ -37,7 +37,8 @@ immediately before persistence prevents new authority.
 
 ## Consequences
 
-AgentLab can now make an auditable, idempotent decision about whether an externally reviewed PR may
-enter a future repair worker. It still cannot execute the repair, interpret selected feedback,
-create a workspace, push a branch, open the replacement draft, merge, deploy, or release. Those
-remain separate credentialless worker and broker decisions.
+AgentLab can make an auditable, idempotent decision about whether an externally reviewed PR may
+enter a separate repair worker. This admission plane still cannot interpret feedback, create a
+workspace, run a model, push a branch, open a draft, merge, deploy, or release. ADR 0027
+subsequently adds the separate credentialless one-attempt execution plane; remote publication
+remains a distinct future broker decision.

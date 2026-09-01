@@ -277,6 +277,9 @@ describe("SqliteFactoryScheduleRepository", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_repair_execution_bundles;
+        DROP TABLE factory_external_pr_repair_execution_events;
+        DROP TABLE factory_external_pr_repair_execution_runs;
         DROP TABLE factory_external_pr_repair_authorizations;
         DROP TABLE factory_external_pr_repair_decisions;
         DROP TABLE factory_external_pr_feedback_records;

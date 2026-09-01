@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SqliteFactoryExternalPullRequestDiscoveryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-repository.js";
 import { SqliteFactoryExternalPullRequestFeedbackRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-feedback-repository.js";
+import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryExternalPullRequestReviewRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-review-repository.js";
 import {
   feedbackEventBase,
@@ -125,7 +126,7 @@ describe("SqliteFactoryExternalPullRequestFeedbackRepository", () => {
     try {
       expect(
         (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
-      ).toBe(23);
+      ).toBe(latestSchemaVersion);
       expect(() =>
         database
           .prepare(

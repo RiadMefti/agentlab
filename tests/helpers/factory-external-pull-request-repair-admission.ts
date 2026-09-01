@@ -1,6 +1,7 @@
 import {
   factoryExternalPullRequestRepairAdmissionPolicySchema,
-  type FactoryExternalPullRequestRepairAdmissionPolicy
+  type FactoryExternalPullRequestRepairAdmissionPolicy,
+  type Sha256Digest
 } from "@agentlab/contracts";
 
 import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain/factory-documents.js";
@@ -15,6 +16,11 @@ export function testExternalPullRequestRepairAdmissionFixture(
   options: {
     readonly allowForks?: boolean;
     readonly minimumFindingSeverity?: "medium" | "high" | "critical";
+    readonly repairExecutionPolicyDigest?: Sha256Digest;
+    readonly costPolicyDigest?: Sha256Digest;
+    readonly roleIdentityPolicyDigest?: Sha256Digest;
+    readonly gateProfileDigest?: Sha256Digest;
+    readonly skillPackageDigests?: readonly [Sha256Digest, ...Sha256Digest[]];
   } = {}
 ) {
   const feedback = testExternalPullRequestFeedbackFixture({
@@ -28,11 +34,11 @@ export function testExternalPullRequestRepairAdmissionFixture(
     repositoryId: feedback.policy.repositoryId,
     reviewPolicyDigest: feedback.policy.reviewPolicyDigest,
     feedbackPolicyDigest: feedback.policyDocument.digest,
-    repairExecutionPolicyDigest: testDigest("3"),
-    costPolicyDigest: testDigest("4"),
-    roleIdentityPolicyDigest: testDigest("5"),
-    gateProfileDigest: testDigest("6"),
-    skillPackageDigests: [testDigest("7"), testDigest("8")],
+    repairExecutionPolicyDigest: options.repairExecutionPolicyDigest ?? testDigest("3"),
+    costPolicyDigest: options.costPolicyDigest ?? testDigest("4"),
+    roleIdentityPolicyDigest: options.roleIdentityPolicyDigest ?? testDigest("5"),
+    gateProfileDigest: options.gateProfileDigest ?? testDigest("6"),
+    skillPackageDigests: options.skillPackageDigests ?? [testDigest("7"), testDigest("8")],
     allowedAuthorAssociations: ["owner", "member", "collaborator", "contributor"],
     allowForks: options.allowForks ?? true,
     minimumFindingSeverity: options.minimumFindingSeverity ?? "medium",
