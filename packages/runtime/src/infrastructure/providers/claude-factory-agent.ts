@@ -1,7 +1,7 @@
 import type { FactoryWorkspace } from "../../domain/factory-workspace.js";
 import {
   emptyFactoryBudgetUsage,
-  isFactoryPreparationRunRequest,
+  isFactoryReadOnlyRunRequest,
   parseFactoryProviderRunRequest,
   type FactoryAgentAdapter,
   type FactoryAgentCommand,
@@ -22,6 +22,7 @@ export const claudeFactoryAgentAdapter: FactoryAgentAdapter = {
     provider: "claude",
     roles: ["reviewer"],
     preparationPhases: ["qualify", "specify", "plan"],
+    maintenanceDiscovery: true,
     maximumToolFilesystemAccess: "read-only",
     toolNetwork: "off",
     acceptsCommandAllowlist: false,
@@ -71,10 +72,7 @@ function assertClaudeRequest(
   request: FactoryProviderRunRequest,
   workspace: FactoryWorkspace
 ): void {
-  if (
-    request.provider !== "claude" ||
-    (!isFactoryPreparationRunRequest(request) && request.role !== "reviewer")
-  ) {
+  if (request.provider !== "claude" || !isFactoryReadOnlyRunRequest(request)) {
     throw new Error("Claude factory adapter supports read-only review and preparation only.");
   }
   if (

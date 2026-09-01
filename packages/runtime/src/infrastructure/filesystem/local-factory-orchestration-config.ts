@@ -65,7 +65,7 @@ export async function loadLocalFactoryOrchestrationConfig(
 }
 
 function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDailyCycleManifest {
-  return factoryDailyCycleManifestSchema.parse({
+  const common = {
     ...manifest,
     agentlabExecutable: {
       ...manifest.agentlabExecutable,
@@ -91,7 +91,22 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
       manifest.roleIdentityPolicyPath,
       "Factory role identity policy"
     )
-  });
+  };
+  return factoryDailyCycleManifestSchema.parse(
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+      ? {
+          ...common,
+          maintenanceDiscoveryConfigPath: privateLocalFilePath(
+            manifest.maintenanceDiscoveryConfigPath,
+            "Factory maintenance discovery config"
+          ),
+          canaryAdmissionConfigPath: privateLocalFilePath(
+            manifest.canaryAdmissionConfigPath,
+            "Factory canary admission config"
+          )
+        }
+      : common
+  );
 }
 
 function parseJson(value: string): unknown {

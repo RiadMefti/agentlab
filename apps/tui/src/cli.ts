@@ -20,6 +20,16 @@ export type CliAction =
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-orchestration-render"; readonly configPath: string }
+  | { readonly kind: "factory-maintenance-discovery-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-maintenance-discovery-tick";
+      readonly configPath: string;
+      readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedPreparationGrantDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
   | {
       readonly kind: "factory-eval-assess";
       readonly configPath: string;
@@ -55,6 +65,15 @@ export type CliAction =
       readonly kind: "factory-canary-reserve";
       readonly configPath: string;
       readonly taskId: string;
+    }
+  | {
+      readonly kind: "factory-canary-admission-tick";
+      readonly configPath: string;
+      readonly expectedCohortDigest: `sha256:${string}`;
+      readonly expectedCandidateDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
     }
   | {
       readonly kind: "factory-scheduler-tick";
@@ -181,6 +200,53 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "maintenance-discovery-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-maintenance-discovery-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "maintenance-discovery-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--discovery-policy" &&
+    input[6] === "--schedule-policy" &&
+    input[8] === "--policy" &&
+    input[10] === "--preparation-grant" &&
+    input[12] === "--role-policy"
+  ) {
+    const configPath = input[3];
+    const expectedDiscoveryPolicyDigest = input[5];
+    const expectedSchedulePolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    const expectedPreparationGrantDigest = input[11];
+    const expectedRoleIdentityPolicyDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedDiscoveryPolicyDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+      isSha256Digest(expectedPreparationGrantDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-maintenance-discovery-tick",
+        configPath,
+        expectedDiscoveryPolicyDigest,
+        expectedSchedulePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedPreparationGrantDigest,
+        expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
     input.length === 7 &&
     input[0] === "factory" &&
     input[1] === "eval-sign" &&
@@ -192,6 +258,42 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const runPath = input[5];
     if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
       return { kind: "factory-eval-sign", configPath, runPath, confirmation: "sign-eval" };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "canary-admission-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--cohort" &&
+    input[6] === "--candidate" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--role-policy" &&
+    input[12] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedCohortDigest = input[5];
+    const expectedCandidateDigest = input[7];
+    const expectedSchedulePolicyDigest = input[9];
+    const expectedRoleIdentityPolicyDigest = input[11];
+    const expectedFactoryPolicyBundleDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedCohortDigest) &&
+      isSha256Digest(expectedCandidateDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-canary-admission-tick",
+        configPath,
+        expectedCohortDigest,
+        expectedCandidateDigest,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
     }
   }
   if (
@@ -764,7 +866,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -810,6 +912,10 @@ export const helpText = `agentlab
 Open the local terminal UI, then choose or add a project folder.
 
 Factory authority:
+  agentlab factory maintenance-discovery-preflight --config <absolute-path>
+      Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
+  agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>
+      Discover one bounded daily set of evidenced R1 maintenance candidates and register only policy-admitted scheduled intake.
   agentlab factory intake-preflight --config <absolute-path>
       Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
   agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register[-scheduled]
@@ -826,6 +932,8 @@ Factory authority:
       Issue one human-reviewed, expiring R0/R1 cohort that structurally forbids merge and release.
   agentlab factory canary-reserve --config <absolute-path> --task <uuid>
       Re-verify the pinned attested cohort and reserve one exact scheduled task ceiling; execute nothing.
+  agentlab factory canary-admission-tick --config <absolute-path> --cohort <sha256> --candidate <sha256> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Reserve one bounded page of scheduled tasks inside existing human-approved attested cohort authority.
   agentlab factory authority-status --config <absolute-path>
       Inspect local scheduler and draft-PR authority plus both immutable event histories.
   agentlab factory scheduler-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-scheduler

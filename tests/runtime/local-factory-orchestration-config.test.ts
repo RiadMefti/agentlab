@@ -65,6 +65,27 @@ describe("local factory orchestration configuration boundary", () => {
     );
   });
 
+  it("loads the v2 autonomous-cycle pins and separate capability configs", async () => {
+    const fixture = await createFixture();
+    const manifest = {
+      ...fixture.manifest,
+      schemaVersion: "agentlab.daily-cycle-manifest.v2",
+      maintenanceDiscoveryConfigPath: join(fixture.root, "maintenance-discovery.json"),
+      canaryAdmissionConfigPath: join(fixture.root, "canary-admission.json"),
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8")
+    } as const;
+    await writePrivateJson(fixture.configPath, manifest);
+
+    await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).resolves.toEqual({
+      ...manifest,
+      schedulePolicy: fixture.schedulePolicy,
+      roleIdentityPolicy: fixture.roleIdentityPolicy
+    });
+  });
+
   it("rejects permissive, linked, relative, and structurally unsafe manifests", async () => {
     const fixture = await createFixture();
     await chmod(fixture.configPath, 0o644);

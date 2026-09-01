@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import {
   factoryAgentRunRequestSchema,
   factoryCostPolicySchema,
+  factoryMaintenanceDiscoveryRunRequestSchema,
   factoryPreparationRunRequestSchema,
   type FactoryAgentRunRequest,
+  type FactoryMaintenanceDiscoveryRunRequest,
   type FactoryPreparationRunRequest
 } from "@agentlab/contracts";
 import { describe, expect, it } from "vitest";
@@ -22,6 +24,7 @@ import type {
   RunResult
 } from "../../packages/runtime/src/infrastructure/process/command-runner.js";
 import { testDigest, testFactoryContract } from "../helpers/factory.js";
+import { testFactoryMaintenanceDiscoveryFixture } from "../helpers/factory-maintenance-discovery.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const prompt = "Implement only the immutable task contract.";
@@ -107,6 +110,33 @@ describe("factory agent adapters", () => {
         .capabilities()
         .find(({ provider }) => provider === "codex")?.preparationPhases
     ).toEqual(["qualify", "specify", "plan"]);
+  });
+
+  it("forces maintenance discovery through provider-neutral read-only harnesses", () => {
+    const codex = maintenanceDiscoveryRunRequest("codex");
+    const claude = maintenanceDiscoveryRunRequest("claude");
+    const discoveryWorkspace = {
+      ...workspace,
+      id: codex.executionId,
+      taskId: codex.taskId,
+      baseRevision: codex.repository.baseRevision
+    };
+
+    expect(
+      codexFactoryAgentAdapter.build(codex, "/opt/codex", discoveryWorkspace, prompt).command.args
+    ).toContain("read-only");
+    expect(
+      claudeFactoryAgentAdapter.build(claude, "/opt/claude", discoveryWorkspace, prompt).command
+        .args
+    ).toEqual(expect.arrayContaining(["--restricted", "Read,Glob,Grep"]));
+    expect(
+      executorWithTimes(new FakeCommandRunner({ stdout: "", stderr: "" })).capabilities()
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "codex", maintenanceDiscovery: true }),
+        expect.objectContaining({ provider: "claude", maintenanceDiscovery: true })
+      ])
+    );
   });
 
   it("parses provider JSONL without treating it as authority", () => {
@@ -564,6 +594,37 @@ function preparationRunRequest(provider: "codex" | "claude"): FactoryPreparation
       commandAllowlist: []
     },
     budget: profile.budget
+  });
+}
+
+function maintenanceDiscoveryRunRequest(
+  provider: "codex" | "claude"
+): FactoryMaintenanceDiscoveryRunRequest {
+  const fixture = testFactoryMaintenanceDiscoveryFixture();
+  return factoryMaintenanceDiscoveryRunRequestSchema.parse({
+    schemaVersion: "agentlab.maintenance-discovery-run-request.v1",
+    executionId: "33333333-3333-4333-8333-333333333333",
+    runId: fixture.run.value.runId,
+    taskId: fixture.run.value.runId,
+    runDigest: fixture.run.digest,
+    attempt: 1,
+    provider,
+    model: provider === "codex" ? "gpt-5.4" : "claude-sonnet-4-6",
+    reasoning: "high",
+    repository: fixture.run.value.repository,
+    skillId: fixture.skill.id,
+    skillPackageDigest: fixture.skill.packageDigest,
+    promptArtifact: {
+      digest: digestOf(prompt),
+      mediaType: "text/plain",
+      sizeBytes: Buffer.byteLength(prompt)
+    },
+    outputSchemaDigest: fixture.skill.outputSchemaDigest,
+    capabilities: {
+      ...fixture.skill.requestedCapabilities,
+      process: provider === "claude" ? "none" : "sandboxed"
+    },
+    budget: fixture.skill.budgetCeiling
   });
 }
 

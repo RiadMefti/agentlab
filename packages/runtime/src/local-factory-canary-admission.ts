@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { FactoryRoleIdentityPolicy, Sha256Digest } from "@agentlab/contracts";
+import type {
+  FactoryRoleIdentityPolicy,
+  FactorySchedulePolicy,
+  Sha256Digest
+} from "@agentlab/contracts";
 
 import { FactoryCanaryAdmissionService } from "./application/factory-canary-admission-service.js";
+import { FactoryCanaryAdmissionConsumerService } from "./application/factory-canary-admission-consumer-service.js";
 import { FactoryEvalAttestationService } from "./application/factory-eval-attestation-service.js";
 import {
   LocalFactoryCanaryAdmissionCoordinator,
@@ -11,6 +16,7 @@ import {
 import { cleanupFailedRuntimeConstruction } from "./application/local-runtime-construction.js";
 import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.js";
 import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
+import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import { NodeFactoryDsseVerifier } from "./infrastructure/crypto/node-factory-dsse-verifier.js";
 import { FileFactoryEvalAttestationKeySource } from "./infrastructure/filesystem/file-factory-eval-attestation-key-source.js";
 import type { LocalFactoryCanaryAdmissionConfig } from "./infrastructure/filesystem/local-factory-canary-admission-config.js";
@@ -21,6 +27,7 @@ import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persi
 import { SqliteFactoryEvalAttestationRepository } from "./infrastructure/persistence/sqlite-factory-eval-attestation-repository.js";
 import { SqliteFactoryEvaluationRepository } from "./infrastructure/persistence/sqlite-factory-evaluation-repository.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
+import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 
 export interface LocalFactoryCanaryAdmissionOptions {
@@ -36,6 +43,7 @@ export interface LocalFactoryCanaryAdmissionOptions {
   readonly expectedCandidateDigest: Sha256Digest;
   readonly expectedSchedulePolicyDigest: Sha256Digest;
   readonly expectedPolicyBundleDigest: Sha256Digest;
+  readonly schedulePolicy?: FactorySchedulePolicy;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
@@ -54,6 +62,14 @@ export function createLocalFactoryCanaryAdmission(
     identityPolicy.value.evalAttestor.keyId !== options.trustedKeyId
   ) {
     throw new Error("Factory canary admission trust coordinates do not match its identity policy.");
+  }
+  const schedulePolicy =
+    options.schedulePolicy === undefined ? null : documents.schedulePolicy(options.schedulePolicy);
+  if (schedulePolicy !== null && schedulePolicy.digest !== options.expectedSchedulePolicyDigest) {
+    throw new Error("Factory canary admission schedule policy changed after review.");
+  }
+  if (schedulePolicy !== null) {
+    assertFactoryProcessRoleIdentity(identityPolicy.value, "worker", process.getuid?.());
   }
   const writerLease = acquireSqliteWriterLease(options.databasePath);
   const repositories = new RuntimeRepositoryOwner();
@@ -90,6 +106,10 @@ export function createLocalFactoryCanaryAdmission(
     const reservations = repositories.track(
       new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
     );
+    const controls =
+      schedulePolicy === null
+        ? null
+        : repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
     const now = options.now ?? (() => new Date().toISOString());
     const createId = options.createId ?? randomUUID;
     const attestationVerifier = new FactoryEvalAttestationService({
@@ -118,8 +138,26 @@ export function createLocalFactoryCanaryAdmission(
       now,
       createId
     });
+    const consumer =
+      schedulePolicy === null || controls === null
+        ? undefined
+        : new FactoryCanaryAdmissionConsumerService({
+            schedulePolicy,
+            pins: {
+              expectedCohortDigest: options.expectedCohortDigest,
+              expectedCandidateDigest: options.expectedCandidateDigest,
+              expectedSchedulePolicyDigest: options.expectedSchedulePolicyDigest,
+              expectedPolicyBundleDigest: options.expectedPolicyBundleDigest,
+              expectedRoleIdentityPolicyDigest: options.expectedRoleIdentityPolicyDigest
+            },
+            controls,
+            preparations,
+            reservations,
+            admission
+          });
     return new LocalFactoryCanaryAdmissionCoordinator({
       admission,
+      ...(consumer === undefined ? {} : { consumer }),
       tasks: new RuntimeTaskOwner(),
       repositories,
       writerLease
@@ -153,6 +191,7 @@ export type {
   FactoryCanaryAdmissionCommand,
   FactoryCanaryAdmissionResult
 } from "./application/factory-canary-admission-service.js";
+export type { FactoryCanaryAdmissionTickReport } from "./application/factory-canary-admission-consumer-service.js";
 export type {
   FactoryCanaryAdmissionCommandPort,
   LocalFactoryCanaryAdmissionRuntime

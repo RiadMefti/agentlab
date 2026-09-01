@@ -247,6 +247,8 @@ describe("SqliteFactoryPreparationRepository", () => {
         DROP TABLE factory_execution_runs;
         DROP TABLE factory_preparation_events;
         DROP TABLE factory_preparations;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 5;
       `);
       historical

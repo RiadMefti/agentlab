@@ -212,6 +212,8 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
         ALTER TABLE factory_canary_cohorts DROP COLUMN role_identity_policy_digest;
         ALTER TABLE factory_canary_cohorts DROP COLUMN attestation_digest;
         DROP TABLE factory_eval_attestations;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 12;
       `);
     } finally {

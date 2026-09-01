@@ -88,6 +88,33 @@ describe("factory daily-cycle contracts", () => {
       }).success
     ).toBe(false);
   });
+
+  it("pins every autonomous producer and consumer in a separate v2 capability config", () => {
+    const manifest = {
+      ...validManifest(),
+      schemaVersion: "agentlab.daily-cycle-manifest.v2",
+      maintenanceDiscoveryConfigPath: "/etc/agentlab/maintenance-discovery.json",
+      canaryAdmissionConfigPath: "/etc/agentlab/canary-admission.json",
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8")
+    } as const;
+
+    expect(factoryDailyCycleManifestSchema.parse(manifest)).toEqual(manifest);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        canaryAdmissionConfigPath: manifest.worker.configPath
+      }).success
+    ).toBe(false);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        expectedCanaryCohortDigest: "latest"
+      }).success
+    ).toBe(false);
+  });
 });
 
 function validManifest() {

@@ -115,6 +115,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-orchestration.ts",
         default: "./dist/local-factory-orchestration.js",
         types: "./dist/local-factory-orchestration.d.ts"
+      },
+      "./factory-maintenance-discovery": {
+        source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
+        default: "./dist/local-factory-maintenance-discovery.js",
+        types: "./dist/local-factory-maintenance-discovery.d.ts"
       }
     }
   }
@@ -393,6 +398,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -410,6 +416,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -425,6 +432,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -466,6 +474,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-orchestration.ts",
       description: "read-only orchestration renderer",
       forbidden: orchestrationCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
+      description: "credentialless maintenance discovery composition",
+      forbidden: maintenanceDiscoveryCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -526,6 +539,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-orchestration-render.ts",
       description: "read-only orchestration render command",
       forbidden: orchestrationCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
+      description: "credentialless maintenance discovery command",
+      forbidden: maintenanceDiscoveryCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -644,6 +662,7 @@ const factoryIntakeInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-intake-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-intake-submission.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
@@ -884,6 +903,7 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
 
 const factoryCanaryAdmissionApplicationModules = new Set([
   "packages/runtime/src/application/factory-canary-admission-service.ts",
+  "packages/runtime/src/application/factory-canary-admission-consumer-service.ts",
   "packages/runtime/src/application/factory-eval-attestation-service.ts",
   "packages/runtime/src/application/local-factory-canary-admission-coordinator.ts",
   "packages/runtime/src/application/local-runtime-construction.ts",
@@ -898,6 +918,7 @@ const factoryCanaryAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
@@ -907,6 +928,7 @@ const factoryCanaryAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
 
@@ -992,6 +1014,101 @@ function orchestrationCommandForbidden(path: string): boolean {
   return false;
 }
 
+const factoryMaintenanceDiscoveryApplicationModules = new Set([
+  "packages/runtime/src/application/factory-maintenance-discovery-intake.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-prompt-renderer.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-run-recorder.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-service.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-skill.ts",
+  "packages/runtime/src/application/factory-preparation-intake-service.ts",
+  "packages/runtime/src/application/factory-skill-package-publisher.ts",
+  "packages/runtime/src/application/local-factory-maintenance-discovery-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryMaintenanceDiscoveryInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-maintenance-evidence-inventory.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-worker-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-intake-deduplicator.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-maintenance-discovery-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/local-factory-worker-host-inspector.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts",
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts",
+  "packages/runtime/src/infrastructure/recovery/local-factory-workspace-recovery.ts"
+]);
+
+function isFactoryMaintenanceDiscoveryModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-maintenance-discovery-") ||
+    path ===
+      "packages/runtime/src/application/local-factory-maintenance-discovery-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-maintenance-discovery-repository.ts"
+  );
+}
+
+function maintenanceDiscoveryCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryMaintenanceDiscoveryApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryMaintenanceDiscoveryInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/contracts/src/")) return "contracts";
   if (path.startsWith("packages/launcher/src/")) return "launcher";
@@ -1008,7 +1125,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
     path === "packages/runtime/src/local-factory-canary-authority.ts" ||
     path === "packages/runtime/src/local-factory-canary-admission.ts" ||
-    path === "packages/runtime/src/local-factory-orchestration.ts"
+    path === "packages/runtime/src/local-factory-orchestration.ts" ||
+    path === "packages/runtime/src/local-factory-maintenance-discovery.ts"
   ) {
     return "runtime-composition";
   }

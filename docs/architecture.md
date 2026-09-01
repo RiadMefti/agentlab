@@ -318,6 +318,25 @@ and is revalidated before each broker checkpoint. Manual dispatch remains schema
 [ADR 0019](decisions/0019-recovery-first-canary-pr-update-consumer.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
+The separate `@agentlab/runtime/factory-maintenance-discovery` composition closes scheduled intake
+without widening authority. A repository-owned policy pins one provider-neutral read-only scout
+skill/profile, exact budgets, R1-only maintenance classes, confidence, scope/protected paths, and
+daily count ceilings. The provider receives an exact-base isolated worktree with read-only Git and
+filesystem, offline tools, no secrets, one worker, and zero change/repair budget. Its strict output
+is untrusted. Trusted admission independently proves every evidence/affected path is tracked at the
+exact base, applies class/confidence/scope/protected/count rules, derives identity and authority,
+and registers only existing scheduled preparation intake under a reviewed R1 grant. SQLite version
+18 stores one immutable policy/day run and an append-only execution/finding journal. This
+composition cannot reserve, execute, contact GitHub, mutate switches, merge, or release.
+
+Canary-admission config v2 adds the exact schedule policy and a bounded consumer. While the
+scheduler switch is enabled it examines at most the schedule candidate ceiling and reserves at most
+the task ceiling, but every task still passes the existing independently signed, human-issued cohort
+and aggregate-budget service. Daily-cycle manifest v2 pins the discovery, preparation-grant, cohort,
+and candidate coordinates and prepends discovery → canary admission to the existing scheduler/broker
+chain. Manifest v1 remains supported. The renderer still cannot install or enable anything. See
+[ADR 0021](decisions/0021-durable-maintenance-discovery-and-canary-consumption.md).
+
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
 ingress rejects an unknown capability, cross-channel producer impersonation, a mismatched artifact,
@@ -519,19 +538,21 @@ re-observation are implemented. A bounded daily-slot consumer joins scheduled ca
 authenticated observations and deterministic repair admission, and a recovery-first credentialless
 consumer now turns exact authorizations into gated local repair proposals. A separate recovery-first
 broker consumer publishes those proposals through the existing durable non-force update service and
-returns them to exact-head observation. Repository/day and organization/day quotas, a sandboxed
-harness producer, owner-provisioned activation, telemetry-driven canary comparison, merge, release,
-rollback, and incident automation remain later stages. A read-only daily-cycle compiler now verifies
-one owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
-broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
-systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
-UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
-published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
-executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
-install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
-assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
-execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
-dormant orchestration rendering exist but remain unactivated.
+returns them to exact-head observation. Durable bounded daily maintenance discovery and automatic
+consumption of pre-existing human cohort authority are implemented. Repository/day and
+organization/day quotas, a sandboxed harness producer, owner-provisioned activation,
+telemetry-driven canary comparison, merge, release, rollback, and incident automation remain later
+stages. A read-only daily-cycle compiler now verifies one owner-only manifest, reviewed policy
+digests, the AgentLab executable digest, distinct worker, broker, and attestor UIDs, repair
+ceilings, and timeouts. It emits a content-addressed system-level systemd bundle whose
+non-persistent UTC timer chains fixed-argv one-shot services across separate UIDs, stops on any
+nonzero result, signals an incident target, and finally re-observes the last published head. Every
+stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact executable check
+record, so binary drift stops before AgentLab runs. The renderer cannot write or install artifacts,
+call the service manager, change authority, or touch the ledger. Deterministic assessment, bounded
+non-release cohort authority, durable admission, reservation-bound scheduled execution, draft
+dispatch, PR maintenance, repair consumption, repaired-branch publication, and dormant orchestration
+rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -548,6 +569,7 @@ eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ 
 eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
 canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
+maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
 unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
@@ -578,7 +600,8 @@ The product-source rules are executable and fail closed:
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
   broker, worker, evaluator, eval-attestor, switch-authority, canary-authority, canary-admission,
-  and orchestration-renderer subpaths are exact; every runtime deep import fails.
+  maintenance-discovery, and orchestration-renderer subpaths are exact; every runtime deep import
+  fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
@@ -592,6 +615,10 @@ The product-source rules are executable and fail closed:
   terminal, or interactive modules. The evaluator cannot reach signing or human canary issuance; the
   attestor cannot reach the evaluator, SQLite, or any authority. Canary admission cannot issue human
   authority or execute the task it reserves.
+- Maintenance discovery has its own exact allowlist. It may reuse read-only provider, isolated
+  worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
+  worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
+  runtime.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -616,23 +643,24 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                                 |
-| ------------------------------------------------------------ | -------------------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                                     |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                            |
-| Product use case or coordination policy                      | `packages/runtime/src/application`                       |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                    |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                  |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`           |
-| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`           |
-| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`        |
-| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`           |
-| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`        |
-| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`    |
-| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts` |
-| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts` |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                               |
-| Installer, cache, or binary handoff                          | `packages/launcher`                                      |
+| Change                                                       | Location                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                                          |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                 |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                            |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                         |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                       |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`             |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                |
+| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`             |
+| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`         |
+| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`      |
+| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`      |
+| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                                    |
+| Installer, cache, or binary handoff                          | `packages/launcher`                                           |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

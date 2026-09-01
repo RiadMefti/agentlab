@@ -186,6 +186,8 @@ describe("SqliteFactoryExecutionRepository", () => {
         DROP TABLE factory_pull_request_dispatches;
         DROP TABLE factory_execution_events;
         DROP TABLE factory_execution_runs;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 6;
       `);
     } finally {

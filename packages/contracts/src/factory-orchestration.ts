@@ -27,10 +27,8 @@ const verifierSafeAbsolutePathSchema = unitSafeTextSchema.regex(
   "Executable verification paths must use simple absolute POSIX segments."
 );
 
-/** Reviewed, command-free inputs for rendering one dormant daily systemd cycle. */
-export const factoryDailyCycleManifestSchema = z
+const factoryDailyCycleManifestBaseSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.daily-cycle-manifest.v1"),
     id: z.literal("agentlab/daily-software-factory"),
     version: factorySemanticVersionSchema,
     agentlabExecutable: z
@@ -51,7 +49,24 @@ export const factoryDailyCycleManifestSchema = z
     workerCommandTimeoutSeconds: z.number().int().min(60).max(90_000),
     brokerCommandTimeoutSeconds: z.number().int().min(60).max(7_200)
   })
-  .strict()
+  .strict();
+
+/** Reviewed, command-free inputs for rendering one dormant daily systemd cycle. */
+export const factoryDailyCycleManifestSchema = z
+  .discriminatedUnion("schemaVersion", [
+    factoryDailyCycleManifestBaseSchema.extend({
+      schemaVersion: z.literal("agentlab.daily-cycle-manifest.v1")
+    }),
+    factoryDailyCycleManifestBaseSchema.extend({
+      schemaVersion: z.literal("agentlab.daily-cycle-manifest.v2"),
+      maintenanceDiscoveryConfigPath: unitSafeTextSchema,
+      canaryAdmissionConfigPath: unitSafeTextSchema,
+      expectedMaintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+      expectedPreparationGrantDigest: sha256DigestSchema,
+      expectedCanaryCohortDigest: sha256DigestSchema,
+      expectedCanaryCandidateDigest: sha256DigestSchema
+    })
+  ])
   .superRefine((manifest, context) => {
     if (manifest.worker.userId === manifest.broker.userId) {
       context.addIssue({
@@ -65,6 +80,21 @@ export const factoryDailyCycleManifestSchema = z
         code: "custom",
         path: ["broker", "configPath"],
         message: "Factory worker and broker must use different configuration files."
+      });
+    }
+    if (
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2" &&
+      new Set([
+        manifest.worker.configPath,
+        manifest.broker.configPath,
+        manifest.maintenanceDiscoveryConfigPath,
+        manifest.canaryAdmissionConfigPath
+      ]).size !== 4
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["maintenanceDiscoveryConfigPath"],
+        message: "Every daily-cycle capability must use a separate configuration file."
       });
     }
   });
@@ -83,10 +113,8 @@ export const factoryDailyCycleUnitSchema = z
   .strict();
 export type FactoryDailyCycleUnit = z.infer<typeof factoryDailyCycleUnitSchema>;
 
-/** Content-addressed output; emitting it neither installs nor activates system services. */
-export const factoryDailyCycleBundleSchema = z
+const factoryDailyCycleBundleBaseSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v1"),
     manifestDigest: sha256DigestSchema,
     schedulePolicyDigest: sha256DigestSchema,
     roleIdentityPolicyDigest: sha256DigestSchema,
@@ -105,4 +133,18 @@ export const factoryDailyCycleBundleSchema = z
     bundleDigest: sha256DigestSchema
   })
   .strict();
+
+/** Content-addressed output; emitting it neither installs nor activates system services. */
+export const factoryDailyCycleBundleSchema = z.discriminatedUnion("schemaVersion", [
+  factoryDailyCycleBundleBaseSchema.extend({
+    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v1")
+  }),
+  factoryDailyCycleBundleBaseSchema.extend({
+    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v2"),
+    maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+    preparationGrantDigest: sha256DigestSchema,
+    canaryCohortDigest: sha256DigestSchema,
+    canaryCandidateDigest: sha256DigestSchema
+  })
+]);
 export type FactoryDailyCycleBundle = z.infer<typeof factoryDailyCycleBundleSchema>;

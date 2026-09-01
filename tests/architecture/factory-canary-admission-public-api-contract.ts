@@ -1,6 +1,7 @@
 import type {
   FactoryCanaryTaskReservation,
   FactoryRoleIdentityPolicy,
+  FactorySchedulePolicy,
   Sha256Digest
 } from "@agentlab/contracts";
 import {
@@ -34,8 +35,7 @@ type Equal<Left, Right> = [Left] extends [Right]
   : false;
 type Assert<Value extends true> = Value;
 
-interface ExpectedConfig {
-  schemaVersion: "agentlab.local-factory-canary-admission.v1";
+interface ExpectedConfigCommon {
   databasePath: string;
   runnerId: string;
   trustedPublicKeyPath: string;
@@ -48,8 +48,20 @@ interface ExpectedConfig {
   expectedPolicyBundleDigest: Sha256Digest;
   maximumIssuanceDelaySeconds: number;
   maximumAttestationLifetimeSeconds: number;
-  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
 }
+
+type ExpectedConfig = (
+  | (ExpectedConfigCommon & {
+      schemaVersion: "agentlab.local-factory-canary-admission.v1";
+    })
+  | (ExpectedConfigCommon & {
+      schemaVersion: "agentlab.local-factory-canary-admission.v2";
+      schedulePolicyPath: string;
+    })
+) & {
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+};
 
 interface ExpectedOptions {
   readonly databasePath: string;
@@ -64,6 +76,7 @@ interface ExpectedOptions {
   readonly expectedCandidateDigest: Sha256Digest;
   readonly expectedSchedulePolicyDigest: Sha256Digest;
   readonly expectedPolicyBundleDigest: Sha256Digest;
+  readonly schedulePolicy?: FactorySchedulePolicy;
   readonly now?: () => string;
   readonly createId?: () => string;
 }
@@ -89,7 +102,7 @@ export type FactoryCanaryAdmissionPublicApiAssertions = [
   Assert<Equal<LocalFactoryCanaryAdmissionOptions, ExpectedOptions>>,
   Assert<Equal<FactoryCanaryAdmissionCommand, ExpectedCommand>>,
   Assert<Equal<FactoryCanaryAdmissionResult, ExpectedResult>>,
-  Assert<Equal<keyof FactoryCanaryAdmissionCommandPort, "reserve">>,
+  Assert<Equal<keyof FactoryCanaryAdmissionCommandPort, "reserve" | "tick">>,
   Assert<Equal<keyof LocalFactoryCanaryAdmissionRuntime, "commands" | "close">>,
   Assert<
     Equal<

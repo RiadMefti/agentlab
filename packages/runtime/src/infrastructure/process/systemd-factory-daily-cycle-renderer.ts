@@ -39,8 +39,7 @@ export function renderSystemdFactoryDailyCycle(
     checksumContent,
     checksumDigest: digest(checksumContent)
   };
-  const body = {
-    schemaVersion: "agentlab.daily-cycle-bundle.v1" as const,
+  const commonBody = {
     manifestDigest,
     schedulePolicyDigest: manifest.expectedSchedulePolicyDigest,
     roleIdentityPolicyDigest: manifest.expectedRoleIdentityPolicyDigest,
@@ -50,6 +49,17 @@ export function renderSystemdFactoryDailyCycle(
     timerUnit,
     units
   };
+  const body =
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+      ? {
+          schemaVersion: "agentlab.daily-cycle-bundle.v2" as const,
+          ...commonBody,
+          maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
+          preparationGrantDigest: manifest.expectedPreparationGrantDigest,
+          canaryCohortDigest: manifest.expectedCanaryCohortDigest,
+          canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
+        }
+      : { schemaVersion: "agentlab.daily-cycle-bundle.v1" as const, ...commonBody };
   return factoryDailyCycleBundleSchema.parse({
     ...body,
     bundleDigest: digest(canonicalJson(body))
@@ -121,6 +131,8 @@ Documentation=https://github.com/riadmefti/agentlab/blob/main/docs/factory-opera
 }
 
 function timerContent(plan: FactoryDailyCyclePlan): string {
+  const first = plan.stages[0];
+  if (first === undefined) throw new Error("Daily factory cycle must contain at least one stage.");
   return `[Unit]
 Description=AgentLab bounded daily software factory
 Documentation=https://github.com/riadmefti/agentlab/blob/main/docs/factory-operations.md
@@ -130,7 +142,7 @@ OnCalendar=*-*-* ${plan.scheduleAtUtc}:00 UTC
 AccuracySec=1s
 RandomizedDelaySec=0
 Persistent=false
-Unit=agentlab-factory-scheduler.service
+Unit=agentlab-factory-${first.id}.service
 
 [Install]
 WantedBy=timers.target

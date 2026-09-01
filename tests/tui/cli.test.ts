@@ -74,6 +74,17 @@ describe("terminal CLI", () => {
     expect(() =>
       parseCliArguments(["factory", "orchestration-render", "--config", "relative.json"])
     ).toThrow(/Usage/u);
+    expect(
+      parseCliArguments([
+        "factory",
+        "maintenance-discovery-preflight",
+        "--config",
+        "/private/agentlab/discovery.json"
+      ])
+    ).toEqual({
+      kind: "factory-maintenance-discovery-preflight",
+      configPath: "/private/agentlab/discovery.json"
+    });
   });
 
   it("requires exact eval and human canary authority coordinates", () => {
@@ -262,6 +273,84 @@ describe("terminal CLI", () => {
         "/private/agentlab/request.json",
         "--policy",
         policy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
+  it("requires exact autonomous discovery and canary-consumer policy pins", () => {
+    const discoveryPolicy = `sha256:${"1".repeat(64)}` as const;
+    const schedulePolicy = `sha256:${"2".repeat(64)}` as const;
+    const factoryPolicy = `sha256:${"3".repeat(64)}` as const;
+    const preparationGrant = `sha256:${"4".repeat(64)}` as const;
+    const rolePolicy = `sha256:${"5".repeat(64)}` as const;
+    expect(
+      parseCliArguments([
+        "factory",
+        "maintenance-discovery-tick",
+        "--config",
+        "/private/agentlab/discovery.json",
+        "--discovery-policy",
+        discoveryPolicy,
+        "--schedule-policy",
+        schedulePolicy,
+        "--policy",
+        factoryPolicy,
+        "--preparation-grant",
+        preparationGrant,
+        "--role-policy",
+        rolePolicy
+      ])
+    ).toEqual({
+      kind: "factory-maintenance-discovery-tick",
+      configPath: "/private/agentlab/discovery.json",
+      expectedDiscoveryPolicyDigest: discoveryPolicy,
+      expectedSchedulePolicyDigest: schedulePolicy,
+      expectedFactoryPolicyBundleDigest: factoryPolicy,
+      expectedPreparationGrantDigest: preparationGrant,
+      expectedRoleIdentityPolicyDigest: rolePolicy
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "canary-admission-tick",
+        "--config",
+        "/private/agentlab/canary-admission.json",
+        "--cohort",
+        discoveryPolicy,
+        "--candidate",
+        schedulePolicy,
+        "--schedule-policy",
+        factoryPolicy,
+        "--role-policy",
+        preparationGrant,
+        "--policy",
+        rolePolicy
+      ])
+    ).toEqual({
+      kind: "factory-canary-admission-tick",
+      configPath: "/private/agentlab/canary-admission.json",
+      expectedCohortDigest: discoveryPolicy,
+      expectedCandidateDigest: schedulePolicy,
+      expectedSchedulePolicyDigest: factoryPolicy,
+      expectedRoleIdentityPolicyDigest: preparationGrant,
+      expectedFactoryPolicyBundleDigest: rolePolicy
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "maintenance-discovery-tick",
+        "--config",
+        "/private/agentlab/discovery.json",
+        "--discovery-policy",
+        "not-a-digest",
+        "--schedule-policy",
+        schedulePolicy,
+        "--policy",
+        factoryPolicy,
+        "--preparation-grant",
+        preparationGrant,
+        "--role-policy",
+        rolePolicy
       ])
     ).toThrow(/Usage/u);
   });
@@ -871,6 +960,9 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory orchestration-render --config");
+    expect(helpText).toContain("factory maintenance-discovery-preflight --config");
+    expect(helpText).toContain("factory maintenance-discovery-tick --config");
+    expect(helpText).toContain("factory canary-admission-tick --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory scheduler-tick --config");
     expect(helpText).toContain("factory broker-open-draft --config");

@@ -154,6 +154,7 @@ export type FactoryRiskTier = z.infer<typeof factoryRiskTierSchema>;
 
 export const factoryActorRoleSchema = z.enum([
   "requester",
+  "maintenance-scout",
   "qualifier",
   "specifier",
   "planner",
@@ -337,6 +338,7 @@ export const factoryProcessIsolationSchema = z
 export type FactoryProcessIsolation = z.infer<typeof factoryProcessIsolationSchema>;
 
 export const evidenceKindSchema = z.enum([
+  "discovery",
   "request",
   "qualification",
   "specification",

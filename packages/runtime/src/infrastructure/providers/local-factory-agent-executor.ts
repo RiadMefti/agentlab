@@ -12,7 +12,9 @@ import {
   type FactoryAgentExecutor,
   type FactoryAgentExecutorCapability,
   type FactoryPreparationAgentExecutionInput,
-  type FactoryPreparationAgentExecutor
+  type FactoryPreparationAgentExecutor,
+  type FactoryMaintenanceDiscoveryAgentExecutionInput,
+  type FactoryMaintenanceDiscoveryAgentExecutor
 } from "../../domain/factory-agent-executor.js";
 import type { FactoryCostAccounting } from "../../domain/factory-cost-accounting.js";
 import {
@@ -47,7 +49,10 @@ export interface LocalFactoryAgentExecutorOptions {
 
 /** Dispatches provider-native non-interactive harnesses behind one bounded execution port. */
 export class LocalFactoryAgentExecutor
-  implements FactoryAgentExecutor, FactoryPreparationAgentExecutor
+  implements
+    FactoryAgentExecutor,
+    FactoryPreparationAgentExecutor,
+    FactoryMaintenanceDiscoveryAgentExecutor
 {
   readonly #runner: CommandRunner;
   readonly #now: () => string;
@@ -78,7 +83,10 @@ export class LocalFactoryAgentExecutor
   }
 
   public async execute(
-    input: FactoryAgentExecutionInput | FactoryPreparationAgentExecutionInput
+    input:
+      | FactoryAgentExecutionInput
+      | FactoryPreparationAgentExecutionInput
+      | FactoryMaintenanceDiscoveryAgentExecutionInput
   ): Promise<FactoryAgentExecutionOutput> {
     const request = parseFactoryProviderRunRequest(input.request);
     this.preflight({

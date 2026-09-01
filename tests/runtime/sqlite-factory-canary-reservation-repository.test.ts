@@ -106,6 +106,8 @@ describe("SqliteFactoryCanaryReservationRepository", () => {
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;
         DROP TABLE factory_canary_task_reservations;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 14;
       `);
     } finally {

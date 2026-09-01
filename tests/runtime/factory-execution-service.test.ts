@@ -1373,6 +1373,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
         preparationPhases: ["qualify" as const, "specify" as const, "plan" as const],
         maximumToolFilesystemAccess: "workspace-write" as const,
         toolNetwork: "off" as const,
+        maintenanceDiscovery: true,
         acceptsCommandAllowlist: false,
         acceptsSecrets: false as const
       },
@@ -1382,6 +1383,7 @@ class FakeAgentExecutor implements FactoryAgentExecutor {
         preparationPhases: ["qualify" as const, "specify" as const, "plan" as const],
         maximumToolFilesystemAccess: "read-only" as const,
         toolNetwork: "off" as const,
+        maintenanceDiscovery: false,
         acceptsCommandAllowlist: false,
         acceptsSecrets: false as const
       }

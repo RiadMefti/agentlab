@@ -217,6 +217,20 @@ limits. Exact retries return the immutable reservation. It executes no model and
 merge, or release authority. Do not interpret a cohort or reservation as a running canary or bypass
 intake, task policy, broker preflight, repository governance, or human merge controls.
 
+Config `agentlab.local-factory-canary-admission.v2` adds a separate owner-only `schedulePolicyPath`.
+Under the reviewed worker UID, its bounded consumer may reserve a page of scheduled preparations
+inside that same already-issued cohort:
+
+```text
+agentlab factory canary-admission-tick --config /absolute/private/release/canary-admission-v2.json --cohort sha256:... --candidate sha256:... --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+```
+
+The scheduler switch must already be enabled. The command cannot issue or widen cohort authority; it
+uses the schedule candidate/task ceilings and routes every task through the same signature, lineage,
+freshness, risk, task-count, and aggregate-budget checks as manual reservation. Cohort capacity or
+per-task denial is reported as a skipped candidate. No model, broker, merge, or release capability
+is reachable.
+
 `scheduler-tick` skips scheduled candidates without an exact current reservation. A claim and its
 finish event carry the reservation digest; SQLite checks task, request, preparation authority,
 schedule/factory/role policies, executable stage, full budget, and enough remaining lifetime before

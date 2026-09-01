@@ -495,6 +495,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TRIGGER factory_pull_request_dispatches_canary_guard;
         DROP INDEX factory_pull_request_dispatches_canary_idx;
         ALTER TABLE factory_pull_request_dispatches DROP COLUMN canary_reservation_digest;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 16;
       `);
     } finally {
@@ -546,6 +548,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TABLE factory_pull_request_repair_runs;
         DROP TABLE factory_pull_request_dispatch_events;
         DROP TABLE factory_pull_request_dispatches;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 7;
       `);
     } finally {

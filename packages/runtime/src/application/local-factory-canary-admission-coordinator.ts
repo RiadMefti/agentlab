@@ -3,6 +3,10 @@ import type {
   FactoryCanaryAdmissionResult,
   FactoryCanaryAdmissionService
 } from "./factory-canary-admission-service.js";
+import type {
+  FactoryCanaryAdmissionConsumerService,
+  FactoryCanaryAdmissionTickReport
+} from "./factory-canary-admission-consumer-service.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
 
@@ -10,6 +14,7 @@ const defaultMaximumQueuedCommands = 16;
 
 export interface FactoryCanaryAdmissionCommandPort {
   reserve(input: unknown): Promise<FactoryCanaryAdmissionResult>;
+  tick(input: unknown): Promise<FactoryCanaryAdmissionTickReport>;
 }
 
 export interface LocalFactoryCanaryAdmissionRuntime {
@@ -19,6 +24,7 @@ export interface LocalFactoryCanaryAdmissionRuntime {
 
 export interface LocalFactoryCanaryAdmissionCoordinatorDependencies {
   readonly admission: Pick<FactoryCanaryAdmissionService, "reserve">;
+  readonly consumer?: Pick<FactoryCanaryAdmissionConsumerService, "tick">;
   readonly tasks: RuntimeTaskOwner;
   readonly repositories: RuntimeRepositoryOwner;
   readonly writerLease: WriterLease;
@@ -51,7 +57,14 @@ export class LocalFactoryCanaryAdmissionCoordinator implements LocalFactoryCanar
     }
     this.#maximumQueuedCommands = maximum;
     this.commands = {
-      reserve: (input) => this.#run(() => this.#admission.reserve(input))
+      reserve: (input) => this.#run(() => this.#admission.reserve(input)),
+      tick: (input) =>
+        this.#run(() => {
+          if (dependencies.consumer === undefined) {
+            throw new Error("Factory canary admission consumer is not configured.");
+          }
+          return dependencies.consumer.tick(input);
+        })
     };
   }
 

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 17;
+export const latestSchemaVersion = 18;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -3323,6 +3323,246 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 17;
+      COMMIT;
+    `);
+  }
+
+  if (version < 18) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_maintenance_discovery_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_policy_id TEXT NOT NULL CHECK (
+          length(discovery_policy_id) BETWEEN 1 AND 128
+        ),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND
+          substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND
+          substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        factory_policy_bundle_digest TEXT NOT NULL CHECK (
+          length(factory_policy_bundle_digest) = 71 AND
+          substr(factory_policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        preparation_grant_digest TEXT NOT NULL CHECK (
+          length(preparation_grant_digest) = 71 AND
+          substr(preparation_grant_digest, 1, 7) = 'sha256:'
+        ),
+        role_identity_policy_digest TEXT NOT NULL CHECK (
+          length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 8388608 AND json_valid(run_json)
+        ),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at),
+        UNIQUE(discovery_policy_id, scheduled_for)
+      ) STRICT;
+      CREATE INDEX factory_maintenance_discovery_runs_slot_idx
+        ON factory_maintenance_discovery_runs(scheduled_for, discovery_policy_id);
+
+      CREATE TABLE factory_maintenance_discovery_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_maintenance_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 1000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'agent-started', 'agent-finished', 'agent-failed',
+          'finding-admitted', 'finding-skipped', 'completed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'agent-active', 'admitting')
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'agent-active', 'admitting', 'completed', 'failed')
+        ),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        finding_key TEXT CHECK (finding_key IS NULL OR length(finding_key) BETWEEN 1 AND 128),
+        finding_digest TEXT CHECK (
+          finding_digest IS NULL OR
+          (length(finding_digest) = 71 AND substr(finding_digest, 1, 7) = 'sha256:')
+        ),
+        task_id TEXT CHECK (task_id IS NULL OR length(task_id) = 36),
+        run_record_digest TEXT CHECK (
+          run_record_digest IS NULL OR
+          (length(run_record_digest) = 71 AND substr(run_record_digest, 1, 7) = 'sha256:')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 4194304 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_maintenance_discovery_events_run_idx
+        ON factory_maintenance_discovery_events(run_id, sequence);
+      CREATE UNIQUE INDEX factory_maintenance_discovery_finding_idx
+        ON factory_maintenance_discovery_events(run_id, finding_key)
+        WHERE kind IN ('finding-admitted', 'finding-skipped');
+
+      CREATE TRIGGER factory_maintenance_discovery_runs_no_update
+      BEFORE UPDATE ON factory_maintenance_discovery_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery runs are immutable');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_runs_no_delete
+      BEFORE DELETE ON factory_maintenance_discovery_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery runs are immutable');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_runs_identity_guard
+      BEFORE INSERT ON factory_maintenance_discovery_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicy.id') IS NOT NEW.discovery_policy_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.factoryPolicyBundleDigest')
+          IS NOT NEW.factory_policy_bundle_digest OR
+        json_extract(NEW.run_json, '$.preparationGrantDigest')
+          IS NOT NEW.preparation_grant_digest OR
+        json_extract(NEW.run_json, '$.roleIdentityPolicyDigest')
+          IS NOT NEW.role_identity_policy_digest OR
+        json_extract(NEW.run_json, '$.repository.id') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.repository.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_maintenance_discovery_events_no_update
+      BEFORE UPDATE ON factory_maintenance_discovery_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery events are append-only');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_no_delete
+      BEFORE DELETE ON factory_maintenance_discovery_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery events are append-only');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_identity_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.findingKey') IS NOT NEW.finding_key OR
+        json_extract(NEW.event_json, '$.findingDigest') IS NOT NEW.finding_digest OR
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.runRecordDigest') IS NOT NEW.run_record_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event identity mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_chain_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event chain mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_transition_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'agent-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'agent-active') OR
+        (NEW.kind = 'agent-finished' AND NEW.from_state = 'agent-active' AND NEW.to_state = 'admitting') OR
+        (NEW.kind = 'agent-failed' AND NEW.from_state = 'agent-active' AND NEW.to_state = 'failed') OR
+        (NEW.kind IN ('finding-admitted', 'finding-skipped') AND
+          NEW.from_state = 'admitting' AND NEW.to_state = 'admitting') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'admitting' AND NEW.to_state = 'completed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory maintenance discovery transition');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_fields_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'completed') AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NULL) OR
+        (NEW.kind = 'agent-started' AND NEW.execution_id IS NOT NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NULL) OR
+        (NEW.kind IN ('agent-finished', 'agent-failed') AND NEW.execution_id IS NOT NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NOT NULL) OR
+        (NEW.kind = 'finding-admitted' AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NOT NULL AND NEW.finding_digest IS NOT NULL AND
+          NEW.task_id IS NOT NULL AND NEW.run_record_digest IS NULL) OR
+        (NEW.kind = 'finding-skipped' AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NOT NULL AND NEW.finding_digest IS NOT NULL AND
+          NEW.task_id IS NULL AND NEW.run_record_digest IS NULL)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event fields mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_time_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 18;
       COMMIT;
     `);
   }

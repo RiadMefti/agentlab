@@ -58,9 +58,11 @@ collapsing separation of duties or granting AgentLab host-installation authority
 manually repeated starts remain idempotent at the ledger. A failure target is an observable signal,
 not an automatic kill-switch mutation; operations must monitor it and disable scheduler and broker
 authority during an incident. Live accounts, files, policies, rates, GitHub App, repository
-governance, unit installation, monitoring, and switch enablement remain owner responsibilities.
-Maintenance discovery, fleet quotas, merge, release, canary telemetry, rollback, and incident
-automation remain separate future capabilities.
+governance, unit installation, monitoring, and switch enablement remain owner responsibilities. At
+this decision's v1 boundary, maintenance discovery was still absent. ADR 0021 adds a compatible v2
+manifest that prepends bounded discovery and consumption of existing human cohort authority. Fleet
+quotas, merge, release, canary telemetry, rollback, and incident automation remain separate future
+capabilities.
 
 ## Fitness functions
 

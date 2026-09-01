@@ -48,6 +48,13 @@ import type {
   FactorySkillPackage,
   FactoryTaskUsageRecord,
   FactoryIntakeRequest,
+  FactoryMaintenanceDiscoveryEvent,
+  FactoryMaintenanceDiscoveryOutput,
+  FactoryMaintenanceDiscoveryPolicy,
+  FactoryMaintenanceDiscoveryRun,
+  FactoryMaintenanceDiscoveryRunRecord,
+  FactoryMaintenanceDiscoveryRunRequest,
+  FactoryMaintenanceFinding,
   FactorySpecification,
   ImmutableTaskContract,
   Sha256Digest,
@@ -63,6 +70,23 @@ export interface CanonicalFactoryDocument<Value> {
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
   intakeRequest(input: unknown): CanonicalFactoryDocument<FactoryIntakeRequest>;
+  maintenanceDiscoveryPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryPolicy>;
+  maintenanceDiscoveryRun(input: unknown): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryRun>;
+  maintenanceDiscoveryEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryEvent>;
+  maintenanceDiscoveryRunRequest(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryRunRequest>;
+  maintenanceDiscoveryRunRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryRunRecord>;
+  maintenanceDiscoveryOutput(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryMaintenanceDiscoveryOutput>;
+  maintenanceFinding(input: unknown): CanonicalFactoryDocument<FactoryMaintenanceFinding>;
   qualification(input: unknown): CanonicalFactoryDocument<FactoryQualification>;
   specification(input: unknown): CanonicalFactoryDocument<FactorySpecification>;
   plan(input: unknown): CanonicalFactoryDocument<FactoryPlan>;

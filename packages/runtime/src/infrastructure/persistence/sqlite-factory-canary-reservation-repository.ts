@@ -7,6 +7,7 @@ import {
 } from "@agentlab/contracts";
 import { z } from "zod";
 
+import { ConflictError } from "../../domain/errors.js";
 import type {
   FactoryCanaryReservationRepository,
   FactoryCanaryReservationSnapshot,
@@ -87,70 +88,82 @@ export class SqliteFactoryCanaryReservationRepository implements FactoryCanaryRe
     reservationClaim: CanonicalFactoryDocument<FactoryCanaryTaskReservation>
   ): Promise<FactoryCanaryReservationWriteResult> {
     const reservation = this.#verifiedReservation(reservationClaim);
-    return Promise.resolve(
-      this.#inTransaction(() => {
-        const existing = this.#findByTaskId(reservation.value.taskId);
-        if (existing !== null) {
-          if (
-            existing.reservationDigest !== reservation.digest ||
-            this.#documents.canaryTaskReservation(existing.reservation).json !== reservation.json
-          ) {
-            throw new Error("Factory task already has different immutable canary authority.");
+    try {
+      return Promise.resolve(
+        this.#inTransaction(() => {
+          const existing = this.#findByTaskId(reservation.value.taskId);
+          if (existing !== null) {
+            if (
+              existing.reservationDigest !== reservation.digest ||
+              this.#documents.canaryTaskReservation(existing.reservation).json !== reservation.json
+            ) {
+              throw new ConflictError(
+                "Factory task already has different immutable canary authority."
+              );
+            }
+            return { status: "existing" as const, ...existing };
           }
-          return { status: "existing" as const, ...existing };
-        }
-        const budget = reservation.value.budget;
-        this.#database
-          .prepare(
-            `INSERT INTO factory_canary_task_reservations (
+          const budget = reservation.value.budget;
+          this.#database
+            .prepare(
+              `INSERT INTO factory_canary_task_reservations (
               ${RESERVATION_COLUMNS}
             ) VALUES (
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?
             )`
-          )
-          .run(
-            reservation.value.reservationId,
-            reservation.digest,
-            reservation.value.cohortId,
-            reservation.value.cohortDigest,
-            reservation.value.approvalDigest,
-            reservation.value.assessmentDigest,
-            reservation.value.attestationDigest,
-            reservation.value.roleIdentityPolicyDigest,
-            reservation.value.challengerCandidateDigest,
-            reservation.value.schedulePolicyDigest,
-            reservation.value.policyBundleDigest,
-            reservation.value.stage,
-            reservation.value.repository.id,
-            reservation.value.repository.baseRevision,
-            reservation.value.taskId,
-            reservation.value.requestDigest,
-            reservation.value.preparationAuthorityDigest,
-            reservation.value.maximumRiskTier,
-            budget.wallClockSeconds,
-            budget.maxAgentTurns,
-            budget.maxToolCalls,
-            budget.maxInputTokens,
-            budget.maxOutputTokens,
-            budget.maxCostMicrousd,
-            budget.maxProcesses,
-            budget.maxOutputBytes,
-            budget.maxWorkers,
-            budget.maxRepairAttempts,
-            budget.maxChangedFiles,
-            budget.maxChangedLines,
-            reservation.value.reservedAt,
-            reservation.value.expiresAt,
-            reservation.json
-          );
-        return {
-          status: "reserved" as const,
-          reservation: reservation.value,
-          reservationDigest: reservation.digest
-        };
-      })
-    );
+            )
+            .run(
+              reservation.value.reservationId,
+              reservation.digest,
+              reservation.value.cohortId,
+              reservation.value.cohortDigest,
+              reservation.value.approvalDigest,
+              reservation.value.assessmentDigest,
+              reservation.value.attestationDigest,
+              reservation.value.roleIdentityPolicyDigest,
+              reservation.value.challengerCandidateDigest,
+              reservation.value.schedulePolicyDigest,
+              reservation.value.policyBundleDigest,
+              reservation.value.stage,
+              reservation.value.repository.id,
+              reservation.value.repository.baseRevision,
+              reservation.value.taskId,
+              reservation.value.requestDigest,
+              reservation.value.preparationAuthorityDigest,
+              reservation.value.maximumRiskTier,
+              budget.wallClockSeconds,
+              budget.maxAgentTurns,
+              budget.maxToolCalls,
+              budget.maxInputTokens,
+              budget.maxOutputTokens,
+              budget.maxCostMicrousd,
+              budget.maxProcesses,
+              budget.maxOutputBytes,
+              budget.maxWorkers,
+              budget.maxRepairAttempts,
+              budget.maxChangedFiles,
+              budget.maxChangedLines,
+              reservation.value.reservedAt,
+              reservation.value.expiresAt,
+              reservation.json
+            );
+          return {
+            status: "reserved" as const,
+            reservation: reservation.value,
+            reservationDigest: reservation.digest
+          };
+        })
+      );
+    } catch (error: unknown) {
+      if (
+        error instanceof Error &&
+        error.message.includes("factory canary cohort reservation capacity exceeded")
+      ) {
+        throw new ConflictError("Factory canary cohort reservation capacity exceeded.");
+      }
+      throw error;
+    }
   }
 
   public findByTaskId(taskIdInput: string): Promise<FactoryCanaryReservationSnapshot | null> {

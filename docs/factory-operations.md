@@ -1,9 +1,9 @@
 # Local factory scheduler operations
 
-This runbook covers the dormant one-shot scheduler and canary-broker boundaries. AgentLab does not
-install a scheduler or broker timer, provision live policy, enable either authority switch, discover
-maintenance work, merge, or release. It can derive pending broker work during an explicit one-shot
-command. Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership
+This runbook covers the dormant one-shot discovery, scheduler, and canary-broker boundaries.
+AgentLab does not install a timer, provision live policy, enable either authority switch, merge, or
+release. It can discover bounded maintenance and derive pending broker work during explicit one-shot
+commands. Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership
 plus the reviewed role-identity policy is the local authorization boundary.
 
 ## Reviewed inputs
@@ -68,6 +68,61 @@ The schedule file is strict and command-free:
 These values are examples, not production approval. The complete authority ceiling of each selected
 task is reserved against every tick dimension. There is no optimistic cost estimate and no wildcard
 provider rate.
+
+## Autonomous maintenance intake
+
+`agentlab.maintenance-discovery-policy.v1` pins exactly one `maintenance-scout` skill and profile.
+The skill must be scheduled, R0, single-worker, read-only/offline/secretless, and have zero change
+and repair budget. The policy also fixes R1-only change classes, confidence, scope, protected paths,
+and finding/admission ceilings no greater than the schedule candidate/task ceilings. Keep the
+policy, skill package, existing preparation grant/packages, and discovery config owner-only and
+outside the repository. The discovery config is strict:
+
+```json
+{
+  "schemaVersion": "agentlab.local-factory-maintenance-discovery.v1",
+  "workerConfigPath": "/absolute/worker-v3.json",
+  "repositoryRoot": "/absolute/source/agentlab",
+  "repositoryId": "owner/agentlab",
+  "conversationId": "00000000-0000-4000-8000-000000000000",
+  "discoveryPolicyPath": "/absolute/maintenance-discovery-policy.json",
+  "discoverySkillPackagePath": "/absolute/maintenance-discovery-skill.json",
+  "preparationGrantPath": "/absolute/preparation-grant.json",
+  "preparationSkillPackagePaths": [
+    "/absolute/qualify.json",
+    "/absolute/specify.json",
+    "/absolute/plan.json",
+    "/absolute/implement.json"
+  ],
+  "authorityLifetimeSeconds": 3600
+}
+```
+
+The exact preparation package list must contain the complete reviewed grant DAG; the four paths are
+only abbreviated examples. Verify the boundary without a model, then run one exact daily slot:
+
+```text
+agentlab factory maintenance-discovery-preflight --config /absolute/maintenance-discovery.json
+agentlab factory maintenance-discovery-tick --config /absolute/maintenance-discovery.json --discovery-policy sha256:... --schedule-policy sha256:... --policy sha256:... --preparation-grant sha256:... --role-policy sha256:...
+```
+
+SQLite schema 18 records the immutable slot and append-only run/finding dispositions. The model
+cannot create identity, authority, ledger evidence, or permission. Deterministic admission verifies
+every evidence path against the exact Git base and rejects scope, protected-path, class, confidence,
+or count violations before registering existing scheduled intake. Exact completed retries are
+no-ops.
+
+Automatic reservation requires `agentlab.local-factory-canary-admission.v2`, which adds a separate
+owner-only `schedulePolicyPath` to the v1 trust pins. It consumes—never issues—the already human-
+approved attested cohort:
+
+```text
+agentlab factory canary-admission-tick --config /absolute/canary-admission-v2.json --cohort sha256:... --candidate sha256:... --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+```
+
+It operates only while scheduler authority is enabled, examines at most the candidate ceiling,
+reserves at most the task ceiling, and retains the cohort's aggregate task/budget enforcement and
+literal `autoMerge:false`/`release:false` limits.
 
 ## Admission ceremony
 
@@ -205,7 +260,7 @@ contains no command or credential:
 
 ```json
 {
-  "schemaVersion": "agentlab.daily-cycle-manifest.v1",
+  "schemaVersion": "agentlab.daily-cycle-manifest.v2",
   "id": "agentlab/daily-software-factory",
   "version": "1.0.0",
   "agentlabExecutable": {
@@ -220,6 +275,12 @@ contains no command or credential:
   "expectedSchedulePolicyDigest": "sha256:...",
   "expectedRoleIdentityPolicyDigest": "sha256:...",
   "expectedFactoryPolicyBundleDigest": "sha256:...",
+  "maintenanceDiscoveryConfigPath": "/etc/agentlab/maintenance-discovery.json",
+  "canaryAdmissionConfigPath": "/etc/agentlab/canary-admission.json",
+  "expectedMaintenanceDiscoveryPolicyDigest": "sha256:...",
+  "expectedPreparationGrantDigest": "sha256:...",
+  "expectedCanaryCohortDigest": "sha256:...",
+  "expectedCanaryCandidateDigest": "sha256:...",
   "maximumRepairRounds": 2,
   "workerCommandTimeoutSeconds": 7500,
   "brokerCommandTimeoutSeconds": 900
@@ -233,13 +294,14 @@ must exceed its complete aggregate wall-clock ceiling by at least 30 seconds. Re
 agentlab factory orchestration-render --config /absolute/orchestration.json
 ```
 
-The JSON bundle pins the manifest, policies, AgentLab executable, every unit, and the bundle itself.
-It contains one UTC `Persistent=false` timer, separate numeric-UID services, fixed argv, bounded
-timeouts, an `OnSuccess=` chain, a final exact-head observation, and an incident target activated by
-any failed step. It also emits `executableVerification.checksumContent`; every service verifies the
-installed executable against that exact record with fixed `/usr/bin/sha256sum` argv before starting
-AgentLab. It never writes a unit or checksum file, calls `systemctl`, changes an authority switch,
-or touches the ledger.
+The v2 JSON bundle pins the manifest, discovery/grant/cohort/candidate and existing policies, the
+AgentLab executable, every unit, and the bundle itself. Its UTC `Persistent=false` timer runs
+discovery → canary admission → scheduler → draft → bounded observe/repair/update rounds. Separate
+numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a final
+exact-head observation, and an incident target preserve separation. V1 remains supported and starts
+at the scheduler. Every service verifies `executableVerification.checksumContent` with fixed
+`/usr/bin/sha256sum` argv before AgentLab. Rendering never writes a unit/checksum, calls
+`systemctl`, changes authority, or touches the ledger.
 
 Owner provisioning is deliberately outside AgentLab. Materialize the exact checksum content at
 `executableVerification.checksumFilePath` and the exact unit contents under `/etc/systemd/system`.
@@ -286,13 +348,12 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, installed timer, live rate card, live worker/authority configuration, repository/day
-or organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts,
-autonomous maintenance discovery, attested eval-harness producer, owner-provisioned activation,
-merge, telemetry-driven canary, rollback controller, or incident automation is shipped.
-Deterministic assessment, human non-release cohorts, task reservation, reservation-bound scheduled
-execution and draft dispatch, slot-bound PR observation/repair admission, credentialless repair
-consumption, and brokered repaired-branch publication plus a content-addressed separated-service
+No OS accounts, installed timer, live rate card/config/cohort, repository/day or organization/day
+quota ledger, cross-repository coordinator, scheduler dashboard/alerts, attested eval-harness
+producer, owner-provisioned activation, merge, telemetry-driven canary, rollback controller, or
+incident automation is shipped. Durable read-only maintenance discovery, bounded consumption of a
+human non-release cohort, reservation-bound scheduled execution/draft dispatch, slot-bound PR
+observation/repair, brokered repaired-branch publication, and a content-addressed separated-service
 renderer exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

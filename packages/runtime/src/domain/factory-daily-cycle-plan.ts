@@ -38,6 +38,42 @@ export function compileFactoryDailyCyclePlan(
     manifest.expectedFactoryPolicyBundleDigest
   ] as const;
   const stages: FactoryDailyCycleStage[] = [
+    ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+      ? [
+          stage(manifest, "maintenance-discovery", "worker", [
+            "factory",
+            "maintenance-discovery-tick",
+            "--config",
+            manifest.maintenanceDiscoveryConfigPath,
+            "--discovery-policy",
+            manifest.expectedMaintenanceDiscoveryPolicyDigest,
+            "--schedule-policy",
+            manifest.expectedSchedulePolicyDigest,
+            "--policy",
+            manifest.expectedFactoryPolicyBundleDigest,
+            "--preparation-grant",
+            manifest.expectedPreparationGrantDigest,
+            "--role-policy",
+            manifest.expectedRoleIdentityPolicyDigest
+          ]),
+          stage(manifest, "canary-admission", "worker", [
+            "factory",
+            "canary-admission-tick",
+            "--config",
+            manifest.canaryAdmissionConfigPath,
+            "--cohort",
+            manifest.expectedCanaryCohortDigest,
+            "--candidate",
+            manifest.expectedCanaryCandidateDigest,
+            "--schedule-policy",
+            manifest.expectedSchedulePolicyDigest,
+            "--role-policy",
+            manifest.expectedRoleIdentityPolicyDigest,
+            "--policy",
+            manifest.expectedFactoryPolicyBundleDigest
+          ])
+        ]
+      : []),
     stage(manifest, "scheduler", "worker", [
       "factory",
       "scheduler-tick",

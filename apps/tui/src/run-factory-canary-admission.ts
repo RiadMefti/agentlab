@@ -2,11 +2,12 @@ import {
   createConfiguredLocalFactoryCanaryAdmission,
   loadLocalFactoryCanaryAdmissionConfig,
   type FactoryCanaryAdmissionResult,
+  type FactoryCanaryAdmissionTickReport,
   type LocalFactoryCanaryAdmissionConfig,
   type LocalFactoryCanaryAdmissionRuntime
 } from "@agentlab/runtime/factory-canary-admission";
 
-import { isFactoryTaskId, isNormalizedAbsolutePath } from "./factory-cli-input.js";
+import { isFactoryTaskId, isNormalizedAbsolutePath, isSha256Digest } from "./factory-cli-input.js";
 
 export interface FactoryCanaryAdmissionRunnerDependencies {
   readonly loadConfig: (path: string) => Promise<LocalFactoryCanaryAdmissionConfig>;
@@ -51,6 +52,47 @@ export async function runFactoryCanaryReserve(
   return 0;
 }
 
+/** Automatically reserves only a bounded scheduled page from already-approved cohort authority. */
+export async function runFactoryCanaryAdmissionTick(
+  configPath: string,
+  expectedCohortDigest: string,
+  expectedCandidateDigest: string,
+  expectedSchedulePolicyDigest: string,
+  expectedRoleIdentityPolicyDigest: string,
+  expectedFactoryPolicyBundleDigest: string,
+  dependencies: FactoryCanaryAdmissionRunnerDependencies = defaultDependencies
+): Promise<number> {
+  if (!isNormalizedAbsolutePath(configPath)) {
+    throw new Error("Factory canary admission tick requires a normalized absolute config path.");
+  }
+  for (const value of [
+    expectedCohortDigest,
+    expectedCandidateDigest,
+    expectedSchedulePolicyDigest,
+    expectedRoleIdentityPolicyDigest,
+    expectedFactoryPolicyBundleDigest
+  ]) {
+    if (!isSha256Digest(value)) throw new Error("Factory canary admission tick digest is invalid.");
+  }
+  const config = await dependencies.loadConfig(configPath);
+  if (config.schemaVersion !== "agentlab.local-factory-canary-admission.v2") {
+    throw new Error("Factory canary admission tick requires config v2.");
+  }
+  const runtime = dependencies.createRuntime(config);
+  const result = await runtime.commands
+    .tick({
+      expectedCohortDigest,
+      expectedCandidateDigest,
+      expectedSchedulePolicyDigest,
+      expectedRoleIdentityPolicyDigest,
+      expectedPolicyBundleDigest: expectedFactoryPolicyBundleDigest
+    })
+    .catch((error: unknown) => closeAfterFailure(runtime, error));
+  await runtime.close();
+  dependencies.write(`${serializeTick(result)}\n`);
+  return result.status === "completed" ? 0 : 2;
+}
+
 function serializeReservation(result: FactoryCanaryAdmissionResult): string {
   const reservation = result.reservation;
   return JSON.stringify({
@@ -77,6 +119,10 @@ function serializeReservation(result: FactoryCanaryAdmissionResult): string {
     autoMerge: reservation.autoMerge,
     release: reservation.release
   });
+}
+
+function serializeTick(result: FactoryCanaryAdmissionTickReport): string {
+  return JSON.stringify({ ...result, reasonCodes: [...result.reasonCodes].sort() });
 }
 
 async function closeAfterFailure(

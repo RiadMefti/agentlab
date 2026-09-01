@@ -50,6 +50,13 @@ import {
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
   factoryIntakeRequestSchema,
+  factoryMaintenanceDiscoveryEventSchema,
+  factoryMaintenanceDiscoveryOutputSchema,
+  factoryMaintenanceDiscoveryPolicySchema,
+  factoryMaintenanceDiscoveryRunRecordSchema,
+  factoryMaintenanceDiscoveryRunRequestSchema,
+  factoryMaintenanceDiscoveryRunSchema,
+  factoryMaintenanceFindingSchema,
   factorySpecificationSchema,
   immutableTaskContractSchema,
   taskEventSchema
@@ -63,6 +70,34 @@ import type {
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
   public intakeRequest(input: unknown) {
     return encodeCanonicalDocument(factoryIntakeRequestSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryPolicySchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRun(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryEventSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRunRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunRequestSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRunRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunRecordSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryOutput(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryOutputSchema.parse(input));
+  }
+
+  public maintenanceFinding(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceFindingSchema.parse(input));
   }
 
   public qualification(input: unknown) {

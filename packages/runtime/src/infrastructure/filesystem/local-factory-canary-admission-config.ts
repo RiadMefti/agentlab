@@ -3,11 +3,13 @@ import { isAbsolute, resolve } from "node:path";
 import {
   factoryIdentifierSchema,
   sha256DigestSchema,
-  type FactoryRoleIdentityPolicy
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy
 } from "@agentlab/contracts";
 import { z } from "zod";
 
 import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
+import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -19,9 +21,8 @@ const absolutePathSchema = z
     "Expected a normalized absolute path."
   );
 
-const configSchema = z
+const commonConfigSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.local-factory-canary-admission.v1"),
     databasePath: absolutePathSchema,
     runnerId: factoryIdentifierSchema,
     trustedPublicKeyPath: absolutePathSchema,
@@ -37,8 +38,18 @@ const configSchema = z
   })
   .strict();
 
+const configV1Schema = commonConfigSchema.extend({
+  schemaVersion: z.literal("agentlab.local-factory-canary-admission.v1")
+});
+const configV2Schema = commonConfigSchema.extend({
+  schemaVersion: z.literal("agentlab.local-factory-canary-admission.v2"),
+  schedulePolicyPath: absolutePathSchema
+});
+const configSchema = z.union([configV1Schema, configV2Schema]);
+
 export type LocalFactoryCanaryAdmissionConfig = z.infer<typeof configSchema> & {
   readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
 };
 
 /** Loads only immutable trust and configuration pins for credentialless canary admission. */
@@ -53,9 +64,14 @@ export async function loadLocalFactoryCanaryAdmissionConfig(
   });
   try {
     const config = configSchema.parse(parseJson(content.toString("utf8")));
+    const schedulePolicy =
+      config.schemaVersion === "agentlab.local-factory-canary-admission.v2"
+        ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+        : undefined;
     return {
       ...config,
-      roleIdentityPolicy: await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
+      roleIdentityPolicy: await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath),
+      ...(schedulePolicy === undefined ? {} : { schedulePolicy })
     };
   } finally {
     content.fill(0);

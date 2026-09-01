@@ -39,6 +39,25 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-maintenance-discovery-preflight") {
+    const { runFactoryMaintenanceDiscoveryPreflight } =
+      await import("./run-factory-maintenance-discovery.js");
+    process.exitCode = await runFactoryMaintenanceDiscoveryPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-maintenance-discovery-tick") {
+    const { runFactoryMaintenanceDiscoveryTick } =
+      await import("./run-factory-maintenance-discovery.js");
+    process.exitCode = await runFactoryMaintenanceDiscoveryTick(
+      action.configPath,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedSchedulePolicyDigest,
+      action.expectedFactoryPolicyBundleDigest,
+      action.expectedPreparationGrantDigest,
+      action.expectedRoleIdentityPolicyDigest
+    );
+    return;
+  }
   if (action.kind === "factory-eval-assess") {
     const { runFactoryEvalAssess } = await import("./run-factory-evaluator.js");
     process.exitCode = await runFactoryEvalAssess(
@@ -85,6 +104,18 @@ async function main(): Promise<void> {
   if (action.kind === "factory-canary-reserve") {
     const { runFactoryCanaryReserve } = await import("./run-factory-canary-admission.js");
     process.exitCode = await runFactoryCanaryReserve(action.configPath, action.taskId);
+    return;
+  }
+  if (action.kind === "factory-canary-admission-tick") {
+    const { runFactoryCanaryAdmissionTick } = await import("./run-factory-canary-admission.js");
+    process.exitCode = await runFactoryCanaryAdmissionTick(
+      action.configPath,
+      action.expectedCohortDigest,
+      action.expectedCandidateDigest,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
     return;
   }
   if (action.kind === "factory-broker-preflight") {

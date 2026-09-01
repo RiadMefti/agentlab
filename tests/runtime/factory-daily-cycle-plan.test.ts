@@ -76,6 +76,43 @@ describe("factory daily-cycle compiler", () => {
     expect(scheduler.content).toContain('ExecStart=:"/opt/agentlab/bin/agentlab"');
   });
 
+  it("prepends discovery and bounded canary admission for the v2 autonomous cycle", () => {
+    const manifest = validAutonomousManifest();
+    const schedule = testFactorySchedulePolicy();
+    const roles = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const plan = compileFactoryDailyCyclePlan(manifest, schedule, roles);
+    const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
+
+    expect(plan.stages.slice(0, 4).map(({ id, role }) => `${id}:${role}`)).toEqual([
+      "maintenance-discovery:worker",
+      "canary-admission:worker",
+      "scheduler:worker",
+      "draft:broker"
+    ]);
+    const discovery = requiredUnit(bundle.units, "agentlab-factory-maintenance-discovery.service");
+    expect(discovery.content).toContain('"maintenance-discovery-tick"');
+    expect(discovery.content).toContain(manifest.expectedPreparationGrantDigest);
+    expect(discovery.content).toContain("OnSuccess=agentlab-factory-canary-admission.service");
+    const admission = requiredUnit(bundle.units, "agentlab-factory-canary-admission.service");
+    expect(admission.content).toContain('"canary-admission-tick"');
+    expect(admission.content).toContain(manifest.expectedCanaryCohortDigest);
+    expect(admission.content).toContain("OnSuccess=agentlab-factory-scheduler.service");
+    expect(requiredUnit(bundle.units, "agentlab-factory-daily.timer").content).toContain(
+      "Unit=agentlab-factory-maintenance-discovery.service"
+    );
+    expect(bundle).toMatchObject({
+      schemaVersion: "agentlab.daily-cycle-bundle.v2",
+      maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
+      preparationGrantDigest: manifest.expectedPreparationGrantDigest,
+      canaryCohortDigest: manifest.expectedCanaryCohortDigest,
+      canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
+    });
+  });
+
   it("rejects identity collapse, excessive repair rounds, and truncating worker timeouts", () => {
     const schedule = testFactorySchedulePolicy({
       tickBudget: { ...testFactorySchedulePolicy().tickBudget, maxRepairAttempts: 1 }
@@ -127,6 +164,19 @@ function validManifest() {
     maximumRepairRounds: 2,
     workerCommandTimeoutSeconds: 7_230,
     brokerCommandTimeoutSeconds: 900
+  } as const;
+}
+
+function validAutonomousManifest() {
+  return {
+    ...validManifest(),
+    schemaVersion: "agentlab.daily-cycle-manifest.v2",
+    maintenanceDiscoveryConfigPath: "/private/maintenance-discovery.json",
+    canaryAdmissionConfigPath: "/private/canary-admission.json",
+    expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+    expectedPreparationGrantDigest: testDigest("6"),
+    expectedCanaryCohortDigest: testDigest("7"),
+    expectedCanaryCandidateDigest: testDigest("8")
   } as const;
 }
 

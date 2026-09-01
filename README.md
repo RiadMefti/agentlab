@@ -146,7 +146,10 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   `@agentlab/runtime/factory-eval-attestor` can only sign a fresh exact run and cannot reach SQLite.
   The separate human-only `@agentlab/runtime/factory-canary-authority` re-verifies one exact signed
   eval record and can issue only an expiring R0/R1 cohort with `autoMerge:false` and
-  `release:false`. None can execute a model, contact GitHub, merge, or release.
+  `release:false`. The credentialless `@agentlab/runtime/factory-maintenance-discovery` runs only a
+  policy-pinned read-only scout and registers deterministic scheduled intake; it cannot reserve or
+  execute that work. Evaluator and authority compositions cannot execute a model, contact GitHub,
+  merge, or release.
 - `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
   candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
   regression, flake, cost, and latency metrics from raw samples, and atomically records one
@@ -162,6 +165,15 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   signed evaluation, then atomically reserves the scheduled task's complete ceiling against cohort
   task and budget limits. The credentialless command executes no model, opens no PR, and grants no
   merge or release authority.
+- `agentlab factory maintenance-discovery-tick --config ... --discovery-policy ... --schedule-policy ... --policy ... --preparation-grant ... --role-policy ...`
+  runs one durable daily read-only scout at an exact Git base. Findings must be R1, evidenced by
+  tracked files, inside reviewed scope/confidence/count ceilings, and outside protected paths before
+  trusted code derives identity and registers scheduled intake. SQLite v18 makes the run and every
+  disposition immutable. It has no GitHub, reservation, execution, merge, or release authority.
+- `agentlab factory canary-admission-tick --config ... --cohort ... --candidate ... --schedule-policy ... --role-policy ... --policy ...`
+  reserves a bounded page only inside an already attested and human-issued cohort. It obeys the
+  scheduler switch and schedule ceilings, reuses the full signature/freshness/risk/aggregate-budget
+  checks, and cannot issue authority or run work.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
   reconciles one exact daily UTC slot from an owner-only worker v3 config. SQLite v11 durably claims
   each scheduled request before model work, while schedule-run v2 also pins the role-policy digest,
@@ -265,10 +277,13 @@ digest carried in every signed eval predicate. No accounts are provisioned or ac
 Provider-neutral per-run and per-tick reservation accounting are policy-pinned and fail-closed, and
 the shipped live rate card is intentionally empty. Owner-only worker and broker config can load the
 same separate strict cost-policy file without sharing broker credentials; broker config v3 also pins
-the schedule and role policies needed for reservation-bound dispatch. The current repository
-governance blocks the write commands. No live factory task or PR has been created through these
-factory commands. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
-implemented controls, activation blockers, and later phases, and
+the schedule and role policies needed for reservation-bound dispatch. The dormant daily-cycle v2
+orders discovery → canary admission → scheduler → brokered draft/repair stages while keeping
+separate fixed-UID configs; v1 remains scheduler-first. The current repository governance blocks the
+write commands. No unit is installed or activated, and no live factory task or PR has been created
+through these factory commands. See
+[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
+activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;
@@ -281,7 +296,9 @@ CI/review observation and repair admission; and
 [ADR 0018](docs/decisions/0018-recovery-first-canary-pr-repair-consumer.md) for recovery-first
 credentialless repair consumption; and
 [ADR 0019](docs/decisions/0019-recovery-first-canary-pr-update-consumer.md) for recovery-first
-brokered repair publication. The dormant procedures are in
+brokered repair publication; and
+[ADR 0021](docs/decisions/0021-durable-maintenance-discovery-and-canary-consumption.md) for daily
+maintenance intake and bounded cohort consumption. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

@@ -2,8 +2,6 @@ import { isAbsolute, parse, resolve } from "node:path";
 
 import {
   factoryIdentifierSchema,
-  factoryPreparationAuthorityGrantSchema,
-  factorySkillPackageSchema,
   type FactoryCostPolicy,
   type FactoryPreparationAuthorityGrant,
   type FactorySkillPackage
@@ -12,6 +10,10 @@ import { z } from "zod";
 
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
+import {
+  loadFactoryPreparationGrant,
+  loadFactorySkillPackage
+} from "./local-factory-preparation-policy-inputs.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -95,40 +97,10 @@ export async function loadLocalFactoryIntakeConfig(
   }
   const [costPolicy, preparationGrant, skillPackages] = await Promise.all([
     loadLocalFactoryCostPolicy(config.costPolicyPath),
-    loadPreparationGrant(config.preparationGrantPath),
-    Promise.all(config.skillPackagePaths.map((skillPath) => loadSkillPackage(skillPath)))
+    loadFactoryPreparationGrant(config.preparationGrantPath),
+    Promise.all(config.skillPackagePaths.map((skillPath) => loadFactorySkillPackage(skillPath)))
   ]);
   return { ...config, costPolicy, preparationGrant, skillPackages };
-}
-
-async function loadPreparationGrant(pathInput: string): Promise<FactoryPreparationAuthorityGrant> {
-  const path = privateLocalFilePath(pathInput, "Factory preparation authority grant");
-  const content = await readPrivateLocalFile(path, {
-    label: "Factory preparation authority grant",
-    minimumBytes: 2,
-    maximumBytes: 2 * 1_024 * 1_024
-  });
-  try {
-    return factoryPreparationAuthorityGrantSchema.parse(
-      parseJson(content.toString("utf8"), "preparation authority grant")
-    );
-  } finally {
-    content.fill(0);
-  }
-}
-
-async function loadSkillPackage(pathInput: string): Promise<FactorySkillPackage> {
-  const path = privateLocalFilePath(pathInput, "Factory skill package");
-  const content = await readPrivateLocalFile(path, {
-    label: "Factory skill package",
-    minimumBytes: 2,
-    maximumBytes: 8 * 1_024 * 1_024
-  });
-  try {
-    return factorySkillPackageSchema.parse(parseJson(content.toString("utf8"), "skill package"));
-  } finally {
-    content.fill(0);
-  }
 }
 
 function parseJson(value: string, label: string): unknown {
