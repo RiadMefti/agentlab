@@ -36,7 +36,8 @@ export interface GitHubAppInstallationTokenSourceOptions {
   readonly repositoryNumericId: number;
   readonly signer: GitHubAppJwtSigner;
   readonly api: GitHubAppInstallationApi;
-  readonly permissionProfile?: "pull-request-broker" | "pull-request-reader";
+  readonly permissionProfile?:
+    "pull-request-broker" | "pull-request-reader" | "pull-request-feedback";
   readonly now?: () => number;
 }
 
@@ -48,7 +49,8 @@ export class GitHubAppInstallationTokenSource implements GitHubTokenSource {
   readonly #repositoryNumericId: number;
   readonly #signer: GitHubAppJwtSigner;
   readonly #api: GitHubAppInstallationApi;
-  readonly #permissionProfile: "pull-request-broker" | "pull-request-reader";
+  readonly #permissionProfile:
+    "pull-request-broker" | "pull-request-reader" | "pull-request-feedback";
   readonly #now: () => number;
   #cached: CachedInstallationToken | null = null;
   #minting: Promise<string> | null = null;
@@ -163,15 +165,20 @@ function positiveIdentifier(value: number): boolean {
 
 function assertExactPermissions(
   permissions: Readonly<Record<string, "read" | "write">>,
-  profile: "pull-request-broker" | "pull-request-reader"
+  profile: "pull-request-broker" | "pull-request-reader" | "pull-request-feedback"
 ): void {
   const keys = Object.keys(permissions).sort();
-  const allowed = ["checks", "contents", "metadata", "pull_requests"];
+  const feedback = profile === "pull-request-feedback";
+  const allowed = feedback
+    ? ["metadata", "pull_requests"]
+    : ["checks", "contents", "metadata", "pull_requests"];
   const expectedContent = profile === "pull-request-broker" ? "write" : "read";
-  const expectedPullRequests = profile === "pull-request-broker" ? "write" : "read";
+  const expectedPullRequests = profile === "pull-request-reader" ? "read" : "write";
   if (
-    permissions.checks !== "read" ||
-    permissions.contents !== expectedContent ||
+    (!feedback && permissions.checks !== "read") ||
+    (!feedback && permissions.contents !== expectedContent) ||
+    (feedback && permissions.checks !== undefined) ||
+    (feedback && permissions.contents !== undefined) ||
     permissions.pull_requests !== expectedPullRequests ||
     (permissions.metadata !== undefined && permissions.metadata !== "read") ||
     keys.some((key) => !allowed.includes(key))

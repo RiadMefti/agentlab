@@ -3,6 +3,7 @@ import {
   factorySkillPackageSchema,
   skillManifestSchema,
   type FactoryExternalPullRequestReviewEvent,
+  type FactoryExternalPullRequestReviewBundle,
   type FactoryExternalPullRequestReviewPolicy,
   type FactoryExternalPullRequestReviewRun,
   type FactorySkillPackage,
@@ -199,6 +200,200 @@ export function reviewSkillManifests(
       packageDigest: fixture.skillDigests[index]
     })
   );
+}
+
+export function completedExternalPullRequestReviewDocuments(
+  fixture: ReturnType<typeof testExternalPullRequestReviewFixture>
+): {
+  readonly events: readonly CanonicalFactoryDocument<FactoryExternalPullRequestReviewEvent>[];
+  readonly bundle: CanonicalFactoryDocument<FactoryExternalPullRequestReviewBundle>;
+} {
+  const events: CanonicalFactoryDocument<FactoryExternalPullRequestReviewEvent>[] = [
+    registeredExternalPullRequestReviewEvent(fixture)
+  ];
+  const patchDigest = testDigest("7");
+  events.push(
+    fixture.documents.externalPullRequestReviewEvent({
+      ...reviewEventBase(fixture.run, 2, events[0]?.digest ?? null, id(4)),
+      kind: "workspace-started",
+      from: "ready",
+      to: "workspace-active",
+      reasonCode: "exact-head-workspace-started"
+    })
+  );
+  events.push(
+    fixture.documents.externalPullRequestReviewEvent({
+      ...reviewEventBase(fixture.run, 3, events[1]?.digest ?? null, id(5)),
+      kind: "workspace-prepared",
+      from: "workspace-active",
+      to: "reviewing",
+      patchDigest,
+      patchArtifact: artifact(patchDigest, "application/vnd.git.patch"),
+      reasonCode: "authenticated-paths-and-local-patch-match"
+    })
+  );
+  const records = fixture.policy.reviewerProfiles.map((profile, index) => {
+    const sequence = index === 0 ? 4 : 6;
+    const executionId = id(10 + index);
+    const requestDigest = testDigest(index === 0 ? "a" : "b");
+    events.push(
+      fixture.documents.externalPullRequestReviewEvent({
+        ...reviewEventBase(fixture.run, sequence, events.at(-1)?.digest ?? null, id(6 + index * 2)),
+        kind: "reviewer-started",
+        from: "reviewing",
+        to: "reviewer-active",
+        reviewerId: profile.id,
+        executionId,
+        requestDigest,
+        reasonCode: "independent-review-started"
+      })
+    );
+    const record = fixture.documents.externalPullRequestReviewerRecord({
+      schemaVersion: "agentlab.external-pull-request-reviewer-record.v1",
+      reviewRunId: fixture.run.value.runId,
+      runDigest: fixture.run.digest,
+      requestDigest,
+      executionId,
+      reviewerId: profile.id,
+      provider: profile.provider,
+      providerVersion: `${profile.provider} test`,
+      harnessVersion: "agentlab-test/1",
+      model: profile.model,
+      reasoning: profile.reasoning,
+      providerSessionId: `session-${String(index + 1)}`,
+      status: "succeeded",
+      startedAt: `2026-09-01T12:${String(13 + index * 2)}:00.000Z`,
+      finishedAt: `2026-09-01T12:${String(14 + index * 2)}:00.000Z`,
+      exitCode: 0,
+      stdoutArtifact: artifact(testDigest(index === 0 ? "c" : "d"), "text/plain"),
+      stderrArtifact: artifact(testDigest(index === 0 ? "e" : "f"), "text/plain"),
+      finalOutputArtifact: artifact(testDigest(index === 0 ? "1" : "2"), "application/json"),
+      usage: usage(),
+      usageComplete: true,
+      errorCode: null,
+      isolation: {
+        isolationId: executionId,
+        mechanism: { id: "linux/systemd-user-scope", version: "systemd 261" },
+        scopeName: `agentlab-factory-${executionId.replaceAll("-", "")}.scope`,
+        limits: fixture.policy.resourceLimits
+      }
+    });
+    const result = fixture.documents.externalPullRequestReviewResult({
+      schemaVersion: "agentlab.external-pull-request-review-result.v1",
+      reviewRunId: fixture.run.value.runId,
+      runDigest: fixture.run.digest,
+      candidateDigest: fixture.candidateDocument.digest,
+      patchDigest,
+      reviewerId: profile.id,
+      requestDigest,
+      reviewerRecordDigest: record.digest,
+      executionId,
+      verdict: index === 0 ? "approved" : "changes-requested",
+      summary: index === 0 ? "No blocking findings." : "A focused correction is required.",
+      findings:
+        index === 0
+          ? []
+          : [
+              {
+                id: "review/finding",
+                severity: "high",
+                path: "tracked.txt",
+                line: 1,
+                title: "Behavior is incorrect",
+                detail: "Correct the behavior and retain the focused regression test."
+              }
+            ],
+      createdAt: `2026-09-01T12:${String(14 + index * 2)}:00.000Z`
+    });
+    events.push(
+      fixture.documents.externalPullRequestReviewEvent({
+        ...reviewEventBase(
+          fixture.run,
+          sequence + 1,
+          events.at(-1)?.digest ?? null,
+          id(7 + index * 2)
+        ),
+        kind: "reviewer-finished",
+        from: "reviewer-active",
+        to: "reviewing",
+        reviewerId: profile.id,
+        executionId,
+        requestDigest,
+        reviewerRecordDigest: record.digest,
+        reviewResultDigest: result.digest,
+        reasonCode: "independent-review-recorded"
+      })
+    );
+    return { record, result };
+  });
+  const bundle = fixture.documents.externalPullRequestReviewBundle({
+    schemaVersion: "agentlab.external-pull-request-review-bundle.v1",
+    reviewRunId: fixture.run.value.runId,
+    runDigest: fixture.run.digest,
+    repositoryId: fixture.run.value.repositoryId,
+    pullRequestNumber: fixture.run.value.pullRequestNumber,
+    candidateDigest: fixture.candidateDocument.digest,
+    patchDigest,
+    reviewPolicyDigest: fixture.policyDocument.digest,
+    decision: "human-review-required",
+    reviewerRecords: records.map(({ record }) => record.value),
+    reviews: records.map(({ result }) => result.value),
+    aggregateUsage: { ...usage(), workers: 1 },
+    usageComplete: true,
+    workspaceUnchanged: true,
+    createdAt: "2026-09-01T12:17:00.000Z"
+  });
+  events.push(
+    fixture.documents.externalPullRequestReviewEvent({
+      ...reviewEventBase(fixture.run, 8, events.at(-1)?.digest ?? null, id(20)),
+      kind: "bundle-recorded",
+      from: "reviewing",
+      to: "recorded",
+      bundleDigest: bundle.digest,
+      bundleArtifact: artifact(
+        bundle.digest,
+        "application/vnd.agentlab.external-pull-request-review-bundle+json;version=1",
+        new TextEncoder().encode(bundle.json).byteLength
+      ),
+      reasonCode: "review-bundle-recorded"
+    })
+  );
+  events.push(
+    fixture.documents.externalPullRequestReviewEvent({
+      ...reviewEventBase(fixture.run, 9, events.at(-1)?.digest ?? null, id(21)),
+      kind: "completed",
+      from: "recorded",
+      to: "completed",
+      decision: bundle.value.decision,
+      reasonCode: "independent-review-completed"
+    })
+  );
+  return { events, bundle };
+}
+
+function id(suffix: number): string {
+  return `92000000-0000-4000-8000-${String(suffix).padStart(12, "0")}`;
+}
+
+function artifact(digest: Sha256Digest, mediaType: string, sizeBytes = 32) {
+  return { digest, mediaType, sizeBytes };
+}
+
+function usage() {
+  return {
+    wallClockSeconds: 1,
+    agentTurns: 1,
+    toolCalls: 1,
+    inputTokens: 100,
+    outputTokens: 20,
+    costMicrousd: 100,
+    processes: 1,
+    outputBytes: 128,
+    workers: 1,
+    repairAttempts: 0,
+    changedFiles: 0,
+    changedLines: 0
+  };
 }
 
 export type ExternalPullRequestReviewFixture = ReturnType<

@@ -393,15 +393,67 @@ review. A tick first recovers active journal-owned scopes/worktrees, then admits
 page. Missing local objects, changed-path disagreement, incomplete usage, invalid strict JSON,
 provider-session reuse, budget exhaustion, or uncertain cleanup fails closed. Workspace mutation is
 quarantined. Only unanimous verdicts aggregate to `approved` or `changes-requested`; disagreement
-becomes `human-review-required`. Treat all three as local evidence only. Do not translate them into
-a GitHub review, comment, branch write, merge, deployment, or release without a separately designed
-and approved authority boundary.
+becomes `human-review-required`. Treat all three as local evidence only. Only the separately
+configured feedback publisher below may translate a completed bundle into an advisory GitHub
+comment; no result grants approval, branch write, merge, deployment, or release authority.
 
 On interruption, preserve SQLite schema v21, the artifact root, and worktree root. The next tick
 proves exact recorded systemd scopes inactive and removes only the journal-owned worktree before a
 bounded retry. If it cannot prove inactivity or cleanup, stop the lane and investigate; never delete
 the journal or reuse an execution/session identity. No live config, timer, skill inventory, rate
 card, provider account, or object-mirroring service is installed by this repository.
+
+## External pull-request feedback publication
+
+Use a third GitHub App and operating-system account for feedback publication. Do not reuse the
+read-only discovery App, model-bearing reviewer UID, or draft/update broker App. The installation
+token must request exactly `pull_requests:write`; GitHub may add implicit `metadata:read`. The App
+must have no contents, checks, administration, actions, deployment, merge, or release permission.
+
+The policy is strict and comment-only:
+
+```json
+{
+  "schemaVersion": "agentlab.external-pull-request-feedback-policy.v1",
+  "id": "agentlab/external-pull-request-feedback",
+  "version": "1.0.0",
+  "repositoryId": "owner/repository",
+  "reviewPolicyDigest": "sha256:...",
+  "publisherId": "external-review-feedback-broker",
+  "publisherUserId": 123456,
+  "publicationMode": "comment-only",
+  "maximumPublicationsPerTick": 3,
+  "maximumReviewAgeHours": 24,
+  "maximumBodyBytes": 16000,
+  "operationDeadlineSeconds": 300,
+  "maximumRecoveryAttempts": 1
+}
+```
+
+`publisherUserId` is the numeric GitHub App bot identity. The owner-only config schema
+`agentlab.local-factory-external-pull-request-feedback.v1` separately pins the database and artifact
+paths, repository owner/name and numeric ID, the dedicated `processUserId`, feedback policy
+path/digest, and App client ID, installation ID, and private-key path. Keep every file owner-only
+and run:
+
+```text
+agentlab factory external-pr-feedback-preflight --config /absolute/external-pr-feedback.json
+agentlab factory external-pr-feedback-tick --config /absolute/external-pr-feedback.json --feedback-policy sha256:... --review-policy sha256:...
+```
+
+Preflight verifies repository/App identity and reports whether the existing broker kill switch is
+enabled; it writes nothing. A tick recovers incomplete journals first and admits a bounded page of
+completed review bundles. It rechecks the exact open, unmerged base/head, posts only a deterministic
+`COMMENT` review, and records the authenticated response. It never publishes contributor title/body
+or a GitHub approval/change-request decision. If POST may have succeeded without a durable response,
+preserve schema v22 and run the next tick: it searches for the exact digest marker from the pinned
+App identity and never blindly posts again. `attention-required` means an operator must inspect the
+remote PR and immutable journal; do not manually delete rows or repeat the comment.
+
+Disabling `pr-broker` prevents new feedback writes and cancels a journal whose intent is durable but
+whose POST has not started. Read-only reconciliation of a potentially completed POST remains
+permitted so evidence is not lost. No timer, account, App, policy, or authority switch is installed
+or enabled by AgentLab.
 
 ## Authority and incident stop
 
@@ -433,7 +485,8 @@ sandboxed eval producer with content-addressed evidence now exists. Durable read
 discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
 bounded read-only external pull-request inventory, credentialless isolated external review evidence,
-and a content-addressed separated-service renderer exist but are not provisioned or activated.
-External review feedback publication and repair admission are not yet implemented. See
+feedback-only external review publication, and a content-addressed separated-service renderer exist
+but are not provisioned or activated. External repair admission and safe contributor/fork repair
+publication are not yet implemented. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

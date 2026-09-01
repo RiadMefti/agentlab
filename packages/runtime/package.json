@@ -59,6 +59,10 @@
     "./factory-external-pull-request-review": {
       "types": "./dist/local-factory-external-pull-request-review.d.ts",
       "default": "./dist/local-factory-external-pull-request-review.js"
+    },
+    "./factory-external-pull-request-feedback": {
+      "types": "./dist/local-factory-external-pull-request-feedback.d.ts",
+      "default": "./dist/local-factory-external-pull-request-feedback.js"
     }
   },
   "files": [

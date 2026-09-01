@@ -20,6 +20,10 @@ import type {
   FactoryEvalSubjectEvidence,
   FactoryEvalSubjectRequest,
   FactoryExternalPullRequestCandidate,
+  FactoryExternalPullRequestFeedbackEvent,
+  FactoryExternalPullRequestFeedbackPolicy,
+  FactoryExternalPullRequestFeedbackRecord,
+  FactoryExternalPullRequestFeedbackRun,
   FactoryExternalPullRequestDiscoveryEvent,
   FactoryExternalPullRequestDiscoveryPolicy,
   FactoryExternalPullRequestDiscoveryRun,
@@ -92,6 +96,18 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestFeedbackPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestFeedbackPolicy>;
+  externalPullRequestFeedbackRun(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestFeedbackRun>;
+  externalPullRequestFeedbackEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestFeedbackEvent>;
+  externalPullRequestFeedbackRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestFeedbackRecord>;
   externalPullRequestReviewPolicy(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestReviewPolicy>;

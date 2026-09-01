@@ -24,6 +24,10 @@ import {
   factoryEvalSubjectEvidenceSchema,
   factoryEvalSubjectRequestSchema,
   factoryExternalPullRequestCandidateSchema,
+  factoryExternalPullRequestFeedbackEventSchema,
+  factoryExternalPullRequestFeedbackPolicySchema,
+  factoryExternalPullRequestFeedbackRecordSchema,
+  factoryExternalPullRequestFeedbackRunSchema,
   factoryExternalPullRequestDiscoveryEventSchema,
   factoryExternalPullRequestDiscoveryPolicySchema,
   factoryExternalPullRequestDiscoveryRunSchema,
@@ -91,6 +95,22 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public externalPullRequestFeedbackPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackPolicySchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackRunSchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackEventSchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackRecordSchema.parse(input));
+  }
+
   public externalPullRequestReviewPolicy(input: unknown) {
     return encodeCanonicalDocument(factoryExternalPullRequestReviewPolicySchema.parse(input));
   }

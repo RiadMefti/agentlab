@@ -78,6 +78,22 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-external-pull-request-feedback-preflight") {
+    const { runFactoryExternalPullRequestFeedbackPreflight } =
+      await import("./run-factory-external-pull-request-feedback.js");
+    process.exitCode = await runFactoryExternalPullRequestFeedbackPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-feedback-tick") {
+    const { runFactoryExternalPullRequestFeedbackTick } =
+      await import("./run-factory-external-pull-request-feedback.js");
+    process.exitCode = await runFactoryExternalPullRequestFeedbackTick(
+      action.configPath,
+      action.expectedFeedbackPolicyDigest,
+      action.expectedReviewPolicyDigest
+    );
+    return;
+  }
   if (action.kind === "factory-maintenance-discovery-tick") {
     const { runFactoryMaintenanceDiscoveryTick } =
       await import("./run-factory-maintenance-discovery.js");

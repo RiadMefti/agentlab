@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 21;
+export const latestSchemaVersion = 22;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -4373,6 +4373,276 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR review bundle identity mismatch'); END;
 
       PRAGMA user_version = 21;
+      COMMIT;
+    `);
+  }
+
+  if (version < 22) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_feedback_runs (
+        publication_run_id TEXT PRIMARY KEY CHECK (length(publication_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        review_run_digest TEXT NOT NULL CHECK (
+          length(review_run_digest) = 71 AND substr(review_run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        review_policy_digest TEXT NOT NULL CHECK (
+          length(review_policy_digest) = 71 AND substr(review_policy_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_policy_digest TEXT NOT NULL CHECK (
+          length(feedback_policy_digest) = 71 AND substr(feedback_policy_digest, 1, 7) = 'sha256:'
+        ),
+        expected_base_revision TEXT NOT NULL CHECK (length(expected_base_revision) BETWEEN 40 AND 64),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        body_digest TEXT NOT NULL CHECK (
+          length(body_digest) = 71 AND substr(body_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        UNIQUE(review_run_id, feedback_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_feedback_runs_policy_idx
+        ON factory_external_pr_feedback_runs(
+          repository_id, feedback_policy_digest, created_at, publication_run_id
+        );
+
+      CREATE TABLE factory_external_pr_feedback_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        publication_run_id TEXT NOT NULL REFERENCES factory_external_pr_feedback_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 16),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'remote-verified', 'publication-started', 'recovery-pending',
+          'publication-cancelled', 'publication-recorded',
+          'completed', 'skipped', 'attention-required', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'remote-verified', 'publication-active', 'recorded', 'completed',
+            'skipped', 'attention-required', 'failed'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'remote-verified', 'publication-active', 'recorded', 'completed',
+          'skipped', 'attention-required', 'failed'
+        )),
+        record_digest TEXT CHECK (
+          record_digest IS NULL OR
+          (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')
+        ),
+        record_artifact_json TEXT CHECK (
+          record_artifact_json IS NULL OR json_valid(record_artifact_json)
+        ),
+        remote_review_id TEXT CHECK (
+          remote_review_id IS NULL OR length(remote_review_id) BETWEEN 1 AND 20
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(publication_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_feedback_records (
+        publication_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_feedback_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        record_digest TEXT NOT NULL UNIQUE CHECK (
+          length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        remote_review_id TEXT NOT NULL CHECK (length(remote_review_id) BETWEEN 1 AND 20),
+        record_json TEXT NOT NULL CHECK (
+          length(record_json) BETWEEN 2 AND 1048576 AND json_valid(record_json)
+        ),
+        UNIQUE(repository_id, pull_request_number, remote_review_id)
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_feedback_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_runs
+      WHEN
+        json_extract(NEW.run_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.run_json, '$.reviewRunDigest') IS NOT NEW.review_run_digest OR
+        json_extract(NEW.run_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.run_json, '$.reviewPolicyDigest') IS NOT NEW.review_policy_digest OR
+        json_extract(NEW.run_json, '$.feedbackPolicyDigest') IS NOT NEW.feedback_policy_digest OR
+        json_extract(NEW.run_json, '$.expectedBaseRevision') IS NOT NEW.expected_base_revision OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.bodyArtifact.digest') IS NOT NEW.body_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_review_runs AS review
+          JOIN factory_external_pr_review_bundles AS bundle ON bundle.run_id = review.run_id
+          WHERE review.run_id = NEW.review_run_id
+            AND review.run_digest = NEW.review_run_digest
+            AND review.repository_id = NEW.repository_id
+            AND review.pull_request_number = NEW.pull_request_number
+            AND review.review_policy_digest = NEW.review_policy_digest
+            AND bundle.bundle_digest = NEW.bundle_digest
+            AND json(review.run_json) = json_extract(NEW.run_json, '$.reviewRun')
+            AND json(bundle.bundle_json) = json_extract(NEW.run_json, '$.bundle')
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_review_events AS event
+              WHERE event.run_id = review.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_feedback_events_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json(NEW.record_artifact_json) IS NOT json_extract(NEW.event_json, '$.recordArtifact') OR
+        json_extract(NEW.event_json, '$.remoteReviewId') IS NOT NEW.remote_review_id OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'pr-broker' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT json_extract(run_json, '$.feedbackPolicy.publisherId')
+          FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.publication_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'remote-verified' AND NEW.from_state = 'ready' AND NEW.to_state = 'remote-verified') OR
+        (NEW.kind = 'publication-started' AND NEW.from_state = 'remote-verified' AND NEW.to_state = 'publication-active') OR
+        (NEW.kind = 'recovery-pending' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'publication-active') OR
+        (NEW.kind = 'publication-cancelled' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'skipped') OR
+        (NEW.kind = 'publication-recorded' AND NEW.from_state IN ('remote-verified', 'publication-active') AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'skipped' AND NEW.from_state IN ('ready', 'remote-verified') AND NEW.to_state = 'skipped') OR
+        (NEW.kind = 'attention-required' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'attention-required') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'remote-verified') AND NEW.to_state = 'failed')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR feedback transition'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'remote-verified', 'publication-started', 'recovery-pending', 'publication-cancelled', 'skipped', 'attention-required', 'failed') AND
+          NEW.record_digest IS NULL AND NEW.record_artifact_json IS NULL AND NEW.remote_review_id IS NULL) OR
+        (NEW.kind = 'publication-recorded' AND NEW.record_digest IS NOT NULL AND
+          NEW.record_artifact_json IS NOT NULL AND NEW.remote_review_id IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.record_digest IS NULL AND
+          NEW.record_artifact_json IS NULL AND NEW.remote_review_id IS NOT NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_time_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_feedback_records_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_records
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_records_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_records
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_records_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_records
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        json_extract(NEW.record_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.record_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.record_json, '$.remoteReviewId') IS NOT NEW.remote_review_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback record identity mismatch'); END;
+
+      PRAGMA user_version = 22;
       COMMIT;
     `);
   }

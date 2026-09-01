@@ -43,6 +43,16 @@ export type CliAction =
       readonly expectedCostPolicyDigest: `sha256:${string}`;
     }
   | {
+      readonly kind: "factory-external-pull-request-feedback-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-feedback-tick";
+      readonly configPath: string;
+      readonly expectedFeedbackPolicyDigest: `sha256:${string}`;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-maintenance-discovery-tick";
       readonly configPath: string;
       readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
@@ -303,6 +313,41 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         expectedReviewPolicyDigest,
         expectedDiscoveryPolicyDigest,
         expectedCostPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-feedback-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-feedback-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-feedback-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--feedback-policy" &&
+    input[6] === "--review-policy"
+  ) {
+    const configPath = input[3];
+    const expectedFeedbackPolicyDigest = input[5];
+    const expectedReviewPolicyDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedFeedbackPolicyDigest) &&
+      isSha256Digest(expectedReviewPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-feedback-tick",
+        configPath,
+        expectedFeedbackPolicyDigest,
+        expectedReviewPolicyDigest
       };
     }
   }
@@ -1054,6 +1099,10 @@ Factory authority:
       Verify pinned local objects, providers, cost rules, read-only skills, and worker identity without running a model.
   agentlab factory external-pr-review-tick --config <absolute-path> --review-policy <sha256> --discovery-policy <sha256> --cost-policy <sha256>
       Produce bounded independent local review evidence; never fetch, comment, repair, approve, or write GitHub.
+  agentlab factory external-pr-feedback-preflight --config <absolute-path>
+      Verify the exact feedback-only GitHub App, repository, publisher identity, and broker switch without writing.
+  agentlab factory external-pr-feedback-tick --config <absolute-path> --feedback-policy <sha256> --review-policy <sha256>
+      Publish completed evidence as deterministic COMMENT reviews; never approve, repair, push, merge, or release.
   agentlab factory maintenance-discovery-preflight --config <absolute-path>
       Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
   agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>

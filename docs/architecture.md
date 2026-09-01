@@ -180,6 +180,21 @@ aggregate budgets, cgroup ceilings, strict JSON, and a clean worktree are mandat
 v21 journals recovery-bounded state and a content-addressed quorum bundle. Split verdicts route to a
 human; no result grants GitHub authority.
 
+The separate `external-pr-feedback-tick` command consumes only completed v21 review bundles through
+`@agentlab/runtime/factory-external-pull-request-feedback`. It runs under a distinct pinned non-root
+UID and a dedicated selected-repository GitHub App whose token requests only `pull_requests:write`;
+it does not reuse discovery or branch-write credentials. The composition has no provider, process
+runner, checkout, content write, draft, repair, merge, deployment, or release port. A deterministic
+sanitized body omits contributor title/body, neutralizes mentions and Markdown controls, declares
+itself advisory, and embeds the exact bundle digest. The adapter can submit only a `COMMENT` review
+on the exact open, unmerged base/head; it cannot express GitHub approval or change-request state.
+New publication requires the default-off broker switch before intent and again immediately before
+POST. SQLite schema v22 stores immutable publication runs, append-only events, and authenticated
+remote records. Durable intent precedes POST; an uncertain outcome is reconciled only by the exact
+body marker, reviewed head, and configured App user ID. Blind POST retry is forbidden, and
+unresolved or conflicting remote evidence reports attention. See
+[ADR 0025](decisions/0025-feedback-only-external-pull-request-review-publication.md).
+
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
 literal `--confirm-repair`. The application revalidates the task, completed dispatch, canonical PR
@@ -580,22 +595,24 @@ consumption of pre-existing human cohort authority, and a separate offline sandb
 are implemented. A separate bounded external pull-request inventory now journals stable heads and
 changed paths with a read-only App. A separate credentialless consumer can reconstruct exact locally
 present patches, run independent reviewed skills in isolated provider sessions, and journal complete
-local review evidence, but it cannot fetch, publish feedback, approve, repair, push, merge, or
-release. Neither external-PR stage is part of the daily chain or provisioned with live policy,
-skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness, fixture,
-candidate, job, or account. Repository/day and organization/day quotas, a secretless hosted-provider
-eval gateway, owner-provisioned activation, telemetry-driven canary comparison, merge, release,
-rollback, and incident automation remain later stages. A read-only daily-cycle compiler now verifies
-one owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
-broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
-systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
-UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
-published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
-executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
-install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
-assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
-execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
-dormant orchestration rendering exist but remain unactivated.
+local review evidence, but it cannot fetch, approve, repair, push, merge, or release. A third,
+feedback-only broker can publish an exact completed bundle as deterministic `COMMENT` feedback and
+reconcile an uncertain write without granting approval, repair, branch mutation, merge, or release
+authority. None of the external-PR stages is part of the daily chain or provisioned with live
+policy, skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness,
+fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
+hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
+merge, release, rollback, and incident automation remain later stages. A read-only daily-cycle
+compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab executable
+digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It emits a
+content-addressed system-level systemd bundle whose non-persistent UTC timer chains fixed-argv
+one-shot services across separate UIDs, stops on any nonzero result, signals an incident target, and
+finally re-observes the last published head. Every stage first runs fixed `/usr/bin/sha256sum` argv
+against the generated exact executable check record, so binary drift stops before AgentLab runs. The
+renderer cannot write or install artifacts, call the service manager, change authority, or touch the
+ledger. Deterministic assessment, bounded non-release cohort authority, durable admission,
+reservation-bound scheduled execution, draft dispatch, PR maintenance, repair consumption,
+repaired-branch publication, and dormant orchestration rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -616,6 +633,7 @@ canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ loc
 maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
 external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
 external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
+external PR feedback ▶ @agentlab/runtime/factory-external-pull-request-feedback ▶ feedback-only publisher composition
 unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
@@ -667,6 +685,10 @@ The product-source rules are executable and fail closed:
   worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
   worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
   runtime.
+- External PR discovery, review, and feedback each have separate closed allowlists. Discovery can
+  only read GitHub, review can run pinned credentialless providers against local objects, and
+  feedback can only read the exact PR and submit a comment review through its dedicated App. No one
+  closure can combine model execution, a credential, branch mutation, merge, or release authority.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -691,26 +713,27 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                                             |
-| ------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                                                 |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                        |
-| Product use case or coordination policy                      | `packages/runtime/src/application`                                   |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                                |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                              |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                       |
-| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                       |
-| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`                    |
-| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                       |
-| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`                    |
-| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`                |
-| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`                |
-| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`             |
-| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`             |
-| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts`        |
-| External PR review construction and resource lifetime        | `packages/runtime/src/local-factory-external-pull-request-review.ts` |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                                           |
-| Installer, cache, or binary handoff                          | `packages/launcher`                                                  |
+| Change                                                       | Location                                                               |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Shared external input or persisted data shape                | `packages/contracts`                                                   |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                          |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                                     |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                                  |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                                |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                         |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                         |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`                      |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                         |
+| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`                      |
+| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`                  |
+| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`                  |
+| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`               |
+| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`               |
+| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts`          |
+| External PR review construction and resource lifetime        | `packages/runtime/src/local-factory-external-pull-request-review.ts`   |
+| External PR feedback construction and resource lifetime      | `packages/runtime/src/local-factory-external-pull-request-feedback.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                                             |
+| Installer, cache, or binary handoff                          | `packages/launcher`                                                    |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session

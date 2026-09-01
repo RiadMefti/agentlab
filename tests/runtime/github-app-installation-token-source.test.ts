@@ -106,6 +106,40 @@ describe("GitHubAppInstallationTokenSource", () => {
     await expect(rejected.token(repositoryId)).rejects.toThrow(/pull-request-reader boundary/u);
   });
 
+  it("accepts only PR-write and metadata-read for the feedback-only profile", async () => {
+    const response = {
+      ...tokenResponse("ghs_feedback"),
+      permissions: { metadata: "read", pull_requests: "write" }
+    };
+    const accepted = new GitHubAppInstallationTokenSource({
+      clientId: "Iv1.agentlab-test",
+      installationId,
+      repositoryId,
+      repositoryNumericId,
+      signer: new RecordingSigner(),
+      api: new RecordingInstallationApi(() => response),
+      permissionProfile: "pull-request-feedback",
+      now: () => nowMilliseconds
+    });
+    await expect(accepted.token(repositoryId)).resolves.toBe("ghs_feedback");
+
+    const rejected = new GitHubAppInstallationTokenSource({
+      clientId: "Iv1.agentlab-test",
+      installationId,
+      repositoryId,
+      repositoryNumericId,
+      signer: new RecordingSigner(),
+      api: new RecordingInstallationApi(() => ({
+        ...response,
+        token: "ghs_feedback_too_broad",
+        permissions: { contents: "write", metadata: "read", pull_requests: "write" }
+      })),
+      permissionProfile: "pull-request-feedback",
+      now: () => nowMilliseconds
+    });
+    await expect(rejected.token(repositoryId)).rejects.toThrow(/pull-request-feedback boundary/u);
+  });
+
   it.each([
     {
       name: "missing checks-read permission",

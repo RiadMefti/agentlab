@@ -159,8 +159,11 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   invoke a model, check out code, comment, approve, repair, merge, or release. The separate
   `@agentlab/runtime/factory-external-pull-request-review` composition can invoke pinned models
   under resource ceilings against exact locally present objects, but has no GitHub credential or
-  remote port. Evaluator and authority compositions cannot execute a model, contact GitHub, merge,
-  or release.
+  remote port. The separate `@agentlab/runtime/factory-external-pull-request-feedback` composition
+  consumes only completed review bundles and can publish one deterministic advisory `COMMENT` review
+  through a dedicated PR-only GitHub App; it cannot approve, repair, push, merge, deploy, or
+  release. Evaluator and authority compositions cannot execute a model, contact GitHub, merge, or
+  release.
 - `agentlab factory external-pr-review-preflight --config ...` validates the separate non-root
   worker identity, exact review/discovery/cost policy pins, reviewed skill inventory, pinned
   provider executables, and read-only capabilities without running a model.
@@ -170,6 +173,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   have no network, secrets, commands, workspace write, remote repository, or GitHub credential;
   disagreement routes to a human and no result can comment, approve, repair, push, merge, deploy, or
   release.
+- `agentlab factory external-pr-feedback-preflight --config ...` verifies the distinct process/App
+  identities, exact policy pins, repository, and broker kill switch without writing.
+  `external-pr-feedback-tick` consumes only completed immutable review bundles, rechecks the exact
+  open base/head, sanitizes a digest-marked advisory body, and submits only a GitHub `COMMENT`
+  review. SQLite v22 journals intent before POST and reconciles uncertain outcomes by exact marker
+  and App user ID without blind duplicate writes. It has no provider, branch write, approval,
+  repair, merge, deployment, or release capability.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -334,7 +344,9 @@ maintenance intake and bounded cohort consumption; and
 and [ADR 0023](docs/decisions/0023-read-only-external-pull-request-discovery.md) for bounded
 external pull-request inventory; and
 [ADR 0024](docs/decisions/0024-credentialless-external-pull-request-review-evidence.md) for isolated
-local external-review evidence. The dormant procedures are in
+local external-review evidence; and
+[ADR 0025](docs/decisions/0025-feedback-only-external-pull-request-review-publication.md) for the
+separate advisory publication boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
