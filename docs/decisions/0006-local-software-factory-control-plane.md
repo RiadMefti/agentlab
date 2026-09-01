@@ -519,6 +519,17 @@ identity, contract limits, and conservative aggregate tick reservation are manda
 existing isolated repair service runs. It stops at `pr-proposed` and has no remote-write or
 authority capability. See [ADR 0018](0018-recovery-first-canary-pr-repair-consumer.md).
 
+The one-shot `broker-pr-update-tick` entry is the separate credential-bearing publication consumer.
+Its read model places nonterminal update journals before fresh work. Fresh entries must join an
+exact completed repair to its actionable maintenance observation and authorization, current
+schema-v2 PR lineage, completed scheduler handoff, current reservation, scheduled R1 task, broker,
+and schedule/role/factory policy pins. Config v3, caller pins, ready governance, configured cost
+policy, enabled broker authority, current canary authority, contract lifetime, and schedule action
+ceilings remain mandatory. Every candidate enters the existing update service, which journals before
+remote mutation, performs only a deterministic non-force child update, authenticates the resulting
+head, and returns the task to `pr-open`. It grants no model, merge, release, deployment, timer, or
+authority-mutation capability. See [ADR 0019](0019-recovery-first-canary-pr-update-consumer.md).
+
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
 literal `--confirm-update`. Its service admits only the exact completed repair journal and evidence,
@@ -825,14 +836,15 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    bounded fresh repair execution, brokered repaired-branch update, exact-head re-observation, and a
    slot-bound canary observation/repair-admission consumer and recovery-first credentialless repair
    consumer now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick
-   reservation ceiling now exist; an autonomous broker-update consumer, cross-repository/day quotas,
-   timer provisioning, alerting, and incident automation do not.
+   reservation ceiling and recovery-first broker update consumer now exist; cross-repository/day
+   quotas, timer provisioning, alerting, and incident automation do not.
 6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
    attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
    execution, attested grader artifacts, autonomous task discovery, shadow telemetry, production
    sampling, provider/model/skill promotion, and rollback drills remain. Exact cohort reservation
-   now gates scheduled R1 execution, initial draft dispatch, slot-bound PR maintenance, and
-   credentialless repair consumption; the bounded consumers remain dormant.
+   now gates scheduled R1 execution, initial draft dispatch, slot-bound PR maintenance,
+   credentialless repair consumption, and repaired-branch publication; the bounded consumers remain
+   dormant.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
    explicit ADR/policy approval; higher-risk human controls remain.
 

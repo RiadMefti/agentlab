@@ -193,6 +193,16 @@ existing repair journal, isolation, gates, distinct reviewer, cumulative task bu
 semantics remain authoritative. It stops at `pr-proposed` and cannot reach GitHub or mutate
 authority.
 
+The one-shot `broker-pr-update-tick` command closes the scheduled repair handoff without weakening
+the broker boundary. Its read projection places every nonterminal update journal before fresh work.
+Fresh candidates must join an exact completed repair to its maintenance observation and
+authorization, current schema-v2 PR head, reservation, completed scheduler handoff, scheduled R1
+task, broker, and schedule/role/factory policy pins. The existing update service remains the sole
+write path: it journals before mutation, performs a deterministic non-force child update, verifies
+and authenticates the new head, and returns the task to `pr-open` for another slot-bound
+observation. Candidate and action counts are schedule-bounded. The command has no model,
+authority-mutation, merge, release, deployment, or timer-installation port.
+
 The separate `broker-update-draft` command binds the owner-only broker config, task UUID, exact
 repair-authorization digest, policy digest, and literal `--confirm-update`. The broker revalidates
 the completed repair journal and evidence, exact repaired patch and complete cumulative usage,
@@ -304,7 +314,8 @@ and is revalidated before each broker checkpoint. Manual dispatch remains schema
 [ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
 [ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md),
 [ADR 0017](decisions/0017-slot-bound-canary-pr-maintenance.md),
-[ADR 0018](decisions/0018-recovery-first-canary-pr-repair-consumer.md), and
+[ADR 0018](decisions/0018-recovery-first-canary-pr-repair-consumer.md),
+[ADR 0019](decisions/0019-recovery-first-canary-pr-update-consumer.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -506,12 +517,13 @@ plus deterministic repair admission and fresh credentialless repair execution ar
 Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
 re-observation are implemented. A bounded daily-slot consumer joins scheduled canary PRs to
 authenticated observations and deterministic repair admission, and a recovery-first credentialless
-consumer now turns exact authorizations into gated local repair proposals. Autonomous
-repaired-branch consumption, repository/day and organization/day quotas, a sandboxed harness
-producer, owner-installed timers, telemetry-driven canary comparison, merge, release, rollback, and
-incident automation remain later stages. Deterministic assessment, bounded non-release cohort
-authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR maintenance,
-and repair consumption exist but remain unactivated.
+consumer now turns exact authorizations into gated local repair proposals. A separate recovery-first
+broker consumer publishes those proposals through the existing durable non-force update service and
+returns them to exact-head observation. Repository/day and organization/day quotas, a sandboxed
+harness producer, owner-installed timers, telemetry-driven canary comparison, merge, release,
+rollback, and incident automation remain later stages. Deterministic assessment, bounded non-release
+cohort authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR
+maintenance, repair consumption, and repaired-branch publication exist but remain unactivated.
 
 ## Dependency map
 

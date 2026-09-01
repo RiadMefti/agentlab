@@ -6,6 +6,7 @@ import {
   type FactoryBrokerPreflight,
   type FactoryCanaryBrokerTickReport,
   type FactoryCanaryPullRequestMaintenanceTickReport,
+  type FactoryCanaryPullRequestUpdateTickReport,
   type GitHubAppPrivateKeySource,
   type LocalFactoryBrokerConfig,
   type LocalFactoryBrokerOptions,
@@ -172,6 +173,36 @@ interface ExpectedCanaryPullRequestMaintenanceTickReport {
   }[];
 }
 
+interface ExpectedCanaryPullRequestUpdateTickReport {
+  readonly schemaVersion: "agentlab.canary-pull-request-update-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly repositoryId: string;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly recoveryAttempts: number;
+  readonly updateAttempts: number;
+  readonly updatesCompleted: number;
+  readonly remoteUpdates: number;
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly repositoryId: string;
+    readonly authorizationDigest: Sha256Digest;
+    readonly repairRunDigest: Sha256Digest;
+    readonly source: "authorized" | "recoverable";
+    readonly status: "updated" | "recovered" | "expired" | "blocked" | "denied" | "needs-human";
+    readonly reasonCodes: readonly string[];
+    readonly pullRequestNumber: number | null;
+    readonly priorHeadRevision: string | null;
+    readonly headRevision: string | null;
+    readonly remoteUpdated: boolean;
+  }[];
+}
+
 export type FactoryBrokerPublicApiAssertions = [
   Assert<Equal<LocalFactoryBrokerConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryBrokerOptions, ExpectedOptions>>,
@@ -184,12 +215,16 @@ export type FactoryBrokerPublicApiAssertions = [
     >
   >,
   Assert<
+    Equal<FactoryCanaryPullRequestUpdateTickReport, ExpectedCanaryPullRequestUpdateTickReport>
+  >,
+  Assert<
     Equal<
       keyof FactoryBrokerCommandPort,
       | "preflight"
       | "openDraft"
       | "reconcileCanaryDrafts"
       | "maintainCanaryPullRequests"
+      | "updateCanaryPullRequests"
       | "updatePullRequest"
       | "observePullRequest"
       | "admitPullRequestRepair"

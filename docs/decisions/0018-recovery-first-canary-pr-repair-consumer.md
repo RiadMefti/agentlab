@@ -39,9 +39,10 @@ authority-mutation, merge, release, deployment, or timer-installation capability
 ## Consequences
 
 An owner-managed worker timer can safely turn deterministic canary feedback into a locally reviewed
-repair proposal while preserving worker/broker separation. A separate broker consumer is still
-required to publish that exact proposal, after which slot-bound observation can repeat on the new
-head. Live policies, identities, timers, governance, monitoring, merge, and release remain dormant.
+repair proposal while preserving worker/broker separation. The separate broker consumer in
+[ADR 0019](0019-recovery-first-canary-pr-update-consumer.md) can publish that exact proposal, after
+which slot-bound observation can repeat on the new head. Live policies, identities, timers,
+governance, monitoring, merge, and release remain dormant.
 
 ## Fitness functions
 

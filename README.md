@@ -213,6 +213,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   readiness and current reservation authority, reserves its full contract ceiling against the tick
   budget, runs in the credentialless worker, and stops at a gated, independently reviewed local
   proposal.
+- `agentlab factory broker-pr-update-tick --config ... --schedule-policy ... --role-policy ... --policy ...`
+  recovers interrupted broker update journals first, then publishes a bounded page of exact
+  completed canary repairs. Fresh work must retain its maintenance observation, authorization,
+  current PR head, reservation, scheduler handoff, policy pins, repository governance, and enabled
+  broker authority. It uses the existing non-force crash-durable update service, returns each task
+  to `pr-open` for exact-head re-observation, and cannot run a model, merge, or release.
 - `agentlab factory broker-update-draft --config ... --task ... --authorization ... --policy ... --confirm-update`
   consumes the completed repair only in the credential-bearing broker composition. It revalidates
   the exact repair journal, patch, cumulative usage, policy, prior PR authority record, repository
@@ -245,24 +251,24 @@ or authority-control capability. Its manual task runner, daily scheduler, and au
 repair runner are crash-resumable and stop before remote writes. Separate CLI commands inspect local
 authority and compare-and-set the scheduler and broker switches independently; that human-only
 process cannot run agents or contact GitHub. Manual initial-draft and repaired-branch writes require
-an exact task UUID, operator-pinned policy digest, and literal confirmation. The evaluated scheduled
-initial-draft path instead requires exact reservation, schedule, role, and factory-policy digests.
-All invoke only the broker after a clean preflight, and their inner services recheck policy,
-evidence, base revision, governance, and the broker kill switch. Both switches remain default-off.
-The eval slice accepts a strict owner-only matched report, signs and verifies its exact bytes
-through disjoint local compositions, and can issue a structurally non-merge/non-release cohort after
-human sample review and fresh attestation re-verification. It does not yet provide the harness
-producer; reservation consumption exists but is not provisioned or activated. Scheduled config v3
-and eval signing now pin one canonical role policy: distinct non-root worker/signer UIDs plus the
-exact signer key and runner, with the policy digest carried in every signed eval predicate. No
-accounts are provisioned or activated. Provider-neutral per-run and per-tick reservation accounting
-are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
-worker and broker config can load the same separate strict cost-policy file without sharing broker
-credentials; broker config v3 also pins the schedule and role policies needed for reservation-bound
-dispatch. The current repository governance blocks the write commands. No live factory task or PR
-has been created through these factory commands. See
-[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases, and
+an exact task UUID, operator-pinned policy digest, and literal confirmation. Evaluated scheduled
+initial-draft and repaired-branch paths instead require exact reservation, schedule, role, and
+factory-policy lineage through their bounded consumers. All invoke only the broker after a clean
+preflight, and their inner services recheck policy, evidence, base revision, governance, and the
+broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
+matched report, signs and verifies its exact bytes through disjoint local compositions, and can
+issue a structurally non-merge/non-release cohort after human sample review and fresh attestation
+re-verification. It does not yet provide the harness producer; reservation consumption exists but is
+not provisioned or activated. Scheduled config v3 and eval signing now pin one canonical role
+policy: distinct non-root worker/signer UIDs plus the exact signer key and runner, with the policy
+digest carried in every signed eval predicate. No accounts are provisioned or activated.
+Provider-neutral per-run and per-tick reservation accounting are policy-pinned and fail-closed, and
+the shipped live rate card is intentionally empty. Owner-only worker and broker config can load the
+same separate strict cost-policy file without sharing broker credentials; broker config v3 also pins
+the schedule and role policies needed for reservation-bound dispatch. The current repository
+governance blocks the write commands. No live factory task or PR has been created through these
+factory commands. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
+implemented controls, activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;
@@ -273,7 +279,9 @@ separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the
 reconciliation; [ADR 0017](docs/decisions/0017-slot-bound-canary-pr-maintenance.md) for bounded
 CI/review observation and repair admission; and
 [ADR 0018](docs/decisions/0018-recovery-first-canary-pr-repair-consumer.md) for recovery-first
-credentialless repair consumption. The dormant procedures are in
+credentialless repair consumption; and
+[ADR 0019](docs/decisions/0019-recovery-first-canary-pr-update-consumer.md) for recovery-first
+brokered repair publication. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

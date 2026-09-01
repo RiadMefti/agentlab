@@ -11,6 +11,7 @@ import {
 import { FactoryBrokerOperator } from "./application/factory-broker-operator.js";
 import { FactoryCanaryBrokerService } from "./application/factory-canary-broker-service.js";
 import { FactoryCanaryPullRequestMaintenanceService } from "./application/factory-canary-pull-request-maintenance-service.js";
+import { FactoryCanaryPullRequestUpdateService } from "./application/factory-canary-pull-request-update-service.js";
 import {
   LocalFactoryBrokerCoordinator,
   type LocalFactoryBrokerRuntime
@@ -49,6 +50,7 @@ import { SqliteConversationRepository } from "./infrastructure/persistence/sqlit
 import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
 import { SqliteFactoryCanaryBrokerQueue } from "./infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
 import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
+import { SqliteFactoryCanaryPullRequestUpdateQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-update-queue.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
@@ -138,6 +140,10 @@ export function createLocalFactoryBroker(
       schedulePolicy === null
         ? null
         : repositories.track(new SqliteFactoryCanaryPullRequestMaintenanceQueue(databasePath));
+    const canaryPullRequestUpdateQueue =
+      schedulePolicy === null
+        ? null
+        : repositories.track(new SqliteFactoryCanaryPullRequestUpdateQueue(databasePath));
     const dispatches = repositories.track(
       new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
     );
@@ -315,6 +321,26 @@ export function createLocalFactoryBroker(
       createId,
       brokerId: options.brokerId
     });
+    const canaryPullRequestUpdates =
+      schedulePolicy === null ||
+      roleIdentityPolicy === null ||
+      canaryPullRequestUpdateQueue === null
+        ? null
+        : new FactoryCanaryPullRequestUpdateService({
+            repositoryId: options.repositoryId,
+            brokerId: options.brokerId,
+            schedulePolicy,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: roleIdentityPolicy.digest,
+            costPolicyConfigured: policyBundle.value.costPolicy.rules.length > 0,
+            queue: canaryPullRequestUpdateQueue,
+            tasks: factory,
+            controls: factory,
+            remote,
+            canaryAuthority,
+            updates: pullRequestUpdates,
+            now
+          });
     const operator = new FactoryBrokerOperator({
       repositoryId: options.repositoryId,
       policyBundleDigest: policyBundle.digest,
@@ -326,7 +352,8 @@ export function createLocalFactoryBroker(
       pullRequestRepairAdmissions,
       pullRequestUpdates,
       canaryBroker,
-      canaryPullRequestMaintenance
+      canaryPullRequestMaintenance,
+      canaryPullRequestUpdates
     });
     return new LocalFactoryBrokerCoordinator({
       operator,
@@ -386,6 +413,7 @@ export type { FactoryBrokerCommandPort } from "./application/local-factory-broke
 export type { FactoryBrokerPreflight } from "./application/factory-broker-operator.js";
 export type { FactoryCanaryBrokerTickReport } from "./application/factory-canary-broker-service.js";
 export type { FactoryCanaryPullRequestMaintenanceTickReport } from "./application/factory-canary-pull-request-maintenance-service.js";
+export type { FactoryCanaryPullRequestUpdateTickReport } from "./application/factory-canary-pull-request-update-service.js";
 export {
   loadLocalFactoryBrokerConfig,
   type LocalFactoryBrokerConfig

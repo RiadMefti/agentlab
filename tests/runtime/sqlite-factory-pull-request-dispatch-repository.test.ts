@@ -11,7 +11,9 @@ import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/p
 import { SqliteFactoryCanaryBrokerQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
 import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
 import { SqliteFactoryCanaryPullRequestRepairQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
+import { SqliteFactoryCanaryPullRequestUpdateQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-update-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
+import { SqliteFactoryPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import {
@@ -155,6 +157,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
       fixture.databasePath
     );
     const repairQueue = new SqliteFactoryCanaryPullRequestRepairQueue(fixture.databasePath);
+    const updateQueue = new SqliteFactoryCanaryPullRequestUpdateQueue(fixture.databasePath);
+    const repairs = new SqliteFactoryPullRequestRepairExecutionRepository(fixture.databasePath);
     try {
       await expect(
         queue.listPending({
@@ -352,6 +356,103 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
           }
         ]
       });
+      const repairing = codec.taskEvent({
+        schemaVersion: "agentlab.task-event.v1",
+        eventId: "66666666-6666-4666-8666-666666666661",
+        taskId: fixture.contract.value.taskId,
+        sequence: taskEvent.value.sequence + 1,
+        contractDigest: fixture.contract.digest,
+        previousEventDigest: taskEvent.digest,
+        from: "pr-open",
+        to: "repairing",
+        actor: taskEvent.value.actor,
+        occurredAt: "2026-08-31T12:18:00.000Z",
+        reasonCode: "authorized-pr-repair-started",
+        summary: null,
+        evidenceBundleDigest: authorizationEvidence.digest,
+        correlationId: TEST_FACTORY_CORRELATION_ID
+      });
+      await fixture.tasks.append(repairing);
+      const repairRun = codec.pullRequestRepairRun({
+        schemaVersion: "agentlab.pull-request-repair-run.v1",
+        runId: "67676767-6767-4767-8767-676767676767",
+        taskId: fixture.contract.value.taskId,
+        contractDigest: fixture.contract.digest,
+        policyBundleDigest: fixture.contract.value.gateProfile.policyDigest,
+        authorizationId: "68686868-6868-4868-8868-686868686868",
+        authorizationDigest: testDigest("7"),
+        observationDigest,
+        priorPatchProposalDigest: fixture.run.value.proposal.patchProposalDigest,
+        repository: fixture.contract.value.repository,
+        contractRepairAttempt: 1,
+        maximumAttempts: 1,
+        createdAt: "2026-08-31T12:19:00.000Z",
+        correlationId: TEST_FACTORY_CORRELATION_ID
+      });
+      const repairRegistered = codec.executionEvent({
+        ...repairExecutionEventBase(repairRun, null, "2026-08-31T12:19:00.000Z"),
+        kind: "registered",
+        from: null,
+        to: "ready"
+      });
+      await repairs.register(repairRun, repairRegistered);
+      const repairFinished = codec.executionEvent({
+        ...repairExecutionEventBase(repairRun, repairRegistered, "2026-08-31T12:20:00.000Z"),
+        kind: "execution-finished",
+        from: "ready",
+        to: "completed",
+        taskState: "pr-proposed"
+      });
+      await repairs.append(repairFinished);
+      let previousRepairTask = repairing;
+      for (const [index, state] of (["verifying", "reviewing", "pr-proposed"] as const).entries()) {
+        const next = codec.taskEvent({
+          schemaVersion: "agentlab.task-event.v1",
+          eventId: `69696969-6969-4969-8969-${String(index + 1).padStart(12, "0")}`,
+          taskId: fixture.contract.value.taskId,
+          sequence: previousRepairTask.value.sequence + 1,
+          contractDigest: fixture.contract.digest,
+          previousEventDigest: previousRepairTask.digest,
+          from: previousRepairTask.value.to,
+          to: state,
+          actor: previousRepairTask.value.actor,
+          occurredAt: `2026-08-31T12:${String(21 + index).padStart(2, "0")}:00.000Z`,
+          reasonCode:
+            state === "pr-proposed" ? "post-pr-independent-review-passed" : "stage-complete",
+          summary: null,
+          evidenceBundleDigest: null,
+          correlationId: TEST_FACTORY_CORRELATION_ID
+        });
+        await fixture.tasks.append(next);
+        previousRepairTask = next;
+      }
+      await expect(
+        updateQueue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T13:00:00.000Z",
+          schedulePolicyDigest: fixture.schedulePolicyDigest,
+          factoryPolicyBundleDigest: fixture.contract.value.gateProfile.policyDigest,
+          roleIdentityPolicyDigest: fixture.roleIdentityPolicyDigest,
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            source: "authorized",
+            taskId: TEST_FACTORY_TASK_ID,
+            repositoryId: "agentlab",
+            authorizationDigest: testDigest("7"),
+            observationDigest,
+            repairRunDigest: repairRun.digest,
+            repairFinishedAt: "2026-08-31T12:20:00.000Z",
+            reservationDigest: fixture.reservationDigest,
+            pullRequestRecordDigest: currentRecordDigest,
+            headRevision: "b".repeat(40),
+            brokerId: brokerActor.id
+          }
+        ]
+      });
       expect(() =>
         queue.listPending({
           repositoryId: "agentlab",
@@ -373,6 +474,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         database.close();
       }
     } finally {
+      repairs.close();
+      updateQueue.close();
       repairQueue.close();
       maintenanceQueue.close();
       queue.close();
@@ -708,6 +811,34 @@ async function scheduledRepositoryFixture() {
       from: null,
       to: "ready"
     })
+  };
+}
+
+function repairExecutionEventBase(
+  run: ReturnType<NodeFactoryDocumentCodec["pullRequestRepairRun"]>,
+  previous: ReturnType<NodeFactoryDocumentCodec["executionEvent"]> | null,
+  occurredAt: string
+) {
+  const sequence = (previous?.value.sequence ?? 0) + 1;
+  return {
+    schemaVersion: "agentlab.execution-event.v1" as const,
+    eventId: `70707070-7070-4070-8070-${String(sequence).padStart(12, "0")}`,
+    runId: run.value.runId,
+    runDigest: run.digest,
+    taskId: run.value.taskId,
+    contractDigest: run.value.contractDigest,
+    sequence,
+    previousEventDigest: previous?.digest ?? null,
+    actor: {
+      kind: "control-plane" as const,
+      role: "policy-engine" as const,
+      id: "agentlab-policy",
+      sessionId: null
+    },
+    occurredAt,
+    reasonCode: "test-repair-event",
+    summary: null,
+    correlationId: TEST_FACTORY_CORRELATION_ID
   };
 }
 

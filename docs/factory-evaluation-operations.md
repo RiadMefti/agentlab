@@ -251,6 +251,14 @@ authority, all three policy pins, and both task and aggregate tick budgets. The 
 repair, strict gates, independent review, and cumulative accounting produce only a local
 `pr-proposed` checkpoint.
 
+`broker-pr-update-tick` consumes only completed proposals from that scheduled repair lane. Its
+projection recovers an existing update journal before selecting a fresh exact maintenance,
+authorization, repair-run, reservation, scheduler-handoff, current-head, broker, and policy chain.
+Fresh work requires ready repository governance and enabled broker authority; the existing durable
+non-force update service remains the sole remote-write path. Success returns the task to `pr-open`
+so a later maintenance slot can observe the new head. The command has no model, merge, release, or
+authority-mutation capability.
+
 ## Failure, recovery, and incident handling
 
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
@@ -274,9 +282,9 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
 grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
-identity or hardware-backed key custody where required; an owner-installed broker timer; an
-autonomous broker-update consumer; telemetry/control comparison; revocation enforcement; alerting;
-rollback drills; and incident automation. Manual PR creation remains separately human-confirmed;
-evaluated canary PR creation, slot-bound maintenance, and credentialless repair consumption are
-reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key
-prerequisites in [ADR 0006](decisions/0006-local-software-factory-control-plane.md).
+identity or hardware-backed key custody where required; owner-installed timers; telemetry/control
+comparison; revocation enforcement; alerting; rollback drills; and incident automation. Manual PR
+creation remains separately human-confirmed; evaluated canary PR creation, slot-bound maintenance,
+credentialless repair consumption, and brokered repair publication are reservation-bound but
+unprovisioned and blocked by repository governance and live policy/config/key prerequisites in
+[ADR 0006](decisions/0006-local-software-factory-control-plane.md).

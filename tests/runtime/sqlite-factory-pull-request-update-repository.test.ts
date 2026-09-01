@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
+import { SqliteFactoryCanaryPullRequestUpdateQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-update-queue.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPullRequestUpdateRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
@@ -47,6 +48,7 @@ afterEach(() => {
 describe("SqliteFactoryPullRequestUpdateRepository", () => {
   it("persists the exact five-checkpoint update chain and removes completion from recovery", async () => {
     const fixture = await repositoryFixture();
+    const queue = new SqliteFactoryCanaryPullRequestUpdateQueue(fixture.databasePath);
     try {
       await expect(
         fixture.updates.register(fixture.updateRun, fixture.updateRegistered)
@@ -57,6 +59,28 @@ describe("SqliteFactoryPullRequestUpdateRepository", () => {
         to: "update-active"
       });
       await fixture.updates.append(started);
+      await expect(
+        queue.listPending({
+          repositoryId: fixture.contract.value.repository.id,
+          observedAt: "2026-08-30T14:02:00.000Z",
+          schedulePolicyDigest: testDigest("1"),
+          factoryPolicyBundleDigest: testDigest("2"),
+          roleIdentityPolicyDigest: testDigest("3"),
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            source: "recoverable",
+            taskId: TEST_FACTORY_TASK_ID,
+            authorizationDigest,
+            repairRunDigest: fixture.repairRun.digest,
+            updateRunDigest: fixture.updateRun.digest,
+            updateState: "update-active"
+          }
+        ]
+      });
       const remote = updateEvent(fixture.updateRun, started, {
         kind: "remote-updated",
         from: "update-active",
@@ -99,6 +123,7 @@ describe("SqliteFactoryPullRequestUpdateRepository", () => {
       await expect(fixture.updates.listRecoverable(10)).resolves.toEqual([]);
       await expect(fixture.updates.append(completed)).resolves.toBeNull();
     } finally {
+      queue.close();
       closeFixture(fixture);
     }
   });

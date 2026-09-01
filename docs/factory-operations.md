@@ -183,13 +183,28 @@ stays blocked rather than running model work.
    `pr-proposed` checkpoint. Exit 2 requires operator attention; do not publish the repair manually
    unless its exact evidence and broker ceremony are reviewed.
 
+9. Publish completed repairs through the separate credential-bearing broker consumer:
+
+   ```text
+   agentlab factory broker-pr-update-tick --config /absolute/broker.json --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+   ```
+
+   It reconciles nonterminal update journals before considering fresh work. Fresh publication
+   requires the exact completed repair, actionable maintenance lineage, current reservation and PR
+   head, all policy pins, ready repository governance, and enabled broker authority. It routes every
+   candidate through the existing crash-durable non-force update service and returns successful work
+   to `pr-open`; the next maintenance tick observes the new exact head. Candidate and action
+   ceilings remain authoritative. Exit 2 requires operator attention. It cannot run a model, merge,
+   release, deploy, install a timer, or change authority.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
 separate broker preflight and switch. Manual draft creation still requires literal confirmation;
-scheduled canary draft creation requires the exact reservation and scheduler handoff instead. Do not
-put broker enablement, merge, release, or deployment into a worker or broker timer. Keep the
-credentialless repair consumer and credential-bearing broker in separate processes and accounts.
+scheduled canary draft creation and repaired-branch publication require the exact reservation and
+scheduler handoff instead. Do not put broker enablement, merge, release, or deployment into a worker
+or broker timer. Keep the credentialless repair consumer and credential-bearing broker in separate
+processes and accounts.
 
 To stop new or resumed scheduled and broker work:
 
@@ -206,10 +221,10 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, autonomous broker-update consumer, attested eval-harness producer,
-owner-installed timers, merge, telemetry-driven canary, rollback controller, or incident automation
-is shipped. Deterministic assessment, human non-release cohorts, task reservation, reservation-bound
-scheduled execution and draft dispatch, slot-bound PR observation/repair admission, and
-credentialless repair consumption exist but are not provisioned or activated. See
+maintenance discovery, attested eval-harness producer, owner-installed timers, merge,
+telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
+assessment, human non-release cohorts, task reservation, reservation-bound scheduled execution and
+draft dispatch, slot-bound PR observation/repair admission, credentialless repair consumption, and
+brokered repaired-branch publication exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.
