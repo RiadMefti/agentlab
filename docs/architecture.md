@@ -704,11 +704,12 @@ skills, rates, object mirroring, or accounts. The eval producer has no provision
 candidate, job, or account. Host-local repository/day and organization/day quotas are implemented in
 the shared SQLite control plane; cross-host/global coordination, a secretless hosted-provider eval
 gateway, owner-provisioned activation, telemetry-driven canary comparison, merge, release, rollback,
-and incident automation remain later stages. A read-only daily-cycle compiler now requires one v3
-owner-only manifest and verifies reviewed policy digests, including daily aggregate quotas, plus the
-AgentLab executable digest, distinct worker, broker, and attestor UIDs, repair ceilings, and
-timeouts. It emits a content-addressed system-level systemd bundle whose non-persistent UTC timer
-chains fixed-argv one-shot services across separate UIDs, stops on any nonzero result, signals an
+alert delivery, and incident coordination remain later stages. A read-only daily-cycle compiler now
+requires one v4 owner-only manifest and verifies reviewed policy digests, including daily aggregate
+quotas and operations health, plus the AgentLab executable digest, distinct worker, broker,
+incident-controller, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed
+system-level systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services
+across separate UIDs, begins with disable-only containment, stops on any nonzero result, signals an
 incident target, and finally re-observes the last published head. Every stage first runs fixed
 `/usr/bin/sha256sum` argv against the generated exact executable check record, so binary drift stops
 before AgentLab runs. The renderer cannot write or install artifacts, call the service manager,
@@ -726,6 +727,15 @@ no writer lease, agent/provider, GitHub, authority mutation, worker, broker, ter
 release, deployment, rollback, or incident port. No monitor unit, alert delivery, automatic
 containment, or report archive is provisioned.
 
+The separate `@agentlab/runtime/factory-incident-containment` composition retains the query-only
+health source but adds only a disable-only incident repository under an isolated reviewed UID. It
+recomputes health internally. On critical health, SQLite schema 28 compare-and-disables the broker
+then scheduler inside one transaction and appends the canonical report, containment record, and
+control-event digest bindings. It cannot accept an external report and has no enable, provider,
+GitHub, model, merge, release, or deployment port. Daily-cycle v4 runs this command first; degraded
+or critical exit codes stop the chain. The command and rendered units remain dormant and
+unprovisioned.
+
 ## Dependency map
 
 Arrows are compile-time dependencies. Runtime control flow may travel in the opposite direction
@@ -742,6 +752,7 @@ eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ 
 eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
 canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
+incident controller ▶ @agentlab/runtime/factory-incident-containment ▶ disable-only containment composition
 maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
 external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
 external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
@@ -778,8 +789,8 @@ The product-source rules are executable and fail closed:
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
   broker, worker, eval-producer, evaluator, eval-attestor, switch-authority, canary-authority,
-  canary-admission, maintenance-discovery, and orchestration-renderer subpaths are exact; every
-  runtime deep import fails.
+  canary-admission, incident-containment, maintenance-discovery, and orchestration-renderer subpaths
+  are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The

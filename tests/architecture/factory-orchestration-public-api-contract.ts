@@ -2,6 +2,7 @@ import type {
   FactoryDailyCycleBundle,
   FactoryDailyCycleManifest,
   FactoryDailyQuotaPolicy,
+  FactoryOperationsHealthPolicy,
   FactoryRoleIdentityPolicy,
   FactorySchedulePolicy
 } from "@agentlab/contracts";
@@ -45,7 +46,12 @@ type ManifestKeys =
   | "workerCommandTimeoutSeconds"
   | "brokerCommandTimeoutSeconds";
 
-type ConfigKeys = ManifestKeys | "schedulePolicy" | "roleIdentityPolicy" | "dailyQuotaPolicy";
+type ConfigKeys =
+  | ManifestKeys
+  | "schedulePolicy"
+  | "roleIdentityPolicy"
+  | "dailyQuotaPolicy"
+  | "operationsHealthPolicy";
 
 export type FactoryOrchestrationPublicApiAssertions = [
   Assert<Equal<keyof FactoryDailyCycleManifest, ManifestKeys>>,
@@ -54,6 +60,12 @@ export type FactoryOrchestrationPublicApiAssertions = [
   Assert<Equal<LocalFactoryOrchestrationConfig["roleIdentityPolicy"], FactoryRoleIdentityPolicy>>,
   Assert<
     Equal<LocalFactoryOrchestrationConfig["dailyQuotaPolicy"], FactoryDailyQuotaPolicy | undefined>
+  >,
+  Assert<
+    Equal<
+      LocalFactoryOrchestrationConfig["operationsHealthPolicy"],
+      FactoryOperationsHealthPolicy | undefined
+    >
   >,
   Assert<
     Equal<

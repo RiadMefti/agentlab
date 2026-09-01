@@ -391,9 +391,10 @@ Before production activation, AgentLab still needs reviewed case banks and insta
 harnesses, or a secretless broker for hosted-provider evals; a brokered multi-account storage
 boundary for the shared ledger; stronger runner identity or hardware-backed key custody where
 required; owner-installed timers; telemetry/control comparison; revocation enforcement; alerting;
-rollback drills; and incident automation. The producer and its content-addressed subject/grader
-evidence exist but no account, config, fixture, executable, candidate, or job is provisioned. Manual
-PR creation remains separately human-confirmed; evaluated canary PR creation, slot-bound
-maintenance, credentialless repair consumption, and brokered repair publication are
-reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key
-prerequisites in [ADR 0006](decisions/0006-local-software-factory-control-plane.md).
+rollback drills; and eval revocation/incident coordination beyond host-local disable-only
+containment. The producer and its content-addressed subject/grader evidence exist but no account,
+config, fixture, executable, candidate, or job is provisioned. Manual PR creation remains separately
+human-confirmed; evaluated canary PR creation, slot-bound maintenance, credentialless repair
+consumption, and brokered repair publication are reservation-bound but unprovisioned and blocked by
+repository governance and live policy/config/key prerequisites in
+[ADR 0006](decisions/0006-local-software-factory-control-plane.md).

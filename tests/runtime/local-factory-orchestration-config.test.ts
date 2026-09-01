@@ -9,6 +9,7 @@ import { loadLocalFactoryOrchestrationConfig } from "../../packages/runtime/src/
 import { encodeCanonicalDocument } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
+import { testFactoryOperationsHealthPolicy } from "../helpers/factory-operations-health.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 import { testDigest } from "../helpers/factory.js";
 
@@ -51,7 +52,7 @@ describe("local factory orchestration configuration boundary", () => {
     await writeFile(fixture.executablePath, fixture.executableContent, { mode: 0o700 });
     await chmod(fixture.executablePath, 0o720);
     await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
-      /immutable to worker and broker/u
+      /immutable to runtime role identities/u
     );
 
     await chmod(fixture.executablePath, 0o700);
@@ -66,13 +67,31 @@ describe("local factory orchestration configuration boundary", () => {
     );
   });
 
-  it("loads the v3 autonomous-cycle pins, aggregate quota, and separate capability configs", async () => {
+  it("loads the v4 containment, quota, and separate capability pins", async () => {
     const fixture = await createFixture();
     const dailyQuotaPolicyPath = join(fixture.root, "daily-quota.json");
     const dailyQuotaPolicy = testFactoryDailyQuotaPolicy();
+    const operationsHealthPolicyPath = join(fixture.root, "operations-health.json");
+    const operationsHealthPolicy = testFactoryOperationsHealthPolicy();
+    const unavailableUserIds = new Set<number>([
+      fixture.manifest.worker.userId,
+      fixture.manifest.broker.userId,
+      fixture.roleIdentityPolicy.evalAttestor.userId
+    ]);
+    const incidentUserId = [1_004, 1_005, 1_006, 1_007].find(
+      (candidate) => !unavailableUserIds.has(candidate)
+    );
+    if (incidentUserId === undefined) throw new Error("No isolated incident test identity.");
     const manifest = {
       ...fixture.manifest,
-      schemaVersion: "agentlab.daily-cycle-manifest.v3",
+      schemaVersion: "agentlab.daily-cycle-manifest.v4",
+      incident: {
+        userId: incidentUserId,
+        configPath: join(fixture.root, "incident.json")
+      },
+      incidentCommandTimeoutSeconds: 120,
+      operationsHealthPolicyPath,
+      expectedOperationsHealthPolicyDigest: encodeCanonicalDocument(operationsHealthPolicy).digest,
       maintenanceDiscoveryConfigPath: join(fixture.root, "maintenance-discovery.json"),
       canaryAdmissionConfigPath: join(fixture.root, "canary-admission.json"),
       dailyQuotaPolicyPath,
@@ -82,14 +101,18 @@ describe("local factory orchestration configuration boundary", () => {
       expectedCanaryCohortDigest: testDigest("7"),
       expectedCanaryCandidateDigest: testDigest("8")
     } as const;
-    await writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy);
+    await Promise.all([
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(operationsHealthPolicyPath, operationsHealthPolicy)
+    ]);
     await writePrivateJson(fixture.configPath, manifest);
 
     await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).resolves.toEqual({
       ...manifest,
       schedulePolicy: fixture.schedulePolicy,
       roleIdentityPolicy: fixture.roleIdentityPolicy,
-      dailyQuotaPolicy
+      dailyQuotaPolicy,
+      operationsHealthPolicy
     });
 
     await writePrivateJson(fixture.configPath, {
@@ -98,6 +121,14 @@ describe("local factory orchestration configuration boundary", () => {
     });
     await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
       /quota policy changed/u
+    );
+
+    await writePrivateJson(fixture.configPath, {
+      ...manifest,
+      expectedOperationsHealthPolicyDigest: testDigest("f")
+    });
+    await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
+      /operations health policy changed/u
     );
   });
 

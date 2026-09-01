@@ -52,6 +52,10 @@
       "types": "./dist/local-factory-operations-health.d.ts",
       "default": "./dist/local-factory-operations-health.js"
     },
+    "./factory-incident-containment": {
+      "types": "./dist/local-factory-incident-containment.d.ts",
+      "default": "./dist/local-factory-incident-containment.js"
+    },
     "./factory-maintenance-discovery": {
       "types": "./dist/local-factory-maintenance-discovery.d.ts",
       "default": "./dist/local-factory-maintenance-discovery.js"

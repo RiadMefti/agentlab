@@ -76,6 +76,21 @@ export const factoryDailyCycleManifestSchema = z
       expectedPreparationGrantDigest: sha256DigestSchema,
       expectedCanaryCohortDigest: sha256DigestSchema,
       expectedCanaryCandidateDigest: sha256DigestSchema
+    }),
+    factoryDailyCycleManifestBaseSchema.extend({
+      schemaVersion: z.literal("agentlab.daily-cycle-manifest.v4"),
+      incident: orchestrationRoleSchema,
+      incidentCommandTimeoutSeconds: z.number().int().min(10).max(600),
+      operationsHealthPolicyPath: unitSafeTextSchema,
+      expectedOperationsHealthPolicyDigest: sha256DigestSchema,
+      maintenanceDiscoveryConfigPath: unitSafeTextSchema,
+      canaryAdmissionConfigPath: unitSafeTextSchema,
+      dailyQuotaPolicyPath: unitSafeTextSchema,
+      expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+      expectedMaintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+      expectedPreparationGrantDigest: sha256DigestSchema,
+      expectedCanaryCohortDigest: sha256DigestSchema,
+      expectedCanaryCandidateDigest: sha256DigestSchema
     })
   ])
   .superRefine((manifest, context) => {
@@ -94,13 +109,27 @@ export const factoryDailyCycleManifestSchema = z
       });
     }
     if (
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" &&
+      (manifest.incident.userId === manifest.worker.userId ||
+        manifest.incident.userId === manifest.broker.userId)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["incident", "userId"],
+        message: "Factory incident controller must use a separate operating-system identity."
+      });
+    }
+    if (
       manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v1" &&
       new Set([
         manifest.worker.configPath,
         manifest.broker.configPath,
         manifest.maintenanceDiscoveryConfigPath,
-        manifest.canaryAdmissionConfigPath
-      ]).size !== 4
+        manifest.canaryAdmissionConfigPath,
+        ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+          ? [manifest.incident.configPath]
+          : [])
+      ]).size !== (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ? 5 : 4)
     ) {
       context.addIssue({
         code: "custom",
@@ -159,6 +188,15 @@ export const factoryDailyCycleBundleSchema = z.discriminatedUnion("schemaVersion
   }),
   factoryDailyCycleBundleBaseSchema.extend({
     schemaVersion: z.literal("agentlab.daily-cycle-bundle.v3"),
+    dailyQuotaPolicyDigest: sha256DigestSchema,
+    maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+    preparationGrantDigest: sha256DigestSchema,
+    canaryCohortDigest: sha256DigestSchema,
+    canaryCandidateDigest: sha256DigestSchema
+  }),
+  factoryDailyCycleBundleBaseSchema.extend({
+    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v4"),
+    operationsHealthPolicyDigest: sha256DigestSchema,
     dailyQuotaPolicyDigest: sha256DigestSchema,
     maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
     preparationGrantDigest: sha256DigestSchema,

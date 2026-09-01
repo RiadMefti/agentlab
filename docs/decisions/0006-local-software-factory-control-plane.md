@@ -844,9 +844,9 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    re-observation, and a slot-bound canary observation/repair-admission consumer and recovery-first
    credentialless repair consumer now exist. One policy-pinned daily scheduler tick, durable claim
    recovery, and tick reservation ceiling, host-local repository/organization daily quotas, a
-   policy-pinned query-only health report with monitor-friendly severity exits, and recovery-first
-   broker update consumer now exist; cross-host quotas, timer provisioning, installed alert
-   delivery/dashboarding, and incident automation do not.
+   policy-pinned query-only health report with monitor-friendly severity exits, atomic host-local
+   disable-only containment, and recovery-first broker update consumer now exist; cross-host quotas,
+   timer provisioning, installed alert delivery/dashboarding, and incident coordination do not.
 6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
    attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
    execution, attested grader artifacts, autonomous task discovery, shadow telemetry, production

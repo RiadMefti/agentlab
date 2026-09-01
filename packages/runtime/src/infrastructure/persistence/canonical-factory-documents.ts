@@ -98,6 +98,7 @@ import {
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
   factoryIntakeRequestSchema,
+  factoryIncidentContainmentSchema,
   factoryMaintenanceDiscoveryEventSchema,
   factoryMaintenanceDiscoveryOutputSchema,
   factoryMaintenanceDiscoveryPolicySchema,
@@ -118,6 +119,10 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public incidentContainment(input: unknown) {
+    return encodeCanonicalDocument(factoryIncidentContainmentSchema.parse(input));
+  }
+
   public operationsHealthPolicy(input: unknown) {
     return encodeCanonicalDocument(factoryOperationsHealthPolicySchema.parse(input));
   }

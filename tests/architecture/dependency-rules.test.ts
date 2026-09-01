@@ -105,6 +105,14 @@ describe("architecture dependency rules", () => {
           "packages/runtime/src/local-factory-orchestration.ts"
         ),
         local(
+          "@agentlab/runtime/factory-operations-health",
+          "packages/runtime/src/local-factory-operations-health.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-incident-containment",
+          "packages/runtime/src/local-factory-incident-containment.ts"
+        ),
+        local(
           "@agentlab/runtime/factory-maintenance-discovery",
           "packages/runtime/src/local-factory-maintenance-discovery.ts"
         ),
@@ -150,6 +158,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-canary-authority.ts"),
       source("packages/runtime/src/local-factory-canary-admission.ts"),
       source("packages/runtime/src/local-factory-orchestration.ts"),
+      source("packages/runtime/src/local-factory-operations-health.ts"),
+      source("packages/runtime/src/local-factory-incident-containment.ts"),
       source("packages/runtime/src/local-factory-maintenance-discovery.ts"),
       source("packages/runtime/src/local-factory-eval-producer.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-discovery.ts"),
@@ -530,6 +540,44 @@ describe("architecture dependency rules", () => {
     );
     expect(violations.map(({ source }) => source)).toContain(
       "apps/tui/src/run-factory-worker-task.ts"
+    );
+  });
+
+  it("keeps incident containment credentialless and free of any enable-capable repository", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-incident-containment.ts", [
+        local(
+          "./application/factory-incident-containment-service.js",
+          "packages/runtime/src/application/factory-incident-containment-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-incident-containment-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        ),
+        local(
+          "../infrastructure/persistence/sqlite-factory-repository.js",
+          "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"),
+      source("apps/tui/src/run-factory-incident-containment.ts", [
+        local(
+          "@agentlab/runtime/factory-incident-containment",
+          "packages/runtime/src/local-factory-incident-containment.ts"
+        )
+      ])
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(4);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/providers/model.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+      ])
     );
   });
 
@@ -1001,6 +1049,10 @@ function architectureFixture(): string {
         default: "./dist/local-factory-operations-health.js",
         types: "./dist/local-factory-operations-health.d.ts"
       },
+      "./factory-incident-containment": {
+        default: "./dist/local-factory-incident-containment.js",
+        types: "./dist/local-factory-incident-containment.d.ts"
+      },
       "./factory-maintenance-discovery": {
         default: "./dist/local-factory-maintenance-discovery.js",
         types: "./dist/local-factory-maintenance-discovery.d.ts"
@@ -1051,6 +1103,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-canary-admission.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-operations-health.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-incident-containment.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
   write(

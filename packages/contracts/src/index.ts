@@ -19,6 +19,7 @@ export * from "./factory-pull-request-update.js";
 export * from "./factory-evaluation.js";
 export * from "./factory-orchestration.js";
 export * from "./factory-operations-health.js";
+export * from "./factory-incident.js";
 export * from "./factory-role-identity.js";
 export * from "./factory-schedule.js";
 export * from "./factory.js";

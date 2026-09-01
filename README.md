@@ -260,11 +260,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   checks, and cannot issue authority or run work.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --daily-quota ... --policy ...`
   runs or reconciles one exact daily UTC slot from an owner-only worker v4 config. Before model
-  work, SQLite schema 27 atomically reserves the task's full ceiling and one possible draft against
-  exact repository/day and organization/day limits. Schedule-run/event v3 bind that immutable
-  reservation, the canary authority, policy digests, and the durable correlation reused after
-  interruption. The worker independently rechecks the chain before each resumable phase. It cannot
-  open a PR, mutate authority, merge, or release.
+  work, SQLite schema 28 preserves schema-27 quota enforcement and adds append-only atomic incident
+  containment; quota admission reserves the task's full ceiling and one possible draft against exact
+  repository/day and organization/day limits. Schedule-run/event v3 bind that immutable reservation,
+  the canary authority, policy digests, and the durable correlation reused after interruption. The
+  worker independently rechecks the chain before each resumable phase. It cannot open a PR, mutate
+  authority, merge, or release.
 - `agentlab factory broker-open-canary-draft --config ... --task ... --reservation ... --schedule-policy ... --role-policy ... --policy ...`
   accepts only a completed scheduled R1 proposal with an exact current `brokered-draft-pr`
   reservation. Broker config v4 loads the same schedule, daily-quota, and role policies; SQLite v17
@@ -362,14 +363,17 @@ Provider-neutral per-run, per-tick, and host-local repository/organization daily
 accounting are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty.
 Owner-only worker and broker config can load the same separate strict cost-policy file without
 sharing broker credentials; broker config v4 also pins the schedule, daily quota, and role policies
-needed for reservation-bound dispatch. The dormant daily-cycle v3 orders discovery → canary
-admission → quota-bound scheduler → brokered draft/repair stages while keeping separate fixed-UID
-configs; legacy manifests remain readable but cannot render an executable cycle. The current
-repository also exposes a separate policy-pinned, query-only operations-health command that
-revalidates canonical ledger documents, reports schedule/task/quota health, and returns
-monitor-friendly healthy/degraded/critical exit codes without any worker, broker, provider, GitHub,
-or authority-mutation port. Repository governance blocks the write commands. No unit is installed or
-activated, and no live factory task or PR has been created through these factory commands. See
+needed for reservation-bound dispatch. The dormant daily-cycle v4 orders independent health and
+disable-only containment → discovery → canary admission → quota-bound scheduler → brokered
+draft/repair stages while keeping separate fixed-UID configs; legacy manifests remain readable but
+cannot render an executable cycle. The current repository also exposes a separate policy-pinned,
+query-only operations-health command that revalidates canonical ledger documents, reports
+schedule/task/quota health, and returns monitor-friendly healthy/degraded/critical exit codes
+without any worker, broker, provider, GitHub, or authority-mutation port. A distinct credentialless
+incident command recomputes that health and can only atomically disable broker and scheduler
+authority while journaling the exact evidence; it has no enable path. Repository governance blocks
+the write commands. No unit is installed or activated, and no live factory task or PR has been
+created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
@@ -403,8 +407,10 @@ strict post-repair gate and independent-review boundary; and
 [ADR 0029](docs/decisions/0029-brokered-external-pull-request-replacement-drafts.md) for the
 contributor-safe publication boundary; and
 [ADR 0030](docs/decisions/0030-durable-daily-aggregate-quotas.md) for host-local repository and
-organization daily ceilings; and [ADR 0031](docs/decisions/0031-query-only-operations-health.md) for
-the credentialless ledger health projection. The dormant procedures are in
+organization daily ceilings; [ADR 0031](docs/decisions/0031-query-only-operations-health.md) for the
+credentialless ledger health projection; and
+[ADR 0032](docs/decisions/0032-durable-disable-only-incident-containment.md) for atomic disable-only
+containment. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

@@ -5,7 +5,7 @@ import {
   type FactorySchedulePolicy
 } from "@agentlab/contracts";
 
-export type FactoryDailyCycleRole = "worker" | "broker";
+export type FactoryDailyCycleRole = "worker" | "broker" | "incident";
 
 export interface FactoryDailyCycleStage {
   readonly id: string;
@@ -21,15 +21,20 @@ export interface FactoryDailyCyclePlan {
   readonly stages: readonly FactoryDailyCycleStage[];
 }
 
-/** Compiles reviewed policy into a fixed, shell-free worker/broker command sequence. */
+type ExecutableFactoryDailyCycleManifest = Extract<
+  FactoryDailyCycleManifest,
+  { readonly schemaVersion: "agentlab.daily-cycle-manifest.v4" }
+>;
+
+/** Compiles reviewed policy into a fixed, shell-free incident/worker/broker command sequence. */
 export function compileFactoryDailyCyclePlan(
   manifestInput: FactoryDailyCycleManifest,
   schedulePolicy: FactorySchedulePolicy,
   roleIdentityPolicy: FactoryRoleIdentityPolicy
 ): FactoryDailyCyclePlan {
   const manifest = factoryDailyCycleManifestSchema.parse(manifestInput);
-  if (manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v3") {
-    throw new Error("Daily cycle rendering requires a v3 manifest with aggregate quotas.");
+  if (manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v4") {
+    throw new Error("Daily cycle rendering requires a v4 manifest with incident containment.");
   }
   validateIdentityAndBudget(manifest, schedulePolicy, roleIdentityPolicy);
   const commonArguments = [
@@ -41,6 +46,16 @@ export function compileFactoryDailyCyclePlan(
     manifest.expectedFactoryPolicyBundleDigest
   ] as const;
   const stages: FactoryDailyCycleStage[] = [
+    stage(manifest, "incident-containment", "incident", [
+      "factory",
+      "incident-containment",
+      "--config",
+      manifest.incident.configPath,
+      "--health-policy",
+      manifest.expectedOperationsHealthPolicyDigest,
+      "--daily-quota",
+      manifest.expectedDailyQuotaPolicyDigest
+    ]),
     stage(manifest, "maintenance-discovery", "worker", [
       "factory",
       "maintenance-discovery-tick",
@@ -133,7 +148,7 @@ export function compileFactoryDailyCyclePlan(
 }
 
 function validateIdentityAndBudget(
-  manifest: FactoryDailyCycleManifest,
+  manifest: ExecutableFactoryDailyCycleManifest,
   schedulePolicy: FactorySchedulePolicy,
   roleIdentityPolicy: FactoryRoleIdentityPolicy
 ): void {
@@ -142,6 +157,11 @@ function validateIdentityAndBudget(
   }
   if (manifest.broker.userId === roleIdentityPolicy.evalAttestor.userId) {
     throw new Error("Daily cycle broker and evaluation attestor identities must remain separate.");
+  }
+  if (manifest.incident.userId === roleIdentityPolicy.evalAttestor.userId) {
+    throw new Error(
+      "Daily cycle incident controller and evaluation attestor identities must remain separate."
+    );
   }
   if (manifest.maximumRepairRounds > schedulePolicy.tickBudget.maxRepairAttempts) {
     throw new Error("Daily cycle repair rounds exceed the reviewed schedule budget.");
@@ -152,12 +172,13 @@ function validateIdentityAndBudget(
 }
 
 function stage(
-  manifest: FactoryDailyCycleManifest,
+  manifest: ExecutableFactoryDailyCycleManifest,
   id: string,
   role: FactoryDailyCycleRole,
   arguments_: readonly string[]
 ): FactoryDailyCycleStage {
-  const identity = role === "worker" ? manifest.worker : manifest.broker;
+  const identity =
+    role === "worker" ? manifest.worker : role === "broker" ? manifest.broker : manifest.incident;
   return Object.freeze({
     id,
     role,
@@ -167,6 +188,8 @@ function stage(
     timeoutSeconds:
       role === "worker"
         ? manifest.workerCommandTimeoutSeconds
-        : manifest.brokerCommandTimeoutSeconds
+        : role === "broker"
+          ? manifest.brokerCommandTimeoutSeconds
+          : manifest.incidentCommandTimeoutSeconds
   });
 }

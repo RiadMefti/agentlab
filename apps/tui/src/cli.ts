@@ -21,6 +21,12 @@ export type CliAction =
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-orchestration-render"; readonly configPath: string }
   | { readonly kind: "factory-operations-health"; readonly configPath: string }
+  | {
+      readonly kind: "factory-incident-containment";
+      readonly configPath: string;
+      readonly expectedHealthPolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+    }
   | { readonly kind: "factory-maintenance-discovery-preflight"; readonly configPath: string }
   | {
       readonly kind: "factory-external-pull-request-discovery-preflight";
@@ -307,6 +313,30 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const configPath = input[3];
     if (isNormalizedAbsolutePath(configPath)) {
       return { kind: "factory-operations-health", configPath };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "incident-containment" &&
+    input[2] === "--config" &&
+    input[4] === "--health-policy" &&
+    input[6] === "--daily-quota"
+  ) {
+    const configPath = input[3];
+    const expectedHealthPolicyDigest = input[5];
+    const expectedDailyQuotaPolicyDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedHealthPolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest)
+    ) {
+      return {
+        kind: "factory-incident-containment",
+        configPath,
+        expectedHealthPolicyDigest,
+        expectedDailyQuotaPolicyDigest
+      };
     }
   }
   if (
@@ -1311,7 +1341,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|operations-health|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|operations-health|incident-containment|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -1426,6 +1456,8 @@ Factory authority:
   agentlab factory orchestration-render --config <absolute-path>
       Emit a content-addressed daily systemd bundle; never install, enable, or start it.
   agentlab factory operations-health --config <absolute-path>
+
+  agentlab factory incident-containment --config <absolute-path> --health-policy <sha256> --daily-quota <sha256>
       Emit one content-addressed query-only ledger health report; exits 0 healthy, 2 degraded, or 3 critical.
   agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --daily-quota <sha256> --policy <sha256>
       Run one bounded UTC slot from exact current canary reservations; stop before remote writes.

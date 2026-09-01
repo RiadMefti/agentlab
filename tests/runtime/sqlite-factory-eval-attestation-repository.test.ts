@@ -232,6 +232,8 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
         DROP TABLE factory_external_pr_repair_decisions;
         DROP TABLE factory_external_pr_feedback_records;
         DROP TABLE factory_external_pr_feedback_events;
+        DROP TABLE factory_incident_containments;
+        DROP TRIGGER factory_control_events_identity_guard;
         DROP TABLE factory_external_pr_feedback_runs;
         DROP TABLE factory_external_pr_review_bundles;
         DROP TABLE factory_external_pr_review_events;

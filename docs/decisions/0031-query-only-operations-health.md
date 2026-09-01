@@ -49,3 +49,7 @@ No monitor unit, alert transport, dashboard, report archive/signature, automatic
 mutation, incident controller, cross-host aggregation, telemetry canary, rollback, merge, or release
 is installed or authorized. Joining this command to a production timer and defining automated
 disable-only containment require separate reviewed provisioning and policy.
+
+ADR 0032 subsequently implements that separate disable-only controller and v4 dormant cycle while
+leaving this query-only composition unchanged and independently usable. Neither ADR provisions or
+activates a timer, monitor, account, policy, or authority switch.

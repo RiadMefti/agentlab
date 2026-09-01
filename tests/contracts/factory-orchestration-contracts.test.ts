@@ -115,6 +115,39 @@ describe("factory daily-cycle contracts", () => {
       }).success
     ).toBe(false);
   });
+
+  it("pins a distinct disable-only incident role before a v4 autonomous cycle", () => {
+    const manifest = {
+      ...validManifest(),
+      schemaVersion: "agentlab.daily-cycle-manifest.v4",
+      incident: { userId: 1_004, configPath: "/etc/agentlab/incident.json" },
+      incidentCommandTimeoutSeconds: 120,
+      operationsHealthPolicyPath: "/etc/agentlab/operations-health-policy.json",
+      expectedOperationsHealthPolicyDigest: testDigest("a"),
+      maintenanceDiscoveryConfigPath: "/etc/agentlab/maintenance-discovery.json",
+      canaryAdmissionConfigPath: "/etc/agentlab/canary-admission.json",
+      dailyQuotaPolicyPath: "/etc/agentlab/daily-quota.json",
+      expectedDailyQuotaPolicyDigest: testDigest("9"),
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8")
+    } as const;
+
+    expect(factoryDailyCycleManifestSchema.parse(manifest)).toEqual(manifest);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        incident: { ...manifest.incident, userId: manifest.worker.userId }
+      }).success
+    ).toBe(false);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        incident: { ...manifest.incident, configPath: manifest.broker.configPath }
+      }).success
+    ).toBe(false);
+  });
 });
 
 function validManifest() {

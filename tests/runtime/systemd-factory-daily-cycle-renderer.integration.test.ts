@@ -30,8 +30,17 @@ describe.skipIf(!runLiveProof)("systemd factory daily-cycle renderer host proof"
     temporaryRoots.push(root);
     const workerUserId = process.getuid?.() ?? 1_000;
     const brokerUserId = workerUserId === 65_534 ? 1 : 65_534;
+    const incidentUserId = [1, 2, 3].find(
+      (candidate) => candidate !== workerUserId && candidate !== brokerUserId
+    );
+    if (incidentUserId === undefined) throw new Error("No isolated incident test identity.");
+    const attestorUserId = [1, 2, 3, 4].find(
+      (candidate) =>
+        candidate !== workerUserId && candidate !== brokerUserId && candidate !== incidentUserId
+    );
+    if (attestorUserId === undefined) throw new Error("No isolated attestor test identity.");
     const manifest = {
-      schemaVersion: "agentlab.daily-cycle-manifest.v1",
+      schemaVersion: "agentlab.daily-cycle-manifest.v4",
       id: "agentlab/daily-software-factory",
       version: "1.0.0",
       agentlabExecutable: {
@@ -41,14 +50,26 @@ describe.skipIf(!runLiveProof)("systemd factory daily-cycle renderer host proof"
       executableChecksumPath: "/etc/agentlab/factory-executable.sha256",
       worker: { userId: workerUserId, configPath: "/tmp/agentlab-worker.json" },
       broker: { userId: brokerUserId, configPath: "/tmp/agentlab-broker.json" },
+      incident: { userId: incidentUserId, configPath: "/tmp/agentlab-incident.json" },
       schedulePolicyPath: "/tmp/agentlab-schedule.json",
+      dailyQuotaPolicyPath: "/tmp/agentlab-daily-quota.json",
+      operationsHealthPolicyPath: "/tmp/agentlab-operations-health.json",
       roleIdentityPolicyPath: "/tmp/agentlab-roles.json",
       expectedSchedulePolicyDigest: testDigest("2"),
+      expectedDailyQuotaPolicyDigest: testDigest("9"),
+      expectedOperationsHealthPolicyDigest: testDigest("a"),
       expectedRoleIdentityPolicyDigest: testDigest("3"),
       expectedFactoryPolicyBundleDigest: testDigest("4"),
+      maintenanceDiscoveryConfigPath: "/tmp/agentlab-maintenance-discovery.json",
+      canaryAdmissionConfigPath: "/tmp/agentlab-canary-admission.json",
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8"),
       maximumRepairRounds: 2,
       workerCommandTimeoutSeconds: 7_230,
-      brokerCommandTimeoutSeconds: 900
+      brokerCommandTimeoutSeconds: 900,
+      incidentCommandTimeoutSeconds: 120
     } as const;
     const plan = compileFactoryDailyCyclePlan(
       manifest,
@@ -56,7 +77,7 @@ describe.skipIf(!runLiveProof)("systemd factory daily-cycle renderer host proof"
       testFactoryRoleIdentityPolicy({
         keyId: testDigest("8"),
         workerUserId,
-        attestorUserId: workerUserId === 1 ? 2 : 1
+        attestorUserId
       })
     );
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);

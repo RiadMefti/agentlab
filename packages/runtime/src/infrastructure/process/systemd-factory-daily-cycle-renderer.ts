@@ -50,26 +50,37 @@ export function renderSystemdFactoryDailyCycle(
     units
   };
   const body =
-    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3"
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
       ? {
-          schemaVersion: "agentlab.daily-cycle-bundle.v3" as const,
+          schemaVersion: "agentlab.daily-cycle-bundle.v4" as const,
           ...commonBody,
+          operationsHealthPolicyDigest: manifest.expectedOperationsHealthPolicyDigest,
           dailyQuotaPolicyDigest: manifest.expectedDailyQuotaPolicyDigest,
           maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
           preparationGrantDigest: manifest.expectedPreparationGrantDigest,
           canaryCohortDigest: manifest.expectedCanaryCohortDigest,
           canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
         }
-      : manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+      : manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3"
         ? {
-            schemaVersion: "agentlab.daily-cycle-bundle.v2" as const,
+            schemaVersion: "agentlab.daily-cycle-bundle.v3" as const,
             ...commonBody,
+            dailyQuotaPolicyDigest: manifest.expectedDailyQuotaPolicyDigest,
             maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
             preparationGrantDigest: manifest.expectedPreparationGrantDigest,
             canaryCohortDigest: manifest.expectedCanaryCohortDigest,
             canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
           }
-        : { schemaVersion: "agentlab.daily-cycle-bundle.v1" as const, ...commonBody };
+        : manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+          ? {
+              schemaVersion: "agentlab.daily-cycle-bundle.v2" as const,
+              ...commonBody,
+              maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
+              preparationGrantDigest: manifest.expectedPreparationGrantDigest,
+              canaryCohortDigest: manifest.expectedCanaryCohortDigest,
+              canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
+            }
+          : { schemaVersion: "agentlab.daily-cycle-bundle.v1" as const, ...commonBody };
   return factoryDailyCycleBundleSchema.parse({
     ...body,
     bundleDigest: digest(canonicalJson(body))

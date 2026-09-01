@@ -1259,6 +1259,7 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory orchestration-render --config");
     expect(helpText).toContain("factory operations-health --config");
+    expect(helpText).toContain("factory incident-containment --config");
     expect(helpText).toContain("factory maintenance-discovery-preflight --config");
     expect(helpText).toContain("factory maintenance-discovery-tick --config");
     expect(helpText).toContain("factory external-pr-review-preflight --config");
@@ -1310,6 +1311,38 @@ describe("terminal CLI", () => {
     });
     expect(() =>
       parseCliArguments(["factory", "operations-health", "--config", "health.json"])
+    ).toThrow(/Usage/u);
+  });
+
+  it("parses only an absolute incident containment config path", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "incident-containment",
+        "--config",
+        "/private/agentlab/incident.json",
+        "--health-policy",
+        `sha256:${"a".repeat(64)}`,
+        "--daily-quota",
+        `sha256:${"b".repeat(64)}`
+      ])
+    ).toEqual({
+      kind: "factory-incident-containment",
+      configPath: "/private/agentlab/incident.json",
+      expectedHealthPolicyDigest: `sha256:${"a".repeat(64)}`,
+      expectedDailyQuotaPolicyDigest: `sha256:${"b".repeat(64)}`
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "incident-containment",
+        "--config",
+        "incident.json",
+        "--health-policy",
+        `sha256:${"a".repeat(64)}`,
+        "--daily-quota",
+        `sha256:${"b".repeat(64)}`
+      ])
     ).toThrow(/Usage/u);
   });
 

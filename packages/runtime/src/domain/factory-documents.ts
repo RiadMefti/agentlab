@@ -96,6 +96,7 @@ import type {
   FactorySkillPackage,
   FactoryTaskUsageRecord,
   FactoryIntakeRequest,
+  FactoryIncidentContainment,
   FactoryMaintenanceDiscoveryEvent,
   FactoryMaintenanceDiscoveryOutput,
   FactoryMaintenanceDiscoveryPolicy,
@@ -119,6 +120,7 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  incidentContainment(input: unknown): CanonicalFactoryDocument<FactoryIncidentContainment>;
   operationsHealthPolicy(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthPolicy>;
   operationsHealthReport(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthReport>;
   dailyQuotaPolicy(input: unknown): CanonicalFactoryDocument<FactoryDailyQuotaPolicy>;

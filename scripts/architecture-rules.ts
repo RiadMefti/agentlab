@@ -126,6 +126,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         default: "./dist/local-factory-operations-health.js",
         types: "./dist/local-factory-operations-health.d.ts"
       },
+      "./factory-incident-containment": {
+        source: "packages/runtime/src/local-factory-incident-containment.ts",
+        default: "./dist/local-factory-incident-containment.js",
+        types: "./dist/local-factory-incident-containment.d.ts"
+      },
       "./factory-maintenance-discovery": {
         source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
         default: "./dist/local-factory-maintenance-discovery.js",
@@ -451,6 +456,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
         isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
@@ -477,6 +483,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
         isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
@@ -501,6 +508,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
         isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
@@ -553,6 +561,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-operations-health.ts",
       description: "credentialless read-only operations health composition",
       forbidden: operationsHealthCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-incident-containment.ts",
+      description: "credentialless disable-only incident composition",
+      forbidden: incidentContainmentCommandForbidden
     },
     {
       entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
@@ -663,6 +676,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-operations-health.ts",
       description: "credentialless read-only operations health command",
       forbidden: operationsHealthCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-incident-containment.ts",
+      description: "credentialless disable-only incident command",
+      forbidden: incidentContainmentCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
@@ -1232,6 +1250,7 @@ const factoryOrchestrationDomainModules = new Set([
 
 const factoryOrchestrationInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
@@ -1330,6 +1349,74 @@ function operationsHealthCommandForbidden(path: string): boolean {
   }
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryOperationsHealthInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryIncidentContainmentDomainModules = new Set([
+  ...factoryOperationsHealthDomainModules,
+  "packages/runtime/src/domain/factory-incident-containment-repository.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryIncidentContainmentApplicationModules = new Set([
+  "packages/runtime/src/application/factory-incident-containment-service.ts",
+  "packages/runtime/src/application/factory-operations-health-service.ts",
+  "packages/runtime/src/application/local-factory-incident-containment-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryIncidentContainmentInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-incident-containment-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-incident-containment-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryIncidentContainmentModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-incident-containment.ts" ||
+    path === "packages/runtime/src/application/factory-incident-containment-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-incident-containment-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-incident-containment-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-incident-containment-repository.ts"
+  );
+}
+
+function incidentContainmentCommandForbidden(path: string): boolean {
+  if (
+    path.startsWith("packages/runtime/src/local-") &&
+    path !== "packages/runtime/src/local-factory-incident-containment.ts"
+  ) {
+    return true;
+  }
+  if (
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryIncidentContainmentDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryIncidentContainmentApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryIncidentContainmentInfrastructureModules.has(path);
   }
   return false;
 }
@@ -2186,6 +2273,7 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-canary-admission.ts" ||
     path === "packages/runtime/src/local-factory-orchestration.ts" ||
     path === "packages/runtime/src/local-factory-operations-health.ts" ||
+    path === "packages/runtime/src/local-factory-incident-containment.ts" ||
     path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||

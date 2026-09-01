@@ -7,7 +7,7 @@ import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 import { testDigest } from "../helpers/factory.js";
 
 describe("factory daily-cycle compiler", () => {
-  it("renders a fixed stop-on-failure worker/broker sequence and final head observation", () => {
+  it("renders a fixed stop-on-failure incident/worker/broker sequence", () => {
     const manifest = validManifest();
     const schedule = testFactorySchedulePolicy({
       tickBudget: { ...testFactorySchedulePolicy().tickBudget, maxRepairAttempts: 2 }
@@ -21,6 +21,7 @@ describe("factory daily-cycle compiler", () => {
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
 
     expect(plan.stages.map(({ id, role }) => `${id}:${role}`)).toEqual([
+      "incident-containment:incident",
       "maintenance-discovery:worker",
       "canary-admission:worker",
       "scheduler:worker",
@@ -33,7 +34,7 @@ describe("factory daily-cycle compiler", () => {
       "update-2:broker",
       "maintenance-3:broker"
     ]);
-    expect(bundle.units).toHaveLength(13);
+    expect(bundle.units).toHaveLength(14);
     expect(new Set(bundle.units.map(({ digest }) => digest)).size).toBe(bundle.units.length);
     const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
     expect(scheduler.content).toContain("User=1001\n");
@@ -45,6 +46,13 @@ describe("factory daily-cycle compiler", () => {
     );
     expect(scheduler.content).not.toContain('ExecStart=:"/bin/sh"');
     expect(scheduler.content).not.toContain('ExecStart=:"/usr/bin/bash"');
+    const incident = requiredUnit(bundle.units, "agentlab-factory-incident-containment.service");
+    expect(incident.content).toContain("User=1004\n");
+    expect(incident.content).toContain('"factory" "incident-containment"');
+    expect(incident.content).toContain(manifest.expectedOperationsHealthPolicyDigest);
+    expect(incident.content).toContain(manifest.expectedDailyQuotaPolicyDigest);
+    expect(incident.content).toContain("OnSuccess=agentlab-factory-maintenance-discovery.service");
+    expect(incident.content).not.toContain("XDG_RUNTIME_DIR");
     const draft = requiredUnit(bundle.units, "agentlab-factory-draft.service");
     expect(draft.content).toContain("User=1003\n");
     expect(draft.content).not.toContain("XDG_RUNTIME_DIR");
@@ -73,12 +81,12 @@ describe("factory daily-cycle compiler", () => {
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
     const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
 
-    expect(bundle.units).toHaveLength(6);
+    expect(bundle.units).toHaveLength(7);
     expect(scheduler.content).toContain('"/private/worker $HOME%%slot.json"');
     expect(scheduler.content).toContain('ExecStart=:"/opt/agentlab/bin/agentlab"');
   });
 
-  it("pins aggregate quota before the v3 autonomous cycle can reach a worker or broker", () => {
+  it("pins critical-health containment before the v4 cycle can reach a worker or broker", () => {
     const manifest = validManifest();
     const schedule = testFactorySchedulePolicy();
     const roles = testFactoryRoleIdentityPolicy({
@@ -89,7 +97,8 @@ describe("factory daily-cycle compiler", () => {
     const plan = compileFactoryDailyCyclePlan(manifest, schedule, roles);
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
 
-    expect(plan.stages.slice(0, 4).map(({ id, role }) => `${id}:${role}`)).toEqual([
+    expect(plan.stages.slice(0, 5).map(({ id, role }) => `${id}:${role}`)).toEqual([
+      "incident-containment:incident",
       "maintenance-discovery:worker",
       "canary-admission:worker",
       "scheduler:worker",
@@ -104,13 +113,14 @@ describe("factory daily-cycle compiler", () => {
     expect(admission.content).toContain(manifest.expectedCanaryCohortDigest);
     expect(admission.content).toContain("OnSuccess=agentlab-factory-scheduler.service");
     expect(requiredUnit(bundle.units, "agentlab-factory-daily.timer").content).toContain(
-      "Unit=agentlab-factory-maintenance-discovery.service"
+      "Unit=agentlab-factory-incident-containment.service"
     );
     const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
     expect(scheduler.content).toContain('"--daily-quota"');
     expect(scheduler.content).toContain(manifest.expectedDailyQuotaPolicyDigest);
     expect(bundle).toMatchObject({
-      schemaVersion: "agentlab.daily-cycle-bundle.v3",
+      schemaVersion: "agentlab.daily-cycle-bundle.v4",
+      operationsHealthPolicyDigest: manifest.expectedOperationsHealthPolicyDigest,
       dailyQuotaPolicyDigest: manifest.expectedDailyQuotaPolicyDigest,
       maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
       preparationGrantDigest: manifest.expectedPreparationGrantDigest,
@@ -119,15 +129,19 @@ describe("factory daily-cycle compiler", () => {
     });
   });
 
-  it("refuses legacy manifests that cannot invoke the quota-bound scheduler", () => {
+  it("refuses legacy manifests that cannot run critical-health containment first", () => {
     const manifest = validManifest();
     const {
-      dailyQuotaPolicyPath: _dailyQuotaPolicyPath,
-      expectedDailyQuotaPolicyDigest: _expectedDailyQuotaPolicyDigest,
+      incident: _incident,
+      incidentCommandTimeoutSeconds: _incidentCommandTimeoutSeconds,
+      operationsHealthPolicyPath: _operationsHealthPolicyPath,
+      expectedOperationsHealthPolicyDigest: _expectedOperationsHealthPolicyDigest,
       ...legacyManifest
     } = manifest;
-    void _dailyQuotaPolicyPath;
-    void _expectedDailyQuotaPolicyDigest;
+    void _incident;
+    void _incidentCommandTimeoutSeconds;
+    void _operationsHealthPolicyPath;
+    void _expectedOperationsHealthPolicyDigest;
     const schedule = testFactorySchedulePolicy();
     const roles = testFactoryRoleIdentityPolicy({
       keyId: testDigest("8"),
@@ -138,12 +152,12 @@ describe("factory daily-cycle compiler", () => {
       compileFactoryDailyCyclePlan(
         {
           ...legacyManifest,
-          schemaVersion: "agentlab.daily-cycle-manifest.v2"
+          schemaVersion: "agentlab.daily-cycle-manifest.v3"
         },
         schedule,
         roles
       )
-    ).toThrow(/requires a v3 manifest/u);
+    ).toThrow(/requires a v4 manifest/u);
   });
 
   it("rejects identity collapse, excessive repair rounds, and truncating worker timeouts", () => {
@@ -177,28 +191,42 @@ describe("factory daily-cycle compiler", () => {
         roles
       )
     ).toThrow(/attestor/u);
+    expect(() =>
+      compileFactoryDailyCyclePlan(
+        {
+          ...validManifest(),
+          incident: { userId: 1_002, configPath: "/private/incident.json" }
+        },
+        schedule,
+        roles
+      )
+    ).toThrow(/attestor/u);
   });
 });
 
 function validManifest() {
   return {
-    schemaVersion: "agentlab.daily-cycle-manifest.v3",
+    schemaVersion: "agentlab.daily-cycle-manifest.v4",
     id: "agentlab/daily-software-factory",
     version: "1.0.0",
     agentlabExecutable: { path: "/opt/agentlab/bin/agentlab", digest: testDigest("1") },
     executableChecksumPath: "/etc/agentlab/factory-executable.sha256",
     worker: { userId: 1_001, configPath: "/private/worker.json" },
     broker: { userId: 1_003, configPath: "/private/broker.json" },
+    incident: { userId: 1_004, configPath: "/private/incident.json" },
     schedulePolicyPath: "/private/schedule.json",
     dailyQuotaPolicyPath: "/private/daily-quota.json",
     roleIdentityPolicyPath: "/private/roles.json",
     expectedSchedulePolicyDigest: testDigest("2"),
     expectedDailyQuotaPolicyDigest: testDigest("9"),
+    operationsHealthPolicyPath: "/private/operations-health.json",
+    expectedOperationsHealthPolicyDigest: testDigest("a"),
     expectedRoleIdentityPolicyDigest: testDigest("3"),
     expectedFactoryPolicyBundleDigest: testDigest("4"),
     maximumRepairRounds: 2,
     workerCommandTimeoutSeconds: 7_230,
     brokerCommandTimeoutSeconds: 900,
+    incidentCommandTimeoutSeconds: 120,
     maintenanceDiscoveryConfigPath: "/private/maintenance-discovery.json",
     canaryAdmissionConfigPath: "/private/canary-admission.json",
     expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),

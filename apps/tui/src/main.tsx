@@ -337,6 +337,15 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryOperationsHealth(action.configPath);
     return;
   }
+  if (action.kind === "factory-incident-containment") {
+    const { runFactoryIncidentContainment } = await import("./run-factory-incident-containment.js");
+    process.exitCode = await runFactoryIncidentContainment(
+      action.configPath,
+      action.expectedHealthPolicyDigest,
+      action.expectedDailyQuotaPolicyDigest
+    );
+    return;
+  }
   if (action.kind === "factory-broker-authority") {
     const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryBrokerAuthority(

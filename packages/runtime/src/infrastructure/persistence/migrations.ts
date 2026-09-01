@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const FACTORY_DATABASE_SCHEMA_VERSION = 27;
+export const FACTORY_DATABASE_SCHEMA_VERSION = 28;
 
-export const latestSchemaVersion = 27;
+export const latestSchemaVersion = 28;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -6160,6 +6160,122 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory schedule daily quota finish mismatch'); END;
 
       PRAGMA user_version = 27;
+      COMMIT;
+    `);
+  }
+
+  if (version < 28) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+
+      CREATE TRIGGER factory_control_events_identity_guard
+      BEFORE INSERT ON factory_control_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.control-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.control') IS NOT NEW.control_name OR
+        json_extract(NEW.event_json, '$.enabled') IS NOT NEW.enabled OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reason') IS NOT NEW.reason
+      BEGIN SELECT RAISE(ABORT, 'factory control event identity mismatch'); END;
+
+      CREATE TABLE factory_incident_containments (
+        containment_id TEXT PRIMARY KEY CHECK (length(containment_id) = 36),
+        containment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(containment_digest) = 71 AND substr(containment_digest, 1, 7) = 'sha256:'
+        ),
+        health_report_digest TEXT NOT NULL UNIQUE CHECK (
+          length(health_report_digest) = 71 AND substr(health_report_digest, 1, 7) = 'sha256:'
+        ),
+        health_policy_digest TEXT NOT NULL CHECK (
+          length(health_policy_digest) = 71 AND substr(health_policy_digest, 1, 7) = 'sha256:'
+        ),
+        daily_quota_policy_digest TEXT NOT NULL CHECK (
+          length(daily_quota_policy_digest) = 71 AND
+          substr(daily_quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        observed_at TEXT NOT NULL,
+        broker_was_enabled INTEGER NOT NULL CHECK (broker_was_enabled IN (0, 1)),
+        scheduler_was_enabled INTEGER NOT NULL CHECK (scheduler_was_enabled IN (0, 1)),
+        broker_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        scheduler_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        contained_at TEXT NOT NULL,
+        containment_json TEXT NOT NULL CHECK (
+          length(containment_json) BETWEEN 2 AND 8388608 AND json_valid(containment_json)
+        ),
+        CHECK (broker_was_enabled = 1 OR scheduler_was_enabled = 1),
+        CHECK ((broker_was_enabled = 1) = (broker_disable_event_digest IS NOT NULL)),
+        CHECK ((scheduler_was_enabled = 1) = (scheduler_disable_event_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_incident_containments_observed_idx
+        ON factory_incident_containments(observed_at DESC, containment_id DESC);
+      CREATE TRIGGER factory_incident_containments_no_update
+      BEFORE UPDATE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_no_delete
+      BEFORE DELETE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_identity_guard
+      BEFORE INSERT ON factory_incident_containments
+      WHEN
+        json_extract(NEW.containment_json, '$.schemaVersion') IS NOT
+          'agentlab.incident-containment.v1' OR
+        json_extract(NEW.containment_json, '$.containmentId') IS NOT NEW.containment_id OR
+        json_extract(NEW.containment_json, '$.healthReportDigest') IS NOT
+          NEW.health_report_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.healthPolicyDigest') IS NOT
+          NEW.health_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.dailyQuotaPolicyDigest') IS NOT
+          NEW.daily_quota_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.containment_json, '$.healthReport.status') IS NOT 'critical' OR
+        json_extract(NEW.containment_json, '$.healthReport.incidentRecommended') IS NOT 1 OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.brokerDisableEventDigest') IS NOT
+          NEW.broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.schedulerDisableEventDigest') IS NOT
+          NEW.scheduler_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.containment_json, '$.actor.role') IS NOT 'incident-commander' OR
+        json_type(NEW.containment_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.containment_json, '$.containedAt') IS NOT NEW.contained_at OR
+        NEW.contained_at < NEW.observed_at OR
+        (NEW.broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.broker_disable_event_digest
+            AND control_name = 'pr-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.scheduler_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.scheduler_disable_event_digest
+            AND control_name = 'scheduler'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory incident containment identity mismatch'); END;
+
+      PRAGMA user_version = 28;
       COMMIT;
     `);
   }

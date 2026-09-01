@@ -277,7 +277,7 @@ contains no command or credential:
 
 ```json
 {
-  "schemaVersion": "agentlab.daily-cycle-manifest.v3",
+  "schemaVersion": "agentlab.daily-cycle-manifest.v4",
   "id": "agentlab/daily-software-factory",
   "version": "1.0.0",
   "agentlabExecutable": {
@@ -287,11 +287,14 @@ contains no command or credential:
   "executableChecksumPath": "/etc/agentlab/factory-executable.sha256",
   "worker": { "userId": 1001, "configPath": "/etc/agentlab/worker.json" },
   "broker": { "userId": 1003, "configPath": "/etc/agentlab/broker.json" },
+  "incident": { "userId": 1004, "configPath": "/etc/agentlab/incident.json" },
   "schedulePolicyPath": "/etc/agentlab/schedule.json",
   "dailyQuotaPolicyPath": "/etc/agentlab/daily-quota.json",
+  "operationsHealthPolicyPath": "/etc/agentlab/operations-health-policy.json",
   "roleIdentityPolicyPath": "/etc/agentlab/role-identities.json",
   "expectedSchedulePolicyDigest": "sha256:...",
   "expectedDailyQuotaPolicyDigest": "sha256:...",
+  "expectedOperationsHealthPolicyDigest": "sha256:...",
   "expectedRoleIdentityPolicyDigest": "sha256:...",
   "expectedFactoryPolicyBundleDigest": "sha256:...",
   "maintenanceDiscoveryConfigPath": "/etc/agentlab/maintenance-discovery.json",
@@ -302,7 +305,8 @@ contains no command or credential:
   "expectedCanaryCandidateDigest": "sha256:...",
   "maximumRepairRounds": 2,
   "workerCommandTimeoutSeconds": 7500,
-  "brokerCommandTimeoutSeconds": 900
+  "brokerCommandTimeoutSeconds": 900,
+  "incidentCommandTimeoutSeconds": 120
 }
 ```
 
@@ -313,26 +317,27 @@ must exceed its complete aggregate wall-clock ceiling by at least 30 seconds. Re
 agentlab factory orchestration-render --config /absolute/orchestration.json
 ```
 
-The v3 JSON bundle pins the manifest, discovery/grant/cohort/candidate, aggregate quota and existing
-policies, the AgentLab executable, every unit, and the bundle itself. Its UTC `Persistent=false`
-timer runs discovery → canary admission → scheduler → draft → bounded observe/repair/update rounds.
-Separate numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a
-final exact-head observation, and an incident target preserve separation. Legacy manifests remain
-readable for audit but cannot render an executable autonomous cycle. Every service verifies
+The v4 JSON bundle pins the manifest, discovery/grant/cohort/candidate, aggregate quota, operations
+health and existing policies, the AgentLab executable, every unit, and the bundle itself. Its UTC
+`Persistent=false` timer runs incident containment → discovery → canary admission → scheduler →
+draft → bounded observe/repair/update rounds. Only a healthy containment result continues. Separate
+numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a final
+exact-head observation, and an incident target preserve separation. Legacy manifests remain readable
+for audit but cannot render an executable autonomous cycle. Every service verifies
 `executableVerification.checksumContent` with fixed `/usr/bin/sha256sum` argv before AgentLab.
 Rendering never writes a unit/checksum, calls `systemctl`, changes authority, or touches the ledger.
 
 Owner provisioning is deliberately outside AgentLab. Materialize the exact checksum content at
 `executableVerification.checksumFilePath` and the exact unit contents under `/etc/systemd/system`.
-Before activation, independently re-hash the executable and every artifact, ensure the worker and
-broker accounts own only their respective private configs/credentials, and ensure neither runtime
-UID owns the AgentLab executable or can write it through group/other permissions. Keep the fixed
-checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege shared
+Before activation, independently re-hash the executable and every artifact, ensure the worker,
+broker, and incident accounts own only their respective private configs or credentials, and ensure
+no runtime UID owns the AgentLab executable or can write it through group/other permissions. Keep
+the fixed checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege shared
 ledger/artifact access, and enable the worker's user manager/linger required by its transient
 scopes. Runtime configs for distinct UIDs require role-owned copies of the schedule and identity
 policies with identical reviewed digests; they cannot share one owner-only file. Run
 `/usr/bin/sha256sum --status --check` on the materialized checksum and `systemd-analyze verify` over
-the complete unit bundle. Only after both role preflights, governance, monitored incident response,
+the complete unit bundle. Only after every role preflight, governance, monitored incident response,
 and the two human-controlled authority switches are ready should an operator enable
 `agentlab-factory-daily.timer`.
 
@@ -669,6 +674,37 @@ projection, unsupported database schema, policy drift, invalid canonical/materia
 record-limit truncation fails closed. No health timer, dashboard, alert transport, or automatic
 incident action is installed by AgentLab.
 
+## Disable-only incident containment
+
+Run containment under a third non-root UID, distinct from worker, broker, and eval attestor. Its
+owner-only config contains no credential and pins the same health and daily-quota policy bytes:
+
+```json
+{
+  "schemaVersion": "agentlab.local-factory-incident-containment.v1",
+  "databasePath": "/var/lib/agentlab/factory.sqlite",
+  "controllerId": "incident-controller",
+  "controllerUserId": 1004,
+  "healthPolicyPath": "/etc/agentlab/incident/operations-health-policy.json",
+  "expectedHealthPolicyDigest": "sha256:...",
+  "dailyQuotaPolicyPath": "/etc/agentlab/incident/daily-quota-policy.json",
+  "expectedDailyQuotaPolicyDigest": "sha256:..."
+}
+```
+
+```text
+agentlab factory incident-containment --config /etc/agentlab/incident/containment.json --health-policy sha256:... --daily-quota sha256:...
+```
+
+The command does not accept a report. It recomputes health internally, verifies both command-line
+pins against config, and has no enable operation. Healthy exits 0 without writing. Degraded exits 2
+without writing so a v4 daily chain stops before work. Critical exits 3: if authority was enabled,
+SQLite schema 28 appends the broker disable, scheduler disable, and canonical containment evidence
+inside one compare-and-disable transaction; if both were already off, it reports
+`already-contained`. Any race or partial insert rolls back. Preserve the one-line result and SQLite
+ledger. Re-enable only through the human commands below after investigation. AgentLab does not
+install or invoke this command outside a separately provisioned v4 cycle.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -694,15 +730,16 @@ existing recovery path; re-enable only after the policy/config digest and host s
 No OS accounts, installed timer, live rate card/config/cohort/quota/health policy, reviewed case
 bank or installed eval harness, cross-host/global quota coordinator, installed dashboard/alert
 delivery, secretless hosted-provider eval gateway, owner-provisioned activation, merge,
-telemetry-driven canary, rollback controller, or incident automation is shipped. A separate offline
-sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
-discovery, bounded consumption of a human non-release cohort, host-local repository/day and
-organization/day quota enforcement, reservation-bound scheduled execution/draft dispatch, slot-bound
-PR observation/repair, brokered repaired-branch publication, bounded read-only external pull-request
-inventory, credentialless isolated external review evidence, feedback-only external review
-publication, deterministic external repair admission, credentialless one-attempt external repair
-execution, credentialless strict post-repair qualification, a separately credentialed
+telemetry-driven canary, rollback controller, or incident coordination is shipped. A separate
+offline sandboxed eval producer with content-addressed evidence now exists. Durable read-only
+maintenance discovery, bounded consumption of a human non-release cohort, host-local repository/day
+and organization/day quota enforcement, reservation-bound scheduled execution/draft dispatch,
+slot-bound PR observation/repair, brokered repaired-branch publication, bounded read-only external
+pull-request inventory, credentialless isolated external review evidence, feedback-only external
+review publication, deterministic external repair admission, credentialless one-attempt external
+repair execution, credentialless strict post-repair qualification, a separately credentialed
 contributor-safe replacement-draft publisher, a content-addressed separated-service renderer, and a
-query-only content-addressed operations-health report exist but are not provisioned or activated.
-See [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining
-controls are required before calling the factory self-maintaining.
+query-only content-addressed operations-health report plus credentialless disable-only incident
+containment exist but are not provisioned or activated. See
+[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
+are required before calling the factory self-maintaining.
