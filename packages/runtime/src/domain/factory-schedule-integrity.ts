@@ -84,11 +84,22 @@ export function assertFactoryScheduleEvent(
       claim.kind !== "task-claimed" ||
       claim.taskId !== event.value.taskId ||
       claim.taskCorrelationId !== event.value.taskCorrelationId ||
-      (claim.schemaVersion === "agentlab.schedule-event.v2") !==
-        (event.value.schemaVersion === "agentlab.schedule-event.v2") ||
-      (claim.schemaVersion === "agentlab.schedule-event.v2" &&
-        event.value.schemaVersion === "agentlab.schedule-event.v2" &&
-        claim.canaryReservationDigest !== event.value.canaryReservationDigest)
+      claim.schemaVersion !== event.value.schemaVersion
+    ) {
+      throw new Error("Factory schedule task outcome does not match its active claim.");
+    }
+    if (
+      claim.schemaVersion === "agentlab.schedule-event.v2" &&
+      event.value.schemaVersion === "agentlab.schedule-event.v2" &&
+      claim.canaryReservationDigest !== event.value.canaryReservationDigest
+    ) {
+      throw new Error("Factory schedule task outcome does not match its active claim.");
+    }
+    if (
+      claim.schemaVersion === "agentlab.schedule-event.v3" &&
+      event.value.schemaVersion === "agentlab.schedule-event.v3" &&
+      (claim.canaryReservationDigest !== event.value.canaryReservationDigest ||
+        claim.dailyQuotaReservationDigest !== event.value.dailyQuotaReservationDigest)
     ) {
       throw new Error("Factory schedule task outcome does not match its active claim.");
     }

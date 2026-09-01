@@ -284,8 +284,9 @@ export class SqliteFactoryCanaryPullRequestUpdateQueue implements FactoryCanaryP
              AND schedule_run.schedule_policy_digest = ?
              AND schedule_run.factory_policy_bundle_digest = ?
              AND json_extract(schedule_run.run_json, '$.roleIdentityPolicyDigest') = ?
-             AND json_extract(finished.event_json, '$.schemaVersion')
-               = 'agentlab.schedule-event.v2'
+             AND json_extract(finished.event_json, '$.schemaVersion') IN (
+               'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+             )
              AND json_extract(finished.event_json, '$.result') = 'ready-for-broker'
              AND (
                SELECT terminal.to_state

@@ -41,11 +41,12 @@ const requiredGateIds = [
 type WorkerProviderId = Extract<ProviderId, "codex" | "claude">;
 
 export interface FactoryWorkerPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v3";
+  readonly schemaVersion: "agentlab.worker-preflight.v4";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
   readonly schedulePolicyDigest: Sha256Digest | null;
   readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -58,6 +59,7 @@ export interface FactoryWorkerOperatorDependencies {
   readonly policyBundleDigest: Sha256Digest;
   readonly schedulePolicyDigest: Sha256Digest | null;
   readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicyDigest: Sha256Digest | null;
   readonly costPolicyConfigured: boolean;
   readonly configuredProviders: readonly WorkerProviderId[];
   readonly gateIds: readonly string[];
@@ -99,14 +101,19 @@ export class FactoryWorkerOperator {
       ...(this.dependencies.costPolicyConfigured ? [] : ["cost-policy-unconfigured"]),
       ...(this.dependencies.schedulePolicyDigest === null ? ["schedule-policy-unconfigured"] : []),
       ...(identityConfigured ? [] : ["role-identity-policy-unconfigured"]),
+      ...(this.dependencies.schedulePolicyDigest !== null &&
+      this.dependencies.dailyQuotaPolicyDigest === null
+        ? ["daily-quota-policy-unconfigured"]
+        : []),
       ...(authority.scheduler ? [] : ["scheduler-disabled"])
     ];
     return {
-      schemaVersion: "agentlab.worker-preflight.v3",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: reasonCodes.length === 0 ? "ready" : "blocked",
       policyBundleDigest: this.dependencies.policyBundleDigest,
       schedulePolicyDigest: this.dependencies.schedulePolicyDigest,
       roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: this.dependencies.dailyQuotaPolicyDigest,
       schedulerEnabled: authority.scheduler,
       costPolicyConfigured: this.dependencies.costPolicyConfigured,
       hostReady: host.status === "ready",

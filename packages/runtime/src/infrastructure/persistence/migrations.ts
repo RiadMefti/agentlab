@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 26;
+export const latestSchemaVersion = 27;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -5701,6 +5701,463 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft record identity mismatch'); END;
 
       PRAGMA user_version = 26;
+      COMMIT;
+    `);
+  }
+
+  if (version < 27) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_daily_quota_reservations (
+        reservation_id TEXT PRIMARY KEY CHECK (length(reservation_id) = 36),
+        reservation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(reservation_digest) = 71 AND substr(reservation_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL UNIQUE CHECK (length(task_id) = 36),
+        quota_policy_digest TEXT NOT NULL CHECK (
+          length(quota_policy_digest) = 71 AND substr(quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        organization_id TEXT NOT NULL CHECK (length(organization_id) BETWEEN 1 AND 128),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        schedule_run_id TEXT NOT NULL REFERENCES factory_schedule_runs(run_id),
+        schedule_run_digest TEXT NOT NULL CHECK (
+          length(schedule_run_digest) = 71 AND substr(schedule_run_digest, 1, 7) = 'sha256:'
+        ),
+        canary_reservation_digest TEXT NOT NULL
+          REFERENCES factory_canary_task_reservations(reservation_digest),
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        wall_clock_seconds INTEGER NOT NULL CHECK (wall_clock_seconds > 0),
+        max_agent_turns INTEGER NOT NULL CHECK (max_agent_turns > 0),
+        max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls > 0),
+        max_input_tokens INTEGER NOT NULL CHECK (max_input_tokens > 0),
+        max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens > 0),
+        max_cost_microusd INTEGER NOT NULL CHECK (max_cost_microusd >= 0),
+        max_processes INTEGER NOT NULL CHECK (max_processes > 0),
+        max_output_bytes INTEGER NOT NULL CHECK (max_output_bytes > 0),
+        max_workers INTEGER NOT NULL CHECK (max_workers > 0),
+        max_repair_attempts INTEGER NOT NULL CHECK (max_repair_attempts >= 0),
+        max_changed_files INTEGER NOT NULL CHECK (max_changed_files >= 0),
+        max_changed_lines INTEGER NOT NULL CHECK (max_changed_lines >= 0),
+        draft_pull_requests INTEGER NOT NULL CHECK (draft_pull_requests = 1),
+        reserved_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        reservation_json TEXT NOT NULL CHECK (
+          length(reservation_json) BETWEEN 2 AND 4194304 AND json_valid(reservation_json)
+        ),
+        CHECK (window_start <= reserved_at AND reserved_at < window_end)
+      ) STRICT;
+      CREATE INDEX factory_daily_quota_reservations_repository_window_idx
+        ON factory_daily_quota_reservations(
+          organization_id, repository_id, window_start, reservation_id
+        );
+      CREATE INDEX factory_daily_quota_reservations_organization_window_idx
+        ON factory_daily_quota_reservations(organization_id, window_start, reservation_id);
+
+      CREATE TRIGGER factory_daily_quota_reservations_no_update
+      BEFORE UPDATE ON factory_daily_quota_reservations
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservations are immutable'); END;
+      CREATE TRIGGER factory_daily_quota_reservations_no_delete
+      BEFORE DELETE ON factory_daily_quota_reservations
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservations are immutable'); END;
+      CREATE TRIGGER factory_daily_quota_reservations_identity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        json_extract(NEW.reservation_json, '$.reservationId') IS NOT NEW.reservation_id OR
+        json_extract(NEW.reservation_json, '$.quotaPolicyDigest') IS NOT NEW.quota_policy_digest OR
+        json_extract(NEW.reservation_json, '$.quotaPolicy.organizationId') IS NOT NEW.organization_id OR
+        json_extract(NEW.reservation_json, '$.organizationId') IS NOT NEW.organization_id OR
+        json_extract(NEW.reservation_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.reservation_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.reservation_json, '$.scheduleRunId') IS NOT NEW.schedule_run_id OR
+        json_extract(NEW.reservation_json, '$.scheduleRunDigest') IS NOT NEW.schedule_run_digest OR
+        json_extract(NEW.reservation_json, '$.canaryReservationDigest') IS NOT NEW.canary_reservation_digest OR
+        json_extract(NEW.reservation_json, '$.windowStart') IS NOT NEW.window_start OR
+        json_extract(NEW.reservation_json, '$.windowEnd') IS NOT NEW.window_end OR
+        json_extract(NEW.reservation_json, '$.budget.wallClockSeconds') IS NOT NEW.wall_clock_seconds OR
+        json_extract(NEW.reservation_json, '$.budget.maxAgentTurns') IS NOT NEW.max_agent_turns OR
+        json_extract(NEW.reservation_json, '$.budget.maxToolCalls') IS NOT NEW.max_tool_calls OR
+        json_extract(NEW.reservation_json, '$.budget.maxInputTokens') IS NOT NEW.max_input_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputTokens') IS NOT NEW.max_output_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxCostMicrousd') IS NOT NEW.max_cost_microusd OR
+        json_extract(NEW.reservation_json, '$.budget.maxProcesses') IS NOT NEW.max_processes OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputBytes') IS NOT NEW.max_output_bytes OR
+        json_extract(NEW.reservation_json, '$.budget.maxWorkers') IS NOT NEW.max_workers OR
+        json_extract(NEW.reservation_json, '$.budget.maxRepairAttempts') IS NOT NEW.max_repair_attempts OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedFiles') IS NOT NEW.max_changed_files OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedLines') IS NOT NEW.max_changed_lines OR
+        json_extract(NEW.reservation_json, '$.draftPullRequests') IS NOT NEW.draft_pull_requests OR
+        json_extract(NEW.reservation_json, '$.reservedAt') IS NOT NEW.reserved_at OR
+        json_extract(NEW.reservation_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NEW.schedule_run_digest IS NOT (
+          SELECT run_digest FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ) OR
+        NEW.quota_policy_digest IS NOT json_extract((
+          SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ), '$.dailyQuotaPolicyDigest') OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT repository_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.wall_clock_seconds IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_agent_turns IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_tool_calls IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_input_tokens IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_output_tokens IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_cost_microusd IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_processes IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_output_bytes IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_workers IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_repair_attempts IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_changed_files IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_changed_lines IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs
+            WHERE run_id = NEW.schedule_run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs
+            WHERE run_id = NEW.schedule_run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        NEW.window_start IS NOT (
+          SELECT substr(scheduled_for, 1, 10) || 'T00:00:00.000Z'
+          FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ) OR
+        NEW.window_end IS NOT strftime(
+          '%Y-%m-%dT00:00:00.000Z', NEW.window_start, '+1 day'
+        ) OR
+        json_extract(NEW.reservation_json, '$.organizationQuota') IS NOT
+          json_extract(NEW.reservation_json, '$.quotaPolicy.organization') OR
+        json_extract(NEW.reservation_json, '$.repositoryQuota') IS NOT (
+          SELECT value FROM json_each(
+            json_extract(NEW.reservation_json, '$.quotaPolicy.repositories')
+          ) WHERE json_extract(value, '$.repositoryId') = NEW.repository_id
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservation identity mismatch'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_policy_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN EXISTS (
+        SELECT 1 FROM factory_daily_quota_reservations
+        WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start
+          AND quota_policy_digest <> NEW.quota_policy_digest
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota policy drift'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_repository_capacity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start) + 1 >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.maximumTasksPerDay') OR
+        COALESCE((SELECT SUM(draft_pull_requests) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.draft_pull_requests >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.maximumDraftPullRequestsPerDay') OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.wall_clock_seconds >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.wallClockSeconds') OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_agent_turns >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxAgentTurns') OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_tool_calls >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxToolCalls') OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_input_tokens >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxInputTokens') OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_output_tokens >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxOutputTokens') OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_cost_microusd >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxCostMicrousd') OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_processes >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxProcesses') OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_output_bytes >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxOutputBytes') OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_workers >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxWorkers') OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_repair_attempts >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxRepairAttempts') OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_changed_files >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxChangedFiles') OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_changed_lines >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxChangedLines')
+      BEGIN SELECT RAISE(ABORT, 'factory daily repository quota capacity exceeded'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_organization_capacity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start) + 1 >
+          json_extract(NEW.reservation_json, '$.organizationQuota.maximumTasksPerDay') OR
+        COALESCE((SELECT SUM(draft_pull_requests) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.draft_pull_requests >
+          json_extract(NEW.reservation_json, '$.organizationQuota.maximumDraftPullRequestsPerDay') OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.wall_clock_seconds >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.wallClockSeconds') OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_agent_turns >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxAgentTurns') OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_tool_calls >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxToolCalls') OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_input_tokens >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxInputTokens') OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_output_tokens >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxOutputTokens') OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_cost_microusd >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxCostMicrousd') OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_processes >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxProcesses') OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_output_bytes >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxOutputBytes') OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_workers >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxWorkers') OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_repair_attempts >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxRepairAttempts') OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_changed_files >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxChangedFiles') OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_changed_lines >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxChangedLines')
+      BEGIN SELECT RAISE(ABORT, 'factory daily organization quota capacity exceeded'); END;
+
+      DROP TRIGGER factory_schedule_events_canary_claim_guard;
+      CREATE TRIGGER factory_schedule_events_canary_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') NOT IN (
+          'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(NEW.event_json, '$.canaryReservationDigest')
+        ) OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT preparation_authority_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        (SELECT stage FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS 'read-only-shadow' OR
+        json_extract(NEW.event_json, '$.reservation.wallClockSeconds') IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxAgentTurns') IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxToolCalls') IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxInputTokens') IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputTokens') IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxCostMicrousd') IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxProcesses') IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputBytes') IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxWorkers') IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxRepairAttempts') IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedFiles') IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedLines') IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.occurred_at < (
+          SELECT reserved_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        unixepoch(NEW.occurred_at) + (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) > unixepoch((
+          SELECT expires_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ))
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule canary claim mismatch'); END;
+
+      DROP TRIGGER factory_schedule_events_canary_finish_guard;
+      CREATE TRIGGER factory_schedule_events_canary_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') NOT IN (
+          'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.canaryReservationDigest') OR
+        NEW.occurred_at > (
+          SELECT expires_at FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(NEW.event_json, '$.canaryReservationDigest')
+        )
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule canary finish mismatch'); END;
+
+      CREATE TRIGGER factory_schedule_events_daily_quota_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND json_extract((
+        SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+      ), '$.schemaVersion') = 'agentlab.schedule-run.v3' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.schedule-event.v3' OR
+        json_extract(NEW.event_json, '$.dailyQuotaReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.run_id IS NOT (
+          SELECT schedule_run_id FROM factory_daily_quota_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.dailyQuotaReservationDigest'
+          )
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT canary_reservation_digest FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.taskCorrelationId') IS NOT (
+          SELECT correlation_id FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract((SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id),
+          '$.dailyQuotaPolicyDigest') IS NOT (
+            SELECT quota_policy_digest FROM factory_daily_quota_reservations
+            WHERE task_id = NEW.task_id
+          )
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule daily quota claim mismatch'); END;
+
+      CREATE TRIGGER factory_schedule_events_daily_quota_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND json_extract((
+        SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+      ), '$.schemaVersion') = 'agentlab.schedule-run.v3' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.schedule-event.v3' OR
+        json_extract(NEW.event_json, '$.dailyQuotaReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.dailyQuotaReservationDigest')
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule daily quota finish mismatch'); END;
+
+      PRAGMA user_version = 27;
       COMMIT;
     `);
   }

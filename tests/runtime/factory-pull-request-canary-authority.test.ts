@@ -6,6 +6,7 @@ import {
   type FactoryPullRequestCanaryCoordinates
 } from "../../packages/runtime/src/application/factory-pull-request-canary-authority.js";
 import type { FactoryCanaryReservationSnapshot } from "../../packages/runtime/src/domain/factory-canary-reservation-repository.js";
+import type { FactoryDailyQuotaReservationSnapshot } from "../../packages/runtime/src/domain/factory-daily-quota-repository.js";
 import type { FactoryPreparationSnapshot } from "../../packages/runtime/src/domain/factory-preparation-repository.js";
 import type { FactoryScheduledTaskCompletion } from "../../packages/runtime/src/domain/factory-schedule-repository.js";
 import type { FactoryTaskSnapshot } from "../../packages/runtime/src/domain/factory-task-repository.js";
@@ -20,6 +21,7 @@ import {
   testFactoryCanaryReservationDocument
 } from "../helpers/factory-canary-admission.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 
 describe("FactoryPullRequestCanaryAuthority", () => {
   it("requires the exact current brokered reservation and completed scheduler handoff", async () => {
@@ -53,6 +55,22 @@ describe("FactoryPullRequestCanaryAuthority", () => {
     ).rejects.toThrow(/completed scheduler handoff/u);
   });
 
+  it("independently rejects substituted daily quota evidence", async () => {
+    const wrongDigest = authorityFixture({
+      completionDailyQuotaReservationDigest: testDigest("f")
+    });
+    await expect(
+      wrongDigest.authority.require(wrongDigest.task, wrongDigest.coordinates)
+    ).rejects.toThrow(/changed its daily quota reservation/u);
+
+    const wrongCorrelation = authorityFixture({
+      dailyQuotaCorrelationId: "22222222-2222-4222-8222-222222222222"
+    });
+    await expect(
+      wrongCorrelation.authority.require(wrongCorrelation.task, wrongCorrelation.coordinates)
+    ).rejects.toThrow(/immutable identity/u);
+  });
+
   it("keeps manually confirmed dispatch separate from canary authority", async () => {
     const fixture = authorityFixture();
     const manualTask = {
@@ -72,10 +90,13 @@ function authorityFixture(
     readonly stage?: "brokered-draft-pr" | "local-proposal";
     readonly now?: string;
     readonly completionReservationDigest?: Sha256Digest;
+    readonly completionDailyQuotaReservationDigest?: Sha256Digest;
+    readonly dailyQuotaCorrelationId?: string;
   } = {}
 ) {
   const documents = testFactoryCanaryAdmissionFixture().documents;
   const schedulePolicy = documents.schedulePolicy(testFactorySchedulePolicy());
+  const dailyQuotaPolicy = documents.dailyQuotaPolicy(testFactoryDailyQuotaPolicy());
   const admission = testFactoryCanaryAdmissionFixture({
     schedulePolicyDigest: schedulePolicy.digest,
     authorityExpiresAt: "2026-09-01T12:00:00.000Z",
@@ -141,7 +162,7 @@ function authorityFixture(
     reasonCode: "independent-review-passed",
     summary: null,
     evidenceBundleDigest: testDigest("e"),
-    correlationId: TEST_FACTORY_CORRELATION_ID
+    correlationId: options.dailyQuotaCorrelationId ?? TEST_FACTORY_CORRELATION_ID
   });
   const task: FactoryTaskSnapshot = {
     contract: contract.value,
@@ -152,19 +173,42 @@ function authorityFixture(
     lastEventDigest: taskEvent.digest
   };
   const run = documents.scheduleRun({
-    schemaVersion: "agentlab.schedule-run.v2",
+    schemaVersion: "agentlab.schedule-run.v3",
     runId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     schedulePolicyDigest: schedulePolicy.digest,
     schedulePolicy: schedulePolicy.value,
     factoryPolicyBundleDigest: admission.preparation.authority.policyBundleDigest,
     roleIdentityPolicyDigest: reservationDocument.value.roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: dailyQuotaPolicy.digest,
     scheduledFor: "2026-08-30T12:30:00.000Z",
     deadlineAt: "2026-08-30T12:45:00.000Z",
     createdAt: "2026-08-30T12:31:00.000Z",
     correlationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
   });
+  const repositoryQuota = dailyQuotaPolicy.value.repositories[0];
+  if (repositoryQuota === undefined) throw new Error("Daily quota test profile is missing.");
+  const dailyQuotaDocument = documents.dailyQuotaReservation({
+    schemaVersion: "agentlab.daily-quota-reservation.v1",
+    reservationId: "11111111-1111-4111-8111-111111111111",
+    quotaPolicyDigest: dailyQuotaPolicy.digest,
+    quotaPolicy: dailyQuotaPolicy.value,
+    organizationId: dailyQuotaPolicy.value.organizationId,
+    repositoryId: task.contract.repository.id,
+    taskId: task.contract.taskId,
+    scheduleRunId: run.value.runId,
+    scheduleRunDigest: run.digest,
+    canaryReservationDigest: reservationDocument.digest,
+    windowStart: "2026-08-30T00:00:00.000Z",
+    windowEnd: "2026-08-31T00:00:00.000Z",
+    repositoryQuota,
+    organizationQuota: dailyQuotaPolicy.value.organization,
+    budget: reservationDocument.value.budget,
+    draftPullRequests: 1,
+    reservedAt: "2026-08-30T12:31:30.000Z",
+    correlationId: TEST_FACTORY_CORRELATION_ID
+  });
   const finished = documents.scheduleEvent({
-    schemaVersion: "agentlab.schedule-event.v2",
+    schemaVersion: "agentlab.schedule-event.v3",
     eventId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
     runId: run.value.runId,
     runDigest: run.digest,
@@ -176,6 +220,8 @@ function authorityFixture(
     taskId: TEST_FACTORY_TASK_ID,
     taskCorrelationId: TEST_FACTORY_CORRELATION_ID,
     canaryReservationDigest: options.completionReservationDigest ?? reservationDocument.digest,
+    dailyQuotaReservationDigest:
+      options.completionDailyQuotaReservationDigest ?? dailyQuotaDocument.digest,
     result: "ready-for-broker",
     preparationState: "prepared",
     taskState: "pr-proposed",
@@ -204,6 +250,10 @@ function authorityFixture(
     state: "completed",
     event: finished.value
   };
+  const dailyQuota: FactoryDailyQuotaReservationSnapshot = {
+    reservation: dailyQuotaDocument.value,
+    reservationDigest: dailyQuotaDocument.digest
+  };
   const coordinates: FactoryPullRequestCanaryCoordinates = {
     reservationDigest: reservationDocument.digest,
     schedulePolicyDigest: schedulePolicy.digest,
@@ -213,12 +263,14 @@ function authorityFixture(
     policyBundleDigest: admission.preparation.authority.policyBundleDigest,
     schedulePolicyDigest: schedulePolicy.digest,
     roleIdentityPolicyDigest: reservationDocument.value.roleIdentityPolicyDigest,
+    dailyQuotaPolicy,
     preparations: { findById: () => Promise.resolve(preparation) },
     reservations: {
       findByReservationDigest: (digest) =>
         Promise.resolve(digest === reservation.reservationDigest ? reservation : null)
     },
     schedules: { findTaskCompletion: () => Promise.resolve(completion) },
+    dailyQuotas: { findByTaskId: () => Promise.resolve(dailyQuota) },
     documents,
     now: () => options.now ?? "2026-08-30T12:42:00.000Z"
   });

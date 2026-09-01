@@ -56,9 +56,10 @@ existing scheduler without giving model output authority. Activation still requi
 accounts/configs/policies/rates, an external evaluated candidate and fresh human cohort, repository
 governance, monitoring, and explicit switches/timer installation. The current loop ends at an open
 draft PR and bounded repair updates. The separately dormant offline eval-harness producer is defined
-by [ADR 0022](0022-sandboxed-eval-evidence-production.md); hosted-provider eval brokerage, fleet
-quotas, merge, release, telemetry canaries, rollback, revocation, and incident automation remain
-future capabilities.
+by [ADR 0022](0022-sandboxed-eval-evidence-production.md). ADR 0030 subsequently adds host-local
+repository and organization daily quotas. Hosted-provider eval brokerage, cross-host quotas, merge,
+release, telemetry canaries, rollback, revocation, and incident automation remain future
+capabilities.
 
 ## Fitness functions
 
@@ -66,6 +67,6 @@ Contracts reject write/network/secret/multi-worker discovery and R2+ findings. P
 read-only Codex and Claude harnesses. Service tests admit one evidenced path, reject a protected
 path, and prove exact retry idempotency. SQLite tests prove slot uniqueness, lineage, terminal
 recovery, and immutability. Consumer tests prove scheduler-switch and per-tick ceilings. Daily-cycle
-tests prove v1 compatibility, fixed v2 ordering, separate configs, exact pins, no shell, and
-stop-on-failure systemd links. Architecture rules keep discovery separate from interactive,
-execution-worker, broker, GitHub, authority, terminal, and tmux closures.
+tests preserve legacy readability and prove fixed v3 quota-bound ordering, separate configs, exact
+pins, no shell, and stop-on-failure systemd links. Architecture rules keep discovery separate from
+interactive, execution-worker, broker, GitHub, authority, terminal, and tmux closures.

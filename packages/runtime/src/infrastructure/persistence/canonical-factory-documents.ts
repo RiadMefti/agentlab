@@ -7,6 +7,8 @@ import {
   factoryCanaryApprovalSchema,
   factoryCanaryCohortSchema,
   factoryCanaryTaskReservationSchema,
+  factoryDailyQuotaPolicySchema,
+  factoryDailyQuotaReservationSchema,
   factoryConfigurationCandidateSchema,
   factoryControlEventSchema,
   factoryEvalAssessmentSchema,
@@ -114,6 +116,14 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public dailyQuotaPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryDailyQuotaPolicySchema.parse(input));
+  }
+
+  public dailyQuotaReservation(input: unknown) {
+    return encodeCanonicalDocument(factoryDailyQuotaReservationSchema.parse(input));
+  }
+
   public externalPullRequestReplacementDraftPolicy(input: unknown) {
     return encodeCanonicalDocument(
       factoryExternalPullRequestReplacementDraftPolicySchema.parse(input)

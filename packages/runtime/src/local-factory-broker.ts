@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   factoryCostPolicySchema,
+  factoryDailyQuotaPolicySchema,
   type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
   type FactorySchedulePolicy,
   type Sha256Digest
@@ -48,6 +50,7 @@ import {
 } from "./infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
+import { SqliteFactoryDailyQuotaRepository } from "./infrastructure/persistence/sqlite-factory-daily-quota-repository.js";
 import { SqliteFactoryCanaryBrokerQueue } from "./infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
 import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
 import { SqliteFactoryCanaryPullRequestUpdateQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-update-queue.js";
@@ -71,6 +74,7 @@ export interface LocalFactoryBrokerOptions {
   readonly gitExecutable: string;
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly githubApp: {
@@ -99,6 +103,10 @@ export function createLocalFactoryBroker(
       options.schedulePolicy === undefined
         ? null
         : documents.schedulePolicy(options.schedulePolicy);
+    const dailyQuotaPolicy =
+      options.dailyQuotaPolicy === undefined
+        ? null
+        : documents.dailyQuotaPolicy(factoryDailyQuotaPolicySchema.parse(options.dailyQuotaPolicy));
     const roleIdentityPolicy =
       options.roleIdentityPolicy === undefined
         ? null
@@ -115,10 +123,21 @@ export function createLocalFactoryBroker(
     ) {
       throw new Error("Factory broker role identity policy changed after review.");
     }
-    if ((schedulePolicy === null) !== (roleIdentityPolicy === null)) {
+    if (
+      (schedulePolicy === null) !== (roleIdentityPolicy === null) ||
+      (schedulePolicy === null) !== (dailyQuotaPolicy === null)
+    ) {
       throw new Error(
-        "Factory canary broker schedule and role policies must be configured together."
+        "Factory canary broker schedule, daily quota, and role policies must be configured together."
       );
+    }
+    if (
+      dailyQuotaPolicy !== null &&
+      !dailyQuotaPolicy.value.repositories.some(
+        ({ repositoryId }) => repositoryId === options.repositoryId
+      )
+    ) {
+      throw new Error("Factory broker repository is not authorized by its daily quota policy.");
     }
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
@@ -128,6 +147,9 @@ export function createLocalFactoryBroker(
     );
     const canaryReservations = repositories.track(
       new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
+    );
+    const dailyQuotas = repositories.track(
+      new SqliteFactoryDailyQuotaRepository(databasePath, { documents })
     );
     const schedules = repositories.track(
       new SqliteFactoryScheduleRepository(databasePath, { documents })
@@ -165,9 +187,11 @@ export function createLocalFactoryBroker(
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicy?.digest ?? null,
       roleIdentityPolicyDigest: roleIdentityPolicy?.digest ?? null,
+      dailyQuotaPolicy,
       preparations,
       reservations: canaryReservations,
       schedules,
+      dailyQuotas: dailyQuotaPolicy === null ? null : dailyQuotas,
       documents,
       now
     });
@@ -392,9 +416,13 @@ export function createConfiguredLocalFactoryBroker(
     ...(config.schemaVersion === "agentlab.local-factory-broker.v1"
       ? {}
       : { costPolicy: config.costPolicy }),
-    ...(config.schemaVersion === "agentlab.local-factory-broker.v3"
+    ...(config.schemaVersion === "agentlab.local-factory-broker.v3" ||
+    config.schemaVersion === "agentlab.local-factory-broker.v4"
       ? {
           schedulePolicy: config.schedulePolicy,
+          ...(config.schemaVersion === "agentlab.local-factory-broker.v4"
+            ? { dailyQuotaPolicy: config.dailyQuotaPolicy }
+            : {}),
           roleIdentityPolicy: config.roleIdentityPolicy,
           expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
         }

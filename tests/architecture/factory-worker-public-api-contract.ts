@@ -1,5 +1,6 @@
 import type {
   FactoryCostPolicy,
+  FactoryDailyQuotaPolicy,
   FactoryRoleIdentityPolicy,
   FactorySchedulePolicy,
   FactoryTaskState,
@@ -9,6 +10,7 @@ import {
   createConfiguredLocalFactoryWorker,
   createLocalFactoryWorker,
   loadLocalFactoryWorkerConfig,
+  loadLocalFactoryDailyQuotaPolicy,
   loadLocalFactorySchedulePolicy,
   type FactoryAgentProviderBinding,
   type FactoryCanaryPullRequestRepairTickReport,
@@ -78,6 +80,7 @@ interface ExpectedOptions {
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
@@ -86,11 +89,12 @@ interface ExpectedOptions {
 }
 
 interface ExpectedPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v3";
+  readonly schemaVersion: "agentlab.worker-preflight.v4";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
   readonly schedulePolicyDigest: Sha256Digest | null;
   readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -155,11 +159,12 @@ interface ExpectedTaskRunReport {
 }
 
 interface ExpectedSchedulerTickReport {
-  readonly schemaVersion: "agentlab.scheduler-tick-result.v2";
+  readonly schemaVersion: "agentlab.scheduler-tick-result.v3";
   readonly status: "completed" | "already-completed" | "missed-deadline" | "blocked";
   readonly schedulePolicyDigest: Sha256Digest;
   readonly factoryPolicyBundleDigest: Sha256Digest;
   readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly dailyQuotaPolicyDigest: Sha256Digest;
   readonly scheduledFor: string;
   readonly deadlineAt: string;
   readonly runId: string | null;
@@ -234,6 +239,7 @@ type ExpectedConfigKeys =
   | "gates"
   | "costPolicy"
   | "schedulePolicy"
+  | "dailyQuotaPolicy"
   | "roleIdentityPolicy";
 
 export type FactoryWorkerPublicApiAssertions = [
@@ -288,6 +294,12 @@ export type FactoryWorkerPublicApiAssertions = [
     Equal<
       typeof loadLocalFactorySchedulePolicy,
       (pathInput: string) => Promise<FactorySchedulePolicy>
+    >
+  >,
+  Assert<
+    Equal<
+      typeof loadLocalFactoryDailyQuotaPolicy,
+      (pathInput: string) => Promise<FactoryDailyQuotaPolicy>
     >
   >
 ];

@@ -2,11 +2,17 @@ import type {
   FactoryScheduleEvent,
   FactorySchedulePolicy,
   FactoryScheduleRun,
+  FactoryDailyQuotaReservation,
   Sha256Digest
 } from "@agentlab/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { FactorySchedulerService } from "../../packages/runtime/src/application/factory-scheduler-service.js";
+import { FactoryDailyQuotaService } from "../../packages/runtime/src/application/factory-daily-quota-service.js";
+import type {
+  FactoryDailyQuotaRepository,
+  FactoryDailyQuotaReservationSnapshot
+} from "../../packages/runtime/src/domain/factory-daily-quota-repository.js";
 import type { FactoryWorkerPreflight } from "../../packages/runtime/src/application/factory-worker-operator.js";
 import type { FactoryWorkerTaskRunReport } from "../../packages/runtime/src/application/factory-worker-task-runner.js";
 import type {
@@ -27,6 +33,7 @@ import type {
 } from "../../packages/runtime/src/domain/factory-schedule-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testDigest } from "../helpers/factory.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import {
   testFactoryCanaryAdmissionFixture,
   testFactoryCanaryReservationDocument
@@ -43,9 +50,13 @@ import {
 
 const factoryPolicyBundleDigest = testFactoryPreparationFixture().policyDigest;
 const roleIdentityPolicyDigest = TEST_ROLE_IDENTITY_POLICY_DIGEST;
+const dailyQuotaPolicyDigest = new NodeFactoryDocumentCodec().dailyQuotaPolicy(
+  testFactoryDailyQuotaPolicy()
+).digest;
 const expectedCommand = (schedulePolicyDigest: Sha256Digest) => ({
   expectedSchedulePolicyDigest: schedulePolicyDigest,
-  expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest
+  expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest,
+  expectedDailyQuotaPolicyDigest: dailyQuotaPolicyDigest
 });
 
 interface SchedulerTaskCommand {
@@ -90,7 +101,7 @@ describe("FactorySchedulerService", () => {
       TEST_FACTORY_SCHEDULED_FOR
     );
     expect(stored?.run).toMatchObject({
-      schemaVersion: "agentlab.schedule-run.v2",
+      schemaVersion: "agentlab.schedule-run.v3",
       roleIdentityPolicyDigest
     });
     expect(stored?.events.map(({ kind }) => kind)).toEqual([
@@ -100,11 +111,11 @@ describe("FactorySchedulerService", () => {
       "completed"
     ]);
     expect(stored?.events[1]).toMatchObject({
-      schemaVersion: "agentlab.schedule-event.v2",
+      schemaVersion: "agentlab.schedule-event.v3",
       canaryReservationDigest: candidate.canaryReservation.reservationDigest
     });
     expect(stored?.events[2]).toMatchObject({
-      schemaVersion: "agentlab.schedule-event.v2",
+      schemaVersion: "agentlab.schedule-event.v3",
       canaryReservationDigest: candidate.canaryReservation.reservationDigest
     });
   });
@@ -251,7 +262,7 @@ describe("FactorySchedulerService", () => {
     expect(fixture.runTask).toHaveBeenCalledOnce();
   });
 
-  it("blocks a historical active claim that never bound canary authority", async () => {
+  it("blocks a historical active run that never bound daily quota policy", async () => {
     const candidate = scheduledPreparation();
     const fixture = schedulerFixture({ candidates: [candidate] });
     await seedLegacyActiveClaim(fixture.schedules, fixture.schedulePolicy, candidate);
@@ -260,7 +271,7 @@ describe("FactorySchedulerService", () => {
       fixture.service.tick(expectedCommand(fixture.schedulePolicy.digest))
     ).resolves.toMatchObject({
       status: "blocked",
-      reasonCodes: ["legacy-schedule-claim-unreserved"]
+      reasonCodes: ["open-schedule-policy-drift"]
     });
     expect(fixture.runTask).not.toHaveBeenCalled();
   });
@@ -366,7 +377,8 @@ describe("FactorySchedulerService", () => {
     await expect(
       fixture.service.tick({
         expectedSchedulePolicyDigest: testDigest("9"),
-        expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest
+        expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest,
+        expectedDailyQuotaPolicyDigest: dailyQuotaPolicyDigest
       })
     ).rejects.toThrow(/schedule policy changed/u);
     expect(fixture.preflight).not.toHaveBeenCalled();
@@ -388,6 +400,7 @@ function schedulerFixture(
 ) {
   const documents = new NodeFactoryDocumentCodec();
   const schedulePolicy = documents.schedulePolicy(options.policy ?? testFactorySchedulePolicy());
+  const dailyQuotaPolicy = documents.dailyQuotaPolicy(testFactoryDailyQuotaPolicy());
   const schedules = options.schedules ?? new MemoryScheduleRepository(documents);
   const candidates = options.candidates ?? [];
   const reservations =
@@ -414,8 +427,18 @@ function schedulerFixture(
         )
       : options.taskResult(command)
   );
+  const createId = sequentialId();
+  const dailyQuotaRepository = new MemoryDailyQuotaRepository(documents);
+  const dailyQuotas = new FactoryDailyQuotaService({
+    policy: dailyQuotaPolicy,
+    quotas: dailyQuotaRepository,
+    documents,
+    now: options.clock ?? (() => options.now ?? TEST_FACTORY_SCHEDULE_NOW),
+    createId
+  });
   const service = new FactorySchedulerService({
     schedulePolicy,
+    dailyQuotaPolicy,
     factoryPolicyBundleDigest,
     roleIdentityPolicyDigest,
     schedules,
@@ -426,9 +449,10 @@ function schedulerFixture(
     },
     worker: { preflight },
     taskRunner: { run: runTask },
+    dailyQuotas,
     documents,
     now: options.clock ?? (() => options.now ?? TEST_FACTORY_SCHEDULE_NOW),
-    createId: sequentialId()
+    createId
   });
   return {
     service,
@@ -444,11 +468,12 @@ function schedulerFixture(
 
 function readyPreflight(schedulePolicyDigest: Sha256Digest): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v3",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status: "ready",
     policyBundleDigest: factoryPolicyBundleDigest,
     schedulePolicyDigest,
     roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest,
     schedulerEnabled: true,
     costPolicyConfigured: true,
     hostReady: true,
@@ -587,6 +612,51 @@ class MemoryScheduleRepository implements FactoryScheduleRepository {
   public close(): void {
     this.#runs.clear();
   }
+}
+
+class MemoryDailyQuotaRepository implements FactoryDailyQuotaRepository {
+  readonly #byTask = new Map<string, CanonicalFactoryDocument<FactoryDailyQuotaReservation>>();
+
+  public constructor(private readonly documents: FactoryDocumentCodec) {}
+
+  public reserve(
+    reservation: CanonicalFactoryDocument<FactoryDailyQuotaReservation>
+  ): Promise<FactoryDailyQuotaReservationSnapshot> {
+    const verified = this.documents.dailyQuotaReservation(reservation.value);
+    if (verified.digest !== reservation.digest || verified.json !== reservation.json) {
+      return Promise.reject(new Error("Daily quota canonical identity mismatch."));
+    }
+    const existing = this.#byTask.get(verified.value.taskId);
+    if (existing !== undefined && existing.digest !== verified.digest) {
+      return Promise.reject(new Error("Daily quota task conflict."));
+    }
+    this.#byTask.set(verified.value.taskId, verified);
+    return Promise.resolve(quotaSnapshot(verified));
+  }
+
+  public findByTaskId(taskId: string): Promise<FactoryDailyQuotaReservationSnapshot | null> {
+    const reservation = this.#byTask.get(taskId);
+    return Promise.resolve(reservation === undefined ? null : quotaSnapshot(reservation));
+  }
+
+  public findByReservationDigest(
+    reservationDigest: Sha256Digest
+  ): Promise<FactoryDailyQuotaReservationSnapshot | null> {
+    const reservation = [...this.#byTask.values()].find(
+      ({ digest }) => digest === reservationDigest
+    );
+    return Promise.resolve(reservation === undefined ? null : quotaSnapshot(reservation));
+  }
+
+  public close(): void {
+    this.#byTask.clear();
+  }
+}
+
+function quotaSnapshot(
+  reservation: CanonicalFactoryDocument<FactoryDailyQuotaReservation>
+): FactoryDailyQuotaReservationSnapshot {
+  return { reservation: reservation.value, reservationDigest: reservation.digest };
 }
 
 function snapshot(

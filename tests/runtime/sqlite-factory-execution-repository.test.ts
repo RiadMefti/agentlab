@@ -167,6 +167,9 @@ describe("SqliteFactoryExecutionRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TRIGGER factory_schedule_events_daily_quota_finish_guard;
+        DROP TRIGGER factory_schedule_events_daily_quota_claim_guard;
+        DROP TABLE factory_daily_quota_reservations;
         DROP TRIGGER factory_pull_request_dispatches_canary_guard;
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;

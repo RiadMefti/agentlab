@@ -318,13 +318,14 @@ the claim commits. On every process retry, the worker reloads that digest and re
 task/configuration and time-window checks before each resumable phase. A legacy unbound active claim
 stays blocked for operator recovery. Manual `worker-run` cannot consume a canary reservation.
 
-For `brokered-draft-pr`, the separate broker config v3 loads the same schedule and role policies.
-`broker-open-canary-draft` requires their exact digests plus the reservation and factory-policy
-digests. It independently resolves the completed v2 scheduler handoff, rejects manual/scheduled
-authority substitution, rechecks expiry before every resumable broker phase, records a v2 dispatch,
-and binds the reservation digest into authenticated PR evidence. The reservation replaces only the
-per-task draft confirmation; broker enablement, cost policy, repository governance, human merge, and
-the structural `autoMerge:false` and `release:false` limits still apply.
+For `brokered-draft-pr`, the separate broker config v4 loads the same schedule, daily-quota, and
+role policies. `broker-open-canary-draft` requires their exact digests plus the reservation and
+factory-policy digests. It independently resolves the completed v3 scheduler handoff and daily
+reservation, rejects manual/scheduled authority substitution, rechecks expiry before every resumable
+broker phase, records a v2 dispatch, and binds the reservation digest into authenticated PR
+evidence. The reservation replaces only the per-task draft confirmation; broker enablement, cost
+policy, repository governance, human merge, and the structural `autoMerge:false` and `release:false`
+limits still apply.
 
 `broker-canary-tick` can derive and reconcile a bounded page of these exact completed handoffs. It
 uses the existing durable dispatch journal for recovery, prioritizes incomplete dispatches within

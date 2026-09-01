@@ -21,6 +21,7 @@ const codec = new NodeFactoryDocumentCodec();
 const schedulePolicy = codec.schedulePolicy(testFactorySchedulePolicy());
 const factoryPolicyBundleDigest = testFactoryContract().gateProfile.policyDigest;
 const roleIdentityPolicyDigest = testDigest("a");
+const dailyQuotaPolicyDigest = testDigest("b");
 const observedAt = "2026-08-31T13:00:00.000Z";
 
 describe("FactoryCanaryPullRequestRepairService", () => {
@@ -209,11 +210,12 @@ function serviceFixture(
   const reasonCodes = options.preflightReasonCodes ?? [];
   const preflight = vi.fn(() =>
     Promise.resolve({
-      schemaVersion: "agentlab.worker-preflight.v3" as const,
+      schemaVersion: "agentlab.worker-preflight.v4" as const,
       status: reasonCodes.length === 0 ? ("ready" as const) : ("blocked" as const),
       policyBundleDigest: factoryPolicyBundleDigest,
       schedulePolicyDigest: selectedPolicy.digest,
       roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest,
       schedulerEnabled: !reasonCodes.includes("scheduler-disabled"),
       costPolicyConfigured: !reasonCodes.includes("cost-policy-unconfigured"),
       hostReady: !reasonCodes.some((reason) => reason.includes("unavailable")),

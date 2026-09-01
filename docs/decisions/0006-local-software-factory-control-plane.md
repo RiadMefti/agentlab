@@ -488,17 +488,18 @@ empty rate card both adds `cost-policy-unconfigured` to preflight and denies dra
 
 The separate `broker-open-canary-draft` entry accepts no per-task confirmation. For a scheduled task
 it instead requires exact reservation, schedule-policy, role-policy, and factory-policy digests and
-config v3. The broker independently proves an unexpired R1 `brokered-draft-pr` reservation and exact
-completed v2 scheduler handoff before dispatch and every resumable checkpoint. Scheduled tasks
-cannot use the manual entry, non-scheduled tasks cannot present canary coordinates, and neither path
-can enable the broker, merge, or release. See [ADR 0015](0015-canary-bound-draft-pr-dispatch.md).
+config v4. The broker independently proves unexpired R1 canary authority, the exact daily aggregate
+quota reservation, and the completed v3 scheduler handoff before dispatch and every resumable
+checkpoint. Scheduled tasks cannot use the manual entry, non-scheduled tasks cannot present canary
+coordinates, and neither path can enable the broker, merge, or release. See
+[ADR 0015](0015-canary-bound-draft-pr-dispatch.md).
 
 The one-shot `broker-canary-tick` entry derives a bounded pending page by joining completed
-immutable scheduler handoffs to absent or incomplete dispatch journals. It requires config v3 and
-exact schedule, role, and factory-policy pins; prioritizes current authority and then recovery
-within that class; and passes each task through the same authority-revalidating draft service. The
-schedule policy bounds candidate inspection and dispatch attempts. It creates no second queue,
-installs no timer, changes no authority, and grants no merge or release capability. See
+immutable scheduler handoffs to absent or incomplete dispatch journals. It requires config v4 and
+exact schedule, daily-quota, role, and factory-policy pins; prioritizes current authority and then
+recovery within that class; and passes each task through the same authority-revalidating draft
+service. The schedule policy bounds candidate inspection and dispatch attempts. It creates no second
+queue, installs no timer, changes no authority, and grants no merge or release capability. See
 [ADR 0016](0016-bounded-canary-broker-reconciliation.md).
 
 The one-shot `broker-pr-maintenance-tick` entry derives exact open schema-v2 canary PR heads from
@@ -514,21 +515,23 @@ The one-shot `worker-pr-repair-tick` entry is the separate credentialless consum
 places any nonterminal repair journal before fresh authority so cleanup remains callable across
 scheduler, cost, identity, or host-readiness blockers. Fresh work must join an exact maintenance
 observation and repair authorization to current schema-v2 PR lineage and the completed canary
-handoff. Config v3, all policy pins, ready worker preflight, current reservation authority, R1 task
-identity, contract limits, and conservative aggregate tick reservation are mandatory before the
-existing isolated repair service runs. It stops at `pr-proposed` and has no remote-write or
-authority capability. See [ADR 0018](0018-recovery-first-canary-pr-repair-consumer.md).
+handoff. Config v4, all policy pins, ready worker preflight, current canary and daily quota
+authority, R1 task identity, contract limits, and conservative aggregate tick reservation are
+mandatory before the existing isolated repair service runs. It stops at `pr-proposed` and has no
+remote-write or authority capability. See
+[ADR 0018](0018-recovery-first-canary-pr-repair-consumer.md).
 
 The one-shot `broker-pr-update-tick` entry is the separate credential-bearing publication consumer.
 Its read model places nonterminal update journals before fresh work. Fresh entries must join an
 exact completed repair to its actionable maintenance observation and authorization, current
-schema-v2 PR lineage, completed scheduler handoff, current reservation, scheduled R1 task, broker,
-and schedule/role/factory policy pins. Config v3, caller pins, ready governance, configured cost
-policy, enabled broker authority, current canary authority, contract lifetime, and schedule action
-ceilings remain mandatory. Every candidate enters the existing update service, which journals before
-remote mutation, performs only a deterministic non-force child update, authenticates the resulting
-head, and returns the task to `pr-open`. It grants no model, merge, release, deployment, timer, or
-authority-mutation capability. See [ADR 0019](0019-recovery-first-canary-pr-update-consumer.md).
+schema-v2 PR lineage, completed scheduler handoff, current canary and daily quota reservations,
+scheduled R1 task, broker, and schedule/quota/role/factory policy pins. Config v4, caller pins,
+ready governance, configured cost policy, enabled broker authority, current canary authority,
+contract lifetime, and schedule action ceilings remain mandatory. Every candidate enters the
+existing update service, which journals before remote mutation, performs only a deterministic
+non-force child update, authenticates the resulting head, and returns the task to `pr-open`. It
+grants no model, merge, release, deployment, timer, or authority-mutation capability. See
+[ADR 0019](0019-recovery-first-canary-pr-update-consumer.md).
 
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
@@ -665,11 +668,13 @@ one distinct reviewer, 45 minutes, two repair attempts, 500 tool calls per worke
 ceiling per day. R2 increases require an explicit repository profile; R3 write work is
 human-approved; R4 never writes.
 
-Per-run accounting and one scheduler tick's conservative reservation are implemented. Before a task
-claim, the scheduler adds the task authority's complete budget ceiling—not an optimistic estimate—to
-the slot's recorded reserved usage and skips candidates that would exceed any tick dimension.
-Repository/day and organization/day ledgers are not implemented, and neither task nor tick policy is
-a provider-side hard spending guarantee.
+Per-run accounting, one scheduler tick's conservative reservation, and host-local repository/day and
+organization/day ledgers are implemented. Before a task claim, the scheduler atomically appends the
+task authority's complete budget ceiling—not an optimistic estimate—and one possible draft to the
+shared SQLite daily ledger, then adds the same budget to the slot's recorded reserved usage. A crash
+never releases daily authority. These policy ceilings are not a provider-side hard spending
+guarantee; independent databases or hosts are separate quota domains. See
+[ADR 0030](0030-durable-daily-aggregate-quotas.md).
 
 Any secret access/exfiltration signal, remote-write attempt from an execution worker, protected-path
 bypass, attestation mismatch, policy tampering, or critical sandbox failure immediately quarantines
@@ -682,7 +687,7 @@ Current scheduling uses deduplicated owner-confirmed intake, one exact daily UTC
 candidate list, task count, start deadline, per-tick reservation ceiling, SQLite single-writer
 lease, prior-day open-run reconciliation, and a separate human kill switch. Multiple open runs or
 policy drift on an open run fail closed before a new slot. It does not yet implement blackout
-windows, repository/day or organization/day quotas, or global concurrency/cost coordination.
+windows or cross-host/global concurrency and cost coordination.
 [ADR 0021](0021-durable-maintenance-discovery-and-canary-consumption.md) later added separate
 read-only autonomous maintenance discovery. The scheduler runs only already-authorized R1 requests
 and stops at a local proposal; it does not invent R2-R4 scope. Future maintenance discovery must
@@ -834,12 +839,13 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    scheduler/broker timer, auto-merge, release, or protected-path write is live; the local scheduler
    code has no broker credential.
 5. **CI repair and operations:** credential rotation/monitoring, CODEOWNERS/last-push/approval
-   rules, dashboards, alerts, quotas, and incident tooling. Deterministic feedback qualification,
-   bounded fresh repair execution, brokered repaired-branch update, exact-head re-observation, and a
-   slot-bound canary observation/repair-admission consumer and recovery-first credentialless repair
-   consumer now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick
-   reservation ceiling and recovery-first broker update consumer now exist; cross-repository/day
-   quotas, timer provisioning, alerting, and incident automation do not.
+   rules, dashboards, alerts, cross-host quotas, and incident tooling. Deterministic feedback
+   qualification, bounded fresh repair execution, brokered repaired-branch update, exact-head
+   re-observation, and a slot-bound canary observation/repair-admission consumer and recovery-first
+   credentialless repair consumer now exist. One policy-pinned daily scheduler tick, durable claim
+   recovery, and tick reservation ceiling, host-local repository/organization daily quotas, and
+   recovery-first broker update consumer now exist; cross-host quotas, timer provisioning, alerting,
+   and incident automation do not.
 6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
    attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
    execution, attested grader artifacts, autonomous task discovery, shadow telemetry, production

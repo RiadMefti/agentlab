@@ -21,6 +21,8 @@ describe("factory daily-cycle compiler", () => {
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
 
     expect(plan.stages.map(({ id, role }) => `${id}:${role}`)).toEqual([
+      "maintenance-discovery:worker",
+      "canary-admission:worker",
       "scheduler:worker",
       "draft:broker",
       "maintenance-1:broker",
@@ -31,7 +33,7 @@ describe("factory daily-cycle compiler", () => {
       "update-2:broker",
       "maintenance-3:broker"
     ]);
-    expect(bundle.units).toHaveLength(11);
+    expect(bundle.units).toHaveLength(13);
     expect(new Set(bundle.units.map(({ digest }) => digest)).size).toBe(bundle.units.length);
     const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
     expect(scheduler.content).toContain("User=1001\n");
@@ -71,13 +73,13 @@ describe("factory daily-cycle compiler", () => {
     const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
     const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
 
-    expect(bundle.units).toHaveLength(4);
+    expect(bundle.units).toHaveLength(6);
     expect(scheduler.content).toContain('"/private/worker $HOME%%slot.json"');
     expect(scheduler.content).toContain('ExecStart=:"/opt/agentlab/bin/agentlab"');
   });
 
-  it("prepends discovery and bounded canary admission for the v2 autonomous cycle", () => {
-    const manifest = validAutonomousManifest();
+  it("pins aggregate quota before the v3 autonomous cycle can reach a worker or broker", () => {
+    const manifest = validManifest();
     const schedule = testFactorySchedulePolicy();
     const roles = testFactoryRoleIdentityPolicy({
       keyId: testDigest("8"),
@@ -104,13 +106,44 @@ describe("factory daily-cycle compiler", () => {
     expect(requiredUnit(bundle.units, "agentlab-factory-daily.timer").content).toContain(
       "Unit=agentlab-factory-maintenance-discovery.service"
     );
+    const scheduler = requiredUnit(bundle.units, "agentlab-factory-scheduler.service");
+    expect(scheduler.content).toContain('"--daily-quota"');
+    expect(scheduler.content).toContain(manifest.expectedDailyQuotaPolicyDigest);
     expect(bundle).toMatchObject({
-      schemaVersion: "agentlab.daily-cycle-bundle.v2",
+      schemaVersion: "agentlab.daily-cycle-bundle.v3",
+      dailyQuotaPolicyDigest: manifest.expectedDailyQuotaPolicyDigest,
       maintenanceDiscoveryPolicyDigest: manifest.expectedMaintenanceDiscoveryPolicyDigest,
       preparationGrantDigest: manifest.expectedPreparationGrantDigest,
       canaryCohortDigest: manifest.expectedCanaryCohortDigest,
       canaryCandidateDigest: manifest.expectedCanaryCandidateDigest
     });
+  });
+
+  it("refuses legacy manifests that cannot invoke the quota-bound scheduler", () => {
+    const manifest = validManifest();
+    const {
+      dailyQuotaPolicyPath: _dailyQuotaPolicyPath,
+      expectedDailyQuotaPolicyDigest: _expectedDailyQuotaPolicyDigest,
+      ...legacyManifest
+    } = manifest;
+    void _dailyQuotaPolicyPath;
+    void _expectedDailyQuotaPolicyDigest;
+    const schedule = testFactorySchedulePolicy();
+    const roles = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    expect(() =>
+      compileFactoryDailyCyclePlan(
+        {
+          ...legacyManifest,
+          schemaVersion: "agentlab.daily-cycle-manifest.v2"
+        },
+        schedule,
+        roles
+      )
+    ).toThrow(/requires a v3 manifest/u);
   });
 
   it("rejects identity collapse, excessive repair rounds, and truncating worker timeouts", () => {
@@ -149,7 +182,7 @@ describe("factory daily-cycle compiler", () => {
 
 function validManifest() {
   return {
-    schemaVersion: "agentlab.daily-cycle-manifest.v1",
+    schemaVersion: "agentlab.daily-cycle-manifest.v3",
     id: "agentlab/daily-software-factory",
     version: "1.0.0",
     agentlabExecutable: { path: "/opt/agentlab/bin/agentlab", digest: testDigest("1") },
@@ -157,20 +190,15 @@ function validManifest() {
     worker: { userId: 1_001, configPath: "/private/worker.json" },
     broker: { userId: 1_003, configPath: "/private/broker.json" },
     schedulePolicyPath: "/private/schedule.json",
+    dailyQuotaPolicyPath: "/private/daily-quota.json",
     roleIdentityPolicyPath: "/private/roles.json",
     expectedSchedulePolicyDigest: testDigest("2"),
+    expectedDailyQuotaPolicyDigest: testDigest("9"),
     expectedRoleIdentityPolicyDigest: testDigest("3"),
     expectedFactoryPolicyBundleDigest: testDigest("4"),
     maximumRepairRounds: 2,
     workerCommandTimeoutSeconds: 7_230,
-    brokerCommandTimeoutSeconds: 900
-  } as const;
-}
-
-function validAutonomousManifest() {
-  return {
-    ...validManifest(),
-    schemaVersion: "agentlab.daily-cycle-manifest.v2",
+    brokerCommandTimeoutSeconds: 900,
     maintenanceDiscoveryConfigPath: "/private/maintenance-discovery.json",
     canaryAdmissionConfigPath: "/private/canary-admission.json",
     expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),

@@ -65,6 +65,17 @@ export const factoryDailyCycleManifestSchema = z
       expectedPreparationGrantDigest: sha256DigestSchema,
       expectedCanaryCohortDigest: sha256DigestSchema,
       expectedCanaryCandidateDigest: sha256DigestSchema
+    }),
+    factoryDailyCycleManifestBaseSchema.extend({
+      schemaVersion: z.literal("agentlab.daily-cycle-manifest.v3"),
+      maintenanceDiscoveryConfigPath: unitSafeTextSchema,
+      canaryAdmissionConfigPath: unitSafeTextSchema,
+      dailyQuotaPolicyPath: unitSafeTextSchema,
+      expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+      expectedMaintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+      expectedPreparationGrantDigest: sha256DigestSchema,
+      expectedCanaryCohortDigest: sha256DigestSchema,
+      expectedCanaryCandidateDigest: sha256DigestSchema
     })
   ])
   .superRefine((manifest, context) => {
@@ -83,7 +94,7 @@ export const factoryDailyCycleManifestSchema = z
       });
     }
     if (
-      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2" &&
+      manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v1" &&
       new Set([
         manifest.worker.configPath,
         manifest.broker.configPath,
@@ -141,6 +152,14 @@ export const factoryDailyCycleBundleSchema = z.discriminatedUnion("schemaVersion
   }),
   factoryDailyCycleBundleBaseSchema.extend({
     schemaVersion: z.literal("agentlab.daily-cycle-bundle.v2"),
+    maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+    preparationGrantDigest: sha256DigestSchema,
+    canaryCohortDigest: sha256DigestSchema,
+    canaryCandidateDigest: sha256DigestSchema
+  }),
+  factoryDailyCycleBundleBaseSchema.extend({
+    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v3"),
+    dailyQuotaPolicyDigest: sha256DigestSchema,
     maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
     preparationGrantDigest: sha256DigestSchema,
     canaryCohortDigest: sha256DigestSchema,

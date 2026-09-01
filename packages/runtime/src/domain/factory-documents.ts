@@ -4,6 +4,8 @@ import type {
   FactoryCanaryApproval,
   FactoryCanaryCohort,
   FactoryCanaryTaskReservation,
+  FactoryDailyQuotaPolicy,
+  FactoryDailyQuotaReservation,
   FactoryConfigurationCandidate,
   FactoryEvalAssessment,
   FactoryEvalAttestationRecord,
@@ -115,6 +117,8 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  dailyQuotaPolicy(input: unknown): CanonicalFactoryDocument<FactoryDailyQuotaPolicy>;
+  dailyQuotaReservation(input: unknown): CanonicalFactoryDocument<FactoryDailyQuotaReservation>;
   externalPullRequestReplacementDraftPolicy(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftPolicy>;

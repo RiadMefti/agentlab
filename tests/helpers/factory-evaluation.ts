@@ -260,6 +260,7 @@ interface TestFactoryCanaryDocumentsInput {
   readonly approvalId?: string;
   readonly cohortId?: string;
   readonly maximumTasks?: number;
+  readonly budget?: FactoryBudget;
   readonly operatorId?: string;
   readonly attestation?: FactoryEvalAttestationSnapshot;
   readonly expiresAt?: string;
@@ -308,7 +309,7 @@ export function testFactoryCanaryDocuments(
     repositoryIds: [evaluation.run.challengerCandidate.repositoryId],
     maximumRiskTier: "R1",
     maximumTasks: input.maximumTasks ?? 2,
-    budget: testFactoryEvalBudget(),
+    budget: input.budget ?? testFactoryEvalBudget(),
     humanSampleReviewDigest: testEvalDigest(902),
     humanSampleSize: 4,
     actor: {

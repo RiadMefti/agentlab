@@ -14,6 +14,7 @@ import {
 } from "@agentlab/runtime/factory-broker";
 import type {
   FactoryCostPolicy,
+  FactoryDailyQuotaPolicy,
   FactoryRoleIdentityPolicy,
   FactorySchedulePolicy,
   Sha256Digest
@@ -71,6 +72,19 @@ type ExpectedConfig = ExpectedConfigFields &
         schedulePolicy: FactorySchedulePolicy;
         roleIdentityPolicy: FactoryRoleIdentityPolicy;
       }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v4";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        dailyQuotaPolicyPath: string;
+        expectedDailyQuotaPolicyDigest: Sha256Digest;
+        roleIdentityPolicyPath: string;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        dailyQuotaPolicy: FactoryDailyQuotaPolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+      }
   );
 
 interface ExpectedOptions {
@@ -83,6 +97,7 @@ interface ExpectedOptions {
   readonly gitExecutable: string;
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly githubApp: {

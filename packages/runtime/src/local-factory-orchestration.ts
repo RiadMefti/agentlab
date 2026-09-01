@@ -8,7 +8,13 @@ import { renderSystemdFactoryDailyCycle } from "./infrastructure/process/systemd
 export function renderConfiguredLocalFactoryDailyCycle(
   config: LocalFactoryOrchestrationConfig
 ): FactoryDailyCycleBundle {
-  const { schedulePolicy, roleIdentityPolicy, ...manifest } = config;
+  const {
+    schedulePolicy,
+    roleIdentityPolicy,
+    dailyQuotaPolicy: _dailyQuotaPolicy,
+    ...manifest
+  } = config;
+  void _dailyQuotaPolicy;
   const plan = compileFactoryDailyCyclePlan(manifest, schedulePolicy, roleIdentityPolicy);
   return renderSystemdFactoryDailyCycle(manifest, plan);
 }

@@ -14,8 +14,12 @@ import {
   NodeFactoryDocumentCodec
 } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testDigest } from "../helpers/factory.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
-import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
+import {
+  testFactoryScheduleBudget,
+  testFactorySchedulePolicy
+} from "../helpers/factory-schedule.js";
 
 const temporaryRoots: string[] = [];
 
@@ -101,8 +105,8 @@ describe("local factory broker composition", () => {
     await expect(runtime.close()).resolves.toBeUndefined();
   });
 
-  it("constructs a v3 canary broker from exact schedule and role-policy pins", async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), "agentlab-local-broker-v3-")));
+  it("constructs a v4 canary broker from exact schedule, quota, and role-policy pins", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "agentlab-local-broker-v4-")));
     temporaryRoots.push(root);
     const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
       keyId: testDigest("8"),
@@ -129,8 +133,19 @@ describe("local factory broker composition", () => {
       ]
     };
     const schedulePolicy = testFactorySchedulePolicy();
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy({
+      repositories: [
+        {
+          repositoryId: "riadmefti/agentlab",
+          maximumTasksPerDay: 3,
+          maximumDraftPullRequestsPerDay: 3,
+          budget: testFactoryScheduleBudget()
+        }
+      ]
+    });
+    const expectedDailyQuotaPolicyDigest = documents.dailyQuotaPolicy(dailyQuotaPolicy).digest;
     const runtime = createConfiguredLocalFactoryBroker({
-      schemaVersion: "agentlab.local-factory-broker.v3",
+      schemaVersion: "agentlab.local-factory-broker.v4",
       databasePath: join(root, "agentlab.sqlite"),
       artifactRoot: join(root, "artifacts"),
       temporaryRoot: join(root, "temporary"),
@@ -140,10 +155,13 @@ describe("local factory broker composition", () => {
       gitExecutable: join(root, "git"),
       costPolicyPath: join(root, "cost-policy.json"),
       schedulePolicyPath: join(root, "schedule-policy.json"),
+      dailyQuotaPolicyPath: join(root, "daily-quota-policy.json"),
+      expectedDailyQuotaPolicyDigest,
       roleIdentityPolicyPath: join(root, "role-identities.json"),
       expectedRoleIdentityPolicyDigest,
       costPolicy,
       schedulePolicy,
+      dailyQuotaPolicy,
       roleIdentityPolicy,
       githubApp: {
         clientId: "Iv1.agentlab-test",

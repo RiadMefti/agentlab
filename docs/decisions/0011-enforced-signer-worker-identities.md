@@ -29,14 +29,18 @@ proves its current POSIX UID before constructing the signing service. The privat
 independently requires the key file to belong to that current UID. Failure occurs before key bytes
 are opened.
 
-Scheduled work requires `agentlab.local-factory-worker.v3`. Runtime construction recomputes the
-policy digest and proves the worker UID before acquiring the SQLite writer lease. Host preflight
-rechecks the UID and reports both the role-policy digest and a stable mismatch reason. Legacy v2
-schedule files remain parseable for diagnosis but cannot construct or invoke model work. V3 may omit
-a schedule policy for explicitly confirmed manual work; autonomous ticks additionally require the
-loaded schedule policy. Each new crash-resumable schedule-run v2 persists the identity-policy digest
-and refuses resume after drift; legacy run v1 remains readable but cannot resume model work. Legacy
-recovery remains available without granting new execution.
+At this decision's boundary, scheduled work required `agentlab.local-factory-worker.v3`. Runtime
+construction recomputes the policy digest and proves the worker UID before acquiring the SQLite
+writer lease. Host preflight rechecks the UID and reports both the role-policy digest and a stable
+mismatch reason. Legacy v2 schedule files remain parseable for diagnosis but cannot construct or
+invoke model work. V3 may omit a schedule policy for explicitly confirmed manual work; autonomous
+ticks additionally require the loaded schedule policy. Each new crash-resumable schedule-run v2
+persists the identity-policy digest and refuses resume after drift; legacy run v1 remains readable
+but cannot resume model work. Legacy recovery remains available without granting new execution.
+
+> **2026-09-01 update:** [ADR 0030](0030-durable-daily-aggregate-quotas.md) requires worker config
+> v4 and schedule-run/event v3 for new autonomous work. Manual identity-bound v3 remains supported;
+> legacy scheduled records remain readable but cannot resume without exact daily quota authority.
 
 Every signed eval predicate now includes `roleIdentityPolicyDigest`. The independent evaluator
 recomputes its policy copy, matches the trusted runner/key coordinates, pins that exact digest in

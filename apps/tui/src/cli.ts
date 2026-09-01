@@ -176,6 +176,7 @@ export type CliAction =
       readonly kind: "factory-scheduler-tick";
       readonly configPath: string;
       readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
       readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
     }
   | {
@@ -937,25 +938,29 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   if (
-    input.length === 8 &&
+    input.length === 10 &&
     input[0] === "factory" &&
     input[1] === "scheduler-tick" &&
     input[2] === "--config" &&
     input[4] === "--schedule-policy" &&
-    input[6] === "--policy"
+    input[6] === "--daily-quota" &&
+    input[8] === "--policy"
   ) {
     const configPath = input[3];
     const expectedSchedulePolicyDigest = input[5];
-    const expectedFactoryPolicyBundleDigest = input[7];
+    const expectedDailyQuotaPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
     if (
       isNormalizedAbsolutePath(configPath) &&
       isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest) &&
       isSha256Digest(expectedFactoryPolicyBundleDigest)
     ) {
       return {
         kind: "factory-scheduler-tick",
         configPath,
         expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
         expectedFactoryPolicyBundleDigest
       };
     }
@@ -1408,7 +1413,7 @@ Factory authority:
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
   agentlab factory orchestration-render --config <absolute-path>
       Emit a content-addressed daily systemd bundle; never install, enable, or start it.
-  agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --policy <sha256>
+  agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --daily-quota <sha256> --policy <sha256>
       Run one bounded UTC slot from exact current canary reservations; stop before remote writes.
   agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.

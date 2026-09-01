@@ -11,12 +11,26 @@ import {
   type FactoryBrokerPullRequestMaintenanceTickRunnerDependencies
 } from "../../apps/tui/src/run-factory-broker-pr-maintenance-tick.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
-import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
+import {
+  testFactoryScheduleBudget,
+  testFactorySchedulePolicy
+} from "../helpers/factory-schedule.js";
 import { testDigest } from "../helpers/factory.js";
 
 const configPath = "/private/agentlab/broker.json";
 const schedulePolicy = testFactorySchedulePolicy();
+const dailyQuotaPolicy = testFactoryDailyQuotaPolicy({
+  repositories: [
+    {
+      repositoryId: "riadmefti/agentlab",
+      maximumTasksPerDay: 3,
+      maximumDraftPullRequestsPerDay: 3,
+      budget: testFactoryScheduleBudget()
+    }
+  ]
+});
 const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
   keyId: testDigest("8"),
   workerUserId: 1_001,
@@ -24,6 +38,7 @@ const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
 });
 const codec = new NodeFactoryDocumentCodec();
 const schedulePolicyDigest = codec.schedulePolicy(schedulePolicy).digest;
+const dailyQuotaPolicyDigest = codec.dailyQuotaPolicy(dailyQuotaPolicy).digest;
 const roleIdentityPolicyDigest = codec.roleIdentityPolicy(roleIdentityPolicy).digest;
 const policyBundleDigest = testDigest("c");
 
@@ -45,7 +60,7 @@ describe("factory broker PR-maintenance tick CLI runner", () => {
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
-  it("requires config v3 before constructing the broker runtime", async () => {
+  it("requires config v4 before constructing the broker runtime", async () => {
     const loadConfig = vi.fn(() => Promise.resolve(v1Config()));
     const createRuntime = vi.fn(() => runtime(Promise.resolve(preflight()), idle()));
 
@@ -57,7 +72,7 @@ describe("factory broker PR-maintenance tick CLI runner", () => {
         policyBundleDigest,
         { loadConfig, createRuntime, write: vi.fn() }
       )
-    ).rejects.toThrow(/config v3/u);
+    ).rejects.toThrow(/config v4/u);
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
@@ -279,9 +294,11 @@ function completed(): FactoryCanaryPullRequestMaintenanceTickReport {
 function config(): LocalFactoryBrokerConfig {
   return {
     ...v1Config(),
-    schemaVersion: "agentlab.local-factory-broker.v3",
+    schemaVersion: "agentlab.local-factory-broker.v4",
     costPolicyPath: "/private/agentlab/cost-policy.json",
     schedulePolicyPath: "/private/agentlab/schedule-policy.json",
+    dailyQuotaPolicyPath: "/private/agentlab/daily-quota-policy.json",
+    expectedDailyQuotaPolicyDigest: dailyQuotaPolicyDigest,
     roleIdentityPolicyPath: "/private/agentlab/role-identities.json",
     expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
     costPolicy: {
@@ -291,6 +308,7 @@ function config(): LocalFactoryBrokerConfig {
       rules: []
     },
     schedulePolicy,
+    dailyQuotaPolicy,
     roleIdentityPolicy
   };
 }

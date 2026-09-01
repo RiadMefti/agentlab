@@ -52,7 +52,9 @@ export async function runFactoryWorkerRepairPullRequest(
     reasonCodes = [
       ...preflight.reasonCodes.filter(
         (reasonCode) =>
-          reasonCode !== "scheduler-disabled" && reasonCode !== "schedule-policy-unconfigured"
+          reasonCode !== "scheduler-disabled" &&
+          reasonCode !== "schedule-policy-unconfigured" &&
+          reasonCode !== "daily-quota-policy-unconfigured"
       ),
       ...(preflight.roleIdentityPolicyDigest === null ? ["role-identity-policy-unconfigured"] : []),
       ...(preflight.policyBundleDigest === expectedPolicyBundleDigest

@@ -290,6 +290,7 @@ async function main(): Promise<void> {
     process.exitCode = await runFactorySchedulerTick(
       action.configPath,
       action.expectedSchedulePolicyDigest,
+      action.expectedDailyQuotaPolicyDigest,
       action.expectedFactoryPolicyBundleDigest
     );
     return;

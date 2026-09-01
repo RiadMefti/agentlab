@@ -149,8 +149,9 @@ export class SqliteFactoryCanaryPullRequestMaintenanceQueue implements FactoryCa
                = 'agentlab.pull-request-dispatch.v2'
              AND reservation.repository_id = ?
              AND reservation.stage = 'brokered-draft-pr'
-             AND json_extract(finished.event_json, '$.schemaVersion')
-               = 'agentlab.schedule-event.v2'
+             AND json_extract(finished.event_json, '$.schemaVersion') IN (
+               'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+             )
              AND json_extract(finished.event_json, '$.result') = 'ready-for-broker'
              AND (
                SELECT task_event.to_state

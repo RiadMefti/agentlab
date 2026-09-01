@@ -81,11 +81,11 @@ App ID for each required `verify` and `factory-sandbox` context. Config v1 remai
 cost-blocked. Config v2 additionally points to a separate canonical owner-only cost-policy file so
 future broker and worker processes can load the same rate card without sharing credentials. The
 loader strictly parses `agentlab.cost-policy.v1` before runtime construction. Config v3 additionally
-loads the same separately protected schedule and role-identity policies as the worker and pins the
-expected role-policy digest; it is required for scheduled canary dispatch. A matching check name
-from another App does not count. Config, policies, and key reject symlinks, hard links, non-owner
-permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
-fresh mutable bytes that the signer erases after one signature.
+loads the same separately protected schedule and role-identity policies as the worker. Config v4 is
+required for scheduled canary dispatch and also loads and pins the reviewed daily aggregate quota
+policy. A matching check name from another App does not count. Config, policies, and key reject
+symlinks, hard links, non-owner permissions, unstable metadata, non-canonical paths, and oversized
+input. Each key read returns fresh mutable bytes that the signer erases after one signature.
 
 Human enablement is a fourth exact runtime package entry, `@agentlab/runtime/factory-authority`. Its
 strict owner-only `agentlab.local-factory-authority.v1` config contains only a durable database path
@@ -118,21 +118,21 @@ command; then compare-and-set disable even when the draft attempt fails. The bro
 preflight and inner rechecks remain authoritative throughout.
 
 The distinct `broker-open-canary-draft` command replaces the per-task confirmation only for a
-scheduled task with an exact `brokered-draft-pr` reservation. It requires broker config v3 plus the
+scheduled task with an exact `brokered-draft-pr` reservation. It requires broker config v4 plus the
 reservation, schedule-policy, role-policy, and factory-policy digests. The broker independently
-proves the unexpired reservation and exact completed scheduler handoff before dispatch and every
-resumable checkpoint. Scheduled tasks cannot use the manual command, and non-scheduled tasks cannot
-present canary authority. This command does not enable the broker, discover work, install a timer,
-merge, or release.
+proves the unexpired canary and daily quota reservations and exact completed scheduler handoff
+before dispatch and every resumable checkpoint. Scheduled tasks cannot use the manual command, and
+non-scheduled tasks cannot present canary authority. This command does not enable the broker,
+discover work, install a timer, merge, or release.
 
 The separate one-shot `broker-canary-tick` command projects pending work by joining immutable
 completed scheduler handoffs to absent or incomplete dispatch journals. It does not create a second
-mutable queue. Config v3 and exact schedule, role, and factory-policy pins are mandatory. One tick
-inspects at most `maximumCandidatesPerTick`, attempts at most `maximumTasksPerTick`, prioritizes
-current authority and then crash recovery within that class, and routes every candidate through the
-same reservation-revalidating draft service. Expiry and deterministic denial produce attention
-output; a denial stops the remaining page. The command cannot enable authority, install a timer,
-merge, or release.
+mutable queue. Config v4 and exact schedule, daily-quota, role, and factory-policy pins are
+mandatory. One tick inspects at most `maximumCandidatesPerTick`, attempts at most
+`maximumTasksPerTick`, prioritizes current authority and then crash recovery within that class, and
+routes every candidate through the same reservation-revalidating draft service. Expiry and
+deterministic denial produce attention output; a denial stops the remaining page. The command cannot
+enable authority, install a timer, merge, or release.
 
 The separate one-shot `broker-pr-maintenance-tick` command projects exact open schema-v2 canary PR
 heads from completed scheduler handoffs, latest durable PR lineage, and append-only evidence. One
@@ -314,21 +314,21 @@ The one-shot `worker-pr-repair-tick` command automates only that credentialless 
 Its read projection prioritizes any nonterminal repair journal over fresh work, including across
 scheduler, cost, identity, or host-readiness blockers. Fresh entries must join an exact actionable
 slot-bound canary observation and authorization to current schema-v2 PR lineage, scheduler handoff,
-reservation, broker, and schedule/role/factory policies. Config v3 and caller pins are mandatory.
-Before model work, the command requires ready worker preflight and current canary authority, and
-conservatively reserves the task's complete contract budget against the schedule tick budget. The
-existing repair journal, isolation, gates, distinct reviewer, cumulative task budget, and no-retry
-semantics remain authoritative. It stops at `pr-proposed` and cannot reach GitHub or mutate
-authority.
+reservation, broker, and schedule/quota/role/factory policies. Config v4 and caller pins are
+mandatory. Before model work, the command requires ready worker preflight and current canary
+authority, and conservatively reserves the task's complete contract budget against the schedule tick
+budget. The existing repair journal, isolation, gates, distinct reviewer, cumulative task budget,
+and no-retry semantics remain authoritative. It stops at `pr-proposed` and cannot reach GitHub or
+mutate authority.
 
 The one-shot `broker-pr-update-tick` command closes the scheduled repair handoff without weakening
 the broker boundary. Its read projection places every nonterminal update journal before fresh work.
 Fresh candidates must join an exact completed repair to its maintenance observation and
-authorization, current schema-v2 PR head, reservation, completed scheduler handoff, scheduled R1
-task, broker, and schedule/role/factory policy pins. The existing update service remains the sole
-write path: it journals before mutation, performs a deterministic non-force child update, verifies
-and authenticates the new head, and returns the task to `pr-open` for another slot-bound
-observation. Candidate and action counts are schedule-bounded. The command has no model,
+authorization, current schema-v2 PR head, canary and daily quota reservations, completed scheduler
+handoff, scheduled R1 task, broker, and schedule/quota/role/factory policy pins. The existing update
+service remains the sole write path: it journals before mutation, performs a deterministic non-force
+child update, verifies and authenticates the new head, and returns the task to `pr-open` for another
+slot-bound observation. Candidate and action counts are schedule-bounded. The command has no model,
 authority-mutation, merge, release, deployment, or timer-installation port.
 
 The separate `broker-update-draft` command binds the owner-only broker config, task UUID, exact
@@ -360,14 +360,14 @@ at `pr-proposed`, emits only a compact non-secret report, and cannot reach GitHu
 credentials, control mutation, merge, or release capability.
 
 The `scheduler-tick` command is a one-shot local reconciliation operation, not an embedded daemon.
-It requires the exact loaded schedule-policy digest and factory-policy digest. The scheduler
-resolves the latest daily UTC slot, refuses to create a run beyond its bounded start deadline, but
-may resume an already-created run after that deadline. Before resolving a new slot, it reconciles
-the single oldest open run even across a UTC day boundary. More than one open run is an integrity
-failure, and an open run pinned to different schedule or factory policy blocks new work for operator
-recovery. A wall clock behind the open run or its latest event also blocks before worker execution.
-SQLite version 11 gives each stable schedule ID/slot pair one immutable run and this append-only
-chain:
+It requires the exact loaded schedule-policy, daily-quota-policy, and factory-policy digests. The
+scheduler resolves the latest daily UTC slot, refuses to create a run beyond its bounded start
+deadline, but may resume an already-created run after that deadline. Before resolving a new slot, it
+reconciles the single oldest open run even across a UTC day boundary. More than one open run is an
+integrity failure, and an open run pinned to different schedule or factory policy blocks new work
+for operator recovery. A wall clock behind the open run or its latest event also blocks before
+worker execution. SQLite version 11 gives each stable schedule ID/slot pair one immutable run and
+this append-only chain:
 
 ```text
 registered/ready
@@ -377,20 +377,26 @@ registered/ready
 ```
 
 Only intake requests whose immutable trigger is `scheduled` are eligible. Before selection,
-preflight requires the scheduler switch, exact role-identity, schedule, and factory policy pins,
-complete cost policy, and a healthy isolated worker host. Each claim durably binds the request and
-authority digests, reserves the task's complete authority budget ceiling against the per-tick
-aggregate quota, and records a fresh task correlation before any model work. A crash or lost result
-leaves `task-active`; retry invokes the existing journal-aware task runner with that same
-correlation. Duplicate ticks read the completed slot without selecting or running work again. The
-single SQLite writer lease prevents overlapping local schedulers, and database uniqueness remains
-the final idempotency guard. The scheduler has no broker, remote credential, authority mutation,
-merge, or release capability and stops every successful task at `pr-proposed`. AgentLab does not
-install a timer; an owner-governed system timer must invoke this one-shot command with the reviewed
-digests. Scheduled activation requires worker config v3 and a canonical policy that proves a
-non-root worker UID distinct from the eval-attestor UID before persistence is opened; preflight
-rechecks and reports that policy digest, and schedule-run v2 persists it across crashes. See
+preflight requires the scheduler switch, exact role-identity, schedule, daily-quota, and factory
+policy pins, complete cost policy, and a healthy isolated worker host. Each claim durably binds the
+request and authority digests, first reserves the task's complete authority budget ceiling plus one
+possible draft against repository/day and organization/day ceilings, reserves the same budget
+against the per-tick aggregate quota, and records a durable task correlation before any model work.
+Daily reservations are append-only and never released. A crash or lost result leaves `task-active`;
+retry invokes the existing journal-aware task runner with that same correlation. Duplicate ticks
+read the completed slot without selecting or running work again. The single SQLite writer lease
+prevents overlapping local schedulers, and database uniqueness remains the final idempotency guard.
+The scheduler has no broker, remote credential, authority mutation, merge, or release capability and
+stops every successful task at `pr-proposed`. AgentLab does not install a timer; an owner-governed
+system timer must invoke this one-shot command with the reviewed digests. Scheduled activation
+requires worker config v4, a separately reviewed daily quota policy, and a canonical role policy
+that proves a non-root worker UID distinct from the eval-attestor UID before persistence is opened;
+preflight rechecks and reports both policy digests, and schedule-run/event v3 persists the quota
+reservation across crashes. SQLite schema 27 atomically enforces exact canary/run/repository/budget
+linkage and all repository and organization UTC-day ceilings. The broker independently proves that
+same reservation before scheduled remote writes. See
 [ADR 0011](decisions/0011-enforced-signer-worker-identities.md) and
+[ADR 0030](decisions/0030-durable-daily-aggregate-quotas.md) and
 [Local factory scheduler operations](factory-operations.md).
 
 Configuration promotion is a separate four-process boundary accepted by
@@ -440,15 +446,16 @@ exact v2 cohort, signature, role-policy, evaluated candidate, schedule/policy/sk
 repository, R0/R1 ceiling, preparation authority, and current validity before atomically reserving a
 scheduled task's complete budget. SQLite version 15 makes reservations immutable and enforces
 aggregate cohort task and budget ceilings inside the insert transaction. Admission has no model,
-process, GitHub, broker, merge, or release capability. New schedule claims are schema-v2 events
-carrying the exact reservation digest. SQLite version 16 rejects missing, mismatched, read-only,
-expired, or insufficient-lifetime claims and binds completion to the same digest. The worker
-independently reloads and validates the reservation before every resumable preparation or execution
-phase. Legacy unbound active claims cannot resume. SQLite version 17 extends the same chain through
-the credential boundary: every scheduled initial dispatch is schema v2, stores the reservation plus
-schedule and role-policy digests, requires the exact completed `ready-for-broker` scheduler handoff,
-and is revalidated before each broker checkpoint. Manual dispatch remains schema v1. See
-[ADR 0012](decisions/0012-attested-canary-authority.md),
+process, GitHub, broker, merge, or release capability. New schedule claims are schema-v3 events
+carrying the exact canary and daily quota reservation digests. SQLite version 16 rejects missing,
+mismatched, read-only, expired, or insufficient-lifetime claims and binds completion to the same
+digest. The worker independently reloads and validates the reservation before every resumable
+preparation or execution phase. SQLite version 27 additionally binds the quota reservation before
+model work and through completion. Legacy unbound active claims cannot resume. SQLite version 17
+extends the same chain through the credential boundary: every scheduled initial dispatch is schema
+v2, stores the reservation plus schedule and role-policy digests, requires the exact completed
+`ready-for-broker` scheduler handoff, and is revalidated before each broker checkpoint. Manual
+dispatch remains schema v1. See [ADR 0012](decisions/0012-attested-canary-authority.md),
 [ADR 0013](decisions/0013-durable-canary-task-admission.md),
 [ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
 [ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
@@ -666,41 +673,43 @@ authority, worker, or broker commands. Current branch protection requires exact 
 and deletion. It still has zero required approvals, does not require approval of the latest push,
 and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
 blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v3 can provision reviewed cost,
-schedule, and role policies for canary dispatch; actual rates, authority config, and broker-key
-provisioning remain activation prerequisites. An incomplete usage record already denies PR creation,
-and each explicit write command refuses a blocked preflight or unexpected policy digest. Governed
-intake is implemented but no live intake configuration or task has been provisioned. No live agent
-task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
-plus deterministic repair admission and fresh credentialless repair execution are implemented.
-Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
-re-observation are implemented. A bounded daily-slot consumer joins scheduled canary PRs to
-authenticated observations and deterministic repair admission, and a recovery-first credentialless
-consumer now turns exact authorizations into gated local repair proposals. A separate recovery-first
-broker consumer publishes those proposals through the existing durable non-force update service and
-returns them to exact-head observation. Durable bounded daily maintenance discovery, automatic
-consumption of pre-existing human cohort authority, and a separate offline sandboxed eval producer
-are implemented. A separate bounded external pull-request inventory now journals stable heads and
-changed paths with a read-only App. A separate credentialless consumer can reconstruct exact locally
-present patches, run independent reviewed skills in isolated provider sessions, and journal complete
-local review evidence, but it cannot fetch, approve, repair, push, merge, or release. A third,
-feedback-only broker can publish an exact completed bundle as deterministic `COMMENT` feedback and
-reconcile an uncertain write without granting approval, repair, branch mutation, merge, or release
-authority. A fourth credentialless plane can make a bounded immutable repair-admission decision from
-that completed feedback. A fifth credentialless plane consumes that exact selectors-only
-authorization once and records a bounded local patch bundle after closing its isolated workspace.
-Strict post-repair gates and independent review are implemented in a sixth credentialless plane; a
-seventh separately credentialed plane can publish only qualified repairs as contributor-safe
-replacement drafts. None of the external-PR stages is part of the daily chain or provisioned with
-live policy, skills, rates, object mirroring, or accounts. The eval producer has no provisioned
-harness, fixture, candidate, job, or account. Repository/day and organization/day quotas, a
-secretless hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary
-comparison, merge, release, rollback, and incident automation remain later stages. A read-only
-daily-cycle compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab
-executable digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It
-emits a content-addressed system-level systemd bundle whose non-persistent UTC timer chains
-fixed-argv one-shot services across separate UIDs, stops on any nonzero result, signals an incident
-target, and finally re-observes the last published head. Every stage first runs fixed
+the repository ships no live config or provider/model rates. Config v4 can provision reviewed cost,
+schedule, daily aggregate quota, and role policies for canary dispatch; actual rates, authority
+config, and broker-key provisioning remain activation prerequisites. An incomplete usage record
+already denies PR creation, and each explicit write command refuses a blocked preflight or
+unexpected policy digest. Governed intake is implemented but no live intake configuration or task
+has been provisioned. No live agent task or PR has been created by this code. Bounded PR-head
+observation and durable feedback evidence plus deterministic repair admission and fresh
+credentialless repair execution are implemented. Brokered repaired-branch update, crash
+reconciliation, authenticated head-lineage advancement, and re-observation are implemented. A
+bounded daily-slot consumer joins scheduled canary PRs to authenticated observations and
+deterministic repair admission, and a recovery-first credentialless consumer now turns exact
+authorizations into gated local repair proposals. A separate recovery-first broker consumer
+publishes those proposals through the existing durable non-force update service and returns them to
+exact-head observation. Durable bounded daily maintenance discovery, automatic consumption of
+pre-existing human cohort authority, and a separate offline sandboxed eval producer are implemented.
+A separate bounded external pull-request inventory now journals stable heads and changed paths with
+a read-only App. A separate credentialless consumer can reconstruct exact locally present patches,
+run independent reviewed skills in isolated provider sessions, and journal complete local review
+evidence, but it cannot fetch, approve, repair, push, merge, or release. A third, feedback-only
+broker can publish an exact completed bundle as deterministic `COMMENT` feedback and reconcile an
+uncertain write without granting approval, repair, branch mutation, merge, or release authority. A
+fourth credentialless plane can make a bounded immutable repair-admission decision from that
+completed feedback. A fifth credentialless plane consumes that exact selectors-only authorization
+once and records a bounded local patch bundle after closing its isolated workspace. Strict
+post-repair gates and independent review are implemented in a sixth credentialless plane; a seventh
+separately credentialed plane can publish only qualified repairs as contributor-safe replacement
+drafts. None of the external-PR stages is part of the daily chain or provisioned with live policy,
+skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness, fixture,
+candidate, job, or account. Host-local repository/day and organization/day quotas are implemented in
+the shared SQLite control plane; cross-host/global coordination, a secretless hosted-provider eval
+gateway, owner-provisioned activation, telemetry-driven canary comparison, merge, release, rollback,
+and incident automation remain later stages. A read-only daily-cycle compiler now requires one v3
+owner-only manifest and verifies reviewed policy digests, including daily aggregate quotas, plus the
+AgentLab executable digest, distinct worker, broker, and attestor UIDs, repair ceilings, and
+timeouts. It emits a content-addressed system-level systemd bundle whose non-persistent UTC timer
+chains fixed-argv one-shot services across separate UIDs, stops on any nonzero result, signals an
+incident target, and finally re-observes the last published head. Every stage first runs fixed
 `/usr/bin/sha256sum` argv against the generated exact executable check record, so binary drift stops
 before AgentLab runs. The renderer cannot write or install artifacts, call the service manager,
 change authority, or touch the ledger. Deterministic assessment, bounded non-release cohort

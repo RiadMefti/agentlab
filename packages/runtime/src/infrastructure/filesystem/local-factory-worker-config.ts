@@ -3,6 +3,7 @@ import { isAbsolute, parse, resolve } from "node:path";
 import {
   sha256DigestSchema,
   type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
   type FactorySchedulePolicy
 } from "@agentlab/contracts";
@@ -10,8 +11,10 @@ import { z } from "zod";
 
 import type { FactoryGateDefinition } from "../../domain/factory-gate.js";
 import type { FactoryAgentProviderBinding } from "../providers/pinned-factory-agent-provider-resolver.js";
+import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
+import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
 import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
 import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
@@ -111,7 +114,18 @@ const configV3Schema = commonConfigSchema
   })
   .superRefine(validateWorkerConfig);
 
-const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema]);
+const configV4Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v4"),
+    schedulePolicyPath: absolutePathSchema,
+    dailyQuotaPolicyPath: absolutePathSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema, configV4Schema]);
 
 const requiredGateEvidence = {
   format: "test",
@@ -158,6 +172,7 @@ type ParsedLocalFactoryWorkerConfig = z.infer<typeof configSchema>;
 export type LocalFactoryWorkerConfig = ParsedLocalFactoryWorkerConfig & {
   readonly costPolicy: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
@@ -186,15 +201,30 @@ export async function loadLocalFactoryWorkerConfig(
       : config.schemaVersion === "agentlab.local-factory-worker.v3" &&
           config.schedulePolicyPath !== undefined
         ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
-        : undefined;
+        : config.schemaVersion === "agentlab.local-factory-worker.v4"
+          ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+          : undefined;
+  const dailyQuotaPolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v4"
+      ? await loadLocalFactoryDailyQuotaPolicy(config.dailyQuotaPolicyPath)
+      : undefined;
   const roleIdentityPolicy =
-    config.schemaVersion === "agentlab.local-factory-worker.v3"
+    config.schemaVersion === "agentlab.local-factory-worker.v3" ||
+    config.schemaVersion === "agentlab.local-factory-worker.v4"
       ? await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
       : undefined;
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v4" &&
+    (dailyQuotaPolicy === undefined ||
+      encodeCanonicalDocument(dailyQuotaPolicy).digest !== config.expectedDailyQuotaPolicyDigest)
+  ) {
+    throw new Error("Factory worker daily quota policy changed after review.");
+  }
   return {
     ...config,
     costPolicy,
     ...(schedulePolicy === undefined ? {} : { schedulePolicy }),
+    ...(dailyQuotaPolicy === undefined ? {} : { dailyQuotaPolicy }),
     ...(roleIdentityPolicy === undefined ? {} : { roleIdentityPolicy })
   };
 }

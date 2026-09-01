@@ -61,15 +61,17 @@ authority during an incident. Live accounts, files, policies, rates, GitHub App,
 governance, unit installation, monitoring, and switch enablement remain owner responsibilities. At
 this decision's v1 boundary, maintenance discovery was still absent. ADR 0021 adds a compatible v2
 manifest that prepends bounded discovery and consumption of existing human cohort authority. Fleet
-quotas, merge, release, canary telemetry, rollback, and incident automation remain separate future
-capabilities.
+quotas were still absent at that boundary. ADR 0030 adds a v3 manifest with host-local repository
+and organization daily quotas; v1/v2 remain readable for audit but can no longer render an
+executable cycle. Cross-host quotas, merge, release, canary telemetry, rollback, and incident
+automation remain separate future capabilities.
 
 ## Fitness functions
 
 Contract tests reject extra fields, identity collapse, and unit-file injection. Compiler tests prove
 the exact role sequence, bounded rounds, final head observation, systemd escaping, policy budgets,
-timeouts, and stop-on-failure links. Configuration tests cover owner-only files, canonical paths,
-stable executable hashing, and policy drift. Public-API and CLI tests keep rendering isolated from
-interactive, worker, and broker compositions. The opt-in factory host suite passes every generated
-unit together through the installed `systemd-analyze verify` parser and proves the generated
-checksum with the installed verifier.
+timeouts, quota pinning, legacy-manifest refusal, and stop-on-failure links. Configuration tests
+cover owner-only files, canonical paths, stable executable hashing, and policy drift. Public-API and
+CLI tests keep rendering isolated from interactive, worker, and broker compositions. The opt-in
+factory host suite passes every generated unit together through the installed
+`systemd-analyze verify` parser and proves the generated checksum with the installed verifier.

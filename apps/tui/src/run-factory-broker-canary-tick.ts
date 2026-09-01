@@ -37,8 +37,8 @@ export async function runFactoryBrokerCanaryTick(
     expectedFactoryPolicyBundleDigest
   );
   const config = await dependencies.loadConfig(configPath);
-  if (config.schemaVersion !== "agentlab.local-factory-broker.v3") {
-    throw new Error("Factory canary broker tick requires broker config v3.");
+  if (config.schemaVersion !== "agentlab.local-factory-broker.v4") {
+    throw new Error("Factory canary broker tick requires broker config v4 with daily quotas.");
   }
   const runtime = dependencies.createRuntime(config);
   let preflight: FactoryBrokerPreflight;

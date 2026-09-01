@@ -651,6 +651,7 @@ describe("terminal CLI", () => {
 
   it("requires exact schedule and factory policy pins for one scheduler tick", () => {
     const schedulePolicy = `sha256:${"1".repeat(64)}`;
+    const dailyQuotaPolicy = `sha256:${"3".repeat(64)}`;
     const factoryPolicy = `sha256:${"2".repeat(64)}`;
     expect(
       parseCliArguments([
@@ -660,6 +661,8 @@ describe("terminal CLI", () => {
         "/private/agentlab/worker.json",
         "--schedule-policy",
         schedulePolicy,
+        "--daily-quota",
+        dailyQuotaPolicy,
         "--policy",
         factoryPolicy
       ])
@@ -667,6 +670,7 @@ describe("terminal CLI", () => {
       kind: "factory-scheduler-tick",
       configPath: "/private/agentlab/worker.json",
       expectedSchedulePolicyDigest: schedulePolicy,
+      expectedDailyQuotaPolicyDigest: dailyQuotaPolicy,
       expectedFactoryPolicyBundleDigest: factoryPolicy
     });
     expect(() =>

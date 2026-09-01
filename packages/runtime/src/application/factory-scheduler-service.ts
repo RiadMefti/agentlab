@@ -3,6 +3,7 @@ import {
   sha256DigestSchema,
   type FactoryBudgetUsage,
   type FactoryCanaryTaskReservation,
+  type FactoryDailyQuotaPolicy,
   type FactoryScheduleEvent,
   type FactorySchedulePolicy,
   type Sha256Digest
@@ -18,6 +19,7 @@ import type {
   FactoryCanaryReservationRepository,
   FactoryCanaryReservationSnapshot
 } from "../domain/factory-canary-reservation-repository.js";
+import { factoryDailyQuotaWindow } from "../domain/factory-daily-quota-integrity.js";
 import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
@@ -41,20 +43,26 @@ import type {
   FactoryWorkerTaskRunner,
   FactoryWorkerTaskRunReport
 } from "./factory-worker-task-runner.js";
+import type {
+  FactoryDailyQuotaReservationOutcome,
+  FactoryDailyQuotaService
+} from "./factory-daily-quota-service.js";
 
 const schedulerTickCommandSchema = z
   .object({
     expectedSchedulePolicyDigest: sha256DigestSchema,
-    expectedFactoryPolicyBundleDigest: sha256DigestSchema
+    expectedFactoryPolicyBundleDigest: sha256DigestSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema
   })
   .strict();
 
 export interface FactorySchedulerTickReport {
-  readonly schemaVersion: "agentlab.scheduler-tick-result.v2";
+  readonly schemaVersion: "agentlab.scheduler-tick-result.v3";
   readonly status: "completed" | "already-completed" | "missed-deadline" | "blocked";
   readonly schedulePolicyDigest: Sha256Digest;
   readonly factoryPolicyBundleDigest: Sha256Digest;
   readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly dailyQuotaPolicyDigest: Sha256Digest;
   readonly scheduledFor: string;
   readonly deadlineAt: string;
   readonly runId: string | null;
@@ -70,6 +78,7 @@ export interface FactorySchedulerServiceDependencies {
   readonly schedulePolicy: CanonicalFactoryDocument<FactorySchedulePolicy>;
   readonly factoryPolicyBundleDigest: Sha256Digest;
   readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly dailyQuotaPolicy: CanonicalFactoryDocument<FactoryDailyQuotaPolicy>;
   readonly schedules: FactoryScheduleRepository;
   readonly preparations: Pick<FactoryPreparationRepository, "findById" | "listScheduled">;
   readonly reservations: Pick<
@@ -78,6 +87,7 @@ export interface FactorySchedulerServiceDependencies {
   >;
   readonly worker: Pick<FactoryWorkerOperator, "preflight">;
   readonly taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
+  readonly dailyQuotas: Pick<FactoryDailyQuotaService, "reserve" | "requireReservation">;
   readonly documents: Pick<
     FactoryDocumentCodec,
     "schedulePolicy" | "scheduleRun" | "scheduleEvent" | "canaryTaskReservation"
@@ -128,6 +138,7 @@ export class FactorySchedulerService {
           this.dependencies.schedulePolicy.digest,
           this.dependencies.factoryPolicyBundleDigest,
           this.dependencies.roleIdentityPolicyDigest,
+          this.dependencies.dailyQuotaPolicy.digest,
           slot.scheduledFor,
           slot.deadlineAt,
           ["schedule-start-deadline-missed"]
@@ -143,6 +154,7 @@ export class FactorySchedulerService {
             this.dependencies.schedulePolicy.digest,
             this.dependencies.factoryPolicyBundleDigest,
             this.dependencies.roleIdentityPolicyDigest,
+            this.dependencies.dailyQuotaPolicy.digest,
             slot.scheduledFor,
             slot.deadlineAt,
             preflight.reasonCodes
@@ -159,6 +171,13 @@ export class FactorySchedulerService {
       return this.#report("blocked", snapshot, [activeBlockReason]);
     }
     snapshot = await this.#finishActiveTask(snapshot);
+    if (
+      factoryTimestampSchema.parse(this.dependencies.now()) >=
+      factoryDailyQuotaWindow(snapshot.run.scheduledFor).windowEnd
+    ) {
+      snapshot = await this.#complete(snapshot);
+      return this.#report("completed", snapshot, []);
+    }
 
     const policy = this.dependencies.schedulePolicy.value;
     const selectedTaskIds = new Set(
@@ -200,7 +219,23 @@ export class FactorySchedulerService {
         selectedTaskIds.add(candidate.request.taskId);
         continue;
       }
-      snapshot = await this.#claim(snapshot, candidate, reservation);
+      const taskCorrelationId = this.dependencies.createId();
+      const quota = await this.dependencies.dailyQuotas.reserve({
+        repositoryId: candidate.request.repository.id,
+        taskId: candidate.request.taskId,
+        scheduleRunId: snapshot.run.runId,
+        scheduleRunDigest: snapshot.runDigest,
+        canaryReservationDigest: reservation.reservationDigest,
+        scheduledFor: snapshot.run.scheduledFor,
+        budget: reservationDocument.value.budget,
+        correlationId: taskCorrelationId
+      });
+      if (quota.status === "denied") {
+        snapshot = await this.#skip(snapshot, candidate, quota.reasonCode);
+        selectedTaskIds.add(candidate.request.taskId);
+        continue;
+      }
+      snapshot = await this.#claim(snapshot, candidate, reservation, quota);
       selectedTaskIds.add(candidate.request.taskId);
       claims += 1;
       const claimedBlockReason = await this.#activeTaskBlockReason(snapshot);
@@ -220,6 +255,9 @@ export class FactorySchedulerService {
     if (command.expectedFactoryPolicyBundleDigest !== this.dependencies.factoryPolicyBundleDigest) {
       throw new ConflictError("Factory policy bundle changed after scheduler review.");
     }
+    if (command.expectedDailyQuotaPolicyDigest !== this.dependencies.dailyQuotaPolicy.digest) {
+      throw new ConflictError("Factory daily quota policy changed after scheduler review.");
+    }
   }
 
   #assertPreflight(preflight: FactoryWorkerPreflight): void {
@@ -227,6 +265,7 @@ export class FactorySchedulerService {
       preflight.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest ||
       preflight.schedulePolicyDigest !== this.dependencies.schedulePolicy.digest ||
       preflight.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest ||
+      preflight.dailyQuotaPolicyDigest !== this.dependencies.dailyQuotaPolicy.digest ||
       !preflight.schedulerEnabled ||
       !preflight.costPolicyConfigured ||
       !preflight.hostReady
@@ -241,12 +280,13 @@ export class FactorySchedulerService {
     createdAt: string
   ): Promise<FactoryScheduleRunSnapshot> {
     const run = this.dependencies.documents.scheduleRun({
-      schemaVersion: "agentlab.schedule-run.v2",
+      schemaVersion: "agentlab.schedule-run.v3",
       runId: this.dependencies.createId(),
       schedulePolicyDigest: this.dependencies.schedulePolicy.digest,
       schedulePolicy: this.dependencies.schedulePolicy.value,
       factoryPolicyBundleDigest: this.dependencies.factoryPolicyBundleDigest,
       roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: this.dependencies.dailyQuotaPolicy.digest,
       scheduledFor,
       deadlineAt,
       createdAt,
@@ -280,20 +320,21 @@ export class FactorySchedulerService {
   async #claim(
     snapshot: FactoryScheduleRunSnapshot,
     candidate: FactoryPreparationSnapshot,
-    reservation: FactoryCanaryReservationSnapshot
+    reservation: FactoryCanaryReservationSnapshot,
+    quota: Extract<FactoryDailyQuotaReservationOutcome, { readonly status: "reserved" }>
   ): Promise<FactoryScheduleRunSnapshot> {
-    const taskCorrelationId = this.dependencies.createId();
     return this.#append(snapshot, {
       ...this.#nextEvent(snapshot),
-      schemaVersion: "agentlab.schedule-event.v2",
+      schemaVersion: "agentlab.schedule-event.v3",
       kind: "task-claimed",
       from: "ready",
       to: "task-active",
       taskId: candidate.request.taskId,
       requestDigest: candidate.requestDigest,
       authorityDigest: candidate.authorityDigest,
-      taskCorrelationId,
+      taskCorrelationId: quota.snapshot.reservation.correlationId,
       canaryReservationDigest: reservation.reservationDigest,
+      dailyQuotaReservationDigest: quota.snapshot.reservationDigest,
       reservation: reservation.reservation.budget,
       reasonCode: "scheduled-task-claimed"
     });
@@ -322,7 +363,7 @@ export class FactorySchedulerService {
   ): Promise<FactoryScheduleRunSnapshot> {
     if (snapshot.state !== "task-active") return snapshot;
     const claim = snapshot.lastEvent;
-    if (claim.kind !== "task-claimed" || claim.schemaVersion !== "agentlab.schedule-event.v2") {
+    if (claim.kind !== "task-claimed" || claim.schemaVersion !== "agentlab.schedule-event.v3") {
       throw new Error("Active factory schedule run is missing its canary-bound task claim.");
     }
     const result = await this.dependencies.taskRunner.run({
@@ -334,13 +375,14 @@ export class FactorySchedulerService {
     this.#assertTaskResult(claim, result);
     return this.#append(snapshot, {
       ...this.#nextEvent(snapshot),
-      schemaVersion: "agentlab.schedule-event.v2",
+      schemaVersion: "agentlab.schedule-event.v3",
       kind: "task-finished",
       from: "task-active",
       to: "ready",
       taskId: claim.taskId,
       taskCorrelationId: claim.taskCorrelationId,
       canaryReservationDigest: claim.canaryReservationDigest,
+      dailyQuotaReservationDigest: claim.dailyQuotaReservationDigest,
       result: result.status,
       preparationState: result.preparationState,
       taskState: result.taskState,
@@ -413,11 +455,12 @@ export class FactorySchedulerService {
   #runUsesCurrentPolicies(snapshot: FactoryScheduleRunSnapshot): boolean {
     const storedPolicy = this.dependencies.documents.schedulePolicy(snapshot.run.schedulePolicy);
     return (
-      snapshot.run.schemaVersion === "agentlab.schedule-run.v2" &&
+      snapshot.run.schemaVersion === "agentlab.schedule-run.v3" &&
       storedPolicy.digest === snapshot.run.schedulePolicyDigest &&
       snapshot.run.schedulePolicyDigest === this.dependencies.schedulePolicy.digest &&
       snapshot.run.factoryPolicyBundleDigest === this.dependencies.factoryPolicyBundleDigest &&
-      snapshot.run.roleIdentityPolicyDigest === this.dependencies.roleIdentityPolicyDigest
+      snapshot.run.roleIdentityPolicyDigest === this.dependencies.roleIdentityPolicyDigest &&
+      snapshot.run.dailyQuotaPolicyDigest === this.dependencies.dailyQuotaPolicy.digest
     );
   }
 
@@ -454,8 +497,8 @@ export class FactorySchedulerService {
     if (claim.kind !== "task-claimed") {
       throw new Error("Active factory schedule run is missing its exact task claim.");
     }
-    if (claim.schemaVersion !== "agentlab.schedule-event.v2") {
-      return "legacy-schedule-claim-unreserved";
+    if (claim.schemaVersion !== "agentlab.schedule-event.v3") {
+      return "legacy-schedule-claim-without-daily-quota";
     }
     const [candidate, reservation] = await Promise.all([
       this.dependencies.preparations.findById(claim.taskId),
@@ -464,6 +507,17 @@ export class FactorySchedulerService {
     if (candidate === null || reservation === null) return "canary-reservation-missing";
     this.#assertCandidate(candidate);
     const document = this.#assertReservation(candidate, reservation);
+    await this.dependencies.dailyQuotas.requireReservation({
+      repositoryId: candidate.request.repository.id,
+      taskId: candidate.request.taskId,
+      scheduleRunId: snapshot.run.runId,
+      scheduleRunDigest: snapshot.runDigest,
+      canaryReservationDigest: claim.canaryReservationDigest,
+      scheduledFor: snapshot.run.scheduledFor,
+      budget: document.value.budget,
+      correlationId: claim.taskCorrelationId,
+      reservationDigest: claim.dailyQuotaReservationDigest
+    });
     return isFactoryCanaryReservationExecutableAt(
       document.value,
       factoryTimestampSchema.parse(this.dependencies.now())
@@ -481,7 +535,7 @@ export class FactorySchedulerService {
       result.correlationId !== claim.taskCorrelationId ||
       result.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest ||
       result.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest ||
-      claim.schemaVersion !== "agentlab.schedule-event.v2" ||
+      claim.schemaVersion !== "agentlab.schedule-event.v3" ||
       result.canaryReservationDigest !== claim.canaryReservationDigest
     ) {
       throw new Error("Factory scheduled worker returned different durable coordinates.");
@@ -494,11 +548,12 @@ export class FactorySchedulerService {
     reasonCodes: readonly string[]
   ): FactorySchedulerTickReport {
     return {
-      schemaVersion: "agentlab.scheduler-tick-result.v2",
+      schemaVersion: "agentlab.scheduler-tick-result.v3",
       status,
       schedulePolicyDigest: snapshot.run.schedulePolicyDigest,
       factoryPolicyBundleDigest: snapshot.run.factoryPolicyBundleDigest,
       roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: this.dependencies.dailyQuotaPolicy.digest,
       scheduledFor: snapshot.run.scheduledFor,
       deadlineAt: snapshot.run.deadlineAt,
       runId: snapshot.run.runId,
@@ -548,16 +603,18 @@ function emptyReport(
   schedulePolicyDigest: Sha256Digest,
   factoryPolicyBundleDigest: Sha256Digest,
   roleIdentityPolicyDigest: Sha256Digest,
+  dailyQuotaPolicyDigest: Sha256Digest,
   scheduledFor: string,
   deadlineAt: string,
   reasonCodes: readonly string[]
 ): FactorySchedulerTickReport {
   return {
-    schemaVersion: "agentlab.scheduler-tick-result.v2",
+    schemaVersion: "agentlab.scheduler-tick-result.v3",
     status,
     schedulePolicyDigest,
     factoryPolicyBundleDigest,
     roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest,
     scheduledFor,
     deadlineAt,
     runId: null,

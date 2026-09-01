@@ -3,8 +3,10 @@ import { dirname } from "node:path";
 
 import {
   factoryCostPolicySchema,
+  factoryDailyQuotaPolicySchema,
   factorySchedulePolicySchema,
   type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
   type FactorySchedulePolicy,
   type Sha256Digest
@@ -12,6 +14,7 @@ import {
 
 import { ArtifactFactorySkillSource } from "./application/artifact-factory-skill-source.js";
 import { FactoryControlPlane } from "./application/factory-control-plane.js";
+import { FactoryDailyQuotaService } from "./application/factory-daily-quota-service.js";
 import { FactoryCanaryPullRequestRepairService } from "./application/factory-canary-pull-request-repair-service.js";
 import {
   createFactoryEvidenceCredential,
@@ -55,6 +58,7 @@ import {
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryDailyQuotaRepository } from "./infrastructure/persistence/sqlite-factory-daily-quota-repository.js";
 import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
 import { SqliteFactoryCanaryPullRequestRepairQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
@@ -100,6 +104,7 @@ export interface LocalFactoryWorkerOptions {
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
   readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
@@ -119,6 +124,13 @@ export function createLocalFactoryWorker(
     options.schedulePolicy === undefined
       ? null
       : factorySchedulePolicySchema.parse(options.schedulePolicy);
+  const dailyQuotaPolicy =
+    options.dailyQuotaPolicy === undefined
+      ? null
+      : factoryDailyQuotaPolicySchema.parse(options.dailyQuotaPolicy);
+  if ((schedulePolicy === null) !== (dailyQuotaPolicy === null)) {
+    throw new Error("Scheduled factory work requires a daily aggregate quota policy.");
+  }
   const identityPolicy =
     options.roleIdentityPolicy === undefined
       ? null
@@ -176,6 +188,9 @@ export function createLocalFactoryWorker(
     );
     const schedules = repositories.track(
       new SqliteFactoryScheduleRepository(databasePath, { documents })
+    );
+    const dailyQuotas = repositories.track(
+      new SqliteFactoryDailyQuotaRepository(databasePath, { documents })
     );
     const canaryReservations = repositories.track(
       new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
@@ -405,6 +420,8 @@ export function createLocalFactoryWorker(
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
+      dailyQuotaPolicyDigest:
+        dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy).digest,
       costPolicyConfigured: costPolicy.rules.length > 0,
       configuredProviders: options.providers.map(({ provider }) => provider),
       gateIds: gates.availableGateIds(),
@@ -422,9 +439,12 @@ export function createLocalFactoryWorker(
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
+      dailyQuotaPolicy:
+        dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy),
       preparations,
       reservations: canaryReservations,
       schedules,
+      dailyQuotas: dailyQuotaPolicy === null ? null : dailyQuotas,
       documents,
       now
     });
@@ -441,12 +461,23 @@ export function createLocalFactoryWorker(
       now
     });
     const scheduledPolicies =
-      schedulePolicyDocument === null
+      schedulePolicyDocument === null || dailyQuotaPolicy === null
         ? null
         : {
             schedule: schedulePolicyDocument,
-            identity: requiredRoleIdentityPolicy(identityPolicy)
+            identity: requiredRoleIdentityPolicy(identityPolicy),
+            dailyQuota: documents.dailyQuotaPolicy(dailyQuotaPolicy)
           };
+    const dailyQuotaService =
+      scheduledPolicies === null
+        ? null
+        : new FactoryDailyQuotaService({
+            policy: scheduledPolicies.dailyQuota,
+            quotas: dailyQuotas,
+            documents,
+            now,
+            createId
+          });
     const scheduler =
       scheduledPolicies === null
         ? null
@@ -454,11 +485,13 @@ export function createLocalFactoryWorker(
             schedulePolicy: scheduledPolicies.schedule,
             factoryPolicyBundleDigest: policyBundle.digest,
             roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
+            dailyQuotaPolicy: scheduledPolicies.dailyQuota,
             schedules,
             preparations,
             reservations: canaryReservations,
             worker: operator,
             taskRunner,
+            dailyQuotas: requiredDailyQuotaService(dailyQuotaService),
             documents,
             now,
             createId
@@ -512,6 +545,15 @@ function requiredRoleIdentityPolicy(
   return policy;
 }
 
+function requiredDailyQuotaService(
+  service: FactoryDailyQuotaService | null
+): FactoryDailyQuotaService {
+  if (service === null) {
+    throw new Error("Scheduled factory work lost its daily quota authority.");
+  }
+  return service;
+}
+
 export function createConfiguredLocalFactoryWorker(
   config: LocalFactoryWorkerConfig
 ): LocalFactoryWorkerRuntime {
@@ -537,7 +579,9 @@ export function createConfiguredLocalFactoryWorker(
     throw new Error("Factory worker v3 configuration requires its role identity policy.");
   }
   if (config.schemaVersion === "agentlab.local-factory-worker.v3") {
-    const schedulePolicy = config.schedulePolicy;
+    if (config.schedulePolicy !== undefined) {
+      throw new Error("Scheduled factory work requires a v4 worker config with daily quotas.");
+    }
     const roleIdentityPolicy = config.roleIdentityPolicy;
     if (roleIdentityPolicy === undefined) {
       throw new Error("Factory worker v3 configuration lost its loaded role identity policy.");
@@ -553,8 +597,32 @@ export function createConfiguredLocalFactoryWorker(
       providers: config.providers,
       gates: config.gates,
       costPolicy: config.costPolicy,
-      ...(schedulePolicy === undefined ? {} : { schedulePolicy }),
       roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+    });
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v4") {
+    if (
+      config.schedulePolicy === undefined ||
+      config.dailyQuotaPolicy === undefined ||
+      config.roleIdentityPolicy === undefined
+    ) {
+      throw new Error("Factory worker v4 configuration lost a required scheduled policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      schedulePolicy: config.schedulePolicy,
+      dailyQuotaPolicy: config.dailyQuotaPolicy,
+      roleIdentityPolicy: config.roleIdentityPolicy,
       expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
     });
   }
@@ -587,4 +655,5 @@ export {
   type LocalFactoryWorkerConfig
 } from "./infrastructure/filesystem/local-factory-worker-config.js";
 export { loadLocalFactorySchedulePolicy } from "./infrastructure/filesystem/local-factory-schedule-policy.js";
+export { loadLocalFactoryDailyQuotaPolicy } from "./infrastructure/filesystem/local-factory-daily-quota-policy.js";
 export type { FactoryAgentProviderBinding } from "./infrastructure/providers/pinned-factory-agent-provider-resolver.js";

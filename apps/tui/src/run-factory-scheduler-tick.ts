@@ -24,6 +24,7 @@ const defaultDependencies: FactorySchedulerTickRunnerDependencies = {
 export async function runFactorySchedulerTick(
   configPath: string,
   expectedSchedulePolicyDigest: string,
+  expectedDailyQuotaPolicyDigest: string,
   expectedFactoryPolicyBundleDigest: string,
   dependencies: FactorySchedulerTickRunnerDependencies = defaultDependencies
 ): Promise<number> {
@@ -36,13 +37,17 @@ export async function runFactorySchedulerTick(
   if (!isSha256Digest(expectedFactoryPolicyBundleDigest)) {
     throw new Error("Factory scheduler expected factory policy digest is invalid.");
   }
+  if (!isSha256Digest(expectedDailyQuotaPolicyDigest)) {
+    throw new Error("Factory scheduler expected daily quota policy digest is invalid.");
+  }
   const config = await dependencies.loadConfig(configPath);
   if (
-    config.schemaVersion !== "agentlab.local-factory-worker.v3" ||
-    config.schedulePolicy === undefined
+    config.schemaVersion !== "agentlab.local-factory-worker.v4" ||
+    config.schedulePolicy === undefined ||
+    config.dailyQuotaPolicy === undefined
   ) {
     throw new Error(
-      "Factory scheduler requires a v3 worker config with schedule and role identity policies."
+      "Factory scheduler requires a v4 worker config with schedule, quota, and role policies."
     );
   }
   const runtime = dependencies.createRuntime(config);
@@ -50,6 +55,7 @@ export async function runFactorySchedulerTick(
   try {
     report = await runtime.commands.runScheduledTick({
       expectedSchedulePolicyDigest,
+      expectedDailyQuotaPolicyDigest,
       expectedFactoryPolicyBundleDigest
     });
   } catch (error: unknown) {

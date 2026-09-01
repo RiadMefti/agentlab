@@ -1211,6 +1211,7 @@ const factoryOrchestrationDomainModules = new Set([
 ]);
 
 const factoryOrchestrationInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
@@ -1279,6 +1280,7 @@ const factoryMaintenanceDiscoveryInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
   "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",

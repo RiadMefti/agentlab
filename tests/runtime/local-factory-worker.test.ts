@@ -13,6 +13,7 @@ import {
 } from "../../packages/runtime/src/local-factory-worker.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testEvalDigest, testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const executableContent =
@@ -43,7 +44,7 @@ describe("local factory worker composition", () => {
       "runTask"
     ]);
     await expect(runtime.commands.preflight()).resolves.toMatchObject({
-      schemaVersion: "agentlab.worker-preflight.v3",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: "blocked",
       schedulePolicyDigest: null,
       roleIdentityPolicyDigest: null,
@@ -114,6 +115,7 @@ describe("local factory worker composition", () => {
       createLocalFactoryWorker({
         ...fixture.options,
         schedulePolicy: testFactorySchedulePolicy(),
+        dailyQuotaPolicy: testFactoryDailyQuotaPolicy(),
         roleIdentityPolicy,
         expectedRoleIdentityPolicyDigest
       })
@@ -151,7 +153,7 @@ describe("local factory worker composition", () => {
     await runtime.close();
   });
 
-  it("composes the canary repair consumer only with exact v3 schedule and role policies", async () => {
+  it("composes the canary repair consumer only with exact schedule, quota, and role policies", async () => {
     const processUserId = process.getuid?.();
     if (processUserId === undefined || processUserId < 1) {
       throw new Error("This identity-bound composition test requires a non-root POSIX user.");
@@ -168,6 +170,7 @@ describe("local factory worker composition", () => {
     const runtime = createLocalFactoryWorker({
       ...fixture.options,
       schedulePolicy: testFactorySchedulePolicy(),
+      dailyQuotaPolicy: testFactoryDailyQuotaPolicy(),
       roleIdentityPolicy,
       expectedRoleIdentityPolicyDigest
     });

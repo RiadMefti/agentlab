@@ -7,8 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadLocalFactoryBrokerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-broker-config.js";
 import { loadLocalFactoryCostPolicy } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
-import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
+import {
+  testFactoryScheduleBudget,
+  testFactorySchedulePolicy
+} from "../helpers/factory-schedule.js";
 import { testDigest } from "../helpers/factory.js";
 
 const temporaryRoots: string[] = [];
@@ -83,6 +87,70 @@ describe("local factory broker configuration boundary", () => {
       schedulePolicy,
       roleIdentityPolicy
     });
+  });
+
+  it("loads v4 with an independently protected aggregate quota pin", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "broker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const dailyQuotaPolicyPath = join(root, "daily-quota-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy({
+      repositories: [
+        {
+          repositoryId: "riadmefti/agentlab",
+          maximumTasksPerDay: 3,
+          maximumDraftPullRequestsPerDay: 3,
+          budget: testFactoryScheduleBudget()
+        }
+      ]
+    });
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const codec = new NodeFactoryDocumentCodec();
+    const config = {
+      ...validConfig(root),
+      schemaVersion: "agentlab.local-factory-broker.v4" as const,
+      costPolicyPath,
+      schedulePolicyPath,
+      dailyQuotaPolicyPath,
+      expectedDailyQuotaPolicyDigest: codec.dailyQuotaPolicy(dailyQuotaPolicy).digest,
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest: codec.roleIdentityPolicy(roleIdentityPolicy).digest
+    };
+    await Promise.all([
+      writePrivateJson(costPolicyPath, costPolicy),
+      writePrivateJson(schedulePolicyPath, schedulePolicy),
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy),
+      writePrivateJson(path, config)
+    ]);
+
+    await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      roleIdentityPolicy,
+      dailyQuotaPolicy
+    });
+    await writePrivateJson(path, {
+      ...config,
+      expectedDailyQuotaPolicyDigest: testDigest("f")
+    });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/quota policy changed/u);
+    const unauthorizedPolicy = testFactoryDailyQuotaPolicy();
+    await writePrivateJson(dailyQuotaPolicyPath, unauthorizedPolicy);
+    await writePrivateJson(path, {
+      ...config,
+      expectedDailyQuotaPolicyDigest: codec.dailyQuotaPolicy(unauthorizedPolicy).digest
+    });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/not authorized/u);
   });
 
   it("rejects unknown fields, unsafe numbers, relative fields, and malformed JSON", async () => {

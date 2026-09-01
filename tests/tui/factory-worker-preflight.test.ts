@@ -51,11 +51,12 @@ describe("factory worker preflight CLI runner", () => {
 
     expect(events).toEqual(["closed", "written"]);
     expect(JSON.parse(writes[0] ?? "")).toEqual({
-      schemaVersion: "agentlab.worker-preflight.v3",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: "ready",
       policyBundleDigest,
       schedulePolicyDigest,
       roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: `sha256:${"d".repeat(64)}`,
       schedulerEnabled: true,
       costPolicyConfigured: true,
       hostReady: true,
@@ -167,11 +168,12 @@ function report(
   configuredProviders: readonly ("codex" | "claude")[]
 ): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v3",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status,
     policyBundleDigest,
     schedulePolicyDigest,
     roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: `sha256:${"d".repeat(64)}`,
     schedulerEnabled,
     costPolicyConfigured,
     hostReady,

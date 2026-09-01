@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryOrchestrationConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.js";
 import { encodeCanonicalDocument } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 import { testDigest } from "../helpers/factory.js";
@@ -65,25 +66,39 @@ describe("local factory orchestration configuration boundary", () => {
     );
   });
 
-  it("loads the v2 autonomous-cycle pins and separate capability configs", async () => {
+  it("loads the v3 autonomous-cycle pins, aggregate quota, and separate capability configs", async () => {
     const fixture = await createFixture();
+    const dailyQuotaPolicyPath = join(fixture.root, "daily-quota.json");
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy();
     const manifest = {
       ...fixture.manifest,
-      schemaVersion: "agentlab.daily-cycle-manifest.v2",
+      schemaVersion: "agentlab.daily-cycle-manifest.v3",
       maintenanceDiscoveryConfigPath: join(fixture.root, "maintenance-discovery.json"),
       canaryAdmissionConfigPath: join(fixture.root, "canary-admission.json"),
+      dailyQuotaPolicyPath,
+      expectedDailyQuotaPolicyDigest: encodeCanonicalDocument(dailyQuotaPolicy).digest,
       expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
       expectedPreparationGrantDigest: testDigest("6"),
       expectedCanaryCohortDigest: testDigest("7"),
       expectedCanaryCandidateDigest: testDigest("8")
     } as const;
+    await writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy);
     await writePrivateJson(fixture.configPath, manifest);
 
     await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).resolves.toEqual({
       ...manifest,
       schedulePolicy: fixture.schedulePolicy,
-      roleIdentityPolicy: fixture.roleIdentityPolicy
+      roleIdentityPolicy: fixture.roleIdentityPolicy,
+      dailyQuotaPolicy
     });
+
+    await writePrivateJson(fixture.configPath, {
+      ...manifest,
+      expectedDailyQuotaPolicyDigest: testDigest("f")
+    });
+    await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
+      /quota policy changed/u
+    );
   });
 
   it("rejects permissive, linked, relative, and structurally unsafe manifests", async () => {

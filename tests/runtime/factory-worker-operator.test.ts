@@ -5,6 +5,7 @@ import { FactoryWorkerOperator } from "../../packages/runtime/src/application/fa
 const policyBundleDigest = `sha256:${"a".repeat(64)}` as const;
 const schedulePolicyDigest = `sha256:${"b".repeat(64)}` as const;
 const roleIdentityPolicyDigest = `sha256:${"c".repeat(64)}` as const;
+const dailyQuotaPolicyDigest = `sha256:${"d".repeat(64)}` as const;
 const gateIds = ["format", "architecture", "typecheck", "lint", "test", "build", "secret-scan"];
 
 describe("FactoryWorkerOperator", () => {
@@ -17,11 +18,12 @@ describe("FactoryWorkerOperator", () => {
     const operator = new FactoryWorkerOperator(fixture.value);
 
     await expect(operator.preflight()).resolves.toEqual({
-      schemaVersion: "agentlab.worker-preflight.v3",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: "blocked",
       policyBundleDigest,
       schedulePolicyDigest,
       roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest,
       schedulerEnabled: false,
       costPolicyConfigured: false,
       hostReady: false,
@@ -131,6 +133,7 @@ function dependencies(
     readonly costPolicyConfigured?: boolean;
     readonly schedulePolicyConfigured?: boolean;
     readonly roleIdentityPolicyConfigured?: boolean;
+    readonly dailyQuotaPolicyConfigured?: boolean;
     readonly hostReasonCodes?: readonly string[];
   } = {}
 ) {
@@ -159,6 +162,8 @@ function dependencies(
         options.schedulePolicyConfigured === false ? null : schedulePolicyDigest,
       roleIdentityPolicyDigest:
         options.roleIdentityPolicyConfigured === false ? null : roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest:
+        options.dailyQuotaPolicyConfigured === false ? null : dailyQuotaPolicyDigest,
       costPolicyConfigured: options.costPolicyConfigured ?? true,
       configuredProviders: ["codex", "claude"] as const,
       gateIds,

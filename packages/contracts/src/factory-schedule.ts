@@ -75,6 +75,14 @@ export const factoryScheduleRunSchema = z
         ...factoryScheduleRunShape,
         roleIdentityPolicyDigest: sha256DigestSchema
       })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.schedule-run.v3"),
+        ...factoryScheduleRunShape,
+        roleIdentityPolicyDigest: sha256DigestSchema,
+        dailyQuotaPolicyDigest: sha256DigestSchema
+      })
       .strict()
   ])
   .superRefine((run, context) => {
@@ -113,6 +121,11 @@ const canaryBoundEventShape = {
   schemaVersion: z.literal("agentlab.schedule-event.v2")
 } as const;
 
+const quotaBoundEventShape = {
+  ...commonEventShape,
+  schemaVersion: z.literal("agentlab.schedule-event.v3")
+} as const;
+
 const taskIdentityShape = {
   taskId: z.uuid(),
   requestDigest: sha256DigestSchema,
@@ -145,6 +158,19 @@ const eventUnionSchema = z.union([
     .strict(),
   z
     .object({
+      ...quotaBoundEventShape,
+      ...taskIdentityShape,
+      kind: z.literal("task-claimed"),
+      from: z.literal("ready"),
+      to: z.literal("task-active"),
+      taskCorrelationId: z.uuid(),
+      canaryReservationDigest: sha256DigestSchema,
+      dailyQuotaReservationDigest: sha256DigestSchema,
+      reservation: factoryBudgetSchema
+    })
+    .strict(),
+  z
+    .object({
       ...commonEventShape,
       ...taskIdentityShape,
       kind: z.literal("task-claimed"),
@@ -163,6 +189,23 @@ const eventUnionSchema = z.union([
       taskId: z.uuid(),
       taskCorrelationId: z.uuid(),
       canaryReservationDigest: sha256DigestSchema,
+      result: workerResultSchema,
+      preparationState: factoryPreparationStateSchema,
+      taskState: factoryTaskStateSchema.nullable(),
+      contractDigest: sha256DigestSchema.nullable(),
+      reasonCodes: z.array(factoryIdentifierSchema).max(32)
+    })
+    .strict(),
+  z
+    .object({
+      ...quotaBoundEventShape,
+      kind: z.literal("task-finished"),
+      from: z.literal("task-active"),
+      to: z.literal("ready"),
+      taskId: z.uuid(),
+      taskCorrelationId: z.uuid(),
+      canaryReservationDigest: sha256DigestSchema,
+      dailyQuotaReservationDigest: sha256DigestSchema,
       result: workerResultSchema,
       preparationState: factoryPreparationStateSchema,
       taskState: factoryTaskStateSchema.nullable(),

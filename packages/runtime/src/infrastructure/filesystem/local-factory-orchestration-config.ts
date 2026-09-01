@@ -3,11 +3,13 @@ import { lstat } from "node:fs/promises";
 import {
   factoryDailyCycleManifestSchema,
   type FactoryDailyCycleManifest,
+  type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
   type FactorySchedulePolicy
 } from "@agentlab/contracts";
 
 import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
+import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
 import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
 import { pinnedLocalExecutableDigest } from "./pinned-local-executable.js";
@@ -16,6 +18,7 @@ import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file
 export type LocalFactoryOrchestrationConfig = FactoryDailyCycleManifest & {
   readonly schedulePolicy: FactorySchedulePolicy;
   readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
 };
 
 /** Loads and verifies the reviewed inputs used only to render a dormant daily-cycle bundle. */
@@ -35,11 +38,15 @@ export async function loadLocalFactoryOrchestrationConfig(
     content.fill(0);
   }
   const manifest = normalizeManifestPaths(parsed);
-  const [schedulePolicy, roleIdentityPolicy, executableDigest] = await Promise.all([
-    loadLocalFactorySchedulePolicy(manifest.schedulePolicyPath),
-    loadLocalFactoryRoleIdentityPolicy(manifest.roleIdentityPolicyPath),
-    pinnedLocalExecutableDigest(manifest.agentlabExecutable.path, "Pinned AgentLab executable")
-  ]);
+  const [schedulePolicy, roleIdentityPolicy, dailyQuotaPolicy, executableDigest] =
+    await Promise.all([
+      loadLocalFactorySchedulePolicy(manifest.schedulePolicyPath),
+      loadLocalFactoryRoleIdentityPolicy(manifest.roleIdentityPolicyPath),
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3"
+        ? loadLocalFactoryDailyQuotaPolicy(manifest.dailyQuotaPolicyPath)
+        : Promise.resolve(undefined),
+      pinnedLocalExecutableDigest(manifest.agentlabExecutable.path, "Pinned AgentLab executable")
+    ]);
   const schedulePolicyDigest = encodeCanonicalDocument(schedulePolicy).digest;
   const roleIdentityPolicyDigest = encodeCanonicalDocument(roleIdentityPolicy).digest;
   if (schedulePolicyDigest !== manifest.expectedSchedulePolicyDigest) {
@@ -47,6 +54,13 @@ export async function loadLocalFactoryOrchestrationConfig(
   }
   if (roleIdentityPolicyDigest !== manifest.expectedRoleIdentityPolicyDigest) {
     throw new Error("Daily cycle role identity policy changed after review.");
+  }
+  if (
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3" &&
+    (dailyQuotaPolicy === undefined ||
+      encodeCanonicalDocument(dailyQuotaPolicy).digest !== manifest.expectedDailyQuotaPolicyDigest)
+  ) {
+    throw new Error("Daily cycle aggregate quota policy changed after review.");
   }
   if (executableDigest !== manifest.agentlabExecutable.digest) {
     throw new Error("Daily cycle AgentLab executable changed after review.");
@@ -61,7 +75,12 @@ export async function loadLocalFactoryOrchestrationConfig(
       "Daily cycle AgentLab executable must be immutable to worker and broker identities."
     );
   }
-  return { ...manifest, schedulePolicy, roleIdentityPolicy };
+  return {
+    ...manifest,
+    schedulePolicy,
+    roleIdentityPolicy,
+    ...(dailyQuotaPolicy === undefined ? {} : { dailyQuotaPolicy })
+  };
 }
 
 function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDailyCycleManifest {
@@ -93,7 +112,7 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
     )
   };
   return factoryDailyCycleManifestSchema.parse(
-    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v2"
+    manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v1"
       ? {
           ...common,
           maintenanceDiscoveryConfigPath: privateLocalFilePath(
@@ -103,7 +122,15 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
           canaryAdmissionConfigPath: privateLocalFilePath(
             manifest.canaryAdmissionConfigPath,
             "Factory canary admission config"
-          )
+          ),
+          ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3"
+            ? {
+                dailyQuotaPolicyPath: privateLocalFilePath(
+                  manifest.dailyQuotaPolicyPath,
+                  "Factory daily quota policy"
+                )
+              }
+            : {})
         }
       : common
   );

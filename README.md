@@ -258,19 +258,19 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   reserves a bounded page only inside an already attested and human-issued cohort. It obeys the
   scheduler switch and schedule ceilings, reuses the full signature/freshness/risk/aggregate-budget
   checks, and cannot issue authority or run work.
-- `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
-  reconciles one exact daily UTC slot from an owner-only worker v3 config. SQLite v11 durably claims
-  each scheduled request before model work, while schedule-run v2 also pins the role-policy digest,
-  reuses that correlation after interruption, and completes the slot once. Every new claim is a
-  schema-v2 event bound to the task's exact current canary reservation; schema 16 enforces that
-  relation and the complete remaining wall-clock ceiling. The worker independently rechecks it
-  before each resumable phase. It cannot open a PR, mutate authority, merge, or release.
+- `agentlab factory scheduler-tick --config ... --schedule-policy ... --daily-quota ... --policy ...`
+  runs or reconciles one exact daily UTC slot from an owner-only worker v4 config. Before model
+  work, SQLite schema 27 atomically reserves the task's full ceiling and one possible draft against
+  exact repository/day and organization/day limits. Schedule-run/event v3 bind that immutable
+  reservation, the canary authority, policy digests, and the durable correlation reused after
+  interruption. The worker independently rechecks the chain before each resumable phase. It cannot
+  open a PR, mutate authority, merge, or release.
 - `agentlab factory broker-open-canary-draft --config ... --task ... --reservation ... --schedule-policy ... --role-policy ... --policy ...`
   accepts only a completed scheduled R1 proposal with an exact current `brokered-draft-pr`
-  reservation. Broker config v3 loads the same schedule and role policies; SQLite v17 stores their
-  coordinates in a v2 dispatch before remote mutation, and the broker independently rechecks the
-  authority before every resumable phase. It does not discover work, enable the broker, merge, or
-  release.
+  reservation. Broker config v4 loads the same schedule, daily-quota, and role policies; SQLite v17
+  stores their coordinates in a v2 dispatch before remote mutation, and the broker independently
+  rechecks the authority before every resumable phase. It does not discover work, enable the broker,
+  merge, or release.
 - `agentlab factory broker-canary-tick --config ... --schedule-policy ... --role-policy ... --policy ...`
   discovers one bounded page of exact completed scheduler handoffs and reconciles them through the
   same durable dispatch service. It prioritizes current authority, then incomplete dispatch recovery
@@ -355,17 +355,18 @@ broker kill switch. Both switches remain default-off. The eval slice produces a 
 matched report from digest-pinned offline harnesses, signs and verifies its exact bytes through
 disjoint local compositions, and can issue a structurally non-merge/non-release cohort after human
 sample review and fresh attestation re-verification. The producer and reservation consumer exist but
-neither is provisioned or activated. Scheduled config v3 and eval signing now pin one canonical role
+neither is provisioned or activated. Scheduled config v4 and eval signing now pin one canonical role
 policy: distinct non-root worker/signer UIDs plus the exact signer key and runner, with the policy
 digest carried in every signed eval predicate. No accounts are provisioned or activated.
-Provider-neutral per-run and per-tick reservation accounting are policy-pinned and fail-closed, and
-the shipped live rate card is intentionally empty. Owner-only worker and broker config can load the
-same separate strict cost-policy file without sharing broker credentials; broker config v3 also pins
-the schedule and role policies needed for reservation-bound dispatch. The dormant daily-cycle v2
-orders discovery → canary admission → scheduler → brokered draft/repair stages while keeping
-separate fixed-UID configs; v1 remains scheduler-first. The current repository governance blocks the
-write commands. No unit is installed or activated, and no live factory task or PR has been created
-through these factory commands. See
+Provider-neutral per-run, per-tick, and host-local repository/organization daily reservation
+accounting are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty.
+Owner-only worker and broker config can load the same separate strict cost-policy file without
+sharing broker credentials; broker config v4 also pins the schedule, daily quota, and role policies
+needed for reservation-bound dispatch. The dormant daily-cycle v3 orders discovery → canary
+admission → quota-bound scheduler → brokered draft/repair stages while keeping separate fixed-UID
+configs; legacy manifests remain readable but cannot render an executable cycle. The current
+repository governance blocks the write commands. No unit is installed or activated, and no live
+factory task or PR has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
@@ -397,7 +398,9 @@ one-attempt isolated repair and patch-bundle boundary; and
 [ADR 0028](docs/decisions/0028-credentialless-external-pull-request-repair-qualification.md) for the
 strict post-repair gate and independent-review boundary; and
 [ADR 0029](docs/decisions/0029-brokered-external-pull-request-replacement-drafts.md) for the
-contributor-safe publication boundary. The dormant procedures are in
+contributor-safe publication boundary; and
+[ADR 0030](docs/decisions/0030-durable-daily-aggregate-quotas.md) for host-local repository and
+organization daily ceilings. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

@@ -2,6 +2,7 @@ import type {
   FactoryCanaryApproval,
   FactoryCanaryCohort,
   FactoryCanaryTaskReservation,
+  FactoryBudget,
   FactoryConfigurationCandidate,
   FactoryEvalAssessment,
   FactoryEvalRun,
@@ -75,6 +76,7 @@ export function testFactoryCanaryAdmissionFixture(
     readonly taskId?: string;
     readonly deduplicationKey?: string;
     readonly maximumTasks?: number;
+    readonly canaryBudget?: FactoryBudget;
     readonly schedulePolicyDigest?: Sha256Digest;
     readonly authorityExpiresAt?: string;
     readonly canaryMaximumLifetimeSeconds?: number;
@@ -138,12 +140,15 @@ export function testFactoryCanaryAdmissionFixture(
   });
   const defaultSuite = testFactoryEvalSuite();
   const suite =
-    input.canaryMaximumLifetimeSeconds === undefined
+    input.canaryMaximumLifetimeSeconds === undefined && input.canaryBudget === undefined
       ? defaultSuite
       : testFactoryEvalSuite({
           canaryLimits: {
             ...defaultSuite.canaryLimits,
-            maximumLifetimeSeconds: input.canaryMaximumLifetimeSeconds
+            ...(input.canaryMaximumLifetimeSeconds === undefined
+              ? {}
+              : { maximumLifetimeSeconds: input.canaryMaximumLifetimeSeconds }),
+            ...(input.canaryBudget === undefined ? {} : { maximumBudget: input.canaryBudget })
           }
         });
   const evaluation = testFactoryEvalDocuments({
@@ -155,7 +160,8 @@ export function testFactoryCanaryAdmissionFixture(
   const canary = testFactoryCanaryDocuments(evaluation.snapshot, {
     attestation,
     ...(input.authorityExpiresAt === undefined ? {} : { expiresAt: input.authorityExpiresAt }),
-    ...(input.maximumTasks === undefined ? {} : { maximumTasks: input.maximumTasks })
+    ...(input.maximumTasks === undefined ? {} : { maximumTasks: input.maximumTasks }),
+    ...(input.canaryBudget === undefined ? {} : { budget: input.canaryBudget })
   });
   const canarySnapshot = {
     approval: canary.approval.value,

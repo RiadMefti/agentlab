@@ -81,8 +81,9 @@ export class SqliteFactoryCanaryBrokerQueue implements FactoryCanaryBrokerQueue 
          LEFT JOIN factory_pull_request_dispatches AS dispatch
            ON dispatch.task_id = finished.task_id
          WHERE finished.kind = 'task-finished'
-           AND json_extract(finished.event_json, '$.schemaVersion')
-             = 'agentlab.schedule-event.v2'
+           AND json_extract(finished.event_json, '$.schemaVersion') IN (
+             'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+           )
            AND json_extract(finished.event_json, '$.result') = 'ready-for-broker'
            AND json_extract(finished.event_json, '$.preparationState') = 'prepared'
            AND json_extract(finished.event_json, '$.taskState') = 'pr-proposed'

@@ -19,6 +19,7 @@ import {
 
 const configPath = "/private/agentlab/worker.json";
 const schedulePolicyDigest = testDigest("1");
+const dailyQuotaPolicyDigest = testDigest("5");
 const factoryPolicyBundleDigest = testDigest("2");
 const roleIdentityPolicyDigest = testDigest("4");
 
@@ -37,6 +38,7 @@ describe("factory scheduler tick CLI runner", () => {
       runFactorySchedulerTick(
         configPath,
         schedulePolicyDigest,
+        dailyQuotaPolicyDigest,
         factoryPolicyBundleDigest,
         dependencies
       )
@@ -44,6 +46,7 @@ describe("factory scheduler tick CLI runner", () => {
 
     expect(runScheduledTick).toHaveBeenCalledWith({
       expectedSchedulePolicyDigest: schedulePolicyDigest,
+      expectedDailyQuotaPolicyDigest: dailyQuotaPolicyDigest,
       expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest
     });
     expect(events).toEqual(["close", "write"]);
@@ -57,7 +60,13 @@ describe("factory scheduler tick CLI runner", () => {
       vi.fn()
     );
     await expect(
-      runFactorySchedulerTick(configPath, schedulePolicyDigest, factoryPolicyBundleDigest, blocked)
+      runFactorySchedulerTick(
+        configPath,
+        schedulePolicyDigest,
+        dailyQuotaPolicyDigest,
+        factoryPolicyBundleDigest,
+        blocked
+      )
     ).resolves.toBe(2);
   });
 
@@ -66,29 +75,47 @@ describe("factory scheduler tick CLI runner", () => {
     const createRuntime = vi.fn(() => runtime(() => Promise.resolve(report("completed"))));
 
     await expect(
-      runFactorySchedulerTick("worker.json", schedulePolicyDigest, factoryPolicyBundleDigest, {
-        loadConfig,
-        createRuntime,
-        write: vi.fn()
-      })
+      runFactorySchedulerTick(
+        "worker.json",
+        schedulePolicyDigest,
+        dailyQuotaPolicyDigest,
+        factoryPolicyBundleDigest,
+        {
+          loadConfig,
+          createRuntime,
+          write: vi.fn()
+        }
+      )
     ).rejects.toThrow(/normalized absolute/u);
     await expect(
-      runFactorySchedulerTick(configPath, "wrong", factoryPolicyBundleDigest, {
-        loadConfig,
-        createRuntime,
-        write: vi.fn()
-      })
+      runFactorySchedulerTick(
+        configPath,
+        "wrong",
+        dailyQuotaPolicyDigest,
+        factoryPolicyBundleDigest,
+        {
+          loadConfig,
+          createRuntime,
+          write: vi.fn()
+        }
+      )
     ).rejects.toThrow(/schedule policy digest/u);
     expect(loadConfig).not.toHaveBeenCalled();
 
     const v1Load = vi.fn(() => Promise.resolve({} as LocalFactoryWorkerConfig));
     await expect(
-      runFactorySchedulerTick(configPath, schedulePolicyDigest, factoryPolicyBundleDigest, {
-        loadConfig: v1Load,
-        createRuntime,
-        write: vi.fn()
-      })
-    ).rejects.toThrow(/v3 worker config/u);
+      runFactorySchedulerTick(
+        configPath,
+        schedulePolicyDigest,
+        dailyQuotaPolicyDigest,
+        factoryPolicyBundleDigest,
+        {
+          loadConfig: v1Load,
+          createRuntime,
+          write: vi.fn()
+        }
+      )
+    ).rejects.toThrow(/v4 worker config/u);
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
@@ -105,6 +132,7 @@ describe("factory scheduler tick CLI runner", () => {
       runFactorySchedulerTick(
         configPath,
         schedulePolicyDigest,
+        dailyQuotaPolicyDigest,
         factoryPolicyBundleDigest,
         dependencies
       )
@@ -155,8 +183,9 @@ function runtime(
 
 function config(): LocalFactoryWorkerConfig {
   return {
-    schemaVersion: "agentlab.local-factory-worker.v3",
-    schedulePolicy: testFactorySchedulePolicy()
+    schemaVersion: "agentlab.local-factory-worker.v4",
+    schedulePolicy: testFactorySchedulePolicy(),
+    dailyQuotaPolicy: {} as never
   } as unknown as LocalFactoryWorkerConfig;
 }
 
@@ -165,11 +194,12 @@ function report(
   reasonCodes: readonly string[] = []
 ): FactorySchedulerTickReport {
   return {
-    schemaVersion: "agentlab.scheduler-tick-result.v2",
+    schemaVersion: "agentlab.scheduler-tick-result.v3",
     status,
     schedulePolicyDigest,
     factoryPolicyBundleDigest,
     roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest,
     scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
     deadlineAt: TEST_FACTORY_SCHEDULE_DEADLINE,
     runId:

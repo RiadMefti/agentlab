@@ -8,11 +8,12 @@ plus the reviewed role-identity policy is the local authorization boundary.
 
 ## Reviewed inputs
 
-The worker must use `agentlab.local-factory-worker.v3`. It has the v1 database, artifact/worktree,
-Git/flock, systemd, Bubblewrap, provider, gate, and cost-policy pins plus normalized absolute
-`roleIdentityPolicyPath`, an `expectedRoleIdentityPolicyDigest`, and—when scheduling—one
-`schedulePolicyPath`. Config and policy files must be owner-only regular files. V3 may omit the
-schedule path for manual work, but a scheduler tick requires it. V1 and legacy v2 remain
+Explicit manual work may use `agentlab.local-factory-worker.v3`; autonomous scheduling requires v4.
+Both have the v1 database, artifact/worktree, Git/flock, systemd, Bubblewrap, provider, gate, and
+cost-policy pins plus normalized absolute role-policy coordinates. V4 additionally requires
+`schedulePolicyPath`, `dailyQuotaPolicyPath`, and `expectedDailyQuotaPolicyDigest`. The scheduled
+broker must use its matching v4 config and authorize its exact repository in the quota policy.
+Config and policy files must be owner-only regular files. V1 and legacy v2 remain
 diagnostic/recovery inputs and cannot invoke new model work without the identity policy.
 
 The exact policy content must match the independent attestor and evaluator copies. Replace example
@@ -68,6 +69,12 @@ The schedule file is strict and command-free:
 These values are examples, not production approval. The complete authority ceiling of each selected
 task is reserved against every tick dimension. There is no optimistic cost estimate and no wildcard
 provider rate.
+
+The separate daily quota policy is also strict and command-free. It fixes `timeZone` to `UTC`, names
+one `organizationId`, and contains exact repository profiles plus an organization profile. Every
+profile has `maximumTasksPerDay`, `maximumDraftPullRequestsPerDay`, and the same complete
+twelve-field budget shape shown above. A zero draft ceiling disables scheduled PR creation for that
+profile.
 
 ## Autonomous maintenance intake
 
@@ -156,36 +163,46 @@ literal `autoMerge:false`/`release:false` limits.
    agentlab factory scheduler-authority --config /absolute/authority.json --expected disabled --to enabled --reason "Approved bounded daily maintenance." --confirm-enable-scheduler
    ```
 
-5. Invoke one slot with both reviewed digests:
+5. Invoke one slot with all reviewed execution and quota digests:
 
    ```text
-   agentlab factory scheduler-tick --config /absolute/worker.json --schedule-policy sha256:... --policy sha256:...
+   agentlab factory scheduler-tick --config /absolute/worker.json --schedule-policy sha256:... --daily-quota sha256:... --policy sha256:...
    ```
 
 Exit 0 means completed or already completed. Exit 2 means policy-blocked or the start deadline was
 missed; alert on it rather than retrying with changed pins. Operational failure exits 1. Output is
 written only after worker cleanup.
 
+Worker and broker config v4 must point to owner-only copies of the same canonical
+`agentlab.daily-quota-policy.v1` and pin its digest. The policy uses UTC and gives every authorized
+repository plus the organization task-count, draft-count, and complete budget ceilings. Every
+repository governed as one local organization must share the same durable AgentLab database and
+writer-lease domain. Separate databases or hosts are separate quota domains and must not reuse the
+organization claim as if capacity were globally coordinated.
+
 An owner-managed timer may invoke exactly that fixed-argument command at the policy's UTC time.
 Duplicate invocation is safe: the SQLite key is `(schedulePolicyId, scheduledFor)`, while the run
-also pins the exact role-identity, schedule, and factory-policy digests. One writer lease prevents
-overlap, and a completed slot cannot select work again. Changing a policy version cannot manufacture
-a second tick for the same schedule ID and day; drift blocks for review. A late persistent timer may
-invoke the command, but a new stale slot is refused after `startDeadlineSeconds`. An existing active
-slot can resume using its durable task correlation, including after a UTC day boundary. The oldest
-open run always reconciles before a new slot. Multiple open runs are treated as ledger corruption;
-role, schedule, or factory policy drift on an open run blocks new work until an operator
-investigates. A clock earlier than the open slot or its latest journal event also blocks; correct
-the host clock without editing the ledger.
+also pins the exact role-identity, schedule, daily-quota, and factory-policy digests. One writer
+lease prevents overlap, and a completed slot cannot select work again. Changing a policy version
+cannot manufacture a second tick for the same schedule ID and day; drift blocks for review. A late
+persistent timer may invoke the command, but a new stale slot is refused after
+`startDeadlineSeconds`. An existing active slot can resume using its durable task correlation,
+including after a UTC day boundary. The oldest open run always reconciles before a new slot.
+Multiple open runs are treated as ledger corruption; role, schedule, quota, or factory policy drift
+on an open run blocks new work until an operator investigates. A clock earlier than the open slot or
+its latest journal event also blocks; correct the host clock without editing the ledger.
 
-The scheduler skips a candidate with no current executable reservation. Each durable v2 claim and
-finish names the reservation digest, and the worker independently reloads it before every resumable
-phase. A crash therefore retries the same claim and authority; an expired or legacy unbound claim
+The scheduler skips a candidate with no current executable canary reservation. Before a claim it
+atomically appends a worst-case daily reservation for one task and one possible draft PR against the
+repository and organization UTC-day ceilings. Each durable v3 claim and finish names both canary and
+daily reservation digests, and the worker independently reloads them before every resumable phase. A
+crash therefore retries the same claim, correlation, and authority. Daily reservations are never
+released, so ambiguity consumes headroom rather than creating it; an expired or legacy unbound claim
 stays blocked rather than running model work.
 
 6. For a cohort authorized specifically for `brokered-draft-pr`, a separate broker consumer may
-   submit the exact completed task. Broker config v3 must load the same cost, schedule, and
-   role-identity policies and pin the expected role-policy digest:
+   submit the exact completed task. Broker config v4 must load the same cost, schedule, daily-quota,
+   and role-identity policies and pin both expected policy digests:
 
    ```text
    agentlab factory broker-open-canary-draft --config /absolute/broker.json --task 00000000-0000-4000-8000-000000000000 --reservation sha256:... --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
@@ -193,9 +210,9 @@ stays blocked rather than running model work.
 
    This command has no per-task confirmation because the exact evaluated reservation is its
    authority. It still requires clean broker preflight, an enabled broker switch, current authority,
-   complete usage, and repository governance. It independently proves the completed v2 scheduler
-   handoff before every durable dispatch phase. Exact retries are idempotent; changed coordinates
-   fail closed.
+   complete usage, and repository governance. It independently proves the completed v3 scheduler
+   handoff and exact daily reservation before every durable dispatch phase. Exact retries are
+   idempotent; changed coordinates fail closed.
 
    For normal bounded consumption, invoke the one-shot reconciler with the reviewed policy pins:
 
@@ -260,7 +277,7 @@ contains no command or credential:
 
 ```json
 {
-  "schemaVersion": "agentlab.daily-cycle-manifest.v2",
+  "schemaVersion": "agentlab.daily-cycle-manifest.v3",
   "id": "agentlab/daily-software-factory",
   "version": "1.0.0",
   "agentlabExecutable": {
@@ -271,8 +288,10 @@ contains no command or credential:
   "worker": { "userId": 1001, "configPath": "/etc/agentlab/worker.json" },
   "broker": { "userId": 1003, "configPath": "/etc/agentlab/broker.json" },
   "schedulePolicyPath": "/etc/agentlab/schedule.json",
+  "dailyQuotaPolicyPath": "/etc/agentlab/daily-quota.json",
   "roleIdentityPolicyPath": "/etc/agentlab/role-identities.json",
   "expectedSchedulePolicyDigest": "sha256:...",
+  "expectedDailyQuotaPolicyDigest": "sha256:...",
   "expectedRoleIdentityPolicyDigest": "sha256:...",
   "expectedFactoryPolicyBundleDigest": "sha256:...",
   "maintenanceDiscoveryConfigPath": "/etc/agentlab/maintenance-discovery.json",
@@ -294,14 +313,14 @@ must exceed its complete aggregate wall-clock ceiling by at least 30 seconds. Re
 agentlab factory orchestration-render --config /absolute/orchestration.json
 ```
 
-The v2 JSON bundle pins the manifest, discovery/grant/cohort/candidate and existing policies, the
-AgentLab executable, every unit, and the bundle itself. Its UTC `Persistent=false` timer runs
-discovery → canary admission → scheduler → draft → bounded observe/repair/update rounds. Separate
-numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a final
-exact-head observation, and an incident target preserve separation. V1 remains supported and starts
-at the scheduler. Every service verifies `executableVerification.checksumContent` with fixed
-`/usr/bin/sha256sum` argv before AgentLab. Rendering never writes a unit/checksum, calls
-`systemctl`, changes authority, or touches the ledger.
+The v3 JSON bundle pins the manifest, discovery/grant/cohort/candidate, aggregate quota and existing
+policies, the AgentLab executable, every unit, and the bundle itself. Its UTC `Persistent=false`
+timer runs discovery → canary admission → scheduler → draft → bounded observe/repair/update rounds.
+Separate numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a
+final exact-head observation, and an incident target preserve separation. Legacy manifests remain
+readable for audit but cannot render an executable autonomous cycle. Every service verifies
+`executableVerification.checksumContent` with fixed `/usr/bin/sha256sum` argv before AgentLab.
+Rendering never writes a unit/checksum, calls `systemctl`, changes authority, or touches the ledger.
 
 Owner provisioning is deliberately outside AgentLab. Materialize the exact checksum content at
 `executableVerification.checksumFilePath` and the exact unit contents under `/etc/systemd/system`.
@@ -630,17 +649,17 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, installed timer, live rate card/config/cohort, reviewed case bank or installed eval
-harness, repository/day or organization/day quota ledger, cross-repository coordinator, scheduler
-dashboard/alerts, secretless hosted-provider eval gateway, owner-provisioned activation, merge,
-telemetry-driven canary, rollback controller, or incident automation is shipped. A separate offline
-sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
-discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
-execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
-bounded read-only external pull-request inventory, credentialless isolated external review evidence,
-feedback-only external review publication, deterministic external repair admission, credentialless
-one-attempt external repair execution, credentialless strict post-repair qualification, a separately
-credentialed contributor-safe replacement-draft publisher, and a content-addressed separated-service
-renderer exist but are not provisioned or activated. See
+No OS accounts, installed timer, live rate card/config/cohort/quota policy, reviewed case bank or
+installed eval harness, cross-host/global quota coordinator, scheduler dashboard/alerts, secretless
+hosted-provider eval gateway, owner-provisioned activation, merge, telemetry-driven canary, rollback
+controller, or incident automation is shipped. A separate offline sandboxed eval producer with
+content-addressed evidence now exists. Durable read-only maintenance discovery, bounded consumption
+of a human non-release cohort, host-local repository/day and organization/day quota enforcement,
+reservation-bound scheduled execution/draft dispatch, slot-bound PR observation/repair, brokered
+repaired-branch publication, bounded read-only external pull-request inventory, credentialless
+isolated external review evidence, feedback-only external review publication, deterministic external
+repair admission, credentialless one-attempt external repair execution, credentialless strict
+post-repair qualification, a separately credentialed contributor-safe replacement-draft publisher,
+and a content-addressed separated-service renderer exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

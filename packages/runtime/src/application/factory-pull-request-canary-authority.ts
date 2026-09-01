@@ -1,4 +1,9 @@
-import { factoryTimestampSchema, sha256DigestSchema, type Sha256Digest } from "@agentlab/contracts";
+import {
+  factoryTimestampSchema,
+  sha256DigestSchema,
+  type FactoryDailyQuotaPolicy,
+  type Sha256Digest
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import {
@@ -6,7 +11,12 @@ import {
   isFactoryCanaryReservationCurrentAt
 } from "../domain/factory-canary-reservation-integrity.js";
 import type { FactoryCanaryReservationRepository } from "../domain/factory-canary-reservation-repository.js";
-import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
+import { assertFactoryDailyQuotaReservation } from "../domain/factory-daily-quota-integrity.js";
+import type { FactoryDailyQuotaRepository } from "../domain/factory-daily-quota-repository.js";
+import type {
+  CanonicalFactoryDocument,
+  FactoryDocumentCodec
+} from "../domain/factory-documents.js";
 import type { FactoryPreparationRepository } from "../domain/factory-preparation-repository.js";
 import type { FactoryScheduleRepository } from "../domain/factory-schedule-repository.js";
 import type { FactoryTaskSnapshot } from "../domain/factory-task-repository.js";
@@ -27,10 +37,15 @@ export interface FactoryPullRequestCanaryAuthorityDependencies {
   readonly policyBundleDigest: Sha256Digest;
   readonly schedulePolicyDigest: Sha256Digest | null;
   readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicy: CanonicalFactoryDocument<FactoryDailyQuotaPolicy> | null;
   readonly preparations: Pick<FactoryPreparationRepository, "findById">;
   readonly reservations: Pick<FactoryCanaryReservationRepository, "findByReservationDigest">;
   readonly schedules: Pick<FactoryScheduleRepository, "findTaskCompletion">;
-  readonly documents: Pick<FactoryDocumentCodec, "canaryTaskReservation">;
+  readonly dailyQuotas: Pick<FactoryDailyQuotaRepository, "findByTaskId"> | null;
+  readonly documents: Pick<
+    FactoryDocumentCodec,
+    "canaryTaskReservation" | "dailyQuotaPolicy" | "dailyQuotaReservation"
+  >;
   readonly now: () => string;
 }
 
@@ -57,17 +72,25 @@ export class FactoryPullRequestCanaryAuthority {
     if (
       this.dependencies.schedulePolicyDigest === null ||
       this.dependencies.roleIdentityPolicyDigest === null ||
+      this.dependencies.dailyQuotaPolicy === null ||
+      this.dependencies.dailyQuotas === null ||
       parsed.schedulePolicyDigest !== this.dependencies.schedulePolicyDigest ||
       parsed.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest
     ) {
       throw new Error("Scheduled draft PR work requires the exact configured canary policy pins.");
     }
-    const [preparation, reservation, completion] = await Promise.all([
+    const [preparation, reservation, completion, dailyQuota] = await Promise.all([
       this.dependencies.preparations.findById(task.contract.taskId),
       this.dependencies.reservations.findByReservationDigest(parsed.reservationDigest),
-      this.dependencies.schedules.findTaskCompletion(task.contract.taskId)
+      this.dependencies.schedules.findTaskCompletion(task.contract.taskId),
+      this.dependencies.dailyQuotas.findByTaskId(task.contract.taskId)
     ]);
-    if (preparation === null || reservation === null || completion === null) {
+    if (
+      preparation === null ||
+      reservation === null ||
+      completion === null ||
+      dailyQuota === null
+    ) {
       throw new Error("Scheduled draft PR work is missing its complete canary authority chain.");
     }
     const document = assertFactoryBrokeredTaskReservation(
@@ -92,11 +115,12 @@ export class FactoryPullRequestCanaryAuthority {
     const event = completion.event;
     if (
       completion.state !== "completed" ||
-      completion.run.schemaVersion !== "agentlab.schedule-run.v2" ||
+      completion.run.schemaVersion !== "agentlab.schedule-run.v3" ||
       completion.run.schedulePolicyDigest !== parsed.schedulePolicyDigest ||
       completion.run.factoryPolicyBundleDigest !== this.dependencies.policyBundleDigest ||
       completion.run.roleIdentityPolicyDigest !== parsed.roleIdentityPolicyDigest ||
-      event.schemaVersion !== "agentlab.schedule-event.v2" ||
+      completion.run.dailyQuotaPolicyDigest !== this.dependencies.dailyQuotaPolicy.digest ||
+      event.schemaVersion !== "agentlab.schedule-event.v3" ||
       event.taskId !== task.contract.taskId ||
       event.canaryReservationDigest !== parsed.reservationDigest ||
       event.result !== "ready-for-broker" ||
@@ -105,6 +129,25 @@ export class FactoryPullRequestCanaryAuthority {
       event.contractDigest !== task.contractDigest
     ) {
       throw new Error("Scheduled draft PR work lacks its exact completed scheduler handoff.");
+    }
+    assertFactoryDailyQuotaReservation(
+      dailyQuota,
+      {
+        policy: this.dependencies.dailyQuotaPolicy,
+        organizationId: this.dependencies.dailyQuotaPolicy.value.organizationId,
+        repositoryId: task.contract.repository.id,
+        taskId: task.contract.taskId,
+        scheduleRunId: completion.run.runId,
+        scheduleRunDigest: completion.runDigest,
+        canaryReservationDigest: parsed.reservationDigest,
+        scheduledFor: completion.run.scheduledFor,
+        budget: document.value.budget,
+        correlationId: task.lastEvent.correlationId
+      },
+      this.dependencies.documents
+    );
+    if (dailyQuota.reservationDigest !== event.dailyQuotaReservationDigest) {
+      throw new Error("Scheduled draft PR work changed its daily quota reservation.");
     }
     return document.digest;
   }

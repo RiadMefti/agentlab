@@ -207,17 +207,22 @@ function runnerDependencies(
 
 function preflight(): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v3",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status: "blocked",
     policyBundleDigest,
     schedulePolicyDigest: null,
     roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: null,
     schedulerEnabled: false,
     costPolicyConfigured: true,
     hostReady: true,
     configuredProviders: ["codex"],
     gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-    reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
+    reasonCodes: [
+      "daily-quota-policy-unconfigured",
+      "schedule-policy-unconfigured",
+      "scheduler-disabled"
+    ]
   };
 }
 
