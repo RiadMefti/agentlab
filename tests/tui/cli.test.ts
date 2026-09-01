@@ -60,6 +60,20 @@ describe("terminal CLI", () => {
       kind: "factory-worker-preflight",
       configPath: "/private/agentlab/worker.json"
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "orchestration-render",
+        "--config",
+        "/private/agentlab/orchestration.json"
+      ])
+    ).toEqual({
+      kind: "factory-orchestration-render",
+      configPath: "/private/agentlab/orchestration.json"
+    });
+    expect(() =>
+      parseCliArguments(["factory", "orchestration-render", "--config", "relative.json"])
+    ).toThrow(/Usage/u);
   });
 
   it("requires exact eval and human canary authority coordinates", () => {
@@ -856,6 +870,7 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory intake-preflight --config");
     expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
+    expect(helpText).toContain("factory orchestration-render --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory scheduler-tick --config");
     expect(helpText).toContain("factory broker-open-draft --config");

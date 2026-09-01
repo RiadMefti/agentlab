@@ -97,6 +97,11 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryWorkerPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-orchestration-render") {
+    const { runFactoryOrchestrationRender } = await import("./run-factory-orchestration-render.js");
+    process.exitCode = await runFactoryOrchestrationRender(action.configPath);
+    return;
+  }
   if (action.kind === "factory-scheduler-tick") {
     const { runFactorySchedulerTick } = await import("./run-factory-scheduler-tick.js");
     process.exitCode = await runFactorySchedulerTick(

@@ -99,6 +99,10 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-canary-admission",
           "packages/runtime/src/local-factory-canary-admission.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-orchestration",
+          "packages/runtime/src/local-factory-orchestration.ts"
         )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
@@ -108,7 +112,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-evaluator.ts"),
       source("packages/runtime/src/local-factory-eval-attestor.ts"),
       source("packages/runtime/src/local-factory-canary-authority.ts"),
-      source("packages/runtime/src/local-factory-canary-admission.ts")
+      source("packages/runtime/src/local-factory-canary-admission.ts"),
+      source("packages/runtime/src/local-factory-orchestration.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -763,6 +768,10 @@ function architectureFixture(): string {
       "./factory-canary-admission": {
         default: "./dist/local-factory-canary-admission.js",
         types: "./dist/local-factory-canary-admission.d.ts"
+      },
+      "./factory-orchestration": {
+        default: "./dist/local-factory-orchestration.js",
+        types: "./dist/local-factory-orchestration.d.ts"
       }
     }
   });
@@ -776,6 +785,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-eval-attestor.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-canary-authority.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-canary-admission.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
   return root;
 }
 

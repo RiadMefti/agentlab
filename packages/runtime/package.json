@@ -39,6 +39,10 @@
     "./factory-canary-admission": {
       "types": "./dist/local-factory-canary-admission.d.ts",
       "default": "./dist/local-factory-canary-admission.js"
+    },
+    "./factory-orchestration": {
+      "types": "./dist/local-factory-orchestration.d.ts",
+      "default": "./dist/local-factory-orchestration.js"
     }
   },
   "files": [

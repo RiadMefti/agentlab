@@ -19,6 +19,7 @@ export type CliAction =
     }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
+  | { readonly kind: "factory-orchestration-render"; readonly configPath: string }
   | {
       readonly kind: "factory-eval-assess";
       readonly configPath: string;
@@ -167,6 +168,17 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "orchestration-render" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-orchestration-render", configPath };
+    }
   }
   if (
     input.length === 7 &&
@@ -752,7 +764,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -824,6 +836,8 @@ Factory authority:
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
+  agentlab factory orchestration-render --config <absolute-path>
+      Emit a content-addressed daily systemd bundle; never install, enable, or start it.
   agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --policy <sha256>
       Run one bounded UTC slot from exact current canary reservations; stop before remote writes.
   agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run

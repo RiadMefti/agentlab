@@ -520,10 +520,18 @@ authenticated observations and deterministic repair admission, and a recovery-fi
 consumer now turns exact authorizations into gated local repair proposals. A separate recovery-first
 broker consumer publishes those proposals through the existing durable non-force update service and
 returns them to exact-head observation. Repository/day and organization/day quotas, a sandboxed
-harness producer, owner-installed timers, telemetry-driven canary comparison, merge, release,
-rollback, and incident automation remain later stages. Deterministic assessment, bounded non-release
-cohort authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR
-maintenance, repair consumption, and repaired-branch publication exist but remain unactivated.
+harness producer, owner-provisioned activation, telemetry-driven canary comparison, merge, release,
+rollback, and incident automation remain later stages. A read-only daily-cycle compiler now verifies
+one owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
+broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
+systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
+UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
+published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
+executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
+install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
+assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
+execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
+dormant orchestration rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -540,6 +548,7 @@ eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ 
 eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
 canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
+unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
                                                    application     infrastructure
@@ -551,15 +560,15 @@ canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ loc
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                                                          | May depend on workspace areas                  |
-| ------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                                                     | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                                                  | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                  | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                 | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, intake, worker, evaluator, admission, human authorities, and broker construction | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                       | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff                                         | launcher                                       |
+| Area                      | Owns                                                                                               | May depend on workspace areas                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                                                          | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                                                       | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                       | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                      | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, evaluator, admission, authorities, broker, and dormant unit rendering | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                            | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                                              | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -568,8 +577,8 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, evaluator, eval-attestor, switch-authority, canary-authority, and canary-admission
-  subpaths are exact; every runtime deep import fails.
+  broker, worker, evaluator, eval-attestor, switch-authority, canary-authority, canary-admission,
+  and orchestration-renderer subpaths are exact; every runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The

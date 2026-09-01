@@ -110,6 +110,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-canary-admission.ts",
         default: "./dist/local-factory-canary-admission.js",
         types: "./dist/local-factory-canary-admission.d.ts"
+      },
+      "./factory-orchestration": {
+        source: "packages/runtime/src/local-factory-orchestration.ts",
+        default: "./dist/local-factory-orchestration.js",
+        types: "./dist/local-factory-orchestration.d.ts"
       }
     }
   }
@@ -388,6 +393,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -404,6 +410,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
     {
@@ -418,6 +425,7 @@ function compositionBoundaryViolations(
         isFactoryEvalAttestorModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -453,6 +461,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-canary-admission.ts",
       description: "credentialless canary admission composition",
       forbidden: canaryAdmissionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-orchestration.ts",
+      description: "read-only orchestration renderer",
+      forbidden: orchestrationCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -508,6 +521,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-canary-admission.ts",
       description: "credentialless canary admission command",
       forbidden: canaryAdmissionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-orchestration-render.ts",
+      description: "read-only orchestration render command",
+      forbidden: orchestrationCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -925,6 +943,55 @@ function canaryAdmissionCommandForbidden(path: string): boolean {
   return false;
 }
 
+const factoryOrchestrationDomainModules = new Set([
+  "packages/runtime/src/domain/factory-daily-cycle-plan.ts",
+  "packages/runtime/src/domain/factory-documents.ts"
+]);
+
+const factoryOrchestrationInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-daily-cycle-renderer.ts"
+]);
+
+function isFactoryOrchestrationModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-orchestration.ts" ||
+    path === "packages/runtime/src/domain/factory-daily-cycle-plan.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts" ||
+    path === "packages/runtime/src/infrastructure/process/systemd-factory-daily-cycle-renderer.ts"
+  );
+}
+
+function orchestrationCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    isFactoryIntakeModule(path) ||
+    isFactoryAuthorityModule(path) ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryOrchestrationDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) return true;
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryOrchestrationInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/contracts/src/")) return "contracts";
   if (path.startsWith("packages/launcher/src/")) return "launcher";
@@ -940,7 +1007,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-evaluator.ts" ||
     path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
     path === "packages/runtime/src/local-factory-canary-authority.ts" ||
-    path === "packages/runtime/src/local-factory-canary-admission.ts"
+    path === "packages/runtime/src/local-factory-canary-admission.ts" ||
+    path === "packages/runtime/src/local-factory-orchestration.ts"
   ) {
     return "runtime-composition";
   }

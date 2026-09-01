@@ -197,6 +197,73 @@ stays blocked rather than running model work.
    ceilings remain authoritative. Exit 2 requires operator attention. It cannot run a model, merge,
    release, deploy, install a timer, or change authority.
 
+## Render the dormant daily cycle
+
+After all identities, configs, policies, costs, governance, and preflights are ready, a provisioning
+operator may render—not install—the separated systemd chain. The owner-only manifest is strict and
+contains no command or credential:
+
+```json
+{
+  "schemaVersion": "agentlab.daily-cycle-manifest.v1",
+  "id": "agentlab/daily-software-factory",
+  "version": "1.0.0",
+  "agentlabExecutable": {
+    "path": "/opt/agentlab/bin/agentlab",
+    "digest": "sha256:..."
+  },
+  "executableChecksumPath": "/etc/agentlab/factory-executable.sha256",
+  "worker": { "userId": 1001, "configPath": "/etc/agentlab/worker.json" },
+  "broker": { "userId": 1003, "configPath": "/etc/agentlab/broker.json" },
+  "schedulePolicyPath": "/etc/agentlab/schedule.json",
+  "roleIdentityPolicyPath": "/etc/agentlab/role-identities.json",
+  "expectedSchedulePolicyDigest": "sha256:...",
+  "expectedRoleIdentityPolicyDigest": "sha256:...",
+  "expectedFactoryPolicyBundleDigest": "sha256:...",
+  "maximumRepairRounds": 2,
+  "workerCommandTimeoutSeconds": 7500,
+  "brokerCommandTimeoutSeconds": 900
+}
+```
+
+`maximumRepairRounds` cannot exceed the schedule tick's repair-attempt ceiling. The worker timeout
+must exceed its complete aggregate wall-clock ceiling by at least 30 seconds. Render to stdout:
+
+```text
+agentlab factory orchestration-render --config /absolute/orchestration.json
+```
+
+The JSON bundle pins the manifest, policies, AgentLab executable, every unit, and the bundle itself.
+It contains one UTC `Persistent=false` timer, separate numeric-UID services, fixed argv, bounded
+timeouts, an `OnSuccess=` chain, a final exact-head observation, and an incident target activated by
+any failed step. It also emits `executableVerification.checksumContent`; every service verifies the
+installed executable against that exact record with fixed `/usr/bin/sha256sum` argv before starting
+AgentLab. It never writes a unit or checksum file, calls `systemctl`, changes an authority switch,
+or touches the ledger.
+
+Owner provisioning is deliberately outside AgentLab. Materialize the exact checksum content at
+`executableVerification.checksumFilePath` and the exact unit contents under `/etc/systemd/system`.
+Before activation, independently re-hash the executable and every artifact, ensure the worker and
+broker accounts own only their respective private configs/credentials, and ensure neither runtime
+UID owns the AgentLab executable or can write it through group/other permissions. Keep the fixed
+checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege shared
+ledger/artifact access, and enable the worker's user manager/linger required by its transient
+scopes. Runtime configs for distinct UIDs require role-owned copies of the schedule and identity
+policies with identical reviewed digests; they cannot share one owner-only file. Run
+`/usr/bin/sha256sum --status --check` on the materialized checksum and `systemd-analyze verify` over
+the complete unit bundle. Only after both role preflights, governance, monitored incident response,
+and the two human-controlled authority switches are ready should an operator enable
+`agentlab-factory-daily.timer`.
+
+Monitor failed stage units and `agentlab-factory-incident.target`. The target is a durable systemd
+signal, not an automatic authority mutation and not a retry latch. On any signal, disable both
+switches with the commands below, preserve evidence, investigate, then stop the target and reset
+failed units only after review. Upstream semantics are documented for
+[`OnSuccess=`/`OnFailure=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#OnSuccess=),
+[`OnCalendar=`/`Persistent=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html#OnCalendar=),
+and
+[`systemd-analyze verify`](https://www.freedesktop.org/software/systemd/man/latest/systemd-analyze.html#systemd-analyze%20verify%20FILE%E2%80%A6).
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -219,12 +286,13 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
-organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, attested eval-harness producer, owner-installed timers, merge,
-telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
-assessment, human non-release cohorts, task reservation, reservation-bound scheduled execution and
-draft dispatch, slot-bound PR observation/repair admission, credentialless repair consumption, and
-brokered repaired-branch publication exist but are not provisioned or activated. See
+No OS accounts, installed timer, live rate card, live worker/authority configuration, repository/day
+or organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts,
+autonomous maintenance discovery, attested eval-harness producer, owner-provisioned activation,
+merge, telemetry-driven canary, rollback controller, or incident automation is shipped.
+Deterministic assessment, human non-release cohorts, task reservation, reservation-bound scheduled
+execution and draft dispatch, slot-bound PR observation/repair admission, credentialless repair
+consumption, and brokered repaired-branch publication plus a content-addressed separated-service
+renderer exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

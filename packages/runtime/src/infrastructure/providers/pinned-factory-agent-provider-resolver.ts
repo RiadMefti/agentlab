@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
-import { constants, type BigIntStats } from "node:fs";
-import { access, lstat, open, realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 
 import { sha256DigestSchema, type ProviderId, type Sha256Digest } from "@agentlab/contracts";
@@ -10,6 +8,7 @@ import type {
   FactoryAgentProviderResolver,
   ResolvedFactoryAgentProvider
 } from "../../domain/factory-agent-executor.js";
+import { pinnedLocalExecutableDigest } from "../filesystem/pinned-local-executable.js";
 import type { CommandRunner } from "../process/command-runner.js";
 
 const supportedProviderSchema = z.enum(["codex", "claude"]);
@@ -88,8 +87,12 @@ export class PinnedFactoryAgentProviderResolver implements FactoryAgentProviderR
     if (binding === undefined) return null;
     const workspace = workspaceSchema.parse(workspaceInput);
     await assertCanonicalDirectory(workspace, "Factory provider workspace");
-    await assertCanonicalExecutable(binding.executable);
-    if ((await executableDigest(binding.executable)) !== binding.executableDigest) {
+    if (
+      (await pinnedLocalExecutableDigest(
+        binding.executable,
+        "Pinned factory provider executable"
+      )) !== binding.executableDigest
+    ) {
       throw new Error(`Pinned ${provider} provider executable digest does not match.`);
     }
     const { stdout, stderr } = await this.runner.run(binding.executable, ["--version"], {
@@ -114,51 +117,6 @@ async function assertCanonicalDirectory(path: string, label: string): Promise<vo
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`${label} must be a real directory.`);
   }
-}
-
-async function assertCanonicalExecutable(path: string): Promise<void> {
-  if ((await realpath(path)) !== path) {
-    throw new Error("Pinned factory provider executable must be canonical and symlink-free.");
-  }
-  const metadata = await lstat(path);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error("Pinned factory provider executable must be a real file.");
-  }
-  await access(path, constants.X_OK);
-}
-
-async function executableDigest(path: string): Promise<Sha256Digest> {
-  const before = await lstat(path, { bigint: true });
-  if (before.size < 1n || before.size > 1_073_741_824n) {
-    throw new Error("Pinned factory provider executable has an unsafe size.");
-  }
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const opened = await handle.stat({ bigint: true });
-    if (!sameFile(before, opened)) {
-      throw new Error("Pinned factory provider executable changed while it was opened.");
-    }
-    const hash = createHash("sha256");
-    const stream = handle.createReadStream({ autoClose: false });
-    for await (const chunk of stream as AsyncIterable<Buffer>) hash.update(chunk);
-    const after = await handle.stat({ bigint: true });
-    if (!sameFile(opened, after)) {
-      throw new Error("Pinned factory provider executable changed while it was hashed.");
-    }
-    return sha256DigestSchema.parse(`sha256:${hash.digest("hex")}`);
-  } finally {
-    await handle.close();
-  }
-}
-
-function sameFile(left: BigIntStats, right: BigIntStats): boolean {
-  return (
-    left.dev === right.dev &&
-    left.ino === right.ino &&
-    left.size === right.size &&
-    left.mtimeNs === right.mtimeNs &&
-    left.ctimeNs === right.ctimeNs
-  );
 }
 
 function providerVersion(stdout: string, stderr: string): string | null {
