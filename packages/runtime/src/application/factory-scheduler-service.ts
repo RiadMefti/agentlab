@@ -2,6 +2,7 @@ import {
   factoryTimestampSchema,
   sha256DigestSchema,
   type FactoryBudgetUsage,
+  type FactoryCanaryTaskReservation,
   type FactoryScheduleEvent,
   type FactorySchedulePolicy,
   type Sha256Digest
@@ -9,6 +10,14 @@ import {
 import { z } from "zod";
 
 import { ConflictError } from "../domain/errors.js";
+import {
+  assertFactoryScheduledTaskReservation,
+  isFactoryCanaryReservationExecutableAt
+} from "../domain/factory-canary-reservation-integrity.js";
+import type {
+  FactoryCanaryReservationRepository,
+  FactoryCanaryReservationSnapshot
+} from "../domain/factory-canary-reservation-repository.js";
 import type {
   CanonicalFactoryDocument,
   FactoryDocumentCodec
@@ -62,12 +71,16 @@ export interface FactorySchedulerServiceDependencies {
   readonly factoryPolicyBundleDigest: Sha256Digest;
   readonly roleIdentityPolicyDigest: Sha256Digest;
   readonly schedules: FactoryScheduleRepository;
-  readonly preparations: Pick<FactoryPreparationRepository, "listScheduled">;
+  readonly preparations: Pick<FactoryPreparationRepository, "findById" | "listScheduled">;
+  readonly reservations: Pick<
+    FactoryCanaryReservationRepository,
+    "findByTaskId" | "findByReservationDigest"
+  >;
   readonly worker: Pick<FactoryWorkerOperator, "preflight">;
   readonly taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
   readonly documents: Pick<
     FactoryDocumentCodec,
-    "schedulePolicy" | "scheduleRun" | "scheduleEvent"
+    "schedulePolicy" | "scheduleRun" | "scheduleEvent" | "canaryTaskReservation"
   >;
   readonly now: () => string;
   readonly createId: () => string;
@@ -141,6 +154,10 @@ export class FactorySchedulerService {
     if (snapshot.state === "completed") {
       return this.#report("already-completed", snapshot, []);
     }
+    const activeBlockReason = await this.#activeTaskBlockReason(snapshot);
+    if (activeBlockReason !== null) {
+      return this.#report("blocked", snapshot, [activeBlockReason]);
+    }
     snapshot = await this.#finishActiveTask(snapshot);
 
     const policy = this.dependencies.schedulePolicy.value;
@@ -157,16 +174,39 @@ export class FactorySchedulerService {
       if (claims >= policy.maximumTasksPerTick) break;
       if (selectedTaskIds.has(candidate.request.taskId)) continue;
       this.#assertCandidate(candidate);
+      const reservation = await this.dependencies.reservations.findByTaskId(
+        candidate.request.taskId
+      );
+      if (reservation === null) {
+        snapshot = await this.#skip(snapshot, candidate, "canary-reservation-missing");
+        selectedTaskIds.add(candidate.request.taskId);
+        continue;
+      }
+      const reservationDocument = this.#assertReservation(candidate, reservation);
+      if (
+        !isFactoryCanaryReservationExecutableAt(
+          reservationDocument.value,
+          factoryTimestampSchema.parse(this.dependencies.now())
+        )
+      ) {
+        snapshot = await this.#skip(snapshot, candidate, "canary-reservation-not-current");
+        selectedTaskIds.add(candidate.request.taskId);
+        continue;
+      }
       const currentUsage = reservedUsage(snapshot.events);
-      const prospectiveUsage = addReservation(currentUsage, candidate.authority.budgetCeiling);
+      const prospectiveUsage = addReservation(currentUsage, reservationDocument.value.budget);
       if (exceedsBudget(prospectiveUsage, policy.tickBudget)) {
         snapshot = await this.#skip(snapshot, candidate, "tick-budget-exceeded");
         selectedTaskIds.add(candidate.request.taskId);
         continue;
       }
-      snapshot = await this.#claim(snapshot, candidate);
+      snapshot = await this.#claim(snapshot, candidate, reservation);
       selectedTaskIds.add(candidate.request.taskId);
       claims += 1;
+      const claimedBlockReason = await this.#activeTaskBlockReason(snapshot);
+      if (claimedBlockReason !== null) {
+        return this.#report("blocked", snapshot, [claimedBlockReason]);
+      }
       snapshot = await this.#finishActiveTask(snapshot);
     }
     snapshot = await this.#complete(snapshot);
@@ -239,11 +279,13 @@ export class FactorySchedulerService {
 
   async #claim(
     snapshot: FactoryScheduleRunSnapshot,
-    candidate: FactoryPreparationSnapshot
+    candidate: FactoryPreparationSnapshot,
+    reservation: FactoryCanaryReservationSnapshot
   ): Promise<FactoryScheduleRunSnapshot> {
     const taskCorrelationId = this.dependencies.createId();
     return this.#append(snapshot, {
       ...this.#nextEvent(snapshot),
+      schemaVersion: "agentlab.schedule-event.v2",
       kind: "task-claimed",
       from: "ready",
       to: "task-active",
@@ -251,7 +293,8 @@ export class FactorySchedulerService {
       requestDigest: candidate.requestDigest,
       authorityDigest: candidate.authorityDigest,
       taskCorrelationId,
-      reservation: candidate.authority.budgetCeiling,
+      canaryReservationDigest: reservation.reservationDigest,
+      reservation: reservation.reservation.budget,
       reasonCode: "scheduled-task-claimed"
     });
   }
@@ -279,22 +322,25 @@ export class FactorySchedulerService {
   ): Promise<FactoryScheduleRunSnapshot> {
     if (snapshot.state !== "task-active") return snapshot;
     const claim = snapshot.lastEvent;
-    if (claim.kind !== "task-claimed") {
-      throw new Error("Active factory schedule run is missing its exact task claim.");
+    if (claim.kind !== "task-claimed" || claim.schemaVersion !== "agentlab.schedule-event.v2") {
+      throw new Error("Active factory schedule run is missing its canary-bound task claim.");
     }
     const result = await this.dependencies.taskRunner.run({
       taskId: claim.taskId,
       correlationId: claim.taskCorrelationId,
-      expectedPolicyBundleDigest: this.dependencies.factoryPolicyBundleDigest
+      expectedPolicyBundleDigest: this.dependencies.factoryPolicyBundleDigest,
+      canaryReservationDigest: claim.canaryReservationDigest
     });
     this.#assertTaskResult(claim, result);
     return this.#append(snapshot, {
       ...this.#nextEvent(snapshot),
+      schemaVersion: "agentlab.schedule-event.v2",
       kind: "task-finished",
       from: "task-active",
       to: "ready",
       taskId: claim.taskId,
       taskCorrelationId: claim.taskCorrelationId,
+      canaryReservationDigest: claim.canaryReservationDigest,
       result: result.status,
       preparationState: result.preparationState,
       taskState: result.taskState,
@@ -386,6 +432,46 @@ export class FactorySchedulerService {
     }
   }
 
+  #assertReservation(
+    candidate: FactoryPreparationSnapshot,
+    reservation: FactoryCanaryReservationSnapshot
+  ): CanonicalFactoryDocument<FactoryCanaryTaskReservation> {
+    return assertFactoryScheduledTaskReservation(
+      reservation,
+      candidate,
+      {
+        schedulePolicyDigest: this.dependencies.schedulePolicy.digest,
+        policyBundleDigest: this.dependencies.factoryPolicyBundleDigest,
+        roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest
+      },
+      this.dependencies.documents
+    );
+  }
+
+  async #activeTaskBlockReason(snapshot: FactoryScheduleRunSnapshot): Promise<string | null> {
+    if (snapshot.state !== "task-active") return null;
+    const claim = snapshot.lastEvent;
+    if (claim.kind !== "task-claimed") {
+      throw new Error("Active factory schedule run is missing its exact task claim.");
+    }
+    if (claim.schemaVersion !== "agentlab.schedule-event.v2") {
+      return "legacy-schedule-claim-unreserved";
+    }
+    const [candidate, reservation] = await Promise.all([
+      this.dependencies.preparations.findById(claim.taskId),
+      this.dependencies.reservations.findByReservationDigest(claim.canaryReservationDigest)
+    ]);
+    if (candidate === null || reservation === null) return "canary-reservation-missing";
+    this.#assertCandidate(candidate);
+    const document = this.#assertReservation(candidate, reservation);
+    return isFactoryCanaryReservationExecutableAt(
+      document.value,
+      factoryTimestampSchema.parse(this.dependencies.now())
+    )
+      ? null
+      : "canary-reservation-not-current";
+  }
+
   #assertTaskResult(
     claim: Extract<FactoryScheduleEvent, { readonly kind: "task-claimed" }>,
     result: FactoryWorkerTaskRunReport
@@ -394,7 +480,9 @@ export class FactorySchedulerService {
       result.taskId !== claim.taskId ||
       result.correlationId !== claim.taskCorrelationId ||
       result.policyBundleDigest !== this.dependencies.factoryPolicyBundleDigest ||
-      result.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest
+      result.roleIdentityPolicyDigest !== this.dependencies.roleIdentityPolicyDigest ||
+      claim.schemaVersion !== "agentlab.schedule-event.v2" ||
+      result.canaryReservationDigest !== claim.canaryReservationDigest
     ) {
       throw new Error("Factory scheduled worker returned different durable coordinates.");
     }

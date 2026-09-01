@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 15;
+export const latestSchemaVersion = 16;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -2999,6 +2999,7 @@ export function migrate(database: DatabaseSync): void {
           SELECT issued_at FROM factory_preparations WHERE task_id = NEW.task_id
         ) OR
         NEW.reserved_at >= NEW.expires_at OR
+        unixepoch(NEW.reserved_at) + NEW.wall_clock_seconds > unixepoch(NEW.expires_at) OR
         NEW.expires_at > (
           SELECT expires_at FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
         ) OR
@@ -3082,6 +3083,133 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 15;
+      COMMIT;
+    `);
+  }
+
+  if (version < 16) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TRIGGER factory_schedule_events_canary_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND (
+        json_extract(NEW.event_json, '$.schemaVersion')
+          IS NOT 'agentlab.schedule-event.v2' OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.canaryReservationDigest'
+          )
+        ) OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT preparation_authority_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        (SELECT stage FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS 'read-only-shadow' OR
+        json_extract(NEW.event_json, '$.reservation.wallClockSeconds') IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxAgentTurns') IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxToolCalls') IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxInputTokens') IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputTokens') IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxCostMicrousd') IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxProcesses') IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputBytes') IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxWorkers') IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxRepairAttempts') IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedFiles') IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedLines') IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.occurred_at < (
+          SELECT reserved_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        unixepoch(NEW.occurred_at) + (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) > unixepoch((
+          SELECT expires_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ))
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule canary claim mismatch');
+      END;
+
+      CREATE TRIGGER factory_schedule_events_canary_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        json_extract(NEW.event_json, '$.schemaVersion')
+          IS NOT 'agentlab.schedule-event.v2' OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.canaryReservationDigest') OR
+        NEW.occurred_at > (
+          SELECT expires_at FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.canaryReservationDigest'
+          )
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule canary finish mismatch');
+      END;
+
+      PRAGMA user_version = 16;
       COMMIT;
     `);
   }

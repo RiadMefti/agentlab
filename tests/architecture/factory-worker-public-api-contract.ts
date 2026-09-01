@@ -98,12 +98,13 @@ interface ExpectedPreflight {
 }
 
 interface ExpectedTaskRunReport {
-  readonly schemaVersion: "agentlab.worker-task-run.v2";
+  readonly schemaVersion: "agentlab.worker-task-run.v3";
   readonly status: "ready-for-broker" | "already-advanced" | "stopped";
   readonly taskId: string;
   readonly correlationId: string;
   readonly policyBundleDigest: Sha256Digest;
   readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly canaryReservationDigest: Sha256Digest | null;
   readonly preparationState:
     | "registered"
     | "qualifying"

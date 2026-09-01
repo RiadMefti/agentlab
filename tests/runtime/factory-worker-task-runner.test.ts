@@ -9,12 +9,17 @@ import type { FactoryExecutionOutcome } from "../../packages/runtime/src/applica
 import type { FactoryExecutionSnapshot } from "../../packages/runtime/src/domain/factory-execution-repository.js";
 import type { FactoryPreparationSnapshot } from "../../packages/runtime/src/domain/factory-preparation-repository.js";
 import type { FactoryTaskSnapshot } from "../../packages/runtime/src/domain/factory-task-repository.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import {
   TEST_FACTORY_CORRELATION_ID,
   TEST_FACTORY_TASK_ID,
   testDigest,
   testFactoryContract
 } from "../helpers/factory.js";
+import {
+  testFactoryCanaryAdmissionFixture,
+  testFactoryCanaryReservationDocument
+} from "../helpers/factory-canary-admission.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 
 const policyBundleDigest = testFactoryPreparationFixture().policyDigest;
@@ -77,12 +82,13 @@ describe("FactoryWorkerTaskRunner", () => {
     });
 
     await expect(runner.run(command)).resolves.toEqual({
-      schemaVersion: "agentlab.worker-task-run.v2",
+      schemaVersion: "agentlab.worker-task-run.v3",
       status: "ready-for-broker",
       taskId: TEST_FACTORY_TASK_ID,
       correlationId: TEST_FACTORY_CORRELATION_ID,
       policyBundleDigest,
       roleIdentityPolicyDigest,
+      canaryReservationDigest: null,
       preparationState: "prepared",
       taskState: "pr-proposed",
       contractDigest: testDigest("c"),
@@ -190,6 +196,69 @@ describe("FactoryWorkerTaskRunner", () => {
     expect(worker.advancePreparation).not.toHaveBeenCalled();
   });
 
+  it("requires and repeatedly verifies exact current canary authority for scheduled work", async () => {
+    const fixture = testFactoryCanaryAdmissionFixture({
+      authorityExpiresAt: "2026-09-01T12:00:00.000Z",
+      canaryMaximumLifetimeSeconds: 172_800
+    });
+    const reservation = testFactoryCanaryReservationDocument(fixture);
+    const preparation: FactoryPreparationSnapshot = {
+      ...fixture.preparation,
+      state: "needs-human",
+      lastEvent: {
+        ...fixture.preparation.lastEvent,
+        reasonCode: "qualification-needs-human"
+      }
+    };
+    const findReservation = vi.fn((digest: Sha256Digest) =>
+      Promise.resolve(
+        digest === reservation.digest
+          ? { reservation: reservation.value, reservationDigest: reservation.digest }
+          : null
+      )
+    );
+    const runner = taskRunner({
+      schedulePolicyDigest: fixture.schedulePolicyDigest,
+      roleIdentityPolicyDigest: reservation.value.roleIdentityPolicyDigest,
+      preparations: { findById: () => Promise.resolve(preparation) },
+      reservations: { findByReservationDigest: findReservation },
+      documents: fixture.documents,
+      now: () => "2026-08-31T12:05:00.000Z"
+    });
+    const scheduledCommand = {
+      ...command,
+      canaryReservationDigest: reservation.digest
+    };
+
+    await expect(runner.run(scheduledCommand)).resolves.toMatchObject({
+      schemaVersion: "agentlab.worker-task-run.v3",
+      status: "stopped",
+      canaryReservationDigest: reservation.digest
+    });
+    expect(findReservation).toHaveBeenCalledWith(reservation.digest);
+    await expect(runner.run(command)).rejects.toThrow(/requires exact canary reservation/u);
+    await expect(
+      taskRunner({
+        schedulePolicyDigest: fixture.schedulePolicyDigest,
+        roleIdentityPolicyDigest: reservation.value.roleIdentityPolicyDigest,
+        preparations: { findById: () => Promise.resolve(preparation) },
+        reservations: { findByReservationDigest: findReservation },
+        documents: fixture.documents,
+        now: () => "2026-09-01T11:45:00.000Z"
+      }).run(scheduledCommand)
+    ).rejects.toThrow(/not currently executable/u);
+  });
+
+  it("does not let manual work consume autonomous authority", async () => {
+    const worker = workerOperations();
+    const runner = taskRunner({ worker });
+
+    await expect(
+      runner.run({ ...command, canaryReservationDigest: testDigest("7") })
+    ).rejects.toThrow(/manual factory work/iu);
+    expect(worker.advancePreparation).not.toHaveBeenCalled();
+  });
+
   it("fails closed when durable preparation and task ledgers disagree", async () => {
     const runner = taskRunner({
       preparations: { findById: () => Promise.resolve(preparation("prepared")) },
@@ -233,11 +302,15 @@ function taskRunner(
 ): FactoryWorkerTaskRunner {
   return new FactoryWorkerTaskRunner({
     policyBundleDigest,
+    schedulePolicyDigest: null,
     roleIdentityPolicyDigest,
     preparations: { findById: () => Promise.resolve(preparation("registered")) },
+    reservations: { findByReservationDigest: () => Promise.resolve(null) },
     tasks: { findById: () => Promise.resolve(null) },
     executions: { findByTaskId: () => Promise.resolve(null) },
+    documents: new NodeFactoryDocumentCodec(),
     worker: workerOperations(),
+    now: () => "2026-08-30T12:02:00.000Z",
     ...overrides
   });
 }

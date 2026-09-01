@@ -249,9 +249,14 @@ exact v2 cohort, signature, role-policy, evaluated candidate, schedule/policy/sk
 repository, R0/R1 ceiling, preparation authority, and current validity before atomically reserving a
 scheduled task's complete budget. SQLite version 15 makes reservations immutable and enforces
 aggregate cohort task and budget ceilings inside the insert transaction. Admission has no model,
-process, GitHub, broker, merge, or release capability. Scheduler and worker execution do not consume
-the reservation yet. See [ADR 0012](decisions/0012-attested-canary-authority.md),
-[ADR 0013](decisions/0013-durable-canary-task-admission.md), and
+process, GitHub, broker, merge, or release capability. New schedule claims are schema-v2 events
+carrying the exact reservation digest. SQLite version 16 rejects missing, mismatched, read-only,
+expired, or insufficient-lifetime claims and binds completion to the same digest. The worker
+independently reloads and validates the reservation before every resumable preparation or execution
+phase. Legacy unbound active claims cannot resume. See
+[ADR 0012](decisions/0012-attested-canary-authority.md),
+[ADR 0013](decisions/0013-durable-canary-task-admission.md),
+[ADR 0014](decisions/0014-canary-bound-scheduled-execution.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -442,10 +447,10 @@ intake configuration or task has been provisioned. No live agent task or PR has 
 code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
 and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
 reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Repository/day and organization/day quotas, a sandboxed harness producer, reservation-bound worker
-and scheduler execution, telemetry-driven canary comparison, merge, release, rollback, and incident
-automation remain later stages. Deterministic assessment, bounded non-release cohort authority, and
-durable admission now exist but remain unactivated.
+Repository/day and organization/day quotas, a sandboxed harness producer, reservation-bound broker
+dispatch, telemetry-driven canary comparison, merge, release, rollback, and incident automation
+remain later stages. Deterministic assessment, bounded non-release cohort authority, durable
+admission, and reservation-bound scheduled execution exist but remain unactivated.
 
 ## Dependency map
 

@@ -14,6 +14,7 @@ import type {
   FactoryDocumentCodec
 } from "../../packages/runtime/src/domain/factory-documents.js";
 import type { FactoryPreparationSnapshot } from "../../packages/runtime/src/domain/factory-preparation-repository.js";
+import type { FactoryCanaryReservationSnapshot } from "../../packages/runtime/src/domain/factory-canary-reservation-repository.js";
 import {
   assertFactoryScheduleEvent,
   assertFactoryScheduleRegistration,
@@ -25,8 +26,14 @@ import type {
 } from "../../packages/runtime/src/domain/factory-schedule-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testDigest } from "../helpers/factory.js";
+import {
+  testFactoryCanaryAdmissionFixture,
+  testFactoryCanaryReservationDocument
+} from "../helpers/factory-canary-admission.js";
+import { TEST_ROLE_IDENTITY_POLICY_DIGEST } from "../helpers/factory-evaluation.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 import {
+  TEST_FACTORY_SCHEDULE_DEADLINE,
   TEST_FACTORY_SCHEDULE_NOW,
   TEST_FACTORY_SCHEDULED_FOR,
   testFactoryScheduleBudget,
@@ -34,7 +41,7 @@ import {
 } from "../helpers/factory-schedule.js";
 
 const factoryPolicyBundleDigest = testFactoryPreparationFixture().policyDigest;
-const roleIdentityPolicyDigest = testDigest("8");
+const roleIdentityPolicyDigest = TEST_ROLE_IDENTITY_POLICY_DIGEST;
 const expectedCommand = (schedulePolicyDigest: Sha256Digest) => ({
   expectedSchedulePolicyDigest: schedulePolicyDigest,
   expectedFactoryPolicyBundleDigest: factoryPolicyBundleDigest
@@ -44,6 +51,11 @@ interface SchedulerTaskCommand {
   readonly taskId: string;
   readonly correlationId: string;
   readonly expectedPolicyBundleDigest: Sha256Digest;
+  readonly canaryReservationDigest: Sha256Digest;
+}
+
+interface ScheduledPreparation extends FactoryPreparationSnapshot {
+  readonly canaryReservation: FactoryCanaryReservationSnapshot;
 }
 
 describe("FactorySchedulerService", () => {
@@ -86,6 +98,14 @@ describe("FactorySchedulerService", () => {
       "task-finished",
       "completed"
     ]);
+    expect(stored?.events[1]).toMatchObject({
+      schemaVersion: "agentlab.schedule-event.v2",
+      canaryReservationDigest: candidate.canaryReservation.reservationDigest
+    });
+    expect(stored?.events[2]).toMatchObject({
+      schemaVersion: "agentlab.schedule-event.v2",
+      canaryReservationDigest: candidate.canaryReservation.reservationDigest
+    });
   });
 
   it("reuses a durable task claim after an ambiguous crash", async () => {
@@ -97,7 +117,9 @@ describe("FactorySchedulerService", () => {
         attempts += 1;
         return attempts === 1
           ? Promise.reject(new Error("worker result was not observed"))
-          : Promise.resolve(taskResult(command.taskId, command.correlationId));
+          : Promise.resolve(
+              taskResult(command.taskId, command.correlationId, command.canaryReservationDigest)
+            );
       }
     });
     const command = expectedCommand(fixture.schedulePolicy.digest);
@@ -117,18 +139,22 @@ describe("FactorySchedulerService", () => {
       {
         taskId: candidate.request.taskId,
         correlationId: taskCorrelationId,
-        expectedPolicyBundleDigest: factoryPolicyBundleDigest
+        expectedPolicyBundleDigest: factoryPolicyBundleDigest,
+        canaryReservationDigest: candidate.canaryReservation.reservationDigest
       },
       {
         taskId: candidate.request.taskId,
         correlationId: taskCorrelationId,
-        expectedPolicyBundleDigest: factoryPolicyBundleDigest
+        expectedPolicyBundleDigest: factoryPolicyBundleDigest,
+        canaryReservationDigest: candidate.canaryReservation.reservationDigest
       }
     ]);
   });
 
   it("finishes an open prior-day claim before admitting a new daily slot", async () => {
-    const candidate = scheduledPreparation();
+    const candidate = scheduledPreparation({
+      authorityExpiresAt: "2026-09-02T12:00:00.000Z"
+    });
     let now = TEST_FACTORY_SCHEDULE_NOW;
     let attempts = 0;
     const fixture = schedulerFixture({
@@ -138,7 +164,9 @@ describe("FactorySchedulerService", () => {
         attempts += 1;
         return attempts === 1
           ? Promise.reject(new Error("worker result was not observed"))
-          : Promise.resolve(taskResult(command.taskId, command.correlationId));
+          : Promise.resolve(
+              taskResult(command.taskId, command.correlationId, command.canaryReservationDigest)
+            );
       }
     });
     const command = expectedCommand(fixture.schedulePolicy.digest);
@@ -222,14 +250,30 @@ describe("FactorySchedulerService", () => {
     expect(fixture.runTask).toHaveBeenCalledOnce();
   });
 
-  it("records an over-budget candidate as skipped before any model work", async () => {
+  it("blocks a historical active claim that never bound canary authority", async () => {
     const candidate = scheduledPreparation();
+    const fixture = schedulerFixture({ candidates: [candidate] });
+    await seedLegacyActiveClaim(fixture.schedules, fixture.schedulePolicy, candidate);
+
+    await expect(
+      fixture.service.tick(expectedCommand(fixture.schedulePolicy.digest))
+    ).resolves.toMatchObject({
+      status: "blocked",
+      reasonCodes: ["legacy-schedule-claim-unreserved"]
+    });
+    expect(fixture.runTask).not.toHaveBeenCalled();
+  });
+
+  it("records an over-budget candidate as skipped before any model work", async () => {
+    const baselineCandidate = scheduledPreparation();
     const policy = testFactorySchedulePolicy({
       maximumTasksPerTick: 1,
       tickBudget: testFactoryScheduleBudget({
-        maxCostMicrousd: candidate.authority.budgetCeiling.maxCostMicrousd - 1
+        maxCostMicrousd: baselineCandidate.authority.budgetCeiling.maxCostMicrousd - 1
       })
     });
+    const policyDigest = new NodeFactoryDocumentCodec().schedulePolicy(policy).digest;
+    const candidate = scheduledPreparation({ schedulePolicyDigest: policyDigest });
     const fixture = schedulerFixture({ candidates: [candidate], policy });
 
     await expect(
@@ -249,6 +293,41 @@ describe("FactorySchedulerService", () => {
         )
       )?.events.map(({ kind }) => kind)
     ).toEqual(["registered", "task-skipped", "completed"]);
+  });
+
+  it("skips candidates without current executable canary reservations", async () => {
+    const missing = scheduledPreparation();
+    const missingFixture = schedulerFixture({ candidates: [missing], reservations: [] });
+
+    await expect(
+      missingFixture.service.tick(expectedCommand(missingFixture.schedulePolicy.digest))
+    ).resolves.toMatchObject({ status: "completed", tasksClaimed: 0, tasksSkipped: 1 });
+    expect(missingFixture.runTask).not.toHaveBeenCalled();
+    const missingRun = await missingFixture.schedules.findBySlot(
+      missingFixture.schedulePolicy.value.id,
+      TEST_FACTORY_SCHEDULED_FOR
+    );
+    expect(missingRun?.events.at(-2)).toMatchObject({
+      kind: "task-skipped",
+      skipReason: "canary-reservation-missing"
+    });
+
+    const expiring = scheduledPreparation({
+      authorityExpiresAt: "2026-08-31T12:20:00.000Z"
+    });
+    const expiringFixture = schedulerFixture({ candidates: [expiring] });
+    await expect(
+      expiringFixture.service.tick(expectedCommand(expiringFixture.schedulePolicy.digest))
+    ).resolves.toMatchObject({ status: "completed", tasksClaimed: 0, tasksSkipped: 1 });
+    expect(expiringFixture.runTask).not.toHaveBeenCalled();
+    const expiringRun = await expiringFixture.schedules.findBySlot(
+      expiringFixture.schedulePolicy.value.id,
+      TEST_FACTORY_SCHEDULED_FOR
+    );
+    expect(expiringRun?.events.at(-2)).toMatchObject({
+      kind: "task-skipped",
+      skipReason: "canary-reservation-not-current"
+    });
   });
 
   it("does not create work after a missed deadline or while authority is disabled", async () => {
@@ -296,7 +375,8 @@ describe("FactorySchedulerService", () => {
 
 function schedulerFixture(
   options: {
-    readonly candidates?: readonly FactoryPreparationSnapshot[];
+    readonly candidates?: readonly ScheduledPreparation[];
+    readonly reservations?: readonly FactoryCanaryReservationSnapshot[];
     readonly now?: string;
     readonly clock?: () => string;
     readonly policy?: FactorySchedulePolicy;
@@ -308,13 +388,29 @@ function schedulerFixture(
   const documents = new NodeFactoryDocumentCodec();
   const schedulePolicy = documents.schedulePolicy(options.policy ?? testFactorySchedulePolicy());
   const schedules = options.schedules ?? new MemoryScheduleRepository(documents);
-  const listScheduled = vi.fn(() => Promise.resolve(options.candidates ?? []));
+  const candidates = options.candidates ?? [];
+  const reservations =
+    options.reservations ?? candidates.map(({ canaryReservation }) => canaryReservation);
+  const listScheduled = vi.fn(() => Promise.resolve(candidates));
+  const findPreparation = vi.fn((taskId: string) =>
+    Promise.resolve(candidates.find(({ request }) => request.taskId === taskId) ?? null)
+  );
+  const findReservationByTask = vi.fn((taskId: string) =>
+    Promise.resolve(reservations.find(({ reservation }) => reservation.taskId === taskId) ?? null)
+  );
+  const findReservationByDigest = vi.fn((digest: Sha256Digest) =>
+    Promise.resolve(
+      reservations.find(({ reservationDigest }) => reservationDigest === digest) ?? null
+    )
+  );
   const preflight = vi.fn(() =>
     Promise.resolve(options.preflight ?? readyPreflight(schedulePolicy.digest))
   );
   const runTask = vi.fn((command: SchedulerTaskCommand) =>
     options.taskResult === undefined
-      ? Promise.resolve(taskResult(command.taskId, command.correlationId))
+      ? Promise.resolve(
+          taskResult(command.taskId, command.correlationId, command.canaryReservationDigest)
+        )
       : options.taskResult(command)
   );
   const service = new FactorySchedulerService({
@@ -322,14 +418,27 @@ function schedulerFixture(
     factoryPolicyBundleDigest,
     roleIdentityPolicyDigest,
     schedules,
-    preparations: { listScheduled },
+    preparations: { listScheduled, findById: findPreparation },
+    reservations: {
+      findByTaskId: findReservationByTask,
+      findByReservationDigest: findReservationByDigest
+    },
     worker: { preflight },
     taskRunner: { run: runTask },
     documents,
     now: options.clock ?? (() => options.now ?? TEST_FACTORY_SCHEDULE_NOW),
     createId: sequentialId()
   });
-  return { service, schedulePolicy, schedules, listScheduled, preflight, runTask };
+  return {
+    service,
+    schedulePolicy,
+    schedules,
+    listScheduled,
+    preflight,
+    runTask,
+    findReservationByTask,
+    findReservationByDigest
+  };
 }
 
 function readyPreflight(schedulePolicyDigest: Sha256Digest): FactoryWorkerPreflight {
@@ -348,14 +457,19 @@ function readyPreflight(schedulePolicyDigest: Sha256Digest): FactoryWorkerPrefli
   };
 }
 
-function taskResult(taskId: string, correlationId: string): FactoryWorkerTaskRunReport {
+function taskResult(
+  taskId: string,
+  correlationId: string,
+  canaryReservationDigest: Sha256Digest
+): FactoryWorkerTaskRunReport {
   return {
-    schemaVersion: "agentlab.worker-task-run.v2",
+    schemaVersion: "agentlab.worker-task-run.v3",
     status: "stopped",
     taskId,
     correlationId,
     policyBundleDigest: factoryPolicyBundleDigest,
     roleIdentityPolicyDigest,
+    canaryReservationDigest,
     preparationState: "needs-human",
     taskState: null,
     contractDigest: null,
@@ -363,23 +477,27 @@ function taskResult(taskId: string, correlationId: string): FactoryWorkerTaskRun
   };
 }
 
-function scheduledPreparation(): FactoryPreparationSnapshot {
-  const fixture = testFactoryPreparationFixture();
-  const request = fixture.documents.intakeRequest({ ...fixture.request, trigger: "scheduled" });
-  const authority = fixture.documents.preparationAuthority({
-    ...fixture.authority,
-    requestDigest: request.digest,
-    expiresAt: "2026-09-01T12:01:00.000Z"
+function scheduledPreparation(
+  options: {
+    readonly schedulePolicyDigest?: Sha256Digest;
+    readonly authorityExpiresAt?: string;
+  } = {}
+): ScheduledPreparation {
+  const schedulePolicyDigest =
+    options.schedulePolicyDigest ??
+    new NodeFactoryDocumentCodec().schedulePolicy(testFactorySchedulePolicy()).digest;
+  const fixture = testFactoryCanaryAdmissionFixture({
+    schedulePolicyDigest,
+    authorityExpiresAt: options.authorityExpiresAt ?? "2026-09-01T12:00:00.000Z",
+    canaryMaximumLifetimeSeconds: options.authorityExpiresAt === undefined ? 172_800 : 259_200
   });
+  const reservation = testFactoryCanaryReservationDocument(fixture);
   return {
-    request: request.value,
-    requestDigest: request.digest,
-    authority: authority.value,
-    authorityDigest: authority.digest,
-    state: "registered",
-    sequence: 1,
-    lastEvent: { reasonCode: "request-registered" } as FactoryPreparationSnapshot["lastEvent"],
-    lastEventDigest: testDigest("8")
+    ...fixture.preparation,
+    canaryReservation: {
+      reservation: reservation.value,
+      reservationDigest: reservation.digest
+    }
   };
 }
 
@@ -469,6 +587,73 @@ function snapshot(
 
 function slotKey(schedulePolicyId: string, scheduledFor: string): string {
   return `${schedulePolicyId}:${scheduledFor}`;
+}
+
+async function seedLegacyActiveClaim(
+  schedules: MemoryScheduleRepository,
+  schedulePolicy: CanonicalFactoryDocument<FactorySchedulePolicy>,
+  candidate: FactoryPreparationSnapshot
+): Promise<void> {
+  const documents = new NodeFactoryDocumentCodec();
+  const run = documents.scheduleRun({
+    schemaVersion: "agentlab.schedule-run.v2",
+    runId: "10000000-0000-4000-8000-000000000001",
+    schedulePolicyDigest: schedulePolicy.digest,
+    schedulePolicy: schedulePolicy.value,
+    factoryPolicyBundleDigest,
+    roleIdentityPolicyDigest,
+    scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
+    deadlineAt: TEST_FACTORY_SCHEDULE_DEADLINE,
+    createdAt: TEST_FACTORY_SCHEDULE_NOW,
+    correlationId: "20000000-0000-4000-8000-000000000002"
+  });
+  const registered = documents.scheduleEvent({
+    schemaVersion: "agentlab.schedule-event.v1",
+    eventId: "30000000-0000-4000-8000-000000000003",
+    runId: run.value.runId,
+    runDigest: run.digest,
+    sequence: 1,
+    previousEventDigest: null,
+    kind: "registered",
+    from: null,
+    to: "ready",
+    actor: schedulerActor(),
+    occurredAt: run.value.createdAt,
+    reasonCode: "schedule-slot-registered",
+    correlationId: run.value.correlationId
+  });
+  await schedules.register(run, registered);
+  await schedules.append(
+    documents.scheduleEvent({
+      schemaVersion: "agentlab.schedule-event.v1",
+      eventId: "40000000-0000-4000-8000-000000000004",
+      runId: run.value.runId,
+      runDigest: run.digest,
+      sequence: 2,
+      previousEventDigest: registered.digest,
+      kind: "task-claimed",
+      from: "ready",
+      to: "task-active",
+      taskId: candidate.request.taskId,
+      requestDigest: candidate.requestDigest,
+      authorityDigest: candidate.authorityDigest,
+      taskCorrelationId: "50000000-0000-4000-8000-000000000005",
+      reservation: candidate.authority.budgetCeiling,
+      actor: schedulerActor(),
+      occurredAt: TEST_FACTORY_SCHEDULE_NOW,
+      reasonCode: "scheduled-task-claimed",
+      correlationId: run.value.correlationId
+    })
+  );
+}
+
+function schedulerActor() {
+  return {
+    kind: "control-plane" as const,
+    role: "policy-engine" as const,
+    id: "agentlab-scheduler",
+    sessionId: null
+  };
 }
 
 function sequentialId(): () => string {

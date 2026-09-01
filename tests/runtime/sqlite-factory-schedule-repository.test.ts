@@ -12,9 +12,14 @@ import {
   emptyReservedUsage
 } from "../../packages/runtime/src/domain/factory-schedule-integrity.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
-import { SqliteFactoryPreparationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.js";
+import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import { testDigest } from "../helpers/factory.js";
+import {
+  persistFactoryCanaryAdmissionFixture,
+  testFactoryCanaryAdmissionFixture
+} from "../helpers/factory-canary-admission.js";
+import { TEST_ROLE_IDENTITY_POLICY_DIGEST } from "../helpers/factory-evaluation.js";
 import { testFactoryPreparationFixture } from "../helpers/factory-preparation.js";
 import {
   TEST_FACTORY_SCHEDULE_DEADLINE,
@@ -33,9 +38,15 @@ afterEach(() => {
 describe("SqliteFactoryScheduleRepository", () => {
   it("persists one immutable slot and a canonical task claim through completion", async () => {
     const databasePath = temporaryDatabase();
-    const preparation = await registerScheduledPreparation(databasePath);
-    const repository = new SqliteFactoryScheduleRepository(databasePath);
     const schedule = scheduleDocuments();
+    const fixture = testFactoryCanaryAdmissionFixture({
+      schedulePolicyDigest: schedule.policy.digest,
+      authorityExpiresAt: "2026-09-01T12:00:00.000Z",
+      canaryMaximumLifetimeSeconds: 172_800
+    });
+    const reservation = await persistFactoryCanaryAdmissionFixture(databasePath, fixture);
+    const preparation = fixture.preparation;
+    const repository = new SqliteFactoryScheduleRepository(databasePath);
 
     try {
       await expect(repository.register(schedule.run, schedule.registered)).resolves.toMatchObject({
@@ -47,8 +58,30 @@ describe("SqliteFactoryScheduleRepository", () => {
         state: "ready"
       });
       const taskCorrelationId = "40000000-0000-4000-8000-000000000004";
+      const legacyClaim = codec.scheduleEvent({
+        ...nextEvent(schedule.registered.value, schedule.registered.digest, schedule.run.digest),
+        eventId: "30000000-0000-4000-8000-000000000002",
+        kind: "task-claimed",
+        from: "ready",
+        to: "task-active",
+        taskId: preparation.request.taskId,
+        requestDigest: preparation.requestDigest,
+        authorityDigest: preparation.authorityDigest,
+        taskCorrelationId,
+        reservation: preparation.authority.budgetCeiling,
+        reasonCode: "scheduled-task-claimed"
+      });
+      expect(() => repository.append(legacyClaim)).toThrow(/canary claim mismatch/u);
+      const substitutedClaim = codec.scheduleEvent({
+        ...legacyClaim.value,
+        schemaVersion: "agentlab.schedule-event.v2",
+        eventId: "30000000-0000-4000-8000-000000000001",
+        canaryReservationDigest: testDigest("e")
+      });
+      expect(() => repository.append(substitutedClaim)).toThrow(/canary claim mismatch/u);
       const claim = codec.scheduleEvent({
         ...nextEvent(schedule.registered.value, schedule.registered.digest, schedule.run.digest),
+        schemaVersion: "agentlab.schedule-event.v2",
         eventId: "30000000-0000-4000-8000-000000000003",
         kind: "task-claimed",
         from: "ready",
@@ -57,6 +90,7 @@ describe("SqliteFactoryScheduleRepository", () => {
         requestDigest: preparation.requestDigest,
         authorityDigest: preparation.authorityDigest,
         taskCorrelationId,
+        canaryReservationDigest: reservation.digest,
         reservation: preparation.authority.budgetCeiling,
         reasonCode: "scheduled-task-claimed"
       });
@@ -69,12 +103,14 @@ describe("SqliteFactoryScheduleRepository", () => {
       try {
         const malformed = {
           ...nextEvent(claim.value, claim.digest, schedule.run.digest),
+          schemaVersion: "agentlab.schedule-event.v2" as const,
           eventId: "50000000-0000-4000-8000-000000000005",
           kind: "task-finished",
           from: "task-active",
           to: "ready",
           taskId: preparation.request.taskId,
           taskCorrelationId: "90000000-0000-4000-8000-000000000009",
+          canaryReservationDigest: reservation.digest,
           result: "stopped",
           preparationState: "registered",
           taskState: null,
@@ -121,12 +157,14 @@ describe("SqliteFactoryScheduleRepository", () => {
 
       const finished = codec.scheduleEvent({
         ...nextEvent(claim.value, claim.digest, schedule.run.digest),
+        schemaVersion: "agentlab.schedule-event.v2",
         eventId: "60000000-0000-4000-8000-000000000006",
         kind: "task-finished",
         from: "task-active",
         to: "ready",
         taskId: preparation.request.taskId,
         taskCorrelationId,
+        canaryReservationDigest: reservation.digest,
         result: "stopped",
         preparationState: "registered",
         taskState: null,
@@ -209,6 +247,46 @@ describe("SqliteFactoryScheduleRepository", () => {
       repository.close();
     }
   });
+
+  it("migrates a version-15 schedule ledger to canary-bound claim enforcement", async () => {
+    const databasePath = temporaryDatabase();
+    const schedule = scheduleDocuments();
+    const initial = new SqliteFactoryScheduleRepository(databasePath);
+    await initial.register(schedule.run, schedule.registered);
+    initial.close();
+    const legacy = new DatabaseSync(databasePath);
+    try {
+      legacy.exec(`
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
+        PRAGMA user_version = 15;
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new SqliteFactoryScheduleRepository(databasePath);
+    await expect(
+      migrated.findBySlot(schedule.policy.value.id, TEST_FACTORY_SCHEDULED_FOR)
+    ).resolves.toMatchObject({ runDigest: schedule.run.digest, state: "ready" });
+    migrated.close();
+    const database = new DatabaseSync(databasePath);
+    try {
+      expect(
+        (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+      ).toBe(latestSchemaVersion);
+      expect(
+        database
+          .prepare(
+            `SELECT COUNT(*) AS count FROM sqlite_master
+             WHERE type = 'trigger' AND name LIKE 'factory_schedule_events_canary_%_guard'`
+          )
+          .get()
+      ).toEqual({ count: 2 });
+    } finally {
+      database.close();
+    }
+  });
 });
 
 function scheduleDocuments(
@@ -228,7 +306,7 @@ function scheduleDocuments(
     schedulePolicyDigest: policy.digest,
     schedulePolicy: policy.value,
     factoryPolicyBundleDigest: testFactoryPreparationFixture().policyDigest,
-    roleIdentityPolicyDigest: testDigest("8"),
+    roleIdentityPolicyDigest: TEST_ROLE_IDENTITY_POLICY_DIGEST,
     scheduledFor: ids.scheduledFor ?? TEST_FACTORY_SCHEDULED_FOR,
     deadlineAt: ids.deadlineAt ?? TEST_FACTORY_SCHEDULE_DEADLINE,
     createdAt: ids.createdAt ?? TEST_FACTORY_SCHEDULE_NOW,
@@ -250,39 +328,6 @@ function scheduleDocuments(
     correlationId: run.value.correlationId
   });
   return { policy, run, registered };
-}
-
-async function registerScheduledPreparation(databasePath: string) {
-  const fixture = testFactoryPreparationFixture();
-  const request = codec.intakeRequest({ ...fixture.request, trigger: "scheduled" });
-  const authority = codec.preparationAuthority({
-    ...fixture.authority,
-    requestDigest: request.digest,
-    expiresAt: "2026-09-01T12:01:00.000Z"
-  });
-  const event = codec.preparationEvent({
-    schemaVersion: "agentlab.preparation-event.v1",
-    eventId: "f0000000-0000-4000-8000-00000000000f",
-    taskId: request.value.taskId,
-    sequence: 1,
-    requestDigest: request.digest,
-    authorityDigest: authority.digest,
-    previousEventDigest: null,
-    kind: "registered",
-    from: null,
-    to: "registered",
-    actor: schedulerActor(),
-    occurredAt: authority.value.issuedAt,
-    reasonCode: "request-registered",
-    summary: null,
-    correlationId: "e0000000-0000-4000-8000-00000000000e"
-  });
-  const preparations = new SqliteFactoryPreparationRepository(databasePath);
-  try {
-    return await preparations.register(request, authority, event);
-  } finally {
-    preparations.close();
-  }
 }
 
 function nextEvent(previous: FactoryScheduleEvent, previousEventDigest: string, runDigest: string) {

@@ -161,13 +161,14 @@ precedence. Provider credentials remain in each CLI's own local authentication s
 - `agentlab factory canary-reserve --config ... --task ...` re-verifies one exact v2 cohort and its
   signed evaluation, then atomically reserves the scheduled task's complete ceiling against cohort
   task and budget limits. The credentialless command executes no model, opens no PR, and grants no
-  merge or release authority; the worker and scheduler do not consume reservations yet.
+  merge or release authority.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --policy ...` runs or
   reconciles one exact daily UTC slot from an owner-only worker v3 config. SQLite v11 durably claims
   each scheduled request before model work, while schedule-run v2 also pins the role-policy digest,
-  reuses that correlation after interruption, reserves the request's complete budget ceiling against
-  the tick quota, and completes the slot once. It cannot open a PR, mutate authority, merge, or
-  release.
+  reuses that correlation after interruption, and completes the slot once. Every new claim is a
+  schema-v2 event bound to the task's exact current canary reservation; schema 16 enforces that
+  relation and the complete remaining wall-clock ceiling. The worker independently rechecks it
+  before each resumable phase. It cannot open a PR, mutate authority, merge, or release.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -226,16 +227,16 @@ preflight, and their inner services recheck policy, evidence, base revision, gov
 broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
 matched report, signs and verifies its exact bytes through disjoint local compositions, and can
 issue a structurally non-merge/non-release cohort after human sample review and fresh attestation
-re-verification. It does not yet provide the harness producer or a cohort consumer. Scheduled config
-v3 and eval signing now pin one canonical role policy: distinct non-root worker/signer UIDs plus the
-exact signer key and runner, with the policy digest carried in every signed eval predicate. No
-accounts are provisioned or activated. Provider-neutral per-run and per-tick reservation accounting
-are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty. Owner-only
-worker and broker config can load the same separate strict cost-policy file without sharing broker
-credentials. The current repository governance blocks the write commands. No live factory task or PR
-has been created through these factory commands. See
-[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases, and
+re-verification. It does not yet provide the harness producer; reservation consumption exists but is
+not provisioned or activated. Scheduled config v3 and eval signing now pin one canonical role
+policy: distinct non-root worker/signer UIDs plus the exact signer key and runner, with the policy
+digest carried in every signed eval predicate. No accounts are provisioned or activated.
+Provider-neutral per-run and per-tick reservation accounting are policy-pinned and fail-closed, and
+the shipped live rate card is intentionally empty. Owner-only worker and broker config can load the
+same separate strict cost-policy file without sharing broker credentials. The current repository
+governance blocks the write commands. No live factory task or PR has been created through these
+factory commands. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
+implemented controls, activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities; and

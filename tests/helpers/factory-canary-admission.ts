@@ -20,6 +20,11 @@ import type { FactoryEvalAttestationSnapshot } from "../../packages/runtime/src/
 import type { FactoryEvalSnapshot } from "../../packages/runtime/src/domain/factory-evaluation-repository.js";
 import type { FactoryPreparationSnapshot } from "../../packages/runtime/src/domain/factory-preparation-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { SqliteFactoryCanaryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.js";
+import { SqliteFactoryCanaryReservationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
+import { SqliteFactoryEvalAttestationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.js";
+import { SqliteFactoryEvaluationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.js";
+import { SqliteFactoryPreparationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import {
   testEvalDigest,
   testFactoryCanaryDocuments,
@@ -27,7 +32,8 @@ import {
   testFactoryEvalAttestationSnapshot,
   testFactoryEvalBudget,
   testFactoryEvalDocuments,
-  testFactoryEvalRun
+  testFactoryEvalRun,
+  testFactoryEvalSuite
 } from "./factory-evaluation.js";
 import { testFactoryPreparationFixture } from "./factory-preparation.js";
 
@@ -69,6 +75,9 @@ export function testFactoryCanaryAdmissionFixture(
     readonly taskId?: string;
     readonly deduplicationKey?: string;
     readonly maximumTasks?: number;
+    readonly schedulePolicyDigest?: Sha256Digest;
+    readonly authorityExpiresAt?: string;
+    readonly canaryMaximumLifetimeSeconds?: number;
   } = {}
 ): FactoryCanaryAdmissionFixture {
   const documents = new NodeFactoryDocumentCodec();
@@ -76,6 +85,9 @@ export function testFactoryCanaryAdmissionFixture(
     trigger: "scheduled",
     budgetCeiling: testFactoryEvalBudget(),
     planBudget: testFactoryEvalBudget(),
+    ...(input.authorityExpiresAt === undefined
+      ? {}
+      : { authorityExpiresAt: input.authorityExpiresAt }),
     ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
     ...(input.deduplicationKey === undefined ? {} : { deduplicationKey: input.deduplicationKey })
   });
@@ -113,7 +125,7 @@ export function testFactoryCanaryAdmissionFixture(
     lastEvent: registered.value,
     lastEventDigest: registered.digest
   };
-  const schedulePolicyDigest = testEvalDigest(3);
+  const schedulePolicyDigest = input.schedulePolicyDigest ?? testEvalDigest(3);
   const candidate = testFactoryConfigurationCandidate({
     candidateId: "challenger",
     version: "1.1.0",
@@ -124,12 +136,25 @@ export function testFactoryCanaryAdmissionFixture(
     schedulePolicyDigest,
     skillPackageDigests: authority.value.skills.map(({ manifest }) => manifest.packageDigest)
   });
+  const defaultSuite = testFactoryEvalSuite();
+  const suite =
+    input.canaryMaximumLifetimeSeconds === undefined
+      ? defaultSuite
+      : testFactoryEvalSuite({
+          canaryLimits: {
+            ...defaultSuite.canaryLimits,
+            maximumLifetimeSeconds: input.canaryMaximumLifetimeSeconds
+          }
+        });
   const evaluation = testFactoryEvalDocuments({
-    run: testFactoryEvalRun({ challengerCandidate: candidate })
+    run: testFactoryEvalRun({ challengerCandidate: candidate, suite })
   });
-  const attestation = testFactoryEvalAttestationSnapshot(evaluation.snapshot);
+  const attestation = testFactoryEvalAttestationSnapshot(evaluation.snapshot, {
+    ...(input.authorityExpiresAt === undefined ? {} : { expiresAt: input.authorityExpiresAt })
+  });
   const canary = testFactoryCanaryDocuments(evaluation.snapshot, {
     attestation,
+    ...(input.authorityExpiresAt === undefined ? {} : { expiresAt: input.authorityExpiresAt }),
     ...(input.maximumTasks === undefined ? {} : { maximumTasks: input.maximumTasks })
   });
   const canarySnapshot = {
@@ -195,6 +220,61 @@ export function testFactoryCanaryReservationDocument(
     autoMerge: false,
     release: false
   });
+}
+
+export async function persistFactoryCanaryAdmissionFixture(
+  databasePath: string,
+  fixture: FactoryCanaryAdmissionFixture
+): Promise<CanonicalFactoryDocument<FactoryCanaryTaskReservation>> {
+  const evaluations = new SqliteFactoryEvaluationRepository(databasePath, {
+    documents: fixture.documents
+  });
+  const verifier = {
+    verify: () =>
+      Promise.resolve({
+        keyId: fixture.attestation.attestation.keyId,
+        payload: Buffer.from(
+          fixture.attestation.attestation.signedAttestation.envelope.payload,
+          "base64"
+        ).toString("utf8")
+      })
+  };
+  const attestations = new SqliteFactoryEvalAttestationRepository(databasePath, {
+    evaluations,
+    verifier,
+    expectedRoleIdentityPolicyDigest:
+      fixture.attestation.attestation.signedAttestation.statement.predicate
+        .roleIdentityPolicyDigest,
+    documents: fixture.documents
+  });
+  const canaries = new SqliteFactoryCanaryRepository(databasePath, {
+    evaluations,
+    attestations,
+    documents: fixture.documents
+  });
+  const preparations = new SqliteFactoryPreparationRepository(databasePath, {
+    documents: fixture.documents
+  });
+  const reservations = new SqliteFactoryCanaryReservationRepository(databasePath, {
+    documents: fixture.documents
+  });
+  try {
+    await evaluations.record(fixture.evaluation.run, fixture.evaluation.assessment);
+    await attestations.record(
+      fixture.documents.evalAttestationRecord(fixture.attestation.attestation)
+    );
+    await canaries.authorize(fixture.canary.approval, fixture.canary.cohort);
+    await preparations.register(fixture.request, fixture.authority, fixture.registered);
+    const reservation = testFactoryCanaryReservationDocument(fixture);
+    await reservations.reserve(reservation);
+    return reservation;
+  } finally {
+    reservations.close();
+    preparations.close();
+    canaries.close();
+    attestations.close();
+    evaluations.close();
+  }
 }
 
 function eventId(taskId: string): string {

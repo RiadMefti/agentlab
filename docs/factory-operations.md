@@ -84,7 +84,15 @@ provider rate.
    agentlab factory intake-register --config /absolute/intake.json --request /absolute/request.json --policy sha256:... --confirm-register-scheduled
    ```
 
-3. Inspect both switches and their append-only histories, then enable only scheduler authority with
+3. Complete the evaluated-candidate, signed-attestation, and human cohort ceremony in
+   [Local factory evaluation operations](factory-evaluation-operations.md), then reserve the exact
+   scheduled task before its authority window can no longer fit the full wall-clock ceiling:
+
+   ```text
+   agentlab factory canary-reserve --config /absolute/canary-admission.json --task 00000000-0000-4000-8000-000000000000
+   ```
+
+4. Inspect both switches and their append-only histories, then enable only scheduler authority with
    compare-and-set:
 
    ```text
@@ -92,7 +100,7 @@ provider rate.
    agentlab factory scheduler-authority --config /absolute/authority.json --expected disabled --to enabled --reason "Approved bounded daily maintenance." --confirm-enable-scheduler
    ```
 
-4. Invoke one slot with both reviewed digests:
+5. Invoke one slot with both reviewed digests:
 
    ```text
    agentlab factory scheduler-tick --config /absolute/worker.json --schedule-policy sha256:... --policy sha256:...
@@ -114,6 +122,11 @@ role, schedule, or factory policy drift on an open run blocks new work until an 
 investigates. A clock earlier than the open slot or its latest journal event also blocks; correct
 the host clock without editing the ledger.
 
+The scheduler skips a candidate with no current executable reservation. Each durable v2 claim and
+finish names the reservation digest, and the worker independently reloads it before every resumable
+phase. A crash therefore retries the same claim and authority; an expired or legacy unbound claim
+stays blocked rather than running model work.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -134,9 +147,9 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, attested eval-harness producer, cohort consumer, auto-broker, merge,
-telemetry-driven canary, rollback controller, or incident automation is shipped. A separate dormant
-deterministic assessment and human non-release cohort ledger now exists, but it cannot schedule or
-authorize work by itself. See
+maintenance discovery, attested eval-harness producer, reservation-bound auto-broker, merge,
+telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
+assessment, human non-release cohorts, task reservation, and reservation-bound scheduled execution
+exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

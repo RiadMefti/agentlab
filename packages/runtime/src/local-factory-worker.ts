@@ -53,6 +53,7 @@ import {
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
@@ -172,6 +173,9 @@ export function createLocalFactoryWorker(
     );
     const schedules = repositories.track(
       new SqliteFactoryScheduleRepository(databasePath, { documents })
+    );
+    const canaryReservations = repositories.track(
+      new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
@@ -409,11 +413,15 @@ export function createLocalFactoryWorker(
     });
     const taskRunner = new FactoryWorkerTaskRunner({
       policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
       preparations,
+      reservations: canaryReservations,
       tasks: factory,
       executions,
-      worker: operator
+      documents,
+      worker: operator,
+      now
     });
     const scheduledPolicies =
       schedulePolicyDocument === null
@@ -431,6 +439,7 @@ export function createLocalFactoryWorker(
             roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
             schedules,
             preparations,
+            reservations: canaryReservations,
             worker: operator,
             taskRunner,
             documents,

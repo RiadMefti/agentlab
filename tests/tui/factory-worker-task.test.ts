@@ -38,16 +38,17 @@ describe("factory worker task CLI runner", () => {
     });
     expect(fixture.close).toHaveBeenCalledOnce();
     expect(JSON.parse(fixture.output.join(""))).toEqual({
-      schemaVersion: "agentlab.worker-run-command-result.v2",
+      schemaVersion: "agentlab.worker-run-command-result.v3",
       status: "ready-for-broker",
       taskId,
       policyBundleDigest,
       roleIdentityPolicyDigest,
       reasonCodes: [],
       run: {
-        schemaVersion: "agentlab.worker-task-run.v2",
+        schemaVersion: "agentlab.worker-task-run.v3",
         correlationId,
         roleIdentityPolicyDigest,
+        canaryReservationDigest: null,
         preparationState: "prepared",
         taskState: "pr-proposed",
         contractDigest
@@ -221,12 +222,13 @@ function preflight(): FactoryWorkerPreflight {
 
 function taskReport(): FactoryWorkerTaskRunReport {
   return {
-    schemaVersion: "agentlab.worker-task-run.v2",
+    schemaVersion: "agentlab.worker-task-run.v3",
     status: "ready-for-broker",
     taskId,
     correlationId,
     policyBundleDigest,
     roleIdentityPolicyDigest,
+    canaryReservationDigest: null,
     preparationState: "prepared",
     taskState: "pr-proposed",
     contractDigest,

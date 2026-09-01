@@ -83,7 +83,12 @@ export function assertFactoryScheduleEvent(
     if (
       claim.kind !== "task-claimed" ||
       claim.taskId !== event.value.taskId ||
-      claim.taskCorrelationId !== event.value.taskCorrelationId
+      claim.taskCorrelationId !== event.value.taskCorrelationId ||
+      (claim.schemaVersion === "agentlab.schedule-event.v2") !==
+        (event.value.schemaVersion === "agentlab.schedule-event.v2") ||
+      (claim.schemaVersion === "agentlab.schedule-event.v2" &&
+        event.value.schemaVersion === "agentlab.schedule-event.v2" &&
+        claim.canaryReservationDigest !== event.value.canaryReservationDigest)
     ) {
       throw new Error("Factory schedule task outcome does not match its active claim.");
     }

@@ -217,6 +217,13 @@ limits. Exact retries return the immutable reservation. It executes no model and
 merge, or release authority. Do not interpret a cohort or reservation as a running canary or bypass
 intake, task policy, broker preflight, repository governance, or human merge controls.
 
+`scheduler-tick` skips scheduled candidates without an exact current reservation. A claim and its
+finish event carry the reservation digest; SQLite checks task, request, preparation authority,
+schedule/factory/role policies, executable stage, full budget, and enough remaining lifetime before
+the claim commits. On every process retry, the worker reloads that digest and repeats the same
+task/configuration and time-window checks before each resumable phase. A legacy unbound active claim
+stays blocked for operator recovery. Manual `worker-run` cannot consume a canary reservation.
+
 ## Failure, recovery, and incident handling
 
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
@@ -238,10 +245,10 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 ## Activation gaps
 
-Before a reservation drives even shadow work, AgentLab still needs a sandboxed harness producer;
-content-addressed grader artifacts; a brokered multi-account storage boundary for the shared ledger;
-stronger runner identity or hardware-backed key custody where required; scheduler/worker consumption
-that requires the exact unexpired reservation; telemetry/control comparison; revocation enforcement;
-alerting; rollback drills; and incident automation. Brokered PR creation remains separately
-human-confirmed and blocked by repository governance and live cost-policy prerequisites in
+Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
+grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
+identity or hardware-backed key custody where required; broker dispatch that requires a
+`brokered-draft-pr` reservation; telemetry/control comparison; revocation enforcement; alerting;
+rollback drills; and incident automation. Brokered PR creation remains separately human-confirmed
+and blocked by repository governance and live cost-policy prerequisites in
 [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

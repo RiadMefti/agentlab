@@ -40,6 +40,7 @@ export interface FactoryPreparationFixtureOptions {
   readonly selectedWorkerProfileIds?: readonly string[];
   readonly reviewerCount?: 1 | 2;
   readonly contractExpiresAt?: string;
+  readonly authorityExpiresAt?: string;
   readonly maximumContractLifetimeSeconds?: number;
   readonly preparationMaxProcesses?: number;
   readonly taskId?: string;
@@ -121,7 +122,7 @@ export function testFactoryPreparationFixture(options: FactoryPreparationFixture
     requestDigest: requestDocument.digest,
     supersedesContractDigest: null,
     issuedAt: "2026-08-30T12:01:00.000Z",
-    expiresAt: "2026-08-31T12:01:00.000Z",
+    expiresAt: options.authorityExpiresAt ?? "2026-08-31T12:01:00.000Z",
     policyBundleDigest: policyDigest,
     repository: request.repository,
     allowedIncludePaths: [

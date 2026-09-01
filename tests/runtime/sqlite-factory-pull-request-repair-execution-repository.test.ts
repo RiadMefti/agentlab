@@ -103,6 +103,8 @@ describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
         database.prepare("DELETE FROM factory_pull_request_repair_events").run()
       ).toThrow(/append-only/u);
       database.exec(`
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
         DROP TABLE factory_canary_task_reservations;
         DROP TABLE factory_eval_attestations;
         DROP TABLE factory_canary_cohorts;

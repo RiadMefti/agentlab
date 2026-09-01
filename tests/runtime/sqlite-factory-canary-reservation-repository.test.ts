@@ -100,6 +100,8 @@ describe("SqliteFactoryCanaryReservationRepository", () => {
     const legacy = new DatabaseSync(databasePath);
     try {
       legacy.exec(`
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
         DROP TABLE factory_canary_task_reservations;
         PRAGMA user_version = 14;
       `);
@@ -113,7 +115,7 @@ describe("SqliteFactoryCanaryReservationRepository", () => {
     try {
       expect(
         (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
-      ).toBe(15);
+      ).toBe(latestSchemaVersion);
       expect(
         database
           .prepare(

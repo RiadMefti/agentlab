@@ -114,6 +114,9 @@ describe("FactoryCanaryAdmissionService", () => {
     await expect(build("2026-08-31T12:00:00.000Z").reserve(command)).rejects.toThrow(
       /not currently valid/u
     );
+    await expect(build("2026-08-31T11:45:00.000Z").reserve(command)).rejects.toThrow(
+      /exactly project/u
+    );
   });
 });
 

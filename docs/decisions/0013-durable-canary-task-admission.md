@@ -33,10 +33,9 @@ broker, merge, release, or authority-issuance port. Every reservation fixes `aut
 ## Consequences
 
 A human cohort is no longer sufficient task-level evidence, and quota enforcement survives process
-failure. This decision does not execute the reserved task or authorize a PR. The scheduler and
-worker do not yet require reservations, so the feature remains unactivated. Multi-account ledger
-brokering, revocation, telemetry/control comparison, merge, release, rollback, and incident
-automation also remain out of scope.
+failure. This decision does not itself execute the reserved task or authorize a PR. Scheduled
+consumption was subsequently accepted by ADR 0014. Multi-account ledger brokering, revocation,
+telemetry/control comparison, merge, release, rollback, and incident automation remain out of scope.
 
 ## Fitness functions
 

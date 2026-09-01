@@ -108,6 +108,11 @@ const commonEventShape = {
   correlationId: z.uuid()
 } as const;
 
+const canaryBoundEventShape = {
+  ...commonEventShape,
+  schemaVersion: z.literal("agentlab.schedule-event.v2")
+} as const;
+
 const taskIdentityShape = {
   taskId: z.uuid(),
   requestDigest: sha256DigestSchema,
@@ -128,6 +133,18 @@ const eventUnionSchema = z.union([
     .strict(),
   z
     .object({
+      ...canaryBoundEventShape,
+      ...taskIdentityShape,
+      kind: z.literal("task-claimed"),
+      from: z.literal("ready"),
+      to: z.literal("task-active"),
+      taskCorrelationId: z.uuid(),
+      canaryReservationDigest: sha256DigestSchema,
+      reservation: factoryBudgetSchema
+    })
+    .strict(),
+  z
+    .object({
       ...commonEventShape,
       ...taskIdentityShape,
       kind: z.literal("task-claimed"),
@@ -135,6 +152,22 @@ const eventUnionSchema = z.union([
       to: z.literal("task-active"),
       taskCorrelationId: z.uuid(),
       reservation: factoryBudgetSchema
+    })
+    .strict(),
+  z
+    .object({
+      ...canaryBoundEventShape,
+      kind: z.literal("task-finished"),
+      from: z.literal("task-active"),
+      to: z.literal("ready"),
+      taskId: z.uuid(),
+      taskCorrelationId: z.uuid(),
+      canaryReservationDigest: sha256DigestSchema,
+      result: workerResultSchema,
+      preparationState: factoryPreparationStateSchema,
+      taskState: factoryTaskStateSchema.nullable(),
+      contractDigest: sha256DigestSchema.nullable(),
+      reasonCodes: z.array(factoryIdentifierSchema).max(32)
     })
     .strict(),
   z

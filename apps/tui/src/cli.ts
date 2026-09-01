@@ -640,7 +640,7 @@ Factory authority:
   agentlab factory worker-preflight --config <absolute-path>
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
   agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --policy <sha256>
-      Run or reconcile one bounded daily UTC slot; stop all tasks before remote writes.
+      Run one bounded UTC slot from exact current canary reservations; stop before remote writes.
   agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory worker-repair-pr --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-repair

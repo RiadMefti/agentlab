@@ -99,6 +99,7 @@ function assertReportIdentity(
     report.correlationId !== correlationId ||
     report.policyBundleDigest !== preflight.policyBundleDigest ||
     report.roleIdentityPolicyDigest !== preflight.roleIdentityPolicyDigest ||
+    report.canaryReservationDigest !== null ||
     (report.taskState === null) !== (report.contractDigest === null)
   ) {
     throw new Error("Factory worker result does not match the confirmed command or preflight.");
@@ -112,7 +113,7 @@ function serializeResult(
   reasonCodes: readonly string[]
 ): string {
   return JSON.stringify({
-    schemaVersion: "agentlab.worker-run-command-result.v2",
+    schemaVersion: "agentlab.worker-run-command-result.v3",
     status: report?.status ?? "blocked",
     taskId,
     policyBundleDigest: preflight.policyBundleDigest,
@@ -125,6 +126,7 @@ function serializeResult(
             schemaVersion: report.schemaVersion,
             correlationId: report.correlationId,
             roleIdentityPolicyDigest: report.roleIdentityPolicyDigest,
+            canaryReservationDigest: report.canaryReservationDigest,
             preparationState: report.preparationState,
             taskState: report.taskState,
             contractDigest: report.contractDigest

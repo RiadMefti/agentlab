@@ -11,6 +11,7 @@ import {
   TEST_FACTORY_SCHEDULE_DEADLINE,
   TEST_FACTORY_SCHEDULE_NOW,
   TEST_FACTORY_SCHEDULED_FOR,
+  testFactoryScheduleBudget,
   testFactorySchedulePolicy
 } from "../helpers/factory-schedule.js";
 
@@ -137,6 +138,31 @@ describe("factory schedule contracts", () => {
     expect(factoryScheduleEventSchema.safeParse({ ...registration, sequence: 2 }).success).toBe(
       false
     );
+
+    const canaryClaim = {
+      ...common,
+      schemaVersion: "agentlab.schedule-event.v2",
+      eventId: "80000000-0000-4000-8000-000000000008",
+      sequence: 2,
+      previousEventDigest: testDigest("8"),
+      kind: "task-claimed",
+      from: "ready",
+      to: "task-active",
+      taskId: "60000000-0000-4000-8000-000000000006",
+      requestDigest: testDigest("6"),
+      authorityDigest: testDigest("7"),
+      taskCorrelationId: "70000000-0000-4000-8000-000000000007",
+      canaryReservationDigest: testDigest("9"),
+      reservation: testFactoryScheduleBudget(),
+      reasonCode: "scheduled-task-claimed"
+    } as const;
+    expect(factoryScheduleEventSchema.safeParse(canaryClaim).success).toBe(true);
+    expect(
+      factoryScheduleEventSchema.safeParse({
+        ...canaryClaim,
+        canaryReservationDigest: undefined
+      }).success
+    ).toBe(false);
 
     const finished = {
       ...common,
