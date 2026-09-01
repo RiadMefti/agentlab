@@ -181,6 +181,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   within that class; obeys the schedule policy's candidate and task ceilings; and reports expiry or
   denial for operator attention. It installs no timer, changes no authority, and has no merge or
   release path.
+- `agentlab factory broker-pr-maintenance-tick --config ... --schedule-policy ... --role-policy ... --policy ...`
+  reconciles one bounded page of exact open scheduled-canary PR heads. Once per daily slot it
+  records authenticated CI/review facts and, only for a deterministic actionable disposition,
+  creates the existing immutable repair authorization. Exact retries resume from observation
+  evidence without another remote read. It cannot execute a repair, update a branch, merge, or
+  release.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -256,9 +262,10 @@ separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;
 [ADR 0012](docs/decisions/0012-attested-canary-authority.md) for attestation-gated cohorts;
 [ADR 0014](docs/decisions/0014-canary-bound-scheduled-execution.md) for scheduled execution;
-[ADR 0015](docs/decisions/0015-canary-bound-draft-pr-dispatch.md) for scheduled draft authority; and
+[ADR 0015](docs/decisions/0015-canary-bound-draft-pr-dispatch.md) for scheduled draft authority;
 [ADR 0016](docs/decisions/0016-bounded-canary-broker-reconciliation.md) for bounded broker
-reconciliation. The dormant procedures are in
+reconciliation; and [ADR 0017](docs/decisions/0017-slot-bound-canary-pr-maintenance.md) for bounded
+CI/review observation and repair admission. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

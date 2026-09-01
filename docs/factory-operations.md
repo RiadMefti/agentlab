@@ -156,12 +156,27 @@ stays blocked rather than running model work.
    only this fixed-argument command, and only while the separately controlled broker switch is
    intentionally enabled.
 
+7. To reconcile CI/review state for the resulting scheduled canary PRs, invoke the separate one-shot
+   maintenance consumer with the same reviewed policy pins:
+
+   ```text
+   agentlab factory broker-pr-maintenance-tick --config /absolute/broker.json --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+   ```
+
+   It observes each exact current PR head at most once for the resolved daily slot and creates a
+   repair authorization only from deterministic actionable facts. If interrupted after observation,
+   the next exact tick resumes admission from durable evidence without rereading GitHub. It obeys
+   the schedule policy's candidate and attempt ceilings and exits 2 for blocked or
+   attention-required results. It does not execute the authorized repair or update the remote
+   branch.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
 separate broker preflight and switch. Manual draft creation still requires literal confirmation;
 scheduled canary draft creation requires the exact reservation and scheduler handoff instead. Do not
-put broker enablement, merge, release, or deployment into the scheduler timer.
+put broker enablement, repair execution, merge, release, or deployment into a scheduler or broker
+timer.
 
 To stop new or resumed scheduled and broker work:
 
@@ -178,9 +193,10 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, attested eval-harness producer, an owner-installed broker timer, merge,
-telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
-assessment, human non-release cohorts, task reservation, reservation-bound scheduled execution, and
-reservation-bound draft dispatch exist but are not provisioned or activated. See
+maintenance discovery, autonomous repair/update consumers, attested eval-harness producer,
+owner-installed timers, merge, telemetry-driven canary, rollback controller, or incident automation
+is shipped. Deterministic assessment, human non-release cohorts, task reservation, reservation-bound
+scheduled execution and draft dispatch, and slot-bound PR observation/repair admission exist but are
+not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

@@ -1,15 +1,15 @@
 import type {
   FactoryBrokerPreflight,
-  FactoryCanaryBrokerTickReport,
+  FactoryCanaryPullRequestMaintenanceTickReport,
   LocalFactoryBrokerConfig,
   LocalFactoryBrokerRuntime
 } from "@agentlab/runtime/factory-broker";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  runFactoryBrokerCanaryTick,
-  type FactoryBrokerCanaryTickRunnerDependencies
-} from "../../apps/tui/src/run-factory-broker-canary-tick.js";
+  runFactoryBrokerPullRequestMaintenanceTick,
+  type FactoryBrokerPullRequestMaintenanceTickRunnerDependencies
+} from "../../apps/tui/src/run-factory-broker-pr-maintenance-tick.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
@@ -27,15 +27,13 @@ const schedulePolicyDigest = codec.schedulePolicy(schedulePolicy).digest;
 const roleIdentityPolicyDigest = codec.roleIdentityPolicy(roleIdentityPolicy).digest;
 const policyBundleDigest = testDigest("c");
 
-describe("factory broker canary-tick CLI runner", () => {
-  it("rejects malformed pins before loading authority-bearing configuration", async () => {
+describe("factory broker PR-maintenance tick CLI runner", () => {
+  it("rejects malformed pins before loading credential-bearing configuration", async () => {
     const loadConfig = vi.fn(() => Promise.resolve(config()));
-    const createRuntime = vi.fn(() =>
-      runtime(Promise.resolve(preflight()), Promise.resolve(idle()))
-    );
+    const createRuntime = vi.fn(() => runtime(Promise.resolve(preflight()), idle()));
 
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         "sha256:short",
         roleIdentityPolicyDigest,
@@ -47,14 +45,12 @@ describe("factory broker canary-tick CLI runner", () => {
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
-  it("requires config v3 before constructing the credentialed runtime", async () => {
+  it("requires config v3 before constructing the broker runtime", async () => {
     const loadConfig = vi.fn(() => Promise.resolve(v1Config()));
-    const createRuntime = vi.fn(() =>
-      runtime(Promise.resolve(preflight()), Promise.resolve(idle()))
-    );
+    const createRuntime = vi.fn(() => runtime(Promise.resolve(preflight()), idle()));
 
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         schedulePolicyDigest,
         roleIdentityPolicyDigest,
@@ -65,22 +61,20 @@ describe("factory broker canary-tick CLI runner", () => {
     expect(createRuntime).not.toHaveBeenCalled();
   });
 
-  it("reconciles exact pins, closes before output, and reports bounded progress", async () => {
+  it("runs exact maintenance, closes before output, and reports bounded progress", async () => {
     const events: string[] = [];
-    const tick = vi.fn(() => Promise.resolve(completed()));
-    const broker = runtime(
-      Promise.resolve(preflight()),
-      Promise.resolve(completed()),
-      () => {
+    const maintain = vi.fn(() => Promise.resolve(completed()));
+    const broker = runtime(Promise.resolve(preflight()), completed(), {
+      maintain,
+      close: () => {
         events.push("closed");
         return Promise.resolve();
-      },
-      tick
-    );
+      }
+    });
     const writes: string[] = [];
 
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         schedulePolicyDigest,
         roleIdentityPolicyDigest,
@@ -92,36 +86,34 @@ describe("factory broker canary-tick CLI runner", () => {
       )
     ).resolves.toBe(0);
 
-    expect(tick).toHaveBeenCalledWith({
+    expect(maintain).toHaveBeenCalledWith({
       expectedSchedulePolicyDigest: schedulePolicyDigest,
       expectedRoleIdentityPolicyDigest: roleIdentityPolicyDigest,
       expectedFactoryPolicyBundleDigest: policyBundleDigest
     });
     expect(events).toEqual(["closed", "written"]);
     expect(JSON.parse(writes[0] ?? "")).toMatchObject({
-      schemaVersion: "agentlab.broker-canary-tick-command-result.v1",
+      schemaVersion: "agentlab.broker-pr-maintenance-tick-command-result.v1",
       status: "completed",
       reasonCodes: [],
-      reconciliation: {
+      maintenance: {
         candidatesInspected: 1,
-        dispatchAttempts: 1,
-        draftsCompleted: 1
+        maintenanceAttempts: 1,
+        observationsCreated: 1,
+        repairAuthorizationsCreated: 1
       }
     });
   });
 
-  it("does not inspect the queue when broker preflight is blocked", async () => {
-    const tick = vi.fn(() => Promise.resolve(idle()));
-    const broker = runtime(
-      Promise.resolve(preflight("blocked", ["pr-broker-disabled"])),
-      Promise.resolve(idle()),
-      undefined,
-      tick
-    );
+  it("does not inspect maintenance work when broker preflight is blocked", async () => {
+    const maintain = vi.fn(() => Promise.resolve(idle()));
+    const broker = runtime(Promise.resolve(preflight("blocked", ["pr-broker-disabled"])), idle(), {
+      maintain
+    });
     const writes: string[] = [];
 
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         schedulePolicyDigest,
         roleIdentityPolicyDigest,
@@ -129,47 +121,46 @@ describe("factory broker canary-tick CLI runner", () => {
         dependencies(broker, (message) => writes.push(message))
       )
     ).resolves.toBe(2);
-    expect(tick).not.toHaveBeenCalled();
+    expect(maintain).not.toHaveBeenCalled();
     expect(JSON.parse(writes[0] ?? "")).toMatchObject({
       status: "blocked",
       reasonCodes: ["pr-broker-disabled"],
-      reconciliation: null
+      maintenance: null
     });
   });
 
-  it("returns attention as policy-blocked and rejects a forged report identity", async () => {
-    const attentionReport: FactoryCanaryBrokerTickReport = {
+  it("returns attention as blocked and rejects a forged report identity", async () => {
+    const attention: FactoryCanaryPullRequestMaintenanceTickReport = {
       ...idle(),
       status: "attention-required",
-      reasonCodes: ["canary-reservation-expired"]
+      reasonCodes: ["pull-request-head-drift"]
     };
     const writes: string[] = [];
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         schedulePolicyDigest,
         roleIdentityPolicyDigest,
         policyBundleDigest,
-        dependencies(
-          runtime(Promise.resolve(preflight()), Promise.resolve(attentionReport)),
-          (message) => writes.push(message)
+        dependencies(runtime(Promise.resolve(preflight()), attention), (message) =>
+          writes.push(message)
         )
       )
     ).resolves.toBe(2);
     expect(JSON.parse(writes[0] ?? "")).toMatchObject({
       status: "attention-required",
-      reasonCodes: ["canary-reservation-expired"]
+      reasonCodes: ["pull-request-head-drift"]
     });
 
     const forged = { ...idle(), repositoryId: "another/repository" };
     const forgedWrites: string[] = [];
     await expect(
-      runFactoryBrokerCanaryTick(
+      runFactoryBrokerPullRequestMaintenanceTick(
         configPath,
         schedulePolicyDigest,
         roleIdentityPolicyDigest,
         policyBundleDigest,
-        dependencies(runtime(Promise.resolve(preflight()), Promise.resolve(forged)), (message) =>
+        dependencies(runtime(Promise.resolve(preflight()), forged), (message) =>
           forgedWrites.push(message)
         )
       )
@@ -181,7 +172,7 @@ describe("factory broker canary-tick CLI runner", () => {
 function dependencies(
   broker: LocalFactoryBrokerRuntime,
   write: (message: string) => void
-): FactoryBrokerCanaryTickRunnerDependencies {
+): FactoryBrokerPullRequestMaintenanceTickRunnerDependencies {
   return {
     loadConfig: () => Promise.resolve(config()),
     createRuntime: () => broker,
@@ -191,23 +182,25 @@ function dependencies(
 
 function runtime(
   preflightResult: Promise<FactoryBrokerPreflight>,
-  tickResult: Promise<FactoryCanaryBrokerTickReport>,
-  close: () => Promise<void> = () => Promise.resolve(),
-  tick: LocalFactoryBrokerRuntime["commands"]["reconcileCanaryDrafts"] = () => tickResult
+  maintenanceResult: FactoryCanaryPullRequestMaintenanceTickReport,
+  options: {
+    readonly maintain?: LocalFactoryBrokerRuntime["commands"]["maintainCanaryPullRequests"];
+    readonly close?: () => Promise<void>;
+  } = {}
 ): LocalFactoryBrokerRuntime {
   return {
     commands: {
       preflight: () => preflightResult,
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
-      reconcileCanaryDrafts: tick,
-      maintainCanaryPullRequests: () => Promise.reject(new Error("not used")),
+      reconcileCanaryDrafts: () => Promise.reject(new Error("not used")),
+      maintainCanaryPullRequests: options.maintain ?? (() => Promise.resolve(maintenanceResult)),
       observePullRequest: () =>
         Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] }),
       admitPullRequestRepair: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] }),
       updatePullRequest: () =>
         Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
     },
-    close
+    close: options.close ?? (() => Promise.resolve())
   };
 }
 
@@ -240,39 +233,43 @@ function preflight(
   };
 }
 
-function idle(): FactoryCanaryBrokerTickReport {
+function idle(): FactoryCanaryPullRequestMaintenanceTickReport {
   return {
-    schemaVersion: "agentlab.canary-broker-tick-result.v1",
+    schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1",
     status: "idle",
     repositoryId: "riadmefti/agentlab",
     schedulePolicyDigest,
     factoryPolicyBundleDigest: policyBundleDigest,
     roleIdentityPolicyDigest,
+    maintenanceSlot: "2026-08-31T12:00:00.000Z",
     observedAt: "2026-08-31T13:00:00.000Z",
     candidatesInspected: 0,
-    dispatchAttempts: 0,
-    draftsCompleted: 0,
+    maintenanceAttempts: 0,
+    observationsCreated: 0,
+    repairAuthorizationsCreated: 0,
     hasMore: false,
     reasonCodes: [],
     tasks: []
   };
 }
 
-function completed(): FactoryCanaryBrokerTickReport {
+function completed(): FactoryCanaryPullRequestMaintenanceTickReport {
   return {
     ...idle(),
     status: "completed",
     candidatesInspected: 1,
-    dispatchAttempts: 1,
-    draftsCompleted: 1,
+    maintenanceAttempts: 1,
+    observationsCreated: 1,
+    repairAuthorizationsCreated: 1,
     tasks: [
       {
         taskId: "00000000-0000-4000-8000-000000000001",
         reservationDigest: testDigest("1"),
-        source: "undispatched",
-        status: "completed",
+        source: "unobserved",
+        status: "repair-authorized",
         reasonCodes: [],
-        pullRequestNumber: 42
+        observationDigest: testDigest("2"),
+        repairAuthorizationDigest: testDigest("3")
       }
     ]
   };
@@ -300,20 +297,20 @@ function config(): LocalFactoryBrokerConfig {
 function v1Config(): LocalFactoryBrokerConfig {
   return {
     schemaVersion: "agentlab.local-factory-broker.v1",
-    databasePath: "/private/agentlab/agentlab.sqlite",
+    databasePath: "/private/agentlab/factory.sqlite",
     artifactRoot: "/private/agentlab/artifacts",
-    temporaryRoot: "/private/agentlab/temporary",
+    temporaryRoot: "/private/agentlab/tmp",
     repositoryId: "riadmefti/agentlab",
-    repositoryNumericId: 12_345,
+    repositoryNumericId: 1,
     brokerId: "agentlab-pr-broker",
     gitExecutable: "/usr/bin/git",
     githubApp: {
-      clientId: "Iv1.agentlab-test",
-      installationId: 67_890,
+      clientId: "Iv1.test",
+      installationId: 1,
       privateKeyPath: "/private/agentlab/github-app.pem",
       trustedStatusChecks: [
-        { context: "verify", appId: 15_368 },
-        { context: "factory-sandbox", appId: 15_368 }
+        { context: "verify", appId: 1 },
+        { context: "factory-sandbox", appId: 1 }
       ]
     }
   };

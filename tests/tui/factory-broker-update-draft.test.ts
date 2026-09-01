@@ -210,6 +210,7 @@ function brokerRuntime(
       preflight: () => Promise.resolve(preflightResult),
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
       reconcileCanaryDrafts: () => Promise.reject(new Error("not used")),
+      maintainCanaryPullRequests: () => Promise.reject(new Error("not used")),
       observePullRequest: () =>
         Promise.resolve({ status: "denied", reasonCodes: ["pr-broker-disabled"] }),
       admitPullRequestRepair: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] }),

@@ -29,6 +29,7 @@ import type {
 } from "../domain/factory-documents.js";
 import type { FactoryGateExecutionOutput } from "../domain/factory-gate.js";
 import type { FactoryPullRequestAssessment } from "../domain/factory-pull-request-observation.js";
+import type { FactoryCanaryPullRequestMaintenanceCoordinates } from "../domain/factory-canary-pull-request-maintenance.js";
 import type { ResolvedFactorySkill } from "../domain/factory-skill.js";
 import type {
   FactoryTaskSnapshot,
@@ -531,6 +532,7 @@ export class FactoryEvidencePublisher {
     readonly task: FactoryTaskSnapshot;
     readonly observation: CanonicalFactoryDocument<FactoryPullRequestObservation>;
     readonly assessment: FactoryPullRequestAssessment;
+    readonly maintenance?: FactoryCanaryPullRequestMaintenanceCoordinates;
   }): Promise<StoredEvidenceBundle> {
     const artifact = await this.#documentArtifact(
       input.observation,
@@ -566,7 +568,24 @@ export class FactoryEvidencePublisher {
           {
             name: "pull-request-record-digest",
             value: input.observation.value.pullRequestRecordDigest
-          }
+          },
+          ...(input.maintenance === undefined
+            ? []
+            : [
+                { name: "maintenance-slot", value: input.maintenance.scheduledFor },
+                {
+                  name: "canary-reservation-digest",
+                  value: input.maintenance.reservationDigest
+                },
+                {
+                  name: "schedule-policy-digest",
+                  value: input.maintenance.schedulePolicyDigest
+                },
+                {
+                  name: "role-identity-policy-digest",
+                  value: input.maintenance.roleIdentityPolicyDigest
+                }
+              ])
         ]
       })
     ]);

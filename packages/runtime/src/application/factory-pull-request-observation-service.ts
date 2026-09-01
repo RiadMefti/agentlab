@@ -1,4 +1,9 @@
-import { type FactoryPullRequestObservation, type Sha256Digest } from "@agentlab/contracts";
+import {
+  factoryTimestampSchema,
+  sha256DigestSchema,
+  type FactoryPullRequestObservation,
+  type Sha256Digest
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import type { FactoryArtifactStore } from "../domain/factory-artifact-store.js";
@@ -7,13 +12,15 @@ import type { FactoryPullRequestObserver } from "../domain/factory-pull-request-
 import type { FactoryPullRequestDispatchRepository } from "../domain/factory-pull-request-dispatch-repository.js";
 import { factoryPullRequestAuthorityCoordinates } from "../domain/factory-pull-request-authority-record.js";
 import type { FactoryPullRequestUpdateRepository } from "../domain/factory-pull-request-update-repository.js";
+import type { FactoryCanaryPullRequestMaintenanceCoordinates } from "../domain/factory-canary-pull-request-maintenance.js";
 import {
   assessFactoryPullRequestObservation,
   type FactoryPullRequestAssessment
 } from "../domain/factory-pull-request-observation.js";
 import type {
   FactoryControlRepository,
-  FactoryTaskRepository
+  FactoryTaskRepository,
+  FactoryTaskSnapshot
 } from "../domain/factory-task-repository.js";
 import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
 import {
@@ -21,8 +28,24 @@ import {
   type FactoryEvidencePublisherCredentials
 } from "./factory-evidence-publisher.js";
 import { FactoryPullRequestLineageReader } from "./factory-pull-request-lineage.js";
+import type { FactoryPullRequestCanaryAuthority } from "./factory-pull-request-canary-authority.js";
 
-const observationInputSchema = z.object({ taskId: z.uuid() }).strict();
+const maintenanceCoordinatesSchema = z
+  .object({
+    reservationDigest: sha256DigestSchema,
+    schedulePolicyDigest: sha256DigestSchema,
+    factoryPolicyBundleDigest: sha256DigestSchema,
+    roleIdentityPolicyDigest: sha256DigestSchema,
+    scheduledFor: factoryTimestampSchema
+  })
+  .strict();
+
+const observationInputSchema = z
+  .object({
+    taskId: z.uuid(),
+    maintenance: maintenanceCoordinatesSchema.optional()
+  })
+  .strict();
 
 export interface FactoryPullRequestObservationServiceDependencies {
   readonly dispatches: Pick<FactoryPullRequestDispatchRepository, "findByTaskId">;
@@ -34,6 +57,7 @@ export interface FactoryPullRequestObservationServiceDependencies {
   readonly artifacts: FactoryArtifactStore;
   readonly documents: FactoryDocumentCodec;
   readonly remote: FactoryPullRequestObserver;
+  readonly canaryAuthority: Pick<FactoryPullRequestCanaryAuthority, "require"> | null;
   readonly now: () => string;
   readonly createId: () => string;
 }
@@ -80,6 +104,9 @@ export class FactoryPullRequestObservationService {
     if (task.state !== "pr-open") {
       throw new Error("PR observation requires a task with a durably opened pull request.");
     }
+    if (command.maintenance !== undefined) {
+      await this.#requireMaintenanceAuthority(task, command.maintenance);
+    }
     const lineage = await this.#lineage.current(task);
     const record = lineage.record;
     const coordinates = factoryPullRequestAuthorityCoordinates(record.value);
@@ -118,7 +145,8 @@ export class FactoryPullRequestObservationService {
     const evidence = await this.#publisher.pullRequestObservation({
       task,
       observation,
-      assessment
+      assessment,
+      ...(command.maintenance === undefined ? {} : { maintenance: command.maintenance })
     });
     return {
       status: "observed",
@@ -127,5 +155,28 @@ export class FactoryPullRequestObservationService {
       evidenceBundleDigest: evidence.digest,
       assessment
     };
+  }
+
+  async #requireMaintenanceAuthority(
+    task: FactoryTaskSnapshot,
+    maintenance: FactoryCanaryPullRequestMaintenanceCoordinates
+  ): Promise<void> {
+    if (
+      task.contract.trigger !== "scheduled" ||
+      task.contract.gateProfile.policyDigest !== maintenance.factoryPolicyBundleDigest
+    ) {
+      throw new Error("Autonomous PR observation requires the exact scheduled task policy.");
+    }
+    if (maintenance.scheduledFor > factoryTimestampSchema.parse(this.dependencies.now())) {
+      throw new Error("Autonomous PR observation cannot precede its maintenance slot.");
+    }
+    if (this.dependencies.canaryAuthority === null) {
+      throw new Error("Autonomous PR observation requires broker config v3.");
+    }
+    await this.dependencies.canaryAuthority.require(task, {
+      reservationDigest: maintenance.reservationDigest,
+      schedulePolicyDigest: maintenance.schedulePolicyDigest,
+      roleIdentityPolicyDigest: maintenance.roleIdentityPolicyDigest
+    });
   }
 }

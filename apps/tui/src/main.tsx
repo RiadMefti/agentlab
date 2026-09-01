@@ -186,6 +186,17 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-pr-maintenance-tick") {
+    const { runFactoryBrokerPullRequestMaintenanceTick } =
+      await import("./run-factory-broker-pr-maintenance-tick.js");
+    process.exitCode = await runFactoryBrokerPullRequestMaintenanceTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-broker-observe-pr") {
     const { runFactoryBrokerObservePullRequest } =
       await import("./run-factory-broker-observe-pr.js");

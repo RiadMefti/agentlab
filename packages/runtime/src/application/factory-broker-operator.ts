@@ -9,6 +9,10 @@ import type {
   FactoryCanaryBrokerService,
   FactoryCanaryBrokerTickReport
 } from "./factory-canary-broker-service.js";
+import type {
+  FactoryCanaryPullRequestMaintenanceService,
+  FactoryCanaryPullRequestMaintenanceTickReport
+} from "./factory-canary-pull-request-maintenance-service.js";
 import { factoryRepositoryGovernanceDenials } from "./factory-pull-request-policy.js";
 import type {
   FactoryPullRequestOutcome,
@@ -47,6 +51,10 @@ export interface FactoryBrokerOperatorDependencies {
   readonly pullRequestRepairAdmissions: Pick<FactoryPullRequestRepairAdmissionService, "admit">;
   readonly pullRequestUpdates: Pick<FactoryPullRequestUpdateService, "update">;
   readonly canaryBroker: Pick<FactoryCanaryBrokerService, "tick"> | null;
+  readonly canaryPullRequestMaintenance: Pick<
+    FactoryCanaryPullRequestMaintenanceService,
+    "tick"
+  > | null;
 }
 
 /** Public authority-plane boundary; this process has no model or provider execution dependency. */
@@ -92,6 +100,15 @@ export class FactoryBrokerOperator {
       throw new Error("Canary broker reconciliation requires broker config v3.");
     }
     return this.dependencies.canaryBroker.tick(input);
+  }
+
+  public maintainCanaryPullRequests(
+    input: unknown
+  ): Promise<FactoryCanaryPullRequestMaintenanceTickReport> {
+    if (this.dependencies.canaryPullRequestMaintenance === null) {
+      throw new Error("Canary PR maintenance requires broker config v3.");
+    }
+    return this.dependencies.canaryPullRequestMaintenance.tick(input);
   }
 
   public observePullRequest(input: unknown): Promise<FactoryPullRequestObservationOutcome> {

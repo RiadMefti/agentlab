@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryCanaryBrokerQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
+import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
@@ -149,6 +150,9 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
   it("allows scheduled dispatch only from its exact completed brokered canary handoff", async () => {
     const fixture = await scheduledRepositoryFixture();
     const queue = new SqliteFactoryCanaryBrokerQueue(fixture.databasePath);
+    const maintenanceQueue = new SqliteFactoryCanaryPullRequestMaintenanceQueue(
+      fixture.databasePath
+    );
     try {
       await expect(
         queue.listPending({
@@ -242,6 +246,82 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
           limit: 10
         })
       ).resolves.toEqual({ items: [], truncated: false });
+      const currentRecordDigest = codec.pullRequestRecord(pullRequestRecord(fixture)).digest;
+      await expect(
+        maintenanceQueue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:15:00.000Z",
+          maintenanceSlot: "2026-08-31T12:00:00.000Z",
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            taskId: TEST_FACTORY_TASK_ID,
+            reservationDigest: fixture.reservationDigest,
+            currentPullRequestRecordDigest: currentRecordDigest,
+            currentHeadRevision: "b".repeat(40),
+            source: "unobserved",
+            observationDigest: null
+          }
+        ]
+      });
+      const observationDigest = testDigest("6");
+      const observationEvidence = maintenanceEvidence(fixture, {
+        sequence: 2,
+        bundleId: "62626262-6262-4262-8262-626262626262",
+        itemId: "63636363-6363-4363-8363-636363636363",
+        previousBundleDigest: fixture.evidence.digest,
+        subjectDigest: observationDigest,
+        mediaType: "application/vnd.agentlab.pull-request-observation.v1+json",
+        claims: [
+          { name: "disposition", value: "actionable" },
+          { name: "maintenance-slot", value: "2026-08-31T12:00:00.000Z" },
+          { name: "head-revision", value: "b".repeat(40) },
+          { name: "pull-request-record-digest", value: currentRecordDigest },
+          { name: "canary-reservation-digest", value: fixture.reservationDigest },
+          { name: "schedule-policy-digest", value: fixture.schedulePolicyDigest },
+          {
+            name: "role-identity-policy-digest",
+            value: fixture.roleIdentityPolicyDigest
+          }
+        ]
+      });
+      await fixture.tasks.appendEvidence(observationEvidence);
+      await expect(
+        maintenanceQueue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:16:00.000Z",
+          maintenanceSlot: "2026-08-31T12:00:00.000Z",
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        items: [
+          {
+            source: "observed-actionable",
+            observationDigest
+          }
+        ]
+      });
+      const authorizationEvidence = maintenanceEvidence(fixture, {
+        sequence: 3,
+        bundleId: "64646464-6464-4464-8464-646464646464",
+        itemId: "65656565-6565-4565-8565-656565656565",
+        previousBundleDigest: observationEvidence.digest,
+        subjectDigest: testDigest("7"),
+        mediaType: "application/vnd.agentlab.pull-request-repair-authorization.v1+json",
+        claims: [{ name: "observation-digest", value: observationDigest }]
+      });
+      await fixture.tasks.appendEvidence(authorizationEvidence);
+      await expect(
+        maintenanceQueue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:17:00.000Z",
+          maintenanceSlot: "2026-08-31T12:00:00.000Z",
+          limit: 10
+        })
+      ).resolves.toEqual({ items: [], truncated: false });
       expect(() =>
         queue.listPending({
           repositoryId: "agentlab",
@@ -263,6 +343,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         database.close();
       }
     } finally {
+      maintenanceQueue.close();
       queue.close();
       fixture.dispatches.close();
       fixture.schedules.close();
@@ -573,6 +654,8 @@ async function scheduledRepositoryFixture() {
     evidence,
     taskLastEvent: previous,
     reservationDigest: reservation.digest,
+    schedulePolicyDigest: schedulePolicy.digest,
+    roleIdentityPolicyDigest: reservation.value.roleIdentityPolicyDigest,
     legacyRun,
     legacyRegistered: codec.pullRequestDispatchEvent({
       ...eventBase(legacyRun, null),
@@ -595,6 +678,43 @@ async function scheduledRepositoryFixture() {
       to: "ready"
     })
   };
+}
+
+function maintenanceEvidence(
+  fixture: Awaited<ReturnType<typeof scheduledRepositoryFixture>>,
+  input: {
+    readonly sequence: number;
+    readonly bundleId: string;
+    readonly itemId: string;
+    readonly previousBundleDigest: string;
+    readonly subjectDigest: string;
+    readonly mediaType: string;
+    readonly claims: readonly { readonly name: string; readonly value: string }[];
+  }
+) {
+  return codec.evidenceBundle({
+    schemaVersion: "agentlab.evidence-bundle.v1",
+    bundleId: input.bundleId,
+    taskId: fixture.contract.value.taskId,
+    sequence: input.sequence,
+    contractDigest: fixture.contract.digest,
+    previousBundleDigest: input.previousBundleDigest,
+    policyBundleDigest: fixture.contract.value.gateProfile.policyDigest,
+    createdAt: `2026-08-31T12:${String(14 + input.sequence).padStart(2, "0")}:00.000Z`,
+    items: [
+      {
+        id: input.itemId,
+        kind: "pull-request",
+        result: "fail",
+        subjectDigest: input.subjectDigest,
+        artifact: { digest: input.subjectDigest, mediaType: input.mediaType, sizeBytes: 1 },
+        producer: brokerActor,
+        createdAt: `2026-08-31T12:${String(14 + input.sequence).padStart(2, "0")}:00.000Z`,
+        claims: input.claims
+      }
+    ],
+    attestations: []
+  });
 }
 
 async function repositoryFixture() {

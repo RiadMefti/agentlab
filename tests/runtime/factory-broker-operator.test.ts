@@ -118,6 +118,34 @@ describe("FactoryBrokerOperator", () => {
     expect(fixture.canaryTick).not.toHaveBeenCalled();
   });
 
+  it("delegates autonomous PR maintenance only through the canary maintenance service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      expectedSchedulePolicyDigest: `sha256:${"1".repeat(64)}`,
+      expectedRoleIdentityPolicyDigest: `sha256:${"2".repeat(64)}`,
+      expectedFactoryPolicyBundleDigest: policyBundleDigest
+    };
+
+    await expect(fixture.operator.maintainCanaryPullRequests(command)).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1",
+      status: "idle"
+    });
+    expect(fixture.maintenanceTick).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+    expect(fixture.observe).not.toHaveBeenCalled();
+  });
+
+  it("rejects autonomous PR maintenance when config v3 did not compose it", () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const operator = new FactoryBrokerOperator({
+      ...fixture.dependencies,
+      canaryPullRequestMaintenance: null
+    });
+
+    expect(() => operator.maintainCanaryPullRequests({})).toThrow(/config v3/u);
+    expect(fixture.maintenanceTick).not.toHaveBeenCalled();
+  });
+
   it("delegates PR observation only through the facts-only observation service", async () => {
     const fixture = operatorFixture(strongGovernance, true);
     const command = { taskId: "0198f005-4ec4-7000-8000-000000000001" };
@@ -224,6 +252,23 @@ function operatorFixture(
     reasonCodes: [],
     tasks: []
   });
+  const maintenanceTick = vi.fn().mockResolvedValue({
+    schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1" as const,
+    status: "idle" as const,
+    repositoryId: "riadmefti/agentlab",
+    schedulePolicyDigest: `sha256:${"1".repeat(64)}` as const,
+    factoryPolicyBundleDigest: policyBundleDigest,
+    roleIdentityPolicyDigest: `sha256:${"2".repeat(64)}` as const,
+    maintenanceSlot: "2026-08-31T12:00:00.000Z",
+    observedAt: "2026-08-31T13:00:00.000Z",
+    candidatesInspected: 0,
+    maintenanceAttempts: 0,
+    observationsCreated: 0,
+    repairAuthorizationsCreated: 0,
+    hasMore: false,
+    reasonCodes: [],
+    tasks: []
+  });
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
@@ -234,7 +279,8 @@ function operatorFixture(
     pullRequestObservations: { observe },
     pullRequestRepairAdmissions: { admit: admitRepair },
     pullRequestUpdates: { update: updatePullRequest },
-    canaryBroker: { tick: canaryTick }
+    canaryBroker: { tick: canaryTick },
+    canaryPullRequestMaintenance: { tick: maintenanceTick }
   };
   return {
     operator: new FactoryBrokerOperator(dependencies),
@@ -245,6 +291,7 @@ function operatorFixture(
     observe,
     admitRepair,
     updatePullRequest,
-    canaryTick
+    canaryTick,
+    maintenanceTick
   };
 }

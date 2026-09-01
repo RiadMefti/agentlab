@@ -93,6 +93,7 @@ function runtime(
       preflight: () => Promise.resolve(preflight()),
       openDraft: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null }),
       reconcileCanaryDrafts: () => Promise.reject(new Error("not used")),
+      maintainCanaryPullRequests: () => Promise.reject(new Error("not used")),
       observePullRequest,
       admitPullRequestRepair: () => Promise.resolve({ status: "denied", reasonCodes: ["test"] }),
       updatePullRequest: () =>

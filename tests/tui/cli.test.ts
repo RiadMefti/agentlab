@@ -427,6 +427,46 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("binds PR maintenance to exact schedule, role, and factory policies", () => {
+    const schedulePolicy = `sha256:${"2".repeat(64)}`;
+    const rolePolicy = `sha256:${"3".repeat(64)}`;
+    const factoryPolicy = `sha256:${"4".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "broker-pr-maintenance-tick",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--schedule-policy",
+        schedulePolicy,
+        "--role-policy",
+        rolePolicy,
+        "--policy",
+        factoryPolicy
+      ])
+    ).toEqual({
+      kind: "factory-broker-pr-maintenance-tick",
+      configPath: "/private/agentlab/broker.json",
+      expectedSchedulePolicyDigest: schedulePolicy,
+      expectedRoleIdentityPolicyDigest: rolePolicy,
+      expectedFactoryPolicyBundleDigest: factoryPolicy
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "broker-pr-maintenance-tick",
+        "--config",
+        "/private/agentlab/broker.json",
+        "--schedule-policy",
+        schedulePolicy,
+        "--role-policy",
+        "invalid",
+        "--policy",
+        factoryPolicy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires an exact task, policy pin, and confirmation for worker execution", () => {
     const taskId = "0198f005-4ec4-7000-8000-000000000001";
     const policy = `sha256:${"b".repeat(64)}`;
@@ -741,6 +781,7 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory broker-open-draft --config");
     expect(helpText).toContain("factory broker-open-canary-draft --config");
     expect(helpText).toContain("factory broker-canary-tick --config");
+    expect(helpText).toContain("factory broker-pr-maintenance-tick --config");
     expect(helpText).toContain("factory broker-update-draft --config");
     expect(helpText).toContain("factory broker-observe-pr --config");
     expect(helpText).toContain("factory broker-authorize-repair --config");

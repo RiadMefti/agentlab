@@ -10,6 +10,7 @@ import {
 
 import { FactoryBrokerOperator } from "./application/factory-broker-operator.js";
 import { FactoryCanaryBrokerService } from "./application/factory-canary-broker-service.js";
+import { FactoryCanaryPullRequestMaintenanceService } from "./application/factory-canary-pull-request-maintenance-service.js";
 import {
   LocalFactoryBrokerCoordinator,
   type LocalFactoryBrokerRuntime
@@ -47,6 +48,7 @@ import {
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
 import { SqliteFactoryCanaryBrokerQueue } from "./infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
+import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
@@ -132,6 +134,10 @@ export function createLocalFactoryBroker(
       schedulePolicy === null
         ? null
         : repositories.track(new SqliteFactoryCanaryBrokerQueue(databasePath));
+    const canaryPullRequestMaintenanceQueue =
+      schedulePolicy === null
+        ? null
+        : repositories.track(new SqliteFactoryCanaryPullRequestMaintenanceQueue(databasePath));
     const dispatches = repositories.track(
       new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
     );
@@ -256,6 +262,7 @@ export function createLocalFactoryBroker(
       artifacts,
       documents,
       remote: pullRequestObserver,
+      canaryAuthority,
       now,
       createId
     });
@@ -272,6 +279,24 @@ export function createLocalFactoryBroker(
       now,
       createId
     });
+    const canaryPullRequestMaintenance =
+      schedulePolicy === null ||
+      roleIdentityPolicy === null ||
+      canaryPullRequestMaintenanceQueue === null
+        ? null
+        : new FactoryCanaryPullRequestMaintenanceService({
+            repositoryId: options.repositoryId,
+            schedulePolicy,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: roleIdentityPolicy.digest,
+            costPolicyConfigured: policyBundle.value.costPolicy.rules.length > 0,
+            queue: canaryPullRequestMaintenanceQueue,
+            tasks: factory,
+            canaryAuthority,
+            observations: pullRequestObservations,
+            repairAdmissions: pullRequestRepairAdmissions,
+            now
+          });
     const pullRequestUpdates = new FactoryPullRequestUpdateService({
       updates,
       dispatches,
@@ -300,7 +325,8 @@ export function createLocalFactoryBroker(
       pullRequestObservations,
       pullRequestRepairAdmissions,
       pullRequestUpdates,
-      canaryBroker
+      canaryBroker,
+      canaryPullRequestMaintenance
     });
     return new LocalFactoryBrokerCoordinator({
       operator,
@@ -359,6 +385,7 @@ export type { LocalFactoryBrokerRuntime } from "./application/local-factory-brok
 export type { FactoryBrokerCommandPort } from "./application/local-factory-broker-coordinator.js";
 export type { FactoryBrokerPreflight } from "./application/factory-broker-operator.js";
 export type { FactoryCanaryBrokerTickReport } from "./application/factory-canary-broker-service.js";
+export type { FactoryCanaryPullRequestMaintenanceTickReport } from "./application/factory-canary-pull-request-maintenance-service.js";
 export {
   loadLocalFactoryBrokerConfig,
   type LocalFactoryBrokerConfig

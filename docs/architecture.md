@@ -133,6 +133,17 @@ same reservation-revalidating draft service. Expiry and deterministic denial pro
 output; a denial stops the remaining page. The command cannot enable authority, install a timer,
 merge, or release.
 
+The separate one-shot `broker-pr-maintenance-tick` command projects exact open schema-v2 canary PR
+heads from completed scheduler handoffs, latest durable PR lineage, and append-only evidence. One
+resolved daily slot, the reservation, current PR record and head, broker, and exact schedule, role,
+and factory-policy digests form the immutable maintenance identity. The schedule policy bounds both
+inspection and attempts. A new observation rechecks canary authority before its credentialed read;
+an actionable observation rechecks it again before existing deterministic repair admission. The
+slot-bound observation is the crash checkpoint, so admission can resume without another remote read.
+Clear or pending facts create no repair authority; unsafe, denied, expired, or regressed work
+reports attention. The command cannot execute repair, update the branch, enable authority, merge, or
+release.
+
 The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
 clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
 local append-only evidence ingress. It resolves the completed durable dispatch itself and binds the
@@ -280,7 +291,8 @@ and is revalidated before each broker checkpoint. Manual dispatch remains schema
 [ADR 0013](decisions/0013-durable-canary-task-admission.md),
 [ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
 [ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
-[ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md), and
+[ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md),
+[ADR 0017](decisions/0017-slot-bound-canary-pr-maintenance.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -480,11 +492,13 @@ intake is implemented but no live intake configuration or task has been provisio
 task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
 plus deterministic repair admission and fresh credentialless repair execution are implemented.
 Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
-re-observation are implemented. Repository/day and organization/day quotas, a sandboxed harness
-producer, an owner-installed broker timer, telemetry-driven canary comparison, merge, release,
-rollback, and incident automation remain later stages. Deterministic assessment, bounded non-release
-cohort authority, durable admission, reservation-bound scheduled execution, and reservation-bound
-draft dispatch exist but remain unactivated.
+re-observation are implemented. A bounded daily-slot consumer now joins scheduled canary PRs to
+authenticated observations and deterministic repair admission without executing repair. Autonomous
+repair execution and repaired-branch consumption, repository/day and organization/day quotas, a
+sandboxed harness producer, owner-installed timers, telemetry-driven canary comparison, merge,
+release, rollback, and incident automation remain later stages. Deterministic assessment, bounded
+non-release cohort authority, durable admission, reservation-bound scheduled execution, draft
+dispatch, and PR maintenance exist but remain unactivated.
 
 ## Dependency map
 

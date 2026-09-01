@@ -8,7 +8,11 @@ import {
   createConfiguredLocalFactoryBroker,
   createLocalFactoryBroker
 } from "../../packages/runtime/src/local-factory-broker.js";
-import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { defaultFactoryPolicyBundle } from "../../packages/runtime/src/domain/factory-policy.js";
+import {
+  encodeCanonicalDocument,
+  NodeFactoryDocumentCodec
+} from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testDigest } from "../helpers/factory.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
@@ -105,9 +109,9 @@ describe("local factory broker composition", () => {
       workerUserId: 1_001,
       attestorUserId: 1_002
     });
-    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
-      roleIdentityPolicy
-    ).digest;
+    const documents = new NodeFactoryDocumentCodec();
+    const expectedRoleIdentityPolicyDigest =
+      documents.roleIdentityPolicy(roleIdentityPolicy).digest;
     const costPolicy = {
       schemaVersion: "agentlab.cost-policy.v1" as const,
       id: "agentlab/live-costs",
@@ -124,6 +128,7 @@ describe("local factory broker composition", () => {
         }
       ]
     };
+    const schedulePolicy = testFactorySchedulePolicy();
     const runtime = createConfiguredLocalFactoryBroker({
       schemaVersion: "agentlab.local-factory-broker.v3",
       databasePath: join(root, "agentlab.sqlite"),
@@ -138,7 +143,7 @@ describe("local factory broker composition", () => {
       roleIdentityPolicyPath: join(root, "role-identities.json"),
       expectedRoleIdentityPolicyDigest,
       costPolicy,
-      schedulePolicy: testFactorySchedulePolicy(),
+      schedulePolicy,
       roleIdentityPolicy,
       githubApp: {
         clientId: "Iv1.agentlab-test",
@@ -151,6 +156,20 @@ describe("local factory broker composition", () => {
       }
     });
 
+    await expect(
+      runtime.commands.maintainCanaryPullRequests({
+        expectedSchedulePolicyDigest: documents.schedulePolicy(schedulePolicy).digest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest: encodeCanonicalDocument({
+          ...defaultFactoryPolicyBundle,
+          costPolicy
+        }).digest
+      })
+    ).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1",
+      status: "idle",
+      candidatesInspected: 0
+    });
     await expect(runtime.close()).resolves.toBeUndefined();
   });
 });
