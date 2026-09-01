@@ -145,6 +145,7 @@ function runtime(
       recoverExecution: noResult,
       executePullRequestRepair: noResult,
       recoverPullRequestRepair: noResult,
+      runCanaryPullRequestRepairTick: noResult,
       runTask: noResult,
       runScheduledTick
     },

@@ -10,6 +10,7 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryCanaryBrokerQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
 import { SqliteFactoryCanaryPullRequestMaintenanceQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-maintenance-queue.js";
+import { SqliteFactoryCanaryPullRequestRepairQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
@@ -153,6 +154,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
     const maintenanceQueue = new SqliteFactoryCanaryPullRequestMaintenanceQueue(
       fixture.databasePath
     );
+    const repairQueue = new SqliteFactoryCanaryPullRequestRepairQueue(fixture.databasePath);
     try {
       await expect(
         queue.listPending({
@@ -311,7 +313,12 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         previousBundleDigest: observationEvidence.digest,
         subjectDigest: testDigest("7"),
         mediaType: "application/vnd.agentlab.pull-request-repair-authorization.v1+json",
-        claims: [{ name: "observation-digest", value: observationDigest }]
+        result: "pass",
+        claims: [
+          { name: "observation-digest", value: observationDigest },
+          { name: "pull-request-record-digest", value: currentRecordDigest },
+          { name: "head-revision", value: "b".repeat(40) }
+        ]
       });
       await fixture.tasks.appendEvidence(authorizationEvidence);
       await expect(
@@ -322,6 +329,29 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
           limit: 10
         })
       ).resolves.toEqual({ items: [], truncated: false });
+      await expect(
+        repairQueue.listPending({
+          observedAt: "2026-08-31T12:17:00.000Z",
+          schedulePolicyDigest: fixture.schedulePolicyDigest,
+          factoryPolicyBundleDigest: fixture.contract.value.gateProfile.policyDigest,
+          roleIdentityPolicyDigest: fixture.roleIdentityPolicyDigest,
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            source: "authorized",
+            taskId: TEST_FACTORY_TASK_ID,
+            repositoryId: "agentlab",
+            authorizationDigest: testDigest("7"),
+            observationDigest,
+            reservationDigest: fixture.reservationDigest,
+            pullRequestRecordDigest: currentRecordDigest,
+            headRevision: "b".repeat(40)
+          }
+        ]
+      });
       expect(() =>
         queue.listPending({
           repositoryId: "agentlab",
@@ -343,6 +373,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         database.close();
       }
     } finally {
+      repairQueue.close();
       maintenanceQueue.close();
       queue.close();
       fixture.dispatches.close();
@@ -689,6 +720,7 @@ function maintenanceEvidence(
     readonly previousBundleDigest: string;
     readonly subjectDigest: string;
     readonly mediaType: string;
+    readonly result?: "pass" | "fail";
     readonly claims: readonly { readonly name: string; readonly value: string }[];
   }
 ) {
@@ -705,7 +737,7 @@ function maintenanceEvidence(
       {
         id: input.itemId,
         kind: "pull-request",
-        result: "fail",
+        result: input.result ?? "fail",
         subjectDigest: input.subjectDigest,
         artifact: { digest: input.subjectDigest, mediaType: input.mediaType, sizeBytes: 1 },
         producer: brokerActor,

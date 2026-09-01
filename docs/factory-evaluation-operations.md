@@ -244,6 +244,13 @@ the remote read and again before admission. Its observation evidence is the cras
 exact retry does not reread the same head. It cannot execute repair, update the PR, merge, or
 release.
 
+`worker-pr-repair-tick` consumes only the resulting exact authorization in the credentialless worker
+plane. Recoverable journals sort ahead of fresh work and remain cleanable under normal-work
+blockers. Fresh execution requires ready worker preflight, the scheduler switch, current reservation
+authority, all three policy pins, and both task and aggregate tick budgets. The existing isolated
+repair, strict gates, independent review, and cumulative accounting produce only a local
+`pr-proposed` checkpoint.
+
 ## Failure, recovery, and incident handling
 
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
@@ -267,9 +274,9 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
 grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
-identity or hardware-backed key custody where required; an owner-installed broker timer;
-credentialless repair and broker-update consumers; telemetry/control comparison; revocation
-enforcement; alerting; rollback drills; and incident automation. Manual PR creation remains
-separately human-confirmed; evaluated canary PR creation and slot-bound maintenance are
+identity or hardware-backed key custody where required; an owner-installed broker timer; an
+autonomous broker-update consumer; telemetry/control comparison; revocation enforcement; alerting;
+rollback drills; and incident automation. Manual PR creation remains separately human-confirmed;
+evaluated canary PR creation, slot-bound maintenance, and credentialless repair consumption are
 reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key
 prerequisites in [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

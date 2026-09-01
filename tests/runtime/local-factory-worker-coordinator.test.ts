@@ -169,6 +169,7 @@ function coordinator(
     operator,
     taskRunner: { run: noResult },
     scheduler: null,
+    canaryPullRequestRepairs: null,
     tasks: new RuntimeTaskOwner(),
     resources: options.resources ?? { closeAll: () => Promise.resolve() },
     repositories: options.repositories ?? new RuntimeRepositoryOwner(),

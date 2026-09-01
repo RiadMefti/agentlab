@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
+import { SqliteFactoryCanaryPullRequestRepairQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import {
@@ -38,6 +39,7 @@ afterEach(() => {
 describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
   it("persists one immutable authorization-bound repair chain", async () => {
     const fixture = await repositoryFixture();
+    const queue = new SqliteFactoryCanaryPullRequestRepairQueue(fixture.databasePath);
     try {
       await expect(
         fixture.repairs.register(fixture.run, fixture.registered)
@@ -58,9 +60,30 @@ describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
       ).resolves.toMatchObject({ state: "workspace-active", sequence: 2 });
       await expect(fixture.repairs.listByTaskId(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(1);
       await expect(fixture.repairs.listRecoverable(10)).resolves.toHaveLength(1);
+      await expect(
+        queue.listPending({
+          observedAt: "2026-08-30T13:02:00.000Z",
+          schedulePolicyDigest: testDigest("1"),
+          factoryPolicyBundleDigest: testDigest("2"),
+          roleIdentityPolicyDigest: testDigest("3"),
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            source: "recoverable",
+            taskId: TEST_FACTORY_TASK_ID,
+            authorizationDigest: AUTHORIZATION_DIGEST,
+            repairRunDigest: fixture.run.digest,
+            repairState: "workspace-active"
+          }
+        ]
+      });
       await expect(fixture.repairs.listEvents(RUN_ID)).resolves.toHaveLength(2);
       await expect(fixture.repairs.append(attempt)).resolves.toBeNull();
     } finally {
+      queue.close();
       fixture.repairs.close();
     }
   });

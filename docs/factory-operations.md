@@ -170,13 +170,26 @@ stays blocked rather than running model work.
    attention-required results. It does not execute the authorized repair or update the remote
    branch.
 
+8. Run the credentialless worker consumer with the same reviewed policy pins:
+
+   ```text
+   agentlab factory worker-pr-repair-tick --config /absolute/worker.json --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+   ```
+
+   It reconciles interrupted repair journals before considering fresh work, including when normal
+   work is blocked. Fresh execution requires the scheduler switch, ready host and cost policy,
+   current canary reservation, and the exact maintenance-issued authorization. Candidate, action,
+   and aggregate tick ceilings remain authoritative. It runs no GitHub adapter and stops at a local
+   `pr-proposed` checkpoint. Exit 2 requires operator attention; do not publish the repair manually
+   unless its exact evidence and broker ceremony are reviewed.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
 separate broker preflight and switch. Manual draft creation still requires literal confirmation;
 scheduled canary draft creation requires the exact reservation and scheduler handoff instead. Do not
-put broker enablement, repair execution, merge, release, or deployment into a scheduler or broker
-timer.
+put broker enablement, merge, release, or deployment into a worker or broker timer. Keep the
+credentialless repair consumer and credential-bearing broker in separate processes and accounts.
 
 To stop new or resumed scheduled and broker work:
 
@@ -193,10 +206,10 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, autonomous repair/update consumers, attested eval-harness producer,
+maintenance discovery, autonomous broker-update consumer, attested eval-harness producer,
 owner-installed timers, merge, telemetry-driven canary, rollback controller, or incident automation
 is shipped. Deterministic assessment, human non-release cohorts, task reservation, reservation-bound
-scheduled execution and draft dispatch, and slot-bound PR observation/repair admission exist but are
-not provisioned or activated. See
+scheduled execution and draft dispatch, slot-bound PR observation/repair admission, and
+credentialless repair consumption exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

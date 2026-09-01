@@ -38,6 +38,7 @@ describe("local factory worker composition", () => {
       "recoverExecution",
       "recoverPreparation",
       "recoverPullRequestRepair",
+      "runCanaryPullRequestRepairTick",
       "runScheduledTick",
       "runTask"
     ]);
@@ -59,6 +60,9 @@ describe("local factory worker composition", () => {
     });
     await expect(runtime.commands.runScheduledTick({})).rejects.toThrow(
       /scheduler policy is not configured/u
+    );
+    await expect(runtime.commands.runCanaryPullRequestRepairTick({})).rejects.toThrow(
+      /repair consumer policy is not configured/u
     );
     await runtime.close();
 
@@ -143,6 +147,46 @@ describe("local factory worker composition", () => {
     await expect(runtime.commands.preflight()).resolves.toMatchObject({
       roleIdentityPolicyDigest: expectedRoleIdentityPolicyDigest,
       reasonCodes: ["schedule-policy-unconfigured", "scheduler-disabled"]
+    });
+    await runtime.close();
+  });
+
+  it("composes the canary repair consumer only with exact v3 schedule and role policies", async () => {
+    const processUserId = process.getuid?.();
+    if (processUserId === undefined || processUserId < 1) {
+      throw new Error("This identity-bound composition test requires a non-root POSIX user.");
+    }
+    const fixture = workerOptions();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(902),
+      workerUserId: processUserId,
+      attestorUserId: processUserId === 1 ? 2 : 1
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const runtime = createLocalFactoryWorker({
+      ...fixture.options,
+      schedulePolicy: testFactorySchedulePolicy(),
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest
+    });
+    const preflight = await runtime.commands.preflight();
+    if (preflight.schedulePolicyDigest === null || preflight.roleIdentityPolicyDigest === null) {
+      throw new Error("Scheduled worker preflight lost its exact policy identities.");
+    }
+
+    await expect(
+      runtime.commands.runCanaryPullRequestRepairTick({
+        expectedSchedulePolicyDigest: preflight.schedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest: preflight.roleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest: preflight.policyBundleDigest
+      })
+    ).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-pull-request-repair-tick-result.v1",
+      status: "blocked",
+      candidatesInspected: 0,
+      reasonCodes: ["scheduler-disabled"]
     });
     await runtime.close();
   });

@@ -76,6 +76,13 @@ export type CliAction =
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
       readonly confirmation: "repair-pr";
     }
+  | {
+      readonly kind: "factory-worker-pr-repair-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
   | { readonly kind: "factory-authority-status"; readonly configPath: string }
   | {
       readonly kind: "factory-broker-authority";
@@ -437,6 +444,34 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "worker-pr-repair-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--role-policy" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedRoleIdentityPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-worker-pr-repair-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
+  }
+  if (
     input.length === 11 &&
     input[0] === "factory" &&
     input[1] === "broker-authorize-repair" &&
@@ -682,7 +717,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -760,6 +795,8 @@ Factory authority:
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory worker-repair-pr --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-repair
       Consume one exact authorization in a fresh credentialless repair worker; repeat all gates and independent review.
+  agentlab factory worker-pr-repair-tick --config <absolute-path> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Recover interrupted repairs, then consume one bounded page of exact canary repair authority.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
   agentlab factory broker-open-canary-draft --config <absolute-path> --task <uuid> --reservation <sha256> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>

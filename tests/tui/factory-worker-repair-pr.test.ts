@@ -193,6 +193,7 @@ function runnerDependencies(
       recoverExecution: noResult,
       executePullRequestRepair: executeRepair,
       recoverPullRequestRepair: noResult,
+      runCanaryPullRequestRepairTick: noResult,
       runTask: noResult,
       runScheduledTick: noResult
     },

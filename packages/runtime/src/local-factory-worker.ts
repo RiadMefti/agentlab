@@ -12,6 +12,7 @@ import {
 
 import { ArtifactFactorySkillSource } from "./application/artifact-factory-skill-source.js";
 import { FactoryControlPlane } from "./application/factory-control-plane.js";
+import { FactoryCanaryPullRequestRepairService } from "./application/factory-canary-pull-request-repair-service.js";
 import {
   createFactoryEvidenceCredential,
   FactoryEvidenceIngress
@@ -23,6 +24,7 @@ import { FactoryPreparationMaterializer } from "./application/factory-preparatio
 import { FactoryPreparationService } from "./application/factory-preparation-service.js";
 import { FactoryPullRequestRepairExecutionService } from "./application/factory-pull-request-repair-execution-service.js";
 import { FactoryPullRequestRepairRecoveryService } from "./application/factory-pull-request-repair-recovery-service.js";
+import { FactoryPullRequestCanaryAuthority } from "./application/factory-pull-request-canary-authority.js";
 import { FactorySchedulerService } from "./application/factory-scheduler-service.js";
 import {
   FactoryWorkerOperator,
@@ -54,6 +56,7 @@ import { SqliteConversationRepository } from "./infrastructure/persistence/sqlit
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
+import { SqliteFactoryCanaryPullRequestRepairQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
@@ -177,6 +180,10 @@ export function createLocalFactoryWorker(
     const canaryReservations = repositories.track(
       new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
     );
+    const canaryPullRequestRepairQueue =
+      schedulePolicyDocument === null
+        ? null
+        : repositories.track(new SqliteFactoryCanaryPullRequestRepairQueue(databasePath));
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
@@ -411,6 +418,16 @@ export function createLocalFactoryWorker(
       pullRequestRepair,
       pullRequestRepairRecovery
     });
+    const pullRequestCanaryAuthority = new FactoryPullRequestCanaryAuthority({
+      policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
+      preparations,
+      reservations: canaryReservations,
+      schedules,
+      documents,
+      now
+    });
     const taskRunner = new FactoryWorkerTaskRunner({
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
@@ -446,10 +463,25 @@ export function createLocalFactoryWorker(
             now,
             createId
           });
+    const canaryPullRequestRepairs =
+      scheduledPolicies === null || canaryPullRequestRepairQueue === null
+        ? null
+        : new FactoryCanaryPullRequestRepairService({
+            schedulePolicy: scheduledPolicies.schedule,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
+            queue: canaryPullRequestRepairQueue,
+            tasks: factory,
+            canaryAuthority: pullRequestCanaryAuthority,
+            worker: operator,
+            now,
+            createId
+          });
     return new LocalFactoryWorkerCoordinator({
       operator,
       taskRunner,
       scheduler,
+      canaryPullRequestRepairs,
       tasks: new RuntimeTaskOwner(),
       resources,
       repositories,
@@ -547,6 +579,7 @@ export type {
 export type { FactoryWorkerPreflight } from "./application/factory-worker-operator.js";
 export type { FactoryWorkerTaskRunReport } from "./application/factory-worker-task-runner.js";
 export type { FactorySchedulerTickReport } from "./application/factory-scheduler-service.js";
+export type { FactoryCanaryPullRequestRepairTickReport } from "./application/factory-canary-pull-request-repair-service.js";
 export type { FactoryPullRequestRepairExecutionOutcome } from "./application/factory-pull-request-repair-execution-service.js";
 export type { FactoryGateDefinition } from "./domain/factory-gate.js";
 export {

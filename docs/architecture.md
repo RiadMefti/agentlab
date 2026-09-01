@@ -182,6 +182,17 @@ terminal state. Success returns to a local `pr-proposed` checkpoint. The composi
 GitHub, broker credential, authority-control, merge, or release port; publishing the repaired branch
 is a separately authorized broker operation.
 
+The one-shot `worker-pr-repair-tick` command automates only that credentialless execution handoff.
+Its read projection prioritizes any nonterminal repair journal over fresh work, including across
+scheduler, cost, identity, or host-readiness blockers. Fresh entries must join an exact actionable
+slot-bound canary observation and authorization to current schema-v2 PR lineage, scheduler handoff,
+reservation, broker, and schedule/role/factory policies. Config v3 and caller pins are mandatory.
+Before model work, the command requires ready worker preflight and current canary authority, and
+conservatively reserves the task's complete contract budget against the schedule tick budget. The
+existing repair journal, isolation, gates, distinct reviewer, cumulative task budget, and no-retry
+semantics remain authoritative. It stops at `pr-proposed` and cannot reach GitHub or mutate
+authority.
+
 The separate `broker-update-draft` command binds the owner-only broker config, task UUID, exact
 repair-authorization digest, policy digest, and literal `--confirm-update`. The broker revalidates
 the completed repair journal and evidence, exact repaired patch and complete cumulative usage,
@@ -292,7 +303,8 @@ and is revalidated before each broker checkpoint. Manual dispatch remains schema
 [ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
 [ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
 [ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md),
-[ADR 0017](decisions/0017-slot-bound-canary-pr-maintenance.md), and
+[ADR 0017](decisions/0017-slot-bound-canary-pr-maintenance.md),
+[ADR 0018](decisions/0018-recovery-first-canary-pr-repair-consumer.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -492,13 +504,14 @@ intake is implemented but no live intake configuration or task has been provisio
 task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
 plus deterministic repair admission and fresh credentialless repair execution are implemented.
 Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
-re-observation are implemented. A bounded daily-slot consumer now joins scheduled canary PRs to
-authenticated observations and deterministic repair admission without executing repair. Autonomous
-repair execution and repaired-branch consumption, repository/day and organization/day quotas, a
-sandboxed harness producer, owner-installed timers, telemetry-driven canary comparison, merge,
-release, rollback, and incident automation remain later stages. Deterministic assessment, bounded
-non-release cohort authority, durable admission, reservation-bound scheduled execution, draft
-dispatch, and PR maintenance exist but remain unactivated.
+re-observation are implemented. A bounded daily-slot consumer joins scheduled canary PRs to
+authenticated observations and deterministic repair admission, and a recovery-first credentialless
+consumer now turns exact authorizations into gated local repair proposals. Autonomous
+repaired-branch consumption, repository/day and organization/day quotas, a sandboxed harness
+producer, owner-installed timers, telemetry-driven canary comparison, merge, release, rollback, and
+incident automation remain later stages. Deterministic assessment, bounded non-release cohort
+authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR maintenance,
+and repair consumption exist but remain unactivated.
 
 ## Dependency map
 

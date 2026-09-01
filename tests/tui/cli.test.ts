@@ -545,6 +545,46 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("binds autonomous worker repair to exact schedule, role, and factory policies", () => {
+    const schedulePolicy = `sha256:${"5".repeat(64)}`;
+    const rolePolicy = `sha256:${"6".repeat(64)}`;
+    const factoryPolicy = `sha256:${"7".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "worker-pr-repair-tick",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--schedule-policy",
+        schedulePolicy,
+        "--role-policy",
+        rolePolicy,
+        "--policy",
+        factoryPolicy
+      ])
+    ).toEqual({
+      kind: "factory-worker-pr-repair-tick",
+      configPath: "/private/agentlab/worker.json",
+      expectedSchedulePolicyDigest: schedulePolicy,
+      expectedRoleIdentityPolicyDigest: rolePolicy,
+      expectedFactoryPolicyBundleDigest: factoryPolicy
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "worker-pr-repair-tick",
+        "--config",
+        "/private/agentlab/worker.json",
+        "--schedule-policy",
+        schedulePolicy,
+        "--role-policy",
+        "invalid",
+        "--policy",
+        factoryPolicy
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("requires an exact repair authorization, policy pin, and broker update confirmation", () => {
     const taskId = "0198f005-4ec4-7000-8000-000000000001";
     const authorization = `sha256:${"f".repeat(64)}`;
@@ -782,6 +822,7 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory broker-open-canary-draft --config");
     expect(helpText).toContain("factory broker-canary-tick --config");
     expect(helpText).toContain("factory broker-pr-maintenance-tick --config");
+    expect(helpText).toContain("factory worker-pr-repair-tick --config");
     expect(helpText).toContain("factory broker-update-draft --config");
     expect(helpText).toContain("factory broker-observe-pr --config");
     expect(helpText).toContain("factory broker-authorize-repair --config");

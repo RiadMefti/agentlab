@@ -127,6 +127,17 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-worker-pr-repair-tick") {
+    const { runFactoryWorkerPullRequestRepairTick } =
+      await import("./run-factory-worker-pr-repair-tick.js");
+    process.exitCode = await runFactoryWorkerPullRequestRepairTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-authority-status") {
     const { runFactoryAuthorityStatus } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryAuthorityStatus(action.configPath);

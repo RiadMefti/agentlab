@@ -207,6 +207,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   Every strict gate and a distinct read-only review run again. Its append-only journal makes
   interruption recoverable, cumulative task budgets remain authoritative, and it stops at a new
   local `pr-proposed` checkpoint; branch update remains a separate broker responsibility.
+- `agentlab factory worker-pr-repair-tick --config ... --schedule-policy ... --role-policy ... --policy ...`
+  recovers interrupted repair journals first, even under normal-work blockers, then consumes a
+  bounded page of exact maintenance-issued canary repair authorizations. Fresh work rechecks worker
+  readiness and current reservation authority, reserves its full contract ceiling against the tick
+  budget, runs in the credentialless worker, and stops at a gated, independently reviewed local
+  proposal.
 - `agentlab factory broker-update-draft --config ... --task ... --authorization ... --policy ... --confirm-update`
   consumes the completed repair only in the credential-bearing broker composition. It revalidates
   the exact repair journal, patch, cumulative usage, policy, prior PR authority record, repository
@@ -264,8 +270,10 @@ separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the
 [ADR 0014](docs/decisions/0014-canary-bound-scheduled-execution.md) for scheduled execution;
 [ADR 0015](docs/decisions/0015-canary-bound-draft-pr-dispatch.md) for scheduled draft authority;
 [ADR 0016](docs/decisions/0016-bounded-canary-broker-reconciliation.md) for bounded broker
-reconciliation; and [ADR 0017](docs/decisions/0017-slot-bound-canary-pr-maintenance.md) for bounded
-CI/review observation and repair admission. The dormant procedures are in
+reconciliation; [ADR 0017](docs/decisions/0017-slot-bound-canary-pr-maintenance.md) for bounded
+CI/review observation and repair admission; and
+[ADR 0018](docs/decisions/0018-recovery-first-canary-pr-repair-consumer.md) for recovery-first
+credentialless repair consumption. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

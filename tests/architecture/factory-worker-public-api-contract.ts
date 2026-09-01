@@ -2,6 +2,7 @@ import type {
   FactoryCostPolicy,
   FactoryRoleIdentityPolicy,
   FactorySchedulePolicy,
+  FactoryTaskState,
   Sha256Digest
 } from "@agentlab/contracts";
 import {
@@ -10,6 +11,7 @@ import {
   loadLocalFactoryWorkerConfig,
   loadLocalFactorySchedulePolicy,
   type FactoryAgentProviderBinding,
+  type FactoryCanaryPullRequestRepairTickReport,
   type FactoryGateDefinition,
   type FactoryWorkerCommandPort,
   type FactoryWorkerPreflight,
@@ -182,6 +184,42 @@ interface ExpectedSchedulerTickReport {
   readonly reasonCodes: readonly string[];
 }
 
+interface ExpectedCanaryPullRequestRepairTickReport {
+  readonly schemaVersion: "agentlab.canary-pull-request-repair-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly recoveryAttempts: number;
+  readonly repairAttempts: number;
+  readonly repairRunsCreated: number;
+  readonly proposalsCreated: number;
+  readonly reservedUsage: ExpectedSchedulerTickReport["reservedUsage"];
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly repositoryId: string;
+    readonly authorizationDigest: Sha256Digest;
+    readonly source: "authorized" | "recoverable";
+    readonly status:
+      | "recovered"
+      | "pr-proposed"
+      | "already-advanced"
+      | "expired"
+      | "blocked"
+      | "needs-attention"
+      | "failed"
+      | "quarantined";
+    readonly taskState: FactoryTaskState | null;
+    readonly reasonCodes: readonly string[];
+    readonly repairRunDigest: Sha256Digest | null;
+    readonly patchProposalDigest: Sha256Digest | null;
+  }[];
+}
+
 type ExpectedConfigKeys =
   | "schemaVersion"
   | "databasePath"
@@ -205,6 +243,9 @@ export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<FactoryWorkerPreflight, ExpectedPreflight>>,
   Assert<Equal<FactoryWorkerTaskRunReport, ExpectedTaskRunReport>>,
   Assert<Equal<FactorySchedulerTickReport, ExpectedSchedulerTickReport>>,
+  Assert<
+    Equal<FactoryCanaryPullRequestRepairTickReport, ExpectedCanaryPullRequestRepairTickReport>
+  >,
   Assert<Equal<keyof LocalFactoryWorkerConfig, ExpectedConfigKeys>>,
   Assert<Equal<Extract<keyof LocalFactoryWorkerConfig, "githubApp" | "repositoryId">, never>>,
   Assert<
@@ -219,6 +260,7 @@ export type FactoryWorkerPublicApiAssertions = [
       | "recoverExecution"
       | "executePullRequestRepair"
       | "recoverPullRequestRepair"
+      | "runCanaryPullRequestRepairTick"
       | "runTask"
       | "runScheduledTick"
     >

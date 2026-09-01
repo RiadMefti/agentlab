@@ -510,6 +510,15 @@ a second mutable queue and a repeated remote read after interruption. It cannot 
 update a branch, enable authority, merge, or release. See
 [ADR 0017](0017-slot-bound-canary-pr-maintenance.md).
 
+The one-shot `worker-pr-repair-tick` entry is the separate credentialless consumer. Its read model
+places any nonterminal repair journal before fresh authority so cleanup remains callable across
+scheduler, cost, identity, or host-readiness blockers. Fresh work must join an exact maintenance
+observation and repair authorization to current schema-v2 PR lineage and the completed canary
+handoff. Config v3, all policy pins, ready worker preflight, current reservation authority, R1 task
+identity, contract limits, and conservative aggregate tick reservation are mandatory before the
+existing isolated repair service runs. It stops at `pr-proposed` and has no remote-write or
+authority capability. See [ADR 0018](0018-recovery-first-canary-pr-repair-consumer.md).
+
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
 literal `--confirm-update`. Its service admits only the exact completed repair journal and evidence,
@@ -615,6 +624,12 @@ repaired tree from the contract base, makes the prior remote head the new commit
 uses a normal non-force push. Retry accepts only the exact deterministic already-applied head. The
 broker verifies the draft, records authenticated update evidence, returns the task to `pr-open`, and
 promotes the completed update record as the sole input to re-observation and the next repair cycle.
+
+The same repair service is now driven by a bounded recovery-first canary consumer. An existing run
+is reconciled through its journal rather than retried; a fresh run is admitted only from the exact
+slot-bound authorization and current canary authority. The schedule policy caps candidates and
+actions and conservatively reserves each selected contract ceiling against its aggregate tick
+budget.
 
 Repository rules remain the merge authority: required status checks, conversation resolution,
 stale-review dismissal, last-push approval, CODEOWNERS for protected paths, linear history, and a
@@ -808,16 +823,16 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
 5. **CI repair and operations:** credential rotation/monitoring, CODEOWNERS/last-push/approval
    rules, dashboards, alerts, quotas, and incident tooling. Deterministic feedback qualification,
    bounded fresh repair execution, brokered repaired-branch update, exact-head re-observation, and a
-   slot-bound canary observation/repair-admission consumer now exist. One policy-pinned daily
-   scheduler tick, durable claim recovery, and tick reservation ceiling now exist; autonomous
-   repair/update consumers, cross-repository/day quotas, timer provisioning, alerting, and incident
-   automation do not.
+   slot-bound canary observation/repair-admission consumer and recovery-first credentialless repair
+   consumer now exist. One policy-pinned daily scheduler tick, durable claim recovery, and tick
+   reservation ceiling now exist; an autonomous broker-update consumer, cross-repository/day quotas,
+   timer provisioning, alerting, and incident automation do not.
 6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
    attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
    execution, attested grader artifacts, autonomous task discovery, shadow telemetry, production
    sampling, provider/model/skill promotion, and rollback drills remain. Exact cohort reservation
-   now gates scheduled R1 execution, initial draft dispatch, and slot-bound PR maintenance; bounded
-   broker dispatch and PR-maintenance consumers exist but remain dormant.
+   now gates scheduled R1 execution, initial draft dispatch, slot-bound PR maintenance, and
+   credentialless repair consumption; the bounded consumers remain dormant.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
    explicit ADR/policy approval; higher-risk human controls remain.
 
