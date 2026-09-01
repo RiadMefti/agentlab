@@ -232,6 +232,11 @@ and binds the reservation digest into authenticated PR evidence. The reservation
 per-task draft confirmation; broker enablement, cost policy, repository governance, human merge, and
 the structural `autoMerge:false` and `release:false` limits still apply.
 
+`broker-canary-tick` can derive and reconcile a bounded page of these exact completed handoffs. It
+uses the existing durable dispatch journal for recovery, prioritizes incomplete dispatches within
+the current-authority class, and does not create another mutable queue. Exact policy pins, broker
+preflight, expiry, and all inner draft checks remain authoritative.
+
 ## Failure, recovery, and incident handling
 
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
@@ -255,7 +260,7 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
 grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
-identity or hardware-backed key custody where required; autonomous broker discovery/queue/timer;
+identity or hardware-backed key custody where required; an owner-installed broker timer;
 telemetry/control comparison; revocation enforcement; alerting; rollback drills; and incident
 automation. Manual PR creation remains separately human-confirmed; evaluated canary PR creation is
 reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key

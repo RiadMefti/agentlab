@@ -176,6 +176,16 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-canary-tick") {
+    const { runFactoryBrokerCanaryTick } = await import("./run-factory-broker-canary-tick.js");
+    process.exitCode = await runFactoryBrokerCanaryTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-broker-observe-pr") {
     const { runFactoryBrokerObservePullRequest } =
       await import("./run-factory-broker-observe-pr.js");

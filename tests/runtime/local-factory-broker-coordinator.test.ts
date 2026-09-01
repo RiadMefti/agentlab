@@ -121,7 +121,8 @@ function createOperator(
     },
     pullRequestUpdates: {
       update: () => Promise.resolve({ status: "denied", reasonCodes: ["test"], decision: null })
-    }
+    },
+    canaryBroker: null
   });
 }
 

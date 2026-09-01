@@ -2,8 +2,9 @@
 
 This runbook covers the dormant one-shot scheduler and canary-broker boundaries. AgentLab does not
 install a scheduler or broker timer, provision live policy, enable either authority switch, discover
-broker work, merge, or release. Use a dedicated non-shared worker OS account and retain the SQLite
-ledger; file ownership plus the reviewed role-identity policy is the local authorization boundary.
+maintenance work, merge, or release. It can derive pending broker work during an explicit one-shot
+command. Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership
+plus the reviewed role-identity policy is the local authorization boundary.
 
 ## Reviewed inputs
 
@@ -141,6 +142,20 @@ stays blocked rather than running model work.
    handoff before every durable dispatch phase. Exact retries are idempotent; changed coordinates
    fail closed.
 
+   For normal bounded consumption, invoke the one-shot reconciler with the reviewed policy pins:
+
+   ```text
+   agentlab factory broker-canary-tick --config /absolute/broker.json --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+   ```
+
+   It derives work from completed immutable scheduler handoffs and incomplete dispatch journals;
+   there is no second queue to repair. It handles current authority before expired work and recovers
+   existing dispatches before starting new ones within either class. It obeys
+   `maximumCandidatesPerTick` and `maximumTasksPerTick`, and exits 2 on blocked or
+   attention-required results. Alert on expiry or denial. An owner-managed broker timer may invoke
+   only this fixed-argument command, and only while the separately controlled broker switch is
+   intentionally enabled.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -148,10 +163,11 @@ separate broker preflight and switch. Manual draft creation still requires liter
 scheduled canary draft creation requires the exact reservation and scheduler handoff instead. Do not
 put broker enablement, merge, release, or deployment into the scheduler timer.
 
-To stop new or resumed scheduled work:
+To stop new or resumed scheduled and broker work:
 
 ```text
 agentlab factory scheduler-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-scheduler
+agentlab factory broker-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-draft-broker
 ```
 
 Disabling does not erase evidence or fabricate completion. Preserve the database, artifact root,
@@ -162,7 +178,7 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, attested eval-harness producer, broker discovery/queue/timer, merge,
+maintenance discovery, attested eval-harness producer, an owner-installed broker timer, merge,
 telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
 assessment, human non-release cohorts, task reservation, reservation-bound scheduled execution, and
 reservation-bound draft dispatch exist but are not provisioned or activated. See

@@ -4,12 +4,14 @@ import type { FactoryPullRequestOutcome } from "./factory-pull-request-service.j
 import type { FactoryPullRequestObservationOutcome } from "./factory-pull-request-observation-service.js";
 import type { FactoryPullRequestRepairAdmissionOutcome } from "./factory-pull-request-repair-admission-service.js";
 import type { FactoryPullRequestUpdateOutcome } from "./factory-pull-request-update-service.js";
+import type { FactoryCanaryBrokerTickReport } from "./factory-canary-broker-service.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
 import type { RuntimeTaskOwner } from "./runtime-task-owner.js";
 
 export interface FactoryBrokerCommandPort {
   preflight(): Promise<FactoryBrokerPreflight>;
   openDraft(input: unknown): Promise<FactoryPullRequestOutcome>;
+  reconcileCanaryDrafts(input: unknown): Promise<FactoryCanaryBrokerTickReport>;
   observePullRequest(input: unknown): Promise<FactoryPullRequestObservationOutcome>;
   admitPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairAdmissionOutcome>;
   updatePullRequest(input: unknown): Promise<FactoryPullRequestUpdateOutcome>;
@@ -49,6 +51,8 @@ export class LocalFactoryBrokerCoordinator implements LocalFactoryBrokerRuntime 
     this.commands = {
       preflight: () => this.#tasks.run(() => dependencies.operator.preflight()),
       openDraft: (input) => this.#tasks.run(() => dependencies.operator.openDraft(input)),
+      reconcileCanaryDrafts: (input) =>
+        this.#tasks.run(() => dependencies.operator.reconcileCanaryDrafts(input)),
       observePullRequest: (input) =>
         this.#tasks.run(() => dependencies.operator.observePullRequest(input)),
       admitPullRequestRepair: (input) =>

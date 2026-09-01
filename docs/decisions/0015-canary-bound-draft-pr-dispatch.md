@@ -44,8 +44,9 @@ while remaining tied to evaluated, human-issued, expiring authority. Manual beha
 compatible. If authority expires during a remote call, the observed result is journaled but later
 progress remains blocked and recoverable.
 
-AgentLab still installs no broker queue, discovery loop, timer, live config, account, key, policy,
-or authority. Activation and any merge or release autonomy remain separate decisions.
+[ADR 0016](0016-bounded-canary-broker-reconciliation.md) adds bounded one-shot discovery without a
+second mutable queue. AgentLab still installs no timer, live config, account, key, policy, or
+authority. Activation and any merge or release autonomy remain separate decisions.
 
 ## Fitness functions
 

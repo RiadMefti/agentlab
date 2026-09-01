@@ -4,6 +4,7 @@ import {
   loadLocalFactoryBrokerConfig,
   type FactoryBrokerCommandPort,
   type FactoryBrokerPreflight,
+  type FactoryCanaryBrokerTickReport,
   type GitHubAppPrivateKeySource,
   type LocalFactoryBrokerConfig,
   type LocalFactoryBrokerOptions,
@@ -120,15 +121,40 @@ interface ExpectedPreflight {
   readonly reasonCodes: readonly string[];
 }
 
+interface ExpectedCanaryBrokerTickReport {
+  readonly schemaVersion: "agentlab.canary-broker-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly repositoryId: string;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly dispatchAttempts: number;
+  readonly draftsCompleted: number;
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly reservationDigest: Sha256Digest;
+    readonly source: "undispatched" | "recoverable";
+    readonly status: "completed" | "expired" | "blocked" | "denied" | "needs-human";
+    readonly reasonCodes: readonly string[];
+    readonly pullRequestNumber: number | null;
+  }[];
+}
+
 export type FactoryBrokerPublicApiAssertions = [
   Assert<Equal<LocalFactoryBrokerConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryBrokerOptions, ExpectedOptions>>,
   Assert<Equal<FactoryBrokerPreflight, ExpectedPreflight>>,
+  Assert<Equal<FactoryCanaryBrokerTickReport, ExpectedCanaryBrokerTickReport>>,
   Assert<
     Equal<
       keyof FactoryBrokerCommandPort,
       | "preflight"
       | "openDraft"
+      | "reconcileCanaryDrafts"
       | "updatePullRequest"
       | "observePullRequest"
       | "admitPullRequestRepair"

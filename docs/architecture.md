@@ -124,6 +124,15 @@ resumable checkpoint. Scheduled tasks cannot use the manual command, and non-sch
 present canary authority. This command does not enable the broker, discover work, install a timer,
 merge, or release.
 
+The separate one-shot `broker-canary-tick` command projects pending work by joining immutable
+completed scheduler handoffs to absent or incomplete dispatch journals. It does not create a second
+mutable queue. Config v3 and exact schedule, role, and factory-policy pins are mandatory. One tick
+inspects at most `maximumCandidatesPerTick`, attempts at most `maximumTasksPerTick`, prioritizes
+current authority and then crash recovery within that class, and routes every candidate through the
+same reservation-revalidating draft service. Expiry and deterministic denial produce attention
+output; a denial stops the remaining page. The command cannot enable authority, install a timer,
+merge, or release.
+
 The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
 clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
 local append-only evidence ingress. It resolves the completed durable dispatch itself and binds the
@@ -270,7 +279,8 @@ and is revalidated before each broker checkpoint. Manual dispatch remains schema
 [ADR 0012](decisions/0012-attested-canary-authority.md),
 [ADR 0013](decisions/0013-durable-canary-task-admission.md),
 [ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
-[ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md), and
+[ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
+[ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -379,6 +389,10 @@ Manual dispatch uses `agentlab.pull-request-dispatch.v1`. Scheduled dispatch use
 exact canary reservation, schedule policy, and role policy. SQLite version 17 rejects a scheduled v1
 run or a v2 run without the matching R1 `brokered-draft-pr` reservation and completed scheduler
 handoff. The broker reloads that authority before every phase, and PR evidence records its digest.
+The canary broker read model derives desired work from that immutable handoff and observed progress
+from the dispatch journal. Current reservations sort before expired ones; within each class,
+recoverable dispatches sort before new work. Completed dispatches disappear from the projection,
+while the existing five checkpoints remain the sole write-side recovery record.
 
 Post-PR repair uses a different SQLite version 9 journal rather than reopening the terminal initial
 execution journal. Its immutable header binds the authorization, observation, prior patch, task
@@ -467,10 +481,10 @@ task or PR has been created by this code. Bounded PR-head observation and durabl
 plus deterministic repair admission and fresh credentialless repair execution are implemented.
 Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
 re-observation are implemented. Repository/day and organization/day quotas, a sandboxed harness
-producer, autonomous broker discovery/queue/timer, telemetry-driven canary comparison, merge,
-release, rollback, and incident automation remain later stages. Deterministic assessment, bounded
-non-release cohort authority, durable admission, reservation-bound scheduled execution, and
-reservation-bound draft dispatch exist but remain unactivated.
+producer, an owner-installed broker timer, telemetry-driven canary comparison, merge, release,
+rollback, and incident automation remain later stages. Deterministic assessment, bounded non-release
+cohort authority, durable admission, reservation-bound scheduled execution, and reservation-bound
+draft dispatch exist but remain unactivated.
 
 ## Dependency map
 

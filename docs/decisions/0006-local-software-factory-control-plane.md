@@ -493,6 +493,14 @@ completed v2 scheduler handoff before dispatch and every resumable checkpoint. S
 cannot use the manual entry, non-scheduled tasks cannot present canary coordinates, and neither path
 can enable the broker, merge, or release. See [ADR 0015](0015-canary-bound-draft-pr-dispatch.md).
 
+The one-shot `broker-canary-tick` entry derives a bounded pending page by joining completed
+immutable scheduler handoffs to absent or incomplete dispatch journals. It requires config v3 and
+exact schedule, role, and factory-policy pins; prioritizes current authority and then recovery
+within that class; and passes each task through the same authority-revalidating draft service. The
+schedule policy bounds candidate inspection and dispatch attempts. It creates no second queue,
+installs no timer, changes no authority, and grants no merge or release capability. See
+[ADR 0016](0016-bounded-canary-broker-reconciliation.md).
+
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
 literal `--confirm-update`. Its service admits only the exact completed repair journal and evidence,

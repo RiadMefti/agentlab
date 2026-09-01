@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
+import { SqliteFactoryCanaryBrokerQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-broker-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
@@ -147,7 +148,26 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
 
   it("allows scheduled dispatch only from its exact completed brokered canary handoff", async () => {
     const fixture = await scheduledRepositoryFixture();
+    const queue = new SqliteFactoryCanaryBrokerQueue(fixture.databasePath);
     try {
+      await expect(
+        queue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:09:00.000Z",
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            taskId: TEST_FACTORY_TASK_ID,
+            reservationDigest: fixture.reservationDigest,
+            source: "undispatched",
+            scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
+            finishedAt: "2026-08-31T12:07:00.000Z"
+          }
+        ]
+      });
       expect(() =>
         fixture.dispatches.register(fixture.legacyRun, fixture.legacyRegistered)
       ).toThrow(/canary authority mismatch/u);
@@ -163,6 +183,72 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
           canaryReservationDigest: fixture.reservationDigest
         }
       });
+      await expect(
+        queue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:09:00.000Z",
+          limit: 10
+        })
+      ).resolves.toMatchObject({ items: [{ source: "recoverable" }] });
+      const started = event(fixture.run, fixture.registered, {
+        kind: "dispatch-started",
+        from: "ready",
+        to: "dispatch-active"
+      });
+      await fixture.dispatches.append(started);
+      const observed = event(fixture.run, started, {
+        kind: "remote-observed",
+        from: "dispatch-active",
+        to: "remote-open",
+        record: pullRequestRecord(fixture),
+        created: true
+      });
+      await fixture.dispatches.append(observed);
+      const evidenced = event(fixture.run, observed, {
+        kind: "evidence-recorded",
+        from: "remote-open",
+        to: "evidence-recorded",
+        evidenceBundleDigest: fixture.evidence.digest
+      });
+      await fixture.dispatches.append(evidenced);
+      const taskEvent = codec.taskEvent({
+        schemaVersion: "agentlab.task-event.v1",
+        eventId: "61616161-6161-4161-8161-616161616161",
+        taskId: fixture.contract.value.taskId,
+        sequence: fixture.taskLastEvent.value.sequence + 1,
+        contractDigest: fixture.contract.digest,
+        previousEventDigest: fixture.taskLastEvent.digest,
+        from: "pr-proposed",
+        to: "pr-open",
+        actor: brokerActor,
+        occurredAt: "2026-08-31T12:14:00.000Z",
+        reasonCode: "draft-pr-opened",
+        summary: null,
+        evidenceBundleDigest: fixture.evidence.digest,
+        correlationId: TEST_FACTORY_CORRELATION_ID
+      });
+      await fixture.tasks.append(taskEvent);
+      const completedDispatch = event(fixture.run, evidenced, {
+        kind: "task-recorded",
+        from: "evidence-recorded",
+        to: "completed",
+        taskEventDigest: taskEvent.digest
+      });
+      await fixture.dispatches.append(completedDispatch);
+      await expect(
+        queue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:15:00.000Z",
+          limit: 10
+        })
+      ).resolves.toEqual({ items: [], truncated: false });
+      expect(() =>
+        queue.listPending({
+          repositoryId: "agentlab",
+          observedAt: "2026-08-31T12:15:00.000Z",
+          limit: 0
+        })
+      ).toThrow(/too_small|greater than or equal to 1/iu);
       const database = new DatabaseSync(fixture.databasePath);
       try {
         expect(
@@ -177,6 +263,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         database.close();
       }
     } finally {
+      queue.close();
       fixture.dispatches.close();
       fixture.schedules.close();
       fixture.tasks.close();
@@ -481,6 +568,10 @@ async function scheduledRepositoryFixture() {
     tasks,
     schedules,
     dispatches: new SqliteFactoryPullRequestDispatchRepository(databasePath),
+    contract,
+    initial,
+    evidence,
+    taskLastEvent: previous,
     reservationDigest: reservation.digest,
     legacyRun,
     legacyRegistered: codec.pullRequestDispatchEvent({
@@ -633,14 +724,19 @@ function eventBase(
     previousEventDigest: previous?.digest ?? null,
     actor: brokerActor,
     occurredAt:
-      previous === null ? run.value.createdAt : `2026-08-30T13:0${String(sequence - 1)}:00.000Z`,
+      previous === null ? run.value.createdAt : minutesAfter(run.value.createdAt, sequence - 1),
     reasonCode: "test-dispatch-event",
     summary: null,
     correlationId: TEST_FACTORY_CORRELATION_ID
   };
 }
 
-function pullRequestRecord(fixture: Awaited<ReturnType<typeof repositoryFixture>>) {
+function pullRequestRecord(
+  fixture: Pick<
+    Awaited<ReturnType<typeof repositoryFixture>>,
+    "run" | "contract" | "initial" | "evidence" | "tasks" | "dispatches" | "databasePath"
+  >
+) {
   const proposal = fixture.run.value.proposal;
   return {
     schemaVersion: "agentlab.pull-request-record.v1" as const,
@@ -655,8 +751,12 @@ function pullRequestRecord(fixture: Awaited<ReturnType<typeof repositoryFixture>
     branchName: proposal.branchName,
     draft: true as const,
     brokerId: brokerActor.id,
-    createdAt: "2026-08-30T13:01:00.000Z"
+    createdAt: minutesAfter(fixture.run.value.createdAt, 1)
   };
+}
+
+function minutesAfter(timestamp: string, minutes: number): string {
+  return new Date(Date.parse(timestamp) + minutes * 60_000).toISOString();
 }
 
 async function advanceTaskToPullRequestOpen(

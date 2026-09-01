@@ -175,6 +175,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   coordinates in a v2 dispatch before remote mutation, and the broker independently rechecks the
   authority before every resumable phase. It does not discover work, enable the broker, merge, or
   release.
+- `agentlab factory broker-canary-tick --config ... --schedule-policy ... --role-policy ... --policy ...`
+  discovers one bounded page of exact completed scheduler handoffs and reconciles them through the
+  same durable dispatch service. It prioritizes current authority, then incomplete dispatch recovery
+  within that class; obeys the schedule policy's candidate and task ceilings; and reports expiry or
+  denial for operator attention. It installs no timer, changes no authority, and has no merge or
+  release path.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -249,9 +255,11 @@ activation blockers, and later phases, and
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;
 [ADR 0012](docs/decisions/0012-attested-canary-authority.md) for attestation-gated cohorts;
-[ADR 0014](docs/decisions/0014-canary-bound-scheduled-execution.md) for scheduled execution; and
-[ADR 0015](docs/decisions/0015-canary-bound-draft-pr-dispatch.md) for scheduled draft authority. The
-dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
+[ADR 0014](docs/decisions/0014-canary-bound-scheduled-execution.md) for scheduled execution;
+[ADR 0015](docs/decisions/0015-canary-bound-draft-pr-dispatch.md) for scheduled draft authority; and
+[ADR 0016](docs/decisions/0016-bounded-canary-broker-reconciliation.md) for bounded broker
+reconciliation. The dormant procedures are in
+[Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development

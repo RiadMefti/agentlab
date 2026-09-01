@@ -94,6 +94,30 @@ describe("FactoryBrokerOperator", () => {
     expect(fixture.openDraft).toHaveBeenCalledWith(draftCommand);
   });
 
+  it("delegates autonomous draft reconciliation only through the canary broker service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      expectedSchedulePolicyDigest: `sha256:${"1".repeat(64)}`,
+      expectedRoleIdentityPolicyDigest: `sha256:${"2".repeat(64)}`,
+      expectedFactoryPolicyBundleDigest: policyBundleDigest
+    };
+
+    await expect(fixture.operator.reconcileCanaryDrafts(command)).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-broker-tick-result.v1",
+      status: "idle"
+    });
+    expect(fixture.canaryTick).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+  });
+
+  it("rejects autonomous draft reconciliation when config v3 did not compose it", () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const operator = new FactoryBrokerOperator({ ...fixture.dependencies, canaryBroker: null });
+
+    expect(() => operator.reconcileCanaryDrafts({})).toThrow(/config v3/u);
+    expect(fixture.canaryTick).not.toHaveBeenCalled();
+  });
+
   it("delegates PR observation only through the facts-only observation service", async () => {
     const fixture = operatorFixture(strongGovernance, true);
     const command = { taskId: "0198f005-4ec4-7000-8000-000000000001" };
@@ -185,6 +209,21 @@ function operatorFixture(
     reasonCodes: ["test-update-denial"],
     decision: null
   });
+  const canaryTick = vi.fn().mockResolvedValue({
+    schemaVersion: "agentlab.canary-broker-tick-result.v1" as const,
+    status: "idle" as const,
+    repositoryId: "riadmefti/agentlab",
+    schedulePolicyDigest: `sha256:${"1".repeat(64)}` as const,
+    factoryPolicyBundleDigest: policyBundleDigest,
+    roleIdentityPolicyDigest: `sha256:${"2".repeat(64)}` as const,
+    observedAt: "2026-08-31T12:00:00.000Z",
+    candidatesInspected: 0,
+    dispatchAttempts: 0,
+    draftsCompleted: 0,
+    hasMore: false,
+    reasonCodes: [],
+    tasks: []
+  });
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
@@ -194,15 +233,18 @@ function operatorFixture(
     pullRequests: { openDraft },
     pullRequestObservations: { observe },
     pullRequestRepairAdmissions: { admit: admitRepair },
-    pullRequestUpdates: { update: updatePullRequest }
+    pullRequestUpdates: { update: updatePullRequest },
+    canaryBroker: { tick: canaryTick }
   };
   return {
     operator: new FactoryBrokerOperator(dependencies),
+    dependencies,
     inspect,
     state,
     openDraft,
     observe,
     admitRepair,
-    updatePullRequest
+    updatePullRequest,
+    canaryTick
   };
 }
