@@ -135,6 +135,10 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-external-pull-request-repair-qualification",
           "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-replacement-draft",
+          "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts"
         )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
@@ -153,7 +157,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-external-pull-request-feedback.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-repair-admission.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-repair-execution.ts"),
-      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts")
+      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -1023,6 +1028,10 @@ function architectureFixture(): string {
       "./factory-external-pull-request-repair-qualification": {
         default: "./dist/local-factory-external-pull-request-repair-qualification.js",
         types: "./dist/local-factory-external-pull-request-repair-qualification.d.ts"
+      },
+      "./factory-external-pull-request-replacement-draft": {
+        default: "./dist/local-factory-external-pull-request-replacement-draft.js",
+        types: "./dist/local-factory-external-pull-request-replacement-draft.d.ts"
       }
     }
   });
@@ -1063,6 +1072,11 @@ function architectureFixture(): string {
   write(
     root,
     "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
     "export {};\n"
   );
   return root;

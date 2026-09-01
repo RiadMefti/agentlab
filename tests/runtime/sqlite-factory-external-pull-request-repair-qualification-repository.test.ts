@@ -8,6 +8,8 @@ import type {
   FactoryExternalPullRequestRepairExecutionRun,
   FactoryExternalPullRequestRepairQualificationEvent,
   FactoryExternalPullRequestRepairQualificationRun,
+  FactoryExternalPullRequestReplacementDraftEvent,
+  FactoryExternalPullRequestReplacementDraftRun,
   FactoryGateObservation,
   FactoryResourceIsolationRecord,
   Sha256Digest
@@ -18,6 +20,7 @@ import type { CanonicalFactoryDocument } from "../../packages/runtime/src/domain
 import { SqliteFactoryExternalPullRequestRepairAdmissionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-admission-repository.js";
 import { SqliteFactoryExternalPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-execution-repository.js";
 import { SqliteFactoryExternalPullRequestRepairQualificationRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-qualification-repository.js";
+import { SqliteFactoryExternalPullRequestReplacementDraftRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-replacement-draft-repository.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { testDigest } from "../helpers/factory.js";
 import { registeredExternalPullRequestRepairExecutionEvent } from "../helpers/factory-external-pull-request-repair-execution.js";
@@ -62,6 +65,24 @@ type QualificationPayload<
       | "schemaVersion"
       | "eventId"
       | "qualificationRunId"
+      | "runDigest"
+      | "sequence"
+      | "previousEventDigest"
+      | "actor"
+      | "occurredAt"
+      | "correlationId"
+    >
+  : never;
+
+type PublicationPayload<
+  Event extends FactoryExternalPullRequestReplacementDraftEvent =
+    FactoryExternalPullRequestReplacementDraftEvent
+> = Event extends FactoryExternalPullRequestReplacementDraftEvent
+  ? Omit<
+      Event,
+      | "schemaVersion"
+      | "eventId"
+      | "publicationRunId"
       | "runDigest"
       | "sequence"
       | "previousEventDigest"
@@ -332,6 +353,153 @@ describe("SqliteFactoryExternalPullRequestRepairQualificationRepository", () => 
       repository.close();
     }
 
+    const publications = new SqliteFactoryExternalPullRequestReplacementDraftRepository(
+      databasePath,
+      { documents: fixture.documents }
+    );
+    try {
+      const candidates = await publications.listQualified({
+        repositoryId: fixture.policy.repositoryId,
+        qualificationPolicyDigest: fixture.policyDocument.digest,
+        publicationPolicyDigest: testDigest("1"),
+        limit: 5
+      });
+      expect(candidates).toHaveLength(1);
+      const candidate = candidates[0];
+      if (candidate === undefined) throw new Error("Missing qualified publication candidate.");
+      const policy = fixture.documents.externalPullRequestReplacementDraftPolicy({
+        schemaVersion: "agentlab.external-pull-request-replacement-draft-policy.v1",
+        id: "agentlab/external-pull-request-replacement-draft",
+        version: "1.0.0",
+        repositoryId: fixture.policy.repositoryId,
+        brokerId: "github-app/external-repair",
+        publisherId: "github-user/77",
+        brokerUserId: 1003,
+        qualificationPolicyDigest: fixture.policyDocument.digest,
+        roleIdentityPolicyDigest: fixture.policy.roleIdentityPolicyDigest,
+        branchPrefix: "agentlab/external-repair",
+        requiredStatusChecks: ["verify", "factory-sandbox"],
+        maximumPatchBytes: fixture.policy.maximumPatchBytes,
+        maximumCandidatesPerTick: 3,
+        operationDeadlineSeconds: 900,
+        maximumRiskTier: "R1",
+        draft: true,
+        contributorBranchWrite: false,
+        forcePush: false,
+        approval: false,
+        autoMerge: false,
+        release: false
+      });
+      const publicationRun = fixture.documents.externalPullRequestReplacementDraftRun({
+        schemaVersion: "agentlab.external-pull-request-replacement-draft-run.v1",
+        publicationRunId: "97000000-0000-4000-8000-000000000001",
+        repositoryId: candidate.qualificationBundle.value.repositoryId,
+        originalPullRequestNumber: candidate.qualificationBundle.value.pullRequestNumber,
+        qualificationRunId: candidate.qualificationRun.value.qualificationRunId,
+        qualificationRunDigest: candidate.qualificationRun.digest,
+        qualificationBundleDigest: candidate.qualificationBundle.digest,
+        repairBundleDigest: candidate.repairBundle.digest,
+        publicationPolicyDigest: policy.digest,
+        publicationPolicy: policy.value,
+        qualificationPolicyDigest: candidate.qualificationBundle.value.qualificationPolicyDigest,
+        expectedBaseRevision: candidate.qualificationRun.value.expectedBaseRevision,
+        expectedHeadRevision: candidate.qualificationRun.value.expectedHeadRevision,
+        repairedPatchDigest: candidate.qualificationBundle.value.repairedPatchArtifact.digest,
+        changeSet: candidate.qualificationBundle.value.changeSet,
+        createdAt: "2026-09-01T13:00:00.000Z",
+        deadlineAt: "2026-09-01T13:15:00.000Z",
+        correlationId: "97000000-0000-4000-8000-000000000002"
+      });
+      const registered = publicationEvent(fixture, publicationRun, 1, null, {
+        kind: "registered",
+        from: null,
+        to: "ready",
+        reasonCode: "qualified-repair-selected"
+      });
+      await expect(
+        publications.register(policy, publicationRun, registered, candidate)
+      ).resolves.toMatchObject({ state: "ready" });
+      const proposalDigest = testDigest("2");
+      const intent = publicationEvent(fixture, publicationRun, 2, registered.digest, {
+        kind: "branch-publish-intent-recorded",
+        from: "ready",
+        to: "branch-publish-intent-recorded",
+        proposalDigest,
+        proposalArtifact: artifact(proposalDigest, "application/json", 512),
+        reasonCode: "durable-branch-publish-intent"
+      });
+      await publications.append(intent);
+      const headRevision = "e".repeat(40);
+      const published = publicationEvent(fixture, publicationRun, 3, intent.digest, {
+        kind: "branch-published",
+        from: "branch-publish-intent-recorded",
+        to: "branch-published",
+        proposalDigest,
+        headRevision,
+        reasonCode: "replacement-branch-created"
+      });
+      await publications.append(published);
+      const pullRequestIntent = publicationEvent(fixture, publicationRun, 4, published.digest, {
+        kind: "pull-request-open-intent-recorded",
+        from: "branch-published",
+        to: "pull-request-open-intent-recorded",
+        proposalDigest,
+        headRevision,
+        reasonCode: "durable-draft-open-intent"
+      });
+      await publications.append(pullRequestIntent);
+      const record = fixture.documents.externalPullRequestReplacementDraftRecord({
+        schemaVersion: "agentlab.external-pull-request-replacement-draft-record.v1",
+        publicationRunId: publicationRun.value.publicationRunId,
+        runDigest: publicationRun.digest,
+        proposalDigest,
+        qualificationBundleDigest: candidate.qualificationBundle.digest,
+        repositoryId: publicationRun.value.repositoryId,
+        originalPullRequestNumber: publicationRun.value.originalPullRequestNumber,
+        originalPullRequestUrl: "https://github.com/riadmefti/agentlab/pull/42",
+        replacementPullRequestNumber: 99,
+        replacementPullRequestUrl: "https://github.com/riadmefti/agentlab/pull/99",
+        baseBranch: "main",
+        baseRevision: publicationRun.value.expectedBaseRevision,
+        branchName: `agentlab/external-repair/pr-42-${candidate.qualificationBundle.digest.slice(7, 23)}`,
+        headRevision,
+        brokerId: policy.value.brokerId,
+        publisherId: policy.value.publisherId,
+        draft: true,
+        createdAt: "2026-09-01T13:00:01.000Z"
+      });
+      const opened = publicationEvent(fixture, publicationRun, 5, pullRequestIntent.digest, {
+        kind: "pull-request-opened",
+        from: "pull-request-open-intent-recorded",
+        to: "pull-request-opened",
+        recordDigest: record.digest,
+        recordArtifact: artifact(record.digest, "application/json", 512),
+        reasonCode: "replacement-draft-created"
+      });
+      await expect(publications.record(opened, record)).resolves.toMatchObject({
+        state: "pull-request-opened",
+        record: { replacementPullRequestNumber: 99 }
+      });
+      const completed = publicationEvent(fixture, publicationRun, 6, opened.digest, {
+        kind: "completed",
+        from: "pull-request-opened",
+        to: "completed",
+        recordDigest: record.digest,
+        reasonCode: "replacement-draft-verified"
+      });
+      await expect(publications.append(completed)).resolves.toMatchObject({ state: "completed" });
+      await expect(
+        publications.listQualified({
+          repositoryId: fixture.policy.repositoryId,
+          qualificationPolicyDigest: fixture.policyDocument.digest,
+          publicationPolicyDigest: policy.digest,
+          limit: 5
+        })
+      ).resolves.toEqual([]);
+    } finally {
+      publications.close();
+    }
+
     const database = new DatabaseSync(databasePath);
     try {
       expect(
@@ -349,6 +517,12 @@ describe("SqliteFactoryExternalPullRequestRepairQualificationRepository", () => 
       ).toThrow(/immutable/u);
       expect(() =>
         database.prepare("DELETE FROM factory_external_pr_repair_qualification_bundles").run()
+      ).toThrow(/immutable/u);
+      expect(() =>
+        database.prepare("DELETE FROM factory_external_pr_replacement_draft_events").run()
+      ).toThrow(/immutable/u);
+      expect(() =>
+        database.prepare("DELETE FROM factory_external_pr_replacement_draft_records").run()
       ).toThrow(/immutable/u);
     } finally {
       database.close();
@@ -493,6 +667,32 @@ function qualificationEvent(
     },
     ...payload,
     occurredAt: "2026-09-01T12:31:00.000Z",
+    correlationId: run.value.correlationId
+  });
+}
+
+function publicationEvent(
+  fixture: ExternalPullRequestRepairQualificationFixture,
+  run: CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftRun>,
+  sequence: number,
+  previousEventDigest: Sha256Digest | null,
+  payload: PublicationPayload
+) {
+  return fixture.documents.externalPullRequestReplacementDraftEvent({
+    schemaVersion: "agentlab.external-pull-request-replacement-draft-event.v1",
+    eventId: `97000000-0000-4000-8000-${String(sequence + 10).padStart(12, "0")}`,
+    publicationRunId: run.value.publicationRunId,
+    runDigest: run.digest,
+    sequence,
+    previousEventDigest,
+    actor: {
+      kind: "broker",
+      role: "pr-broker",
+      id: run.value.publicationPolicy.brokerId,
+      sessionId: run.value.publicationRunId
+    },
+    ...payload,
+    occurredAt: "2026-09-01T13:00:00.000Z",
     correlationId: run.value.correlationId
   });
 }

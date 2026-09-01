@@ -155,6 +155,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
         default: "./dist/local-factory-external-pull-request-repair-qualification.js",
         types: "./dist/local-factory-external-pull-request-repair-qualification.d.ts"
+      },
+      "./factory-external-pull-request-replacement-draft": {
+        source: "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
+        default: "./dist/local-factory-external-pull-request-replacement-draft.js",
+        types: "./dist/local-factory-external-pull-request-replacement-draft.d.ts"
       }
     }
   }
@@ -572,6 +577,11 @@ function compositionBoundaryViolations(
       forbidden: externalPullRequestRepairQualificationCommandForbidden
     },
     {
+      entry: "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
+      description: "separately credentialed external pull-request replacement-draft broker",
+      forbidden: externalPullRequestReplacementDraftCommandForbidden
+    },
+    {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
       description: "broker preflight command",
       forbidden: brokerCommandForbidden
@@ -670,6 +680,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-external-pull-request-repair-qualification.ts",
       description: "credentialless external pull-request repair qualification command",
       forbidden: externalPullRequestRepairQualificationCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-replacement-draft.ts",
+      description: "external pull-request replacement-draft broker command",
+      forbidden: externalPullRequestReplacementDraftCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -2005,6 +2020,73 @@ function externalPullRequestRepairQualificationCommandForbidden(path: string): b
   return false;
 }
 
+const factoryExternalPullRequestReplacementDraftDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-broker.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-repository.ts",
+  "packages/runtime/src/domain/factory-pull-request-broker.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/runtime-resource.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+const factoryExternalPullRequestReplacementDraftApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-replacement-draft-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-replacement-draft-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+const factoryExternalPullRequestReplacementDraftInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-replacement-draft-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/git-broker-workspace.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-external-pull-request-replacement-draft-broker.ts",
+  "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/github/github-trusted-status-checks.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-replacement-draft-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts"
+]);
+
+function externalPullRequestReplacementDraftCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  )
+    return true;
+  if (path.startsWith("packages/runtime/src/domain/"))
+    return !factoryExternalPullRequestReplacementDraftDomainModules.has(path);
+  if (path.startsWith("packages/runtime/src/application/"))
+    return !factoryExternalPullRequestReplacementDraftApplicationModules.has(path);
+  if (path.startsWith("packages/runtime/src/infrastructure/"))
+    return !factoryExternalPullRequestReplacementDraftInfrastructureModules.has(path);
+  return false;
+}
+
 export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/contracts/src/")) return "contracts";
   if (path.startsWith("packages/launcher/src/")) return "launcher";
@@ -2029,7 +2111,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts" ||
-    path === "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts"
   ) {
     return "runtime-composition";
   }

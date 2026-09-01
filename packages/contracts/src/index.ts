@@ -9,6 +9,7 @@ export * from "./factory-external-pull-request-feedback.js";
 export * from "./factory-external-pull-request-repair-admission.js";
 export * from "./factory-external-pull-request-repair-execution.js";
 export * from "./factory-external-pull-request-repair-qualification.js";
+export * from "./factory-external-pull-request-replacement-draft.js";
 export * from "./factory-execution.js";
 export * from "./factory-pull-request-observation.js";
 export * from "./factory-pull-request-repair.js";

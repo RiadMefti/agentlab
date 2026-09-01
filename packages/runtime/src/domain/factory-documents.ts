@@ -38,6 +38,11 @@ import type {
   FactoryExternalPullRequestRepairQualificationEvent,
   FactoryExternalPullRequestRepairQualificationPolicy,
   FactoryExternalPullRequestRepairQualificationRun,
+  FactoryExternalPullRequestReplacementDraftEvent,
+  FactoryExternalPullRequestReplacementDraftPolicy,
+  FactoryExternalPullRequestReplacementDraftProposal,
+  FactoryExternalPullRequestReplacementDraftRecord,
+  FactoryExternalPullRequestReplacementDraftRun,
   FactoryExternalPullRequestDiscoveryEvent,
   FactoryExternalPullRequestDiscoveryPolicy,
   FactoryExternalPullRequestDiscoveryRun,
@@ -110,6 +115,21 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestReplacementDraftPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftPolicy>;
+  externalPullRequestReplacementDraftRun(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftRun>;
+  externalPullRequestReplacementDraftProposal(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftProposal>;
+  externalPullRequestReplacementDraftEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftEvent>;
+  externalPullRequestReplacementDraftRecord(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestReplacementDraftRecord>;
   externalPullRequestRepairGateProfile(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairGateProfile>;

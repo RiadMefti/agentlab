@@ -96,6 +96,17 @@ export type CliAction =
       readonly expectedGateProfileDigest: `sha256:${string}`;
     }
   | {
+      readonly kind: "factory-external-pull-request-replacement-draft-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-replacement-draft-tick";
+      readonly configPath: string;
+      readonly expectedPublicationPolicyDigest: `sha256:${string}`;
+      readonly expectedQualificationPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-maintenance-discovery-tick";
       readonly configPath: string;
       readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
@@ -474,6 +485,44 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         expectedCostPolicyDigest,
         expectedRoleIdentityPolicyDigest,
         expectedGateProfileDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-replacement-draft-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath))
+      return { kind: "factory-external-pull-request-replacement-draft-preflight", configPath };
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-replacement-draft-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--publication-policy" &&
+    input[6] === "--qualification-policy" &&
+    input[8] === "--role-policy"
+  ) {
+    const configPath = input[3];
+    const expectedPublicationPolicyDigest = input[5];
+    const expectedQualificationPolicyDigest = input[7];
+    const expectedRoleIdentityPolicyDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedPublicationPolicyDigest) &&
+      isSha256Digest(expectedQualificationPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-replacement-draft-tick",
+        configPath,
+        expectedPublicationPolicyDigest,
+        expectedQualificationPolicyDigest,
+        expectedRoleIdentityPolicyDigest
       };
     }
   }
@@ -1245,7 +1294,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -1317,6 +1366,10 @@ Factory authority:
       Verify exact gate executables, read-only reviewers, policy pins, and worker identity without executing them.
   agentlab factory external-pr-repair-qualification-tick --config <absolute-path> --qualification-policy <sha256> --repair-execution-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
       Run the seven strict gates and independent review over an exact repaired patch; never publish, push, merge, deploy, or release.
+  agentlab factory external-pr-replacement-draft-preflight --config <absolute-path>
+      Verify the distinct broker identity, exact policy pins, and both authority switches without writing GitHub.
+  agentlab factory external-pr-replacement-draft-tick --config <absolute-path> --publication-policy <sha256> --qualification-policy <sha256> --role-policy <sha256>
+      Publish qualified repairs to a new base-repository branch and draft PR; never touch contributor branches, force-push, approve, merge, deploy, or release.
   agentlab factory maintenance-discovery-preflight --config <absolute-path>
       Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
   agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>

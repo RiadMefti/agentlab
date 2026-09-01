@@ -572,6 +572,42 @@ same qualification run. Disable the scheduler to stop fresh work, preserve SQLit
 worktree evidence, and investigate the recorded isolation ID. A qualified bundle is still local
 evidence, not GitHub authority: do not push or open a replacement draft manually.
 
+## External pull-request replacement-draft publication
+
+Run publication under its own non-root broker account, distinct from worker and eval-attestor
+accounts. The owner-only config schema is
+`agentlab.local-factory-external-pull-request-replacement-draft.v1`. It pins the durable database,
+artifact, temporary-workspace, and source-repository roots; repository owner/name and numeric ID;
+publication, qualification, and role-policy paths and digests; Git executable; broker App client,
+installation, private-key path, numeric publisher user ID; and exact App IDs for `verify` and
+`factory-sandbox`. The App installation-token profile is fixed to checks-read, contents-write, and
+pull-requests-write for that one repository.
+
+The publication policy must structurally require R1, draft-only, no contributor-branch write, no
+force push, no approval, no auto-merge, and no release. Its patch ceiling must equal qualification;
+its broker UID must differ from worker and attestor UIDs; and its opaque publisher identity must
+match `github-user/<publisherUserId>`.
+
+```text
+agentlab factory external-pr-replacement-draft-preflight --config /absolute/external-pr-replacement-draft.json
+agentlab factory external-pr-replacement-draft-tick --config /absolute/external-pr-replacement-draft.json --publication-policy sha256:... --qualification-policy sha256:... --role-policy sha256:...
+```
+
+Preflight validates identities, pins, and both authority switches without running a model or writing
+GitHub. A tick recovers active schema-v26 journals first, then consumes a bounded page of completed
+`qualified` schema-v25 bundles. Immediately before push and PR creation it requires the original
+PR's exact open URL, base/head, and protected-branch governance. It creates one commit above the
+qualified original head, normally pushes it to a deterministic new base-repository branch, and opens
+a draft targeting the original base. It never writes the contributor or fork branch.
+
+Branch and PR intents are durable before remote effects. Retry accepts only the exact branch commit
+and exact draft coordinates, digest marker, and pinned App user. Original movement is recorded
+`stale`; conflicting branch/PR/publisher evidence or failed final verification is `quarantined`.
+Preserve the branch, SQLite, artifacts, and journal for investigation. Disable either `scheduler` or
+`pr-broker` to stop the next mutation. Do not delete rows, force-push, manually reuse the branch,
+approve, merge, deploy, or release from this account. No App, account, key, policy, switch, timer,
+or live config is provisioned or enabled by AgentLab.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -603,8 +639,8 @@ discovery, bounded consumption of a human non-release cohort, reservation-bound 
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
 bounded read-only external pull-request inventory, credentialless isolated external review evidence,
 feedback-only external review publication, deterministic external repair admission, credentialless
-one-attempt external repair execution, credentialless strict post-repair qualification, and a
-content-addressed separated-service renderer exist but are not provisioned or activated. Safe
-contributor/fork replacement-draft publication is not yet implemented. See
+one-attempt external repair execution, credentialless strict post-repair qualification, a separately
+credentialed contributor-safe replacement-draft publisher, and a content-addressed separated-service
+renderer exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

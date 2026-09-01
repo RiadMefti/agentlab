@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 25;
+export const latestSchemaVersion = 26;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -5573,6 +5573,134 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundle identity mismatch'); END;
 
       PRAGMA user_version = 25;
+      COMMIT;
+    `);
+  }
+
+  if (version < 26) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_replacement_draft_runs (
+        publication_run_id TEXT PRIMARY KEY CHECK (length(publication_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        original_pull_request_number INTEGER NOT NULL CHECK (original_pull_request_number > 0),
+        qualification_bundle_digest TEXT NOT NULL UNIQUE REFERENCES factory_external_pr_repair_qualification_bundles(bundle_digest),
+        publication_policy_digest TEXT NOT NULL CHECK (length(publication_policy_digest) = 71 AND substr(publication_policy_digest, 1, 7) = 'sha256:'),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)),
+        UNIQUE(qualification_bundle_digest, publication_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_replacement_draft_runs_policy_idx
+        ON factory_external_pr_replacement_draft_runs(repository_id, publication_policy_digest, created_at, publication_run_id);
+
+      CREATE TABLE factory_external_pr_replacement_draft_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        publication_run_id TEXT NOT NULL REFERENCES factory_external_pr_replacement_draft_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 16),
+        event_digest TEXT NOT NULL UNIQUE CHECK (length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'),
+        previous_event_digest TEXT CHECK (previous_event_digest IS NULL OR (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')),
+        kind TEXT NOT NULL CHECK (kind IN ('registered', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened', 'completed', 'stale', 'quarantined')),
+        from_state TEXT CHECK (from_state IS NULL OR from_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened')),
+        to_state TEXT NOT NULL CHECK (to_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened', 'completed', 'stale', 'quarantined')),
+        proposal_digest TEXT CHECK (proposal_digest IS NULL OR (length(proposal_digest) = 71 AND substr(proposal_digest, 1, 7) = 'sha256:')),
+        proposal_artifact_json TEXT CHECK (proposal_artifact_json IS NULL OR json_valid(proposal_artifact_json)),
+        head_revision TEXT CHECK (head_revision IS NULL OR length(head_revision) BETWEEN 40 AND 64),
+        record_digest TEXT CHECK (record_digest IS NULL OR (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')),
+        record_artifact_json TEXT CHECK (record_artifact_json IS NULL OR json_valid(record_artifact_json)),
+        evidence_digest TEXT CHECK (evidence_digest IS NULL OR (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)),
+        UNIQUE(publication_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_replacement_draft_records (
+        publication_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_replacement_draft_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        record_digest TEXT NOT NULL UNIQUE CHECK (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'),
+        replacement_pull_request_number INTEGER NOT NULL CHECK (replacement_pull_request_number > 0),
+        head_revision TEXT NOT NULL CHECK (length(head_revision) BETWEEN 40 AND 64),
+        publisher_id TEXT NOT NULL CHECK (length(publisher_id) BETWEEN 1 AND 128),
+        record_json TEXT NOT NULL CHECK (length(record_json) BETWEEN 2 AND 16777216 AND json_valid(record_json))
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_runs BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_runs BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_runs
+      WHEN json_extract(NEW.run_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.originalPullRequestNumber') IS NOT NEW.original_pull_request_number OR
+        json_extract(NEW.run_json, '$.qualificationBundleDigest') IS NOT NEW.qualification_bundle_digest OR
+        json_extract(NEW.run_json, '$.publicationPolicyDigest') IS NOT NEW.publication_policy_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.run_json, '$.publicationPolicy.draft') IS NOT 1 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.contributorBranchWrite') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.forcePush') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.approval') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.autoMerge') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.release') IS NOT 0
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_events BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_events BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_events
+      WHEN json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.proposalDigest') IS NOT NEW.proposal_digest OR
+        json(NEW.proposal_artifact_json) IS NOT json_extract(NEW.event_json, '$.proposalArtifact') OR
+        json_extract(NEW.event_json, '$.headRevision') IS NOT NEW.head_revision OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json(NEW.record_artifact_json) IS NOT json_extract(NEW.event_json, '$.recordArtifact') OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'pr-broker' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.publication_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'branch-publish-intent-recorded' AND NEW.from_state = 'ready' AND NEW.to_state = 'branch-publish-intent-recorded') OR
+        (NEW.kind = 'branch-published' AND NEW.from_state = 'branch-publish-intent-recorded' AND NEW.to_state = 'branch-published') OR
+        (NEW.kind = 'pull-request-open-intent-recorded' AND NEW.from_state = 'branch-published' AND NEW.to_state = 'pull-request-open-intent-recorded') OR
+        (NEW.kind = 'pull-request-opened' AND NEW.from_state = 'pull-request-open-intent-recorded' AND NEW.to_state = 'pull-request-opened') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'pull-request-opened' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'stale' AND NEW.from_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded') AND NEW.to_state = 'stale') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened') AND NEW.to_state = 'quarantined')
+      ) BEGIN SELECT RAISE(ABORT, 'illegal factory external PR replacement-draft transition'); END;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_records BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_records BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_records
+      WHEN json_extract(NEW.record_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.replacementPullRequestNumber') IS NOT NEW.replacement_pull_request_number OR
+        json_extract(NEW.record_json, '$.headRevision') IS NOT NEW.head_revision OR
+        json_extract(NEW.record_json, '$.publisherId') IS NOT NEW.publisher_id OR
+        json_extract(NEW.record_json, '$.draft') IS NOT 1
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft record identity mismatch'); END;
+
+      PRAGMA user_version = 26;
       COMMIT;
     `);
   }

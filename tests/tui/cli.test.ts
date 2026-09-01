@@ -7,6 +7,36 @@ import {
 } from "../../apps/tui/src/cli.js";
 
 describe("terminal CLI", () => {
+  it("parses the separately pinned replacement-draft broker commands", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-replacement-draft-preflight",
+        "--config",
+        "/private/replacement.json"
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-replacement-draft-preflight",
+      configPath: "/private/replacement.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-replacement-draft-tick",
+        "--config",
+        "/private/replacement.json",
+        "--publication-policy",
+        `sha256:${"1".repeat(64)}`,
+        "--qualification-policy",
+        `sha256:${"2".repeat(64)}`,
+        "--role-policy",
+        `sha256:${"3".repeat(64)}`
+      ])
+    ).toMatchObject({
+      kind: "factory-external-pull-request-replacement-draft-tick",
+      configPath: "/private/replacement.json"
+    });
+  });
   it("always opens the project chooser when no arguments are supplied", () => {
     expect(parseCliArguments([])).toEqual({ kind: "run" });
   });

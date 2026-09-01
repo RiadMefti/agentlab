@@ -75,6 +75,10 @@
     "./factory-external-pull-request-repair-qualification": {
       "types": "./dist/local-factory-external-pull-request-repair-qualification.d.ts",
       "default": "./dist/local-factory-external-pull-request-repair-qualification.js"
+    },
+    "./factory-external-pull-request-replacement-draft": {
+      "types": "./dist/local-factory-external-pull-request-replacement-draft.d.ts",
+      "default": "./dist/local-factory-external-pull-request-replacement-draft.js"
     }
   },
   "files": [

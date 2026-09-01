@@ -167,8 +167,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   bundle, but has no GitHub or remote-write port. The separate
   `@agentlab/runtime/factory-external-pull-request-repair-qualification` composition reconstructs
   that exact patch, runs the ordered seven-gate quality floor, and obtains a distinct read-only
-  review quorum without any GitHub or remote-write port. Evaluator and authority compositions cannot
-  execute a model, contact GitHub, merge, or release.
+  review quorum without any GitHub or remote-write port. The separate
+  `@agentlab/runtime/factory-external-pull-request-replacement-draft` composition consumes only
+  completed qualified bundles under a distinct broker UID and GitHub App, creates a deterministic
+  new base-repository branch and draft PR, and verifies exact original/replacement, commit,
+  proposal, qualification, broker, and publisher lineage. It cannot touch contributor branches,
+  force-push, approve, merge, deploy, release, or invoke a model. Evaluator and authority
+  compositions cannot execute a model, contact GitHub, merge, or release.
 - `agentlab factory external-pr-review-preflight --config ...` validates the separate non-root
   worker identity, exact review/discovery/cost policy pins, reviewed skill inventory, pinned
   provider executables, and read-only capabilities without running a model.
@@ -211,6 +216,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   process, enforces immutable evidence lineage, quarantines uncertain post-start outcomes without
   rerun, and records `qualified`, `rejected`, or `human-review-required` only after the worktree is
   unchanged and closed. It cannot publish, push, approve on GitHub, merge, deploy, or release.
+- `agentlab factory external-pr-replacement-draft-preflight --config ...` verifies the distinct
+  broker UID/App publisher identity, exact publication/qualification/role pins, repository, trusted
+  checks, and both kill switches without writing. `external-pr-replacement-draft-tick` consumes only
+  completed qualified schema-v25 bundles, rechecks exact original base/head and governance before
+  each mutation, records schema-v26 intent before a normal push and draft-PR POST, reconciles only
+  exact App-authored remote state, and quarantines conflicts. It never writes contributor branches,
+  force-pushes, approves, merges, deploys, or releases.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -383,7 +395,9 @@ selectors-only external repair authority boundary; and
 [ADR 0027](docs/decisions/0027-credentialless-external-pull-request-repair-execution.md) for the
 one-attempt isolated repair and patch-bundle boundary; and
 [ADR 0028](docs/decisions/0028-credentialless-external-pull-request-repair-qualification.md) for the
-strict post-repair gate and independent-review boundary. The dormant procedures are in
+strict post-repair gate and independent-review boundary; and
+[ADR 0029](docs/decisions/0029-brokered-external-pull-request-replacement-drafts.md) for the
+contributor-safe publication boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

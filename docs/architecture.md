@@ -259,8 +259,29 @@ never blindly rerun. Artifact digests are re-read on recovery, repairer/reviewer
 at the persistence boundary, and a final `qualified`, `rejected`, or `human-review-required` bundle
 is recorded only after every required observation is complete and the unchanged worktree is closed.
 The result fixes publication mode to `replacement-draft` and keeps remote write, auto-merge, and
-release false. Replacement-draft publication remains a separate future broker authority. See
+release false. Replacement-draft publication remains a separate broker authority. See
 [ADR 0028](decisions/0028-credentialless-external-pull-request-repair-qualification.md).
+
+The seventh external-PR plane is the separately credentialed publication composition
+`@agentlab/runtime/factory-external-pull-request-replacement-draft`. It runs under a policy-pinned
+broker UID distinct from worker and attestor identities and uses a separate repository-scoped GitHub
+App with only checks-read, contents-write, and pull-requests-write. The architecture closure
+contains no provider, agent, gate, approval, merge, deployment, release, terminal, or tmux path.
+
+Only a completed schema-v25 `qualified` bundle can create an immutable schema-v26 publication run.
+Before each mutation the adapter re-reads the original open PR and requires its exact URL, base
+branch/revision, qualified head, and the full governance floor. The repaired commit is
+deterministic, has the original qualified head as its sole parent, and is normally pushed without
+force to `agentlab/external-repair/pr-<number>-<qualification-prefix>` in the base repository. No
+contributor or fork branch can be named as a push destination.
+
+SQLite records branch and PR intents before their remote effects. Recovery accepts only the exact
+branch SHA and reconciles a draft by exact base/head/title/body marker plus the pinned GitHub App
+user ID. Original movement becomes terminal stale; conflicting remote identity or final drift is
+quarantined. The immutable record links the original PR, replacement PR, proposal, qualification,
+branch, commit, broker, and publisher. The plane can only create and verify a draft; it cannot
+approve, merge, release, deploy, or activate itself. See
+[ADR 0029](decisions/0029-brokered-external-pull-request-replacement-drafts.md).
 
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
@@ -668,23 +689,24 @@ reconcile an uncertain write without granting approval, repair, branch mutation,
 authority. A fourth credentialless plane can make a bounded immutable repair-admission decision from
 that completed feedback. A fifth credentialless plane consumes that exact selectors-only
 authorization once and records a bounded local patch bundle after closing its isolated workspace.
-Strict post-repair gates and independent review are implemented in a sixth credentialless plane;
-safe contributor/fork replacement-draft publication is not yet implemented. None of the external-PR
-stages is part of the daily chain or provisioned with live policy, skills, rates, object mirroring,
-or accounts. The eval producer has no provisioned harness, fixture, candidate, job, or account.
-Repository/day and organization/day quotas, a secretless hosted-provider eval gateway,
-owner-provisioned activation, telemetry-driven canary comparison, merge, release, rollback, and
-incident automation remain later stages. A read-only daily-cycle compiler now verifies one
-owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
-broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
-systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
-UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
-published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
-executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
-install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
-assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
-execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
-dormant orchestration rendering exist but remain unactivated.
+Strict post-repair gates and independent review are implemented in a sixth credentialless plane; a
+seventh separately credentialed plane can publish only qualified repairs as contributor-safe
+replacement drafts. None of the external-PR stages is part of the daily chain or provisioned with
+live policy, skills, rates, object mirroring, or accounts. The eval producer has no provisioned
+harness, fixture, candidate, job, or account. Repository/day and organization/day quotas, a
+secretless hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary
+comparison, merge, release, rollback, and incident automation remain later stages. A read-only
+daily-cycle compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab
+executable digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It
+emits a content-addressed system-level systemd bundle whose non-persistent UTC timer chains
+fixed-argv one-shot services across separate UIDs, stops on any nonzero result, signals an incident
+target, and finally re-observes the last published head. Every stage first runs fixed
+`/usr/bin/sha256sum` argv against the generated exact executable check record, so binary drift stops
+before AgentLab runs. The renderer cannot write or install artifacts, call the service manager,
+change authority, or touch the ledger. Deterministic assessment, bounded non-release cohort
+authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR maintenance,
+repair consumption, repaired-branch publication, and dormant orchestration rendering exist but
+remain unactivated.
 
 ## Dependency map
 
