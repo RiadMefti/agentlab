@@ -8,8 +8,8 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@opentui/core": "0.5.8",
-    "@opentui/react": "0.5.8",
+    "@opentui/core": "0.5.9",
+    "@opentui/react": "0.5.9",
     "@agentlab/contracts": "0.2.9",
     "@agentlab/runtime": "0.2.9",
     "react": "^19.2.1"
