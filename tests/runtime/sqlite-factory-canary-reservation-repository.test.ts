@@ -110,6 +110,9 @@ describe("SqliteFactoryCanaryReservationRepository", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_repair_qualification_bundles;
+        DROP TABLE factory_external_pr_repair_qualification_events;
+        DROP TABLE factory_external_pr_repair_qualification_runs;
         DROP TABLE factory_external_pr_repair_execution_bundles;
         DROP TABLE factory_external_pr_repair_execution_events;
         DROP TABLE factory_external_pr_repair_execution_runs;

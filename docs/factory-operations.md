@@ -537,6 +537,41 @@ A completed bundle is local evidence, not publication authority. Do not push it 
 post-repair gates, an independent reviewer, authenticated replacement-draft lineage, and a separate
 credential-bearing broker are still required before external repaired code can become a PR.
 
+## External pull-request repair qualification
+
+Run qualification under a dedicated non-root worker account with no GitHub credential. The
+owner-only config schema is `agentlab.local-factory-external-pull-request-repair-qualification.v1`.
+It pins the exact qualification and repair-execution policy files and digests, cost and role
+policies, reviewer skill packages, provider executables, repository and storage roots,
+Git/flock/systemd/bubblewrap tools, and read-only runtime mounts. The qualification policy embeds
+the exact ordered seven-gate profile; the config loader hashes every gate executable and rejects any
+path, content, or digest drift.
+
+The policy must reserve the complete gate and selected-reviewer ceilings inside both its aggregate
+budget and operation deadline. Codex reviewer grants use filesystem/Git read, sandboxed process,
+network off, no secrets, no command allowlist, and no remote repository. Claude reviewer grants use
+the same restrictions with process set to none. Reviewer IDs must differ from the repairer; durable
+provider sessions and execution IDs must also be distinct.
+
+```text
+agentlab factory external-pr-repair-qualification-preflight --config /absolute/external-pr-repair-qualification.json
+agentlab factory external-pr-repair-qualification-tick --config /absolute/external-pr-repair-qualification.json --qualification-policy sha256:... --repair-execution-policy sha256:... --cost-policy sha256:... --role-policy sha256:... --gate-profile sha256:...
+```
+
+Preflight hashes and validates inputs but creates no worktree and starts no gate or model. A tick
+consumes only completed schema-v24 repair bundles, reconstitutes the exact patch at the recorded
+head without fetching, and runs format, architecture, typecheck, lint, test, build, and secret-scan
+in order. Gate failure records a rejected bundle without reviewer execution. Passing gates require
+the complete independent reviewer quorum before SQLite v25 can record `qualified`, `rejected`, or
+`human-review-required`.
+
+Each gate and reviewer intent is durable before its process starts. Stable interrupted states may
+rebuild the exact worktree within the policy recovery limit. Treat `gate-active` or
+`reviewer-active` without a recoverable completed result as quarantined; never rerun it under the
+same qualification run. Disable the scheduler to stop fresh work, preserve SQLite, artifact, and
+worktree evidence, and investigate the recorded isolation ID. A qualified bundle is still local
+evidence, not GitHub authority: do not push or open a replacement draft manually.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -568,8 +603,8 @@ discovery, bounded consumption of a human non-release cohort, reservation-bound 
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
 bounded read-only external pull-request inventory, credentialless isolated external review evidence,
 feedback-only external review publication, deterministic external repair admission, credentialless
-one-attempt external repair execution, and a content-addressed separated-service renderer exist but
-are not provisioned or activated. Strict post-repair quality/review admission and safe
-contributor/fork replacement-draft publication are not yet implemented. See
+one-attempt external repair execution, credentialless strict post-repair qualification, and a
+content-addressed separated-service renderer exist but are not provisioned or activated. Safe
+contributor/fork replacement-draft publication is not yet implemented. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

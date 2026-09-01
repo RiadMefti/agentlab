@@ -131,6 +131,10 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-external-pull-request-repair-execution",
           "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-repair-qualification",
+          "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"
         )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
@@ -148,7 +152,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-external-pull-request-review.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-feedback.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-repair-admission.ts"),
-      source("packages/runtime/src/local-factory-external-pull-request-repair-execution.ts")
+      source("packages/runtime/src/local-factory-external-pull-request-repair-execution.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -296,6 +301,35 @@ describe("architecture dependency rules", () => {
       ]),
       source(
         "packages/runtime/src/application/factory-external-pull-request-repair-execution-service.ts",
+        [
+          local(
+            "../infrastructure/github/github-rest-client.js",
+            "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+          ),
+          local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+        ]
+      ),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps external repair qualification provider-capable but credentialless and remote-write-free", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts", [
+        local(
+          "./application/factory-external-pull-request-repair-qualification-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-repair-qualification-service.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/application/factory-external-pull-request-repair-qualification-service.ts",
         [
           local(
             "../infrastructure/github/github-rest-client.js",
@@ -985,6 +1019,10 @@ function architectureFixture(): string {
       "./factory-external-pull-request-repair-execution": {
         default: "./dist/local-factory-external-pull-request-repair-execution.js",
         types: "./dist/local-factory-external-pull-request-repair-execution.d.ts"
+      },
+      "./factory-external-pull-request-repair-qualification": {
+        default: "./dist/local-factory-external-pull-request-repair-qualification.js",
+        types: "./dist/local-factory-external-pull-request-repair-qualification.d.ts"
       }
     }
   });
@@ -1020,6 +1058,11 @@ function architectureFixture(): string {
   write(
     root,
     "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
     "export {};\n"
   );
   return root;

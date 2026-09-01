@@ -164,7 +164,10 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   through a dedicated PR-only GitHub App; it cannot approve, repair, push, merge, deploy, or
   release. The separate `@agentlab/runtime/factory-external-pull-request-repair-execution`
   composition can run one credentialless repairer against exact local objects and emit a local patch
-  bundle, but has no GitHub or remote-write port. Evaluator and authority compositions cannot
+  bundle, but has no GitHub or remote-write port. The separate
+  `@agentlab/runtime/factory-external-pull-request-repair-qualification` composition reconstructs
+  that exact patch, runs the ordered seven-gate quality floor, and obtains a distinct read-only
+  review quorum without any GitHub or remote-write port. Evaluator and authority compositions cannot
   execute a model, contact GitHub, merge, or release.
 - `agentlab factory external-pr-review-preflight --config ...` validates the separate non-root
   worker identity, exact review/discovery/cost policy pins, reviewed skill inventory, pinned
@@ -199,6 +202,15 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   after the workspace closes. Pre-agent workspace setup may recover within policy; a post-start
   uncertain outcome is quarantined and never retried under the same authorization. The command has
   no GitHub credential or remote-write port and cannot push, publish, merge, deploy, or release.
+- `agentlab factory external-pr-repair-qualification-preflight --config ...` verifies the separate
+  worker identity, exact qualification/execution/cost/role/gate pins, content-addressed review
+  skills, provider executables, and all seven gate executable digests without executing work.
+  `external-pr-repair-qualification-tick` consumes only completed schema-v24 bundles, reconstructs
+  the exact repaired patch, and runs format, architecture, typecheck, lint, test, build, and secret
+  scan gates before a reviewer distinct from the repairer. SQLite v25 journals intent before each
+  process, enforces immutable evidence lineage, quarantines uncertain post-start outcomes without
+  rerun, and records `qualified`, `rejected`, or `human-review-required` only after the worktree is
+  unchanged and closed. It cannot publish, push, approve on GitHub, merge, deploy, or release.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -369,7 +381,9 @@ separate advisory publication boundary; and
 [ADR 0026](docs/decisions/0026-deterministic-external-pull-request-repair-admission.md) for the
 selectors-only external repair authority boundary; and
 [ADR 0027](docs/decisions/0027-credentialless-external-pull-request-repair-execution.md) for the
-one-attempt isolated repair and patch-bundle boundary. The dormant procedures are in
+one-attempt isolated repair and patch-bundle boundary; and
+[ADR 0028](docs/decisions/0028-credentialless-external-pull-request-repair-qualification.md) for the
+strict post-repair gate and independent-review boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

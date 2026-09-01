@@ -138,6 +138,29 @@ async function main(): Promise<void> {
     });
     return;
   }
+  if (action.kind === "factory-external-pull-request-repair-qualification-preflight") {
+    const { runFactoryExternalPullRequestRepairQualificationPreflight } =
+      await import("./run-factory-external-pull-request-repair-qualification.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairQualificationPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-qualification-tick") {
+    const { runFactoryExternalPullRequestRepairQualificationTick } =
+      await import("./run-factory-external-pull-request-repair-qualification.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairQualificationTick(
+      action.configPath,
+      {
+        expectedQualificationPolicyDigest: action.expectedQualificationPolicyDigest,
+        expectedRepairExecutionPolicyDigest: action.expectedRepairExecutionPolicyDigest,
+        expectedCostPolicyDigest: action.expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest: action.expectedGateProfileDigest
+      }
+    );
+    return;
+  }
   if (action.kind === "factory-maintenance-discovery-tick") {
     const { runFactoryMaintenanceDiscoveryTick } =
       await import("./run-factory-maintenance-discovery.js");

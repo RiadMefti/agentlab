@@ -84,6 +84,7 @@ export const factoryExternalPullRequestRepairExecutionPolicySchema = z
     costPolicyDigest: sha256DigestSchema,
     roleIdentityPolicyDigest: sha256DigestSchema,
     gateProfileDigest: sha256DigestSchema,
+    qualificationPolicyDigest: sha256DigestSchema,
     repairerProfile: repairerProfileSchema,
     protectedPaths: z.array(repositoryPathPatternSchema).max(256),
     maximumChangedFiles: z.number().int().min(1).max(99),

@@ -45,6 +45,7 @@ export function testExternalPullRequestRepairExecutionFixture(
     readonly costPolicyDigest?: Sha256Digest;
     readonly roleIdentityPolicyDigest?: Sha256Digest;
     readonly gateProfileDigest?: Sha256Digest;
+    readonly qualificationPolicyDigest?: Sha256Digest;
   } = {}
 ): ExternalPullRequestRepairExecutionFixture {
   const initial = testExternalPullRequestRepairAdmissionFixture();
@@ -77,6 +78,7 @@ export function testExternalPullRequestRepairExecutionFixture(
   const costPolicyDigest = options.costPolicyDigest ?? testDigest("4");
   const roleIdentityPolicyDigest = options.roleIdentityPolicyDigest ?? testDigest("5");
   const gateProfileDigest = options.gateProfileDigest ?? testDigest("6");
+  const qualificationPolicyDigest = options.qualificationPolicyDigest ?? testDigest("7");
   const executionPolicy = factoryExternalPullRequestRepairExecutionPolicySchema.parse({
     schemaVersion: "agentlab.external-pull-request-repair-execution-policy.v1",
     id: "agentlab/external-pull-request-repair-execution",
@@ -85,6 +87,7 @@ export function testExternalPullRequestRepairExecutionFixture(
     costPolicyDigest,
     roleIdentityPolicyDigest,
     gateProfileDigest,
+    qualificationPolicyDigest,
     repairerProfile: {
       id: "external-r1-repairer",
       provider: "codex",

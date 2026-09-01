@@ -229,8 +229,38 @@ workspace setup only before `repairer-started`; any inactive or uncertain post-s
 quarantined so the same authorization can never silently run a second model attempt. Success closes
 the worktree before recording a content-addressed replacement-draft patch bundle with
 `remoteWrite:false`, `autoMerge:false`, and `release:false`. This plane does not run the final
-strict gate/review floor and cannot publish the bundle; those are later, separately authorized
-stages. See [ADR 0027](decisions/0027-credentialless-external-pull-request-repair-execution.md).
+strict gate/review floor and cannot publish the bundle; those are separate authority stages. See
+[ADR 0027](decisions/0027-credentialless-external-pull-request-repair-execution.md).
+
+The sixth external-PR plane is credentialless post-repair qualification through
+`@agentlab/runtime/factory-external-pull-request-repair-qualification`. Its owner-only configuration
+mutually pins the qualification and repair-execution policies, cost and role policies, exact review
+skills, provider binaries, repository and storage roots, and an inline content-addressed gate
+profile. Before runtime construction the loader hashes every canonical gate executable and rejects
+drift or conflicting digests. The composition has no GitHub client, token, remote-repository port,
+broker, merge, deployment, release, tmux, terminal, or interactive path.
+
+One completed schema-v24 repair bundle creates one immutable schema-v25 qualification run. The
+worker reconstructs the exact repaired patch at the authenticated head without fetching and proves
+the patch digest and change set before work starts. It then journals intent and runs the exact
+ordered format → architecture → typecheck → lint → test → build → secret-scan floor in an offline
+bubblewrap/systemd boundary. Every gate executable, argument vector, timeout, output ceiling,
+evidence kind, and isolation record is policy-bound. A failed gate deterministically rejects the
+repair. Passing gates are followed by the configured independent review quorum in sessions distinct
+from the repairer and from each other. Codex review is read-only with a sandboxed process; Claude
+review is read-only with no process capability. Both have network off, no secrets, no command
+allowlist, and no remote authority. Aggregate work is reserved inside the immutable budget and
+deadline.
+
+SQLite v25 stores immutable runs and bundles plus an append-only legal event chain. Intent is
+durable before every gate or reviewer process. Stable pre-process states may rebuild the exact
+worktree within the recovery limit; an interrupted active process is reconciled and quarantined,
+never blindly rerun. Artifact digests are re-read on recovery, repairer/reviewer identity is checked
+at the persistence boundary, and a final `qualified`, `rejected`, or `human-review-required` bundle
+is recorded only after every required observation is complete and the unchanged worktree is closed.
+The result fixes publication mode to `replacement-draft` and keeps remote write, auto-merge, and
+release false. Replacement-draft publication remains a separate future broker authority. See
+[ADR 0028](decisions/0028-credentialless-external-pull-request-repair-qualification.md).
 
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
@@ -638,22 +668,23 @@ reconcile an uncertain write without granting approval, repair, branch mutation,
 authority. A fourth credentialless plane can make a bounded immutable repair-admission decision from
 that completed feedback. A fifth credentialless plane consumes that exact selectors-only
 authorization once and records a bounded local patch bundle after closing its isolated workspace.
-Strict post-repair gates, independent review, and replacement-draft publication are not yet
-implemented. None of the external-PR stages is part of the daily chain or provisioned with live
-policy, skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness,
-fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
-hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
-merge, release, rollback, and incident automation remain later stages. A read-only daily-cycle
-compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab executable
-digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It emits a
-content-addressed system-level systemd bundle whose non-persistent UTC timer chains fixed-argv
-one-shot services across separate UIDs, stops on any nonzero result, signals an incident target, and
-finally re-observes the last published head. Every stage first runs fixed `/usr/bin/sha256sum` argv
-against the generated exact executable check record, so binary drift stops before AgentLab runs. The
-renderer cannot write or install artifacts, call the service manager, change authority, or touch the
-ledger. Deterministic assessment, bounded non-release cohort authority, durable admission,
-reservation-bound scheduled execution, draft dispatch, PR maintenance, repair consumption,
-repaired-branch publication, and dormant orchestration rendering exist but remain unactivated.
+Strict post-repair gates and independent review are implemented in a sixth credentialless plane;
+safe contributor/fork replacement-draft publication is not yet implemented. None of the external-PR
+stages is part of the daily chain or provisioned with live policy, skills, rates, object mirroring,
+or accounts. The eval producer has no provisioned harness, fixture, candidate, job, or account.
+Repository/day and organization/day quotas, a secretless hosted-provider eval gateway,
+owner-provisioned activation, telemetry-driven canary comparison, merge, release, rollback, and
+incident automation remain later stages. A read-only daily-cycle compiler now verifies one
+owner-only manifest, reviewed policy digests, the AgentLab executable digest, distinct worker,
+broker, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed system-level
+systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services across separate
+UIDs, stops on any nonzero result, signals an incident target, and finally re-observes the last
+published head. Every stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact
+executable check record, so binary drift stops before AgentLab runs. The renderer cannot write or
+install artifacts, call the service manager, change authority, or touch the ledger. Deterministic
+assessment, bounded non-release cohort authority, durable admission, reservation-bound scheduled
+execution, draft dispatch, PR maintenance, repair consumption, repaired-branch publication, and
+dormant orchestration rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -728,14 +759,15 @@ The product-source rules are executable and fail closed:
   worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
   worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
   runtime.
-- External PR discovery, review, feedback, repair admission, and repair execution each have separate
-  closed allowlists. Discovery can only read GitHub, review can run pinned credentialless providers
-  against local objects, and feedback can only read the exact PR and submit a comment review through
-  its dedicated App. Admission can only read completed local evidence and write a bounded
-  selectors-only capability. Repair execution can run one workspace-writing provider against
-  authenticated local objects but has no credential or remote port and emits only a closed-workspace
-  patch bundle. No one closure can combine model execution, a credential, remote branch mutation,
-  merge, or release authority.
+- External PR discovery, review, feedback, repair admission, repair execution, and repair
+  qualification each have separate closed allowlists. Discovery can only read GitHub, review can run
+  pinned credentialless providers against local objects, and feedback can only read the exact PR and
+  submit a comment review through its dedicated App. Admission can only read completed local
+  evidence and write a bounded selectors-only capability. Repair execution can run one
+  workspace-writing provider against authenticated local objects but has no credential or remote
+  port and emits only a closed-workspace patch bundle. Qualification can run only the pinned offline
+  gate floor and read-only independent reviewers over that exact bundle. No one closure can combine
+  model execution, a credential, remote branch mutation, merge, or release authority.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,

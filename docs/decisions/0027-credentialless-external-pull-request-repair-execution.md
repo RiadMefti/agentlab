@@ -40,6 +40,6 @@ journals reconcile before scheduler or provider-readiness blockers stop fresh wo
 
 AgentLab can now turn one admitted external-PR finding set into an auditable local patch without
 placing credentials near a model. The output is not a quality attestation or remote-write
-capability. Strict post-repair gates, independent review, authenticated contributor/fork branch
-strategy, replacement-draft creation, re-observation, merge, deployment, release, and rollback
-remain separate future decisions.
+capability. ADR 0028 adds strict post-repair gates and independent review as a separate
+credentialless plane. Authenticated contributor/fork branch strategy, replacement-draft creation,
+re-observation, merge, deployment, release, and rollback remain separate future decisions.

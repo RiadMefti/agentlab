@@ -71,6 +71,10 @@
     "./factory-external-pull-request-repair-execution": {
       "types": "./dist/local-factory-external-pull-request-repair-execution.d.ts",
       "default": "./dist/local-factory-external-pull-request-repair-execution.js"
+    },
+    "./factory-external-pull-request-repair-qualification": {
+      "types": "./dist/local-factory-external-pull-request-repair-qualification.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-qualification.js"
     }
   },
   "files": [

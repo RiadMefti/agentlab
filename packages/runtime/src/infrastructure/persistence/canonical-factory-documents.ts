@@ -37,6 +37,11 @@ import {
   factoryExternalPullRequestRepairExecutionRunSchema,
   factoryExternalPullRequestRepairerRecordSchema,
   factoryExternalPullRequestRepairerRequestSchema,
+  factoryExternalPullRequestRepairGateProfileSchema,
+  factoryExternalPullRequestRepairQualificationBundleSchema,
+  factoryExternalPullRequestRepairQualificationEventSchema,
+  factoryExternalPullRequestRepairQualificationPolicySchema,
+  factoryExternalPullRequestRepairQualificationRunSchema,
   factoryExternalPullRequestDiscoveryEventSchema,
   factoryExternalPullRequestDiscoveryPolicySchema,
   factoryExternalPullRequestDiscoveryRunSchema,
@@ -104,6 +109,34 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public externalPullRequestRepairGateProfile(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairGateProfileSchema.parse(input));
+  }
+
+  public externalPullRequestRepairQualificationPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationRun(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationRunSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationEvent(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationEventSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationBundle(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationBundleSchema.parse(input)
+    );
+  }
+
   public externalPullRequestRepairExecutionPolicy(input: unknown) {
     return encodeCanonicalDocument(
       factoryExternalPullRequestRepairExecutionPolicySchema.parse(input)

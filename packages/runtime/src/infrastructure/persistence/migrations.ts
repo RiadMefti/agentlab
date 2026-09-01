@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 24;
+export const latestSchemaVersion = 25;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -5151,6 +5151,428 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution bundle identity mismatch'); END;
 
       PRAGMA user_version = 24;
+      COMMIT;
+    `);
+  }
+
+  if (version < 25) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_repair_qualification_runs (
+        qualification_run_id TEXT PRIMARY KEY CHECK (length(qualification_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        repair_run_id TEXT NOT NULL REFERENCES factory_external_pr_repair_execution_runs(run_id),
+        repair_run_digest TEXT NOT NULL CHECK (
+          length(repair_run_digest) = 71 AND substr(repair_run_digest, 1, 7) = 'sha256:'
+        ),
+        repair_bundle_digest TEXT NOT NULL REFERENCES factory_external_pr_repair_execution_bundles(bundle_digest),
+        repair_execution_policy_digest TEXT NOT NULL CHECK (
+          length(repair_execution_policy_digest) = 71 AND
+          substr(repair_execution_policy_digest, 1, 7) = 'sha256:'
+        ),
+        qualification_policy_digest TEXT NOT NULL CHECK (
+          length(qualification_policy_digest) = 71 AND
+          substr(qualification_policy_digest, 1, 7) = 'sha256:'
+        ),
+        gate_profile_digest TEXT NOT NULL CHECK (
+          length(gate_profile_digest) = 71 AND substr(gate_profile_digest, 1, 7) = 'sha256:'
+        ),
+        workspace_id TEXT NOT NULL UNIQUE CHECK (length(workspace_id) = 36),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        repaired_patch_digest TEXT NOT NULL CHECK (
+          length(repaired_patch_digest) = 71 AND substr(repaired_patch_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        UNIQUE(repair_bundle_digest, qualification_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_repair_qualification_runs_policy_idx
+        ON factory_external_pr_repair_qualification_runs(
+          repository_id, qualification_policy_digest, created_at, qualification_run_id
+        );
+
+      CREATE TABLE factory_external_pr_repair_qualification_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        qualification_run_id TEXT NOT NULL REFERENCES factory_external_pr_repair_qualification_runs(qualification_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 128),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'workspace-started', 'workspace-prepared', 'gate-started',
+          'gate-finished', 'gates-passed', 'reviewer-started', 'reviewer-finished',
+          'recovered', 'bundle-recorded', 'completed', 'failed', 'quarantined'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'gating', 'gate-active', 'reviewing',
+            'reviewer-active', 'recorded', 'completed', 'failed', 'quarantined'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'gating', 'gate-active', 'reviewing',
+          'reviewer-active', 'recorded', 'completed', 'failed', 'quarantined'
+        )),
+        patch_digest TEXT CHECK (
+          patch_digest IS NULL OR
+          (length(patch_digest) = 71 AND substr(patch_digest, 1, 7) = 'sha256:')
+        ),
+        patch_artifact_json TEXT CHECK (
+          patch_artifact_json IS NULL OR json_valid(patch_artifact_json)
+        ),
+        gate_id TEXT CHECK (gate_id IS NULL OR length(gate_id) BETWEEN 1 AND 128),
+        isolation_id TEXT CHECK (isolation_id IS NULL OR length(isolation_id) = 36),
+        gate_observation_digest TEXT CHECK (
+          gate_observation_digest IS NULL OR
+          (length(gate_observation_digest) = 71 AND substr(gate_observation_digest, 1, 7) = 'sha256:')
+        ),
+        isolation_record_digest TEXT CHECK (
+          isolation_record_digest IS NULL OR
+          (length(isolation_record_digest) = 71 AND substr(isolation_record_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_id TEXT CHECK (reviewer_id IS NULL OR length(reviewer_id) BETWEEN 1 AND 128),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_record_digest TEXT CHECK (
+          reviewer_record_digest IS NULL OR
+          (length(reviewer_record_digest) = 71 AND substr(reviewer_record_digest, 1, 7) = 'sha256:')
+        ),
+        review_result_digest TEXT CHECK (
+          review_result_digest IS NULL OR
+          (length(review_result_digest) = 71 AND substr(review_result_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_digest TEXT CHECK (
+          bundle_digest IS NULL OR
+          (length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_artifact_json TEXT CHECK (
+          bundle_artifact_json IS NULL OR json_valid(bundle_artifact_json)
+        ),
+        decision TEXT CHECK (
+          decision IS NULL OR decision IN ('qualified', 'rejected', 'human-review-required')
+        ),
+        evidence_digest TEXT CHECK (
+          evidence_digest IS NULL OR
+          (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(qualification_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_repair_qualification_bundles (
+        qualification_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_repair_qualification_runs(qualification_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        repair_bundle_digest TEXT NOT NULL CHECK (
+          length(repair_bundle_digest) = 71 AND substr(repair_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        repaired_patch_digest TEXT NOT NULL CHECK (
+          length(repaired_patch_digest) = 71 AND substr(repaired_patch_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (
+          decision IN ('qualified', 'rejected', 'human-review-required')
+        ),
+        bundle_json TEXT NOT NULL CHECK (
+          length(bundle_json) BETWEEN 2 AND 33554432 AND json_valid(bundle_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_runs
+      WHEN
+        json_extract(NEW.run_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.repairRunId') IS NOT NEW.repair_run_id OR
+        json_extract(NEW.run_json, '$.repairRunDigest') IS NOT NEW.repair_run_digest OR
+        json_extract(NEW.run_json, '$.repairBundleDigest') IS NOT NEW.repair_bundle_digest OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicyDigest')
+          IS NOT NEW.repair_execution_policy_digest OR
+        json_extract(NEW.run_json, '$.qualificationPolicyDigest')
+          IS NOT NEW.qualification_policy_digest OR
+        json_extract(NEW.run_json, '$.gateProfileDigest') IS NOT NEW.gate_profile_digest OR
+        json_extract(NEW.run_json, '$.workspaceId') IS NOT NEW.workspace_id OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.repairedPatchDigest') IS NOT NEW.repaired_patch_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.maximumRiskTier') IS NOT 'R1' OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.publicationMode')
+          IS NOT 'replacement-draft' OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.autoMerge') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.release') IS NOT 0 OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_repair_execution_runs AS execution
+          JOIN factory_external_pr_repair_execution_bundles AS repair
+            ON repair.run_id = execution.run_id
+          WHERE execution.run_id = NEW.repair_run_id
+            AND execution.run_digest = NEW.repair_run_digest
+            AND execution.repository_id = NEW.repository_id
+            AND execution.pull_request_number = NEW.pull_request_number
+            AND execution.repair_execution_policy_digest = NEW.repair_execution_policy_digest
+            AND repair.bundle_digest = NEW.repair_bundle_digest
+            AND repair.patch_digest = NEW.repaired_patch_digest
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_repair_execution_events AS event
+              WHERE event.run_id = execution.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.patchDigest') IS NOT NEW.patch_digest OR
+        json(NEW.patch_artifact_json) IS NOT json_extract(NEW.event_json, '$.patchArtifact') OR
+        json_extract(NEW.event_json, '$.gateId') IS NOT NEW.gate_id OR
+        json_extract(NEW.event_json, '$.isolationId') IS NOT NEW.isolation_id OR
+        json_extract(NEW.event_json, '$.gateObservationDigest')
+          IS NOT NEW.gate_observation_digest OR
+        json_extract(NEW.event_json, '$.isolationRecordDigest')
+          IS NOT NEW.isolation_record_digest OR
+        json_extract(NEW.event_json, '$.reviewerId') IS NOT NEW.reviewer_id OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.event_json, '$.reviewerRecordDigest')
+          IS NOT NEW.reviewer_record_digest OR
+        json_extract(NEW.event_json, '$.reviewResultDigest') IS NOT NEW.review_result_digest OR
+        json_extract(NEW.event_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json(NEW.bundle_artifact_json) IS NOT json_extract(NEW.event_json, '$.bundleArtifact') OR
+        json_extract(NEW.event_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.event_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-qualification' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.qualification_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'workspace-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'workspace-prepared' AND NEW.from_state = 'workspace-active' AND NEW.to_state IN ('gating', 'reviewing')) OR
+        (NEW.kind = 'gate-started' AND NEW.from_state = 'gating' AND NEW.to_state = 'gate-active') OR
+        (NEW.kind = 'gate-finished' AND NEW.from_state = 'gate-active' AND NEW.to_state = 'gating') OR
+        (NEW.kind = 'gates-passed' AND NEW.from_state = 'gating' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'reviewer-started' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'reviewer-active') OR
+        (NEW.kind = 'reviewer-finished' AND NEW.from_state = 'reviewer-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'recovered' AND NEW.from_state IN ('workspace-active', 'gating', 'reviewing') AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'bundle-recorded' AND NEW.from_state IN ('gating', 'reviewing') AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'workspace-active', 'gating', 'gate-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'failed') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('workspace-active', 'gating', 'gate-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'quarantined')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR repair qualification transition'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'workspace-started', 'gates-passed', 'recovered') AND
+          NEW.patch_digest IS NULL AND NEW.patch_artifact_json IS NULL AND
+          NEW.gate_id IS NULL AND NEW.isolation_id IS NULL AND
+          NEW.gate_observation_digest IS NULL AND NEW.isolation_record_digest IS NULL AND
+          NEW.reviewer_id IS NULL AND NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'workspace-prepared' AND NEW.patch_digest IS NOT NULL AND
+          NEW.patch_artifact_json IS NOT NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'gate-started' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NOT NULL AND
+          NEW.isolation_id IS NOT NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'gate-finished' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NOT NULL AND
+          NEW.isolation_id IS NOT NULL AND NEW.gate_observation_digest IS NOT NULL AND
+          NEW.isolation_record_digest IS NOT NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'reviewer-started' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'reviewer-finished' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.reviewer_record_digest IS NOT NULL AND NEW.review_result_digest IS NOT NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'bundle-recorded' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NOT NULL AND NEW.bundle_artifact_json IS NOT NULL AND
+          NEW.decision IS NOT NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NOT NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NOT NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind IN ('failed', 'quarantined') AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND NEW.decision IS NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_time_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_bundles
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.repair_bundle_digest IS NOT (
+          SELECT repair_bundle_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.repaired_patch_digest IS NOT (
+          SELECT repaired_patch_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        json_extract(NEW.bundle_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.bundle_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.bundle_json, '$.repairBundleDigest') IS NOT NEW.repair_bundle_digest OR
+        json_extract(NEW.bundle_json, '$.repairedPatchArtifact.digest')
+          IS NOT NEW.repaired_patch_digest OR
+        json_extract(NEW.bundle_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.bundle_json, '$.usageComplete') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.workspaceUnchanged') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.workspaceClosed') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.publicationMode') IS NOT 'replacement-draft' OR
+        json_extract(NEW.bundle_json, '$.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.release') IS NOT 0
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundle identity mismatch'); END;
+
+      PRAGMA user_version = 25;
       COMMIT;
     `);
   }

@@ -265,6 +265,43 @@ describe("terminal CLI", () => {
       expectedRoleIdentityPolicyDigest: rolePolicy,
       expectedGateProfileDigest: gateProfile
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-repair-qualification-preflight",
+        "--config",
+        "/private/agentlab/pr-repair-qualification.json"
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-repair-qualification-preflight",
+      configPath: "/private/agentlab/pr-repair-qualification.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-repair-qualification-tick",
+        "--config",
+        "/private/agentlab/pr-repair-qualification.json",
+        "--qualification-policy",
+        repairPolicy,
+        "--repair-execution-policy",
+        executionPolicy,
+        "--cost-policy",
+        costPolicy,
+        "--role-policy",
+        rolePolicy,
+        "--gate-profile",
+        gateProfile
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-repair-qualification-tick",
+      configPath: "/private/agentlab/pr-repair-qualification.json",
+      expectedQualificationPolicyDigest: repairPolicy,
+      expectedRepairExecutionPolicyDigest: executionPolicy,
+      expectedCostPolicyDigest: costPolicy,
+      expectedRoleIdentityPolicyDigest: rolePolicy,
+      expectedGateProfileDigest: gateProfile
+    });
   });
 
   it("requires exact eval and human canary authority coordinates", () => {
@@ -1197,6 +1234,8 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory external-pr-repair-admission-tick --config");
     expect(helpText).toContain("factory external-pr-repair-execution-preflight --config");
     expect(helpText).toContain("factory external-pr-repair-execution-tick --config");
+    expect(helpText).toContain("factory external-pr-repair-qualification-preflight --config");
+    expect(helpText).toContain("factory external-pr-repair-qualification-tick --config");
     expect(helpText).toContain("factory canary-admission-tick --config");
     expect(helpText).toContain("factory worker-run --config");
     expect(helpText).toContain("factory scheduler-tick --config");
