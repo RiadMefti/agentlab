@@ -164,6 +164,18 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-broker-open-canary-draft") {
+    const { runFactoryBrokerOpenCanaryDraft } = await import("./run-factory-broker-open-draft.js");
+    process.exitCode = await runFactoryBrokerOpenCanaryDraft(
+      action.configPath,
+      action.taskId,
+      action.reservationDigest,
+      action.schedulePolicyDigest,
+      action.roleIdentityPolicyDigest,
+      action.expectedPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-broker-observe-pr") {
     const { runFactoryBrokerObservePullRequest } =
       await import("./run-factory-broker-observe-pr.js");

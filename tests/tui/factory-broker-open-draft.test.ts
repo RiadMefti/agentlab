@@ -6,6 +6,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  runFactoryBrokerOpenCanaryDraft,
   runFactoryBrokerOpenDraft,
   type FactoryBrokerOpenDraftRunnerDependencies
 } from "../../apps/tui/src/run-factory-broker-open-draft.js";
@@ -13,6 +14,9 @@ import {
 const configPath = "/private/agentlab/broker.json";
 const taskId = "0198f005-4ec4-7000-8000-000000000001";
 const policyBundleDigest = `sha256:${"c".repeat(64)}` as const;
+const reservationDigest = `sha256:${"8".repeat(64)}` as const;
+const schedulePolicyDigest = `sha256:${"9".repeat(64)}` as const;
+const roleIdentityPolicyDigest = `sha256:${"a".repeat(64)}` as const;
 const baseRevision = "a".repeat(40);
 
 describe("factory broker open-draft CLI runner", () => {
@@ -93,6 +97,55 @@ describe("factory broker open-draft CLI runner", () => {
         draft: true
       }
     });
+  });
+
+  it("opens a scheduled draft from exact canary pins without a per-task confirmation", async () => {
+    const openDraft = vi.fn(() => Promise.resolve(openedOutcome()));
+    const runtime = brokerRuntime(Promise.resolve(preflight()), openDraft);
+    const writes: string[] = [];
+
+    await expect(
+      runFactoryBrokerOpenCanaryDraft(
+        configPath,
+        taskId,
+        reservationDigest,
+        schedulePolicyDigest,
+        roleIdentityPolicyDigest,
+        policyBundleDigest,
+        dependencies(runtime, (message) => writes.push(message))
+      )
+    ).resolves.toBe(0);
+
+    expect(openDraft).toHaveBeenCalledWith({
+      taskId,
+      canary: { reservationDigest, schedulePolicyDigest, roleIdentityPolicyDigest }
+    });
+    expect(JSON.parse(writes[0] ?? "")).toMatchObject({
+      schemaVersion: "agentlab.broker-open-canary-draft-result.v1",
+      status: "opened",
+      canary: { reservationDigest, schedulePolicyDigest, roleIdentityPolicyDigest }
+    });
+  });
+
+  it("rejects malformed autonomous authority before loading broker credentials", async () => {
+    const loadConfig = vi.fn(() => Promise.resolve(config()));
+    const createRuntime = vi.fn(() =>
+      brokerRuntime(Promise.resolve(preflight()), () => Promise.resolve(openedOutcome()))
+    );
+
+    await expect(
+      runFactoryBrokerOpenCanaryDraft(
+        configPath,
+        taskId,
+        "sha256:short",
+        schedulePolicyDigest,
+        roleIdentityPolicyDigest,
+        policyBundleDigest,
+        { loadConfig, createRuntime, write: vi.fn() }
+      )
+    ).rejects.toThrow(/reservation digest is invalid/u);
+    expect(loadConfig).not.toHaveBeenCalled();
+    expect(createRuntime).not.toHaveBeenCalled();
   });
 
   it("does not invoke the write port when governance or authority preflight is blocked", async () => {

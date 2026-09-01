@@ -9,7 +9,12 @@ import {
   type LocalFactoryBrokerOptions,
   type LocalFactoryBrokerRuntime
 } from "@agentlab/runtime/factory-broker";
-import type { FactoryCostPolicy } from "@agentlab/contracts";
+import type {
+  FactoryCostPolicy,
+  FactoryRoleIdentityPolicy,
+  FactorySchedulePolicy,
+  Sha256Digest
+} from "@agentlab/contracts";
 // @ts-expect-error Broker authority must not be exported by the interactive runtime entry point.
 import { createLocalFactoryBroker as forbiddenInteractiveBroker } from "@agentlab/runtime";
 // @ts-expect-error Human authority mutation must not be exported by the credential-bearing broker.
@@ -53,6 +58,16 @@ type ExpectedConfig = ExpectedConfigFields &
         costPolicyPath: string;
         costPolicy: FactoryCostPolicy;
       }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v3";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        roleIdentityPolicyPath: string;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+      }
   );
 
 interface ExpectedOptions {
@@ -64,6 +79,9 @@ interface ExpectedOptions {
   readonly brokerId: string;
   readonly gitExecutable: string;
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;

@@ -18,19 +18,35 @@ export const factoryPullRequestDispatchStateSchema = z.enum([
 ]);
 export type FactoryPullRequestDispatchState = z.infer<typeof factoryPullRequestDispatchStateSchema>;
 
+const dispatchRunShape = {
+  dispatchId: z.uuid(),
+  taskId: z.uuid(),
+  contractDigest: sha256DigestSchema,
+  proposalDigest: sha256DigestSchema,
+  proposal: factoryPullRequestProposalSchema,
+  brokerId: factoryIdentifierSchema,
+  createdAt: factoryTimestampSchema,
+  correlationId: z.uuid()
+} as const;
+
 export const factoryPullRequestDispatchRunSchema = z
-  .object({
-    schemaVersion: z.literal("agentlab.pull-request-dispatch.v1"),
-    dispatchId: z.uuid(),
-    taskId: z.uuid(),
-    contractDigest: sha256DigestSchema,
-    proposalDigest: sha256DigestSchema,
-    proposal: factoryPullRequestProposalSchema,
-    brokerId: factoryIdentifierSchema,
-    createdAt: factoryTimestampSchema,
-    correlationId: z.uuid()
-  })
-  .strict()
+  .discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.pull-request-dispatch.v1"),
+        ...dispatchRunShape
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal("agentlab.pull-request-dispatch.v2"),
+        ...dispatchRunShape,
+        canaryReservationDigest: sha256DigestSchema,
+        schedulePolicyDigest: sha256DigestSchema,
+        roleIdentityPolicyDigest: sha256DigestSchema
+      })
+      .strict()
+  ])
   .superRefine((run, context) => {
     if (
       run.proposal.taskId !== run.taskId ||

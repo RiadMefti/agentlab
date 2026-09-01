@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryBrokerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-broker-config.js";
 import { loadLocalFactoryCostPolicy } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
+import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
+import { testDigest } from "../helpers/factory.js";
 
 const temporaryRoots: string[] = [];
 
@@ -40,6 +44,45 @@ describe("local factory broker configuration boundary", () => {
 
     await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual({ ...config, costPolicy });
     await expect(loadLocalFactoryCostPolicy(costPolicyPath)).resolves.toEqual(costPolicy);
+  });
+
+  it("loads v3 with independently protected canary schedule and role-policy pins", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "broker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const config = {
+      ...validConfig(root),
+      schemaVersion: "agentlab.local-factory-broker.v3" as const,
+      costPolicyPath,
+      schedulePolicyPath,
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest
+    };
+    await Promise.all([
+      writePrivateJson(costPolicyPath, costPolicy),
+      writePrivateJson(schedulePolicyPath, schedulePolicy),
+      writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy),
+      writePrivateJson(path, config)
+    ]);
+
+    await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      roleIdentityPolicy
+    });
   });
 
   it("rejects unknown fields, unsafe numbers, relative fields, and malformed JSON", async () => {

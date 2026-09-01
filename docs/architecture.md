@@ -79,8 +79,10 @@ owner-only configuration points to a canonical owner-only App-key file and pins 
 App ID for each required `verify` and `factory-sandbox` context. Config v1 remains compatible and
 cost-blocked. Config v2 additionally points to a separate canonical owner-only cost-policy file so
 future broker and worker processes can load the same rate card without sharing credentials. The
-loader strictly parses `agentlab.cost-policy.v1` before runtime construction. A matching check name
-from another App does not count. Config, cost policy, and key reject symlinks, hard links, non-owner
+loader strictly parses `agentlab.cost-policy.v1` before runtime construction. Config v3 additionally
+loads the same separately protected schedule and role-identity policies as the worker and pins the
+expected role-policy digest; it is required for scheduled canary dispatch. A matching check name
+from another App does not count. Config, policies, and key reject symlinks, hard links, non-owner
 permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
 fresh mutable bytes that the signer erases after one signature.
 
@@ -113,6 +115,14 @@ mutation, so readiness is not merely advisory. The safe manual ceremony is: insp
 preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the exact draft
 command; then compare-and-set disable even when the draft attempt fails. The broker's immediate
 preflight and inner rechecks remain authoritative throughout.
+
+The distinct `broker-open-canary-draft` command replaces the per-task confirmation only for a
+scheduled task with an exact `brokered-draft-pr` reservation. It requires broker config v3 plus the
+reservation, schedule-policy, role-policy, and factory-policy digests. The broker independently
+proves the unexpired reservation and exact completed scheduler handoff before dispatch and every
+resumable checkpoint. Scheduled tasks cannot use the manual command, and non-scheduled tasks cannot
+present canary authority. This command does not enable the broker, discover work, install a timer,
+merge, or release.
 
 The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
 clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
@@ -253,10 +263,14 @@ process, GitHub, broker, merge, or release capability. New schedule claims are s
 carrying the exact reservation digest. SQLite version 16 rejects missing, mismatched, read-only,
 expired, or insufficient-lifetime claims and binds completion to the same digest. The worker
 independently reloads and validates the reservation before every resumable preparation or execution
-phase. Legacy unbound active claims cannot resume. See
+phase. Legacy unbound active claims cannot resume. SQLite version 17 extends the same chain through
+the credential boundary: every scheduled initial dispatch is schema v2, stores the reservation plus
+schedule and role-policy digests, requires the exact completed `ready-for-broker` scheduler handoff,
+and is revalidated before each broker checkpoint. Manual dispatch remains schema v1. See
 [ADR 0012](decisions/0012-attested-canary-authority.md),
 [ADR 0013](decisions/0013-durable-canary-task-admission.md),
-[ADR 0014](decisions/0014-canary-bound-scheduled-execution.md), and
+[ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
+[ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md), and
 [Local factory evaluation operations](factory-evaluation-operations.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
@@ -361,6 +375,11 @@ checkpoint without creating a second PR or manufacturing completion. A checkpoin
 broker revocation performs no new write. If revocation races an already in-flight remote call, its
 exact result is journaled but the task cannot advance; the dispatch remains recoverable.
 
+Manual dispatch uses `agentlab.pull-request-dispatch.v1`. Scheduled dispatch uses v2 and binds the
+exact canary reservation, schedule policy, and role policy. SQLite version 17 rejects a scheduled v1
+run or a v2 run without the matching R1 `brokered-draft-pr` reservation and completed scheduler
+handoff. The broker reloads that authority before every phase, and PR evidence records its digest.
+
 Post-PR repair uses a different SQLite version 9 journal rather than reopening the terminal initial
 execution journal. Its immutable header binds the authorization, observation, prior patch, task
 contract, policy, repository/base, cumulative repair slot, and correlation ID. The shared execution
@@ -439,18 +458,19 @@ authority, worker, or broker commands. Current branch protection requires exact 
 and deletion. It still has zero required approvals, does not require approval of the latest push,
 and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
 blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
-owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
-prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
-refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
-intake configuration or task has been provisioned. No live agent task or PR has been created by this
-code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
-and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
-reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Repository/day and organization/day quotas, a sandboxed harness producer, reservation-bound broker
-dispatch, telemetry-driven canary comparison, merge, release, rollback, and incident automation
-remain later stages. Deterministic assessment, bounded non-release cohort authority, durable
-admission, and reservation-bound scheduled execution exist but remain unactivated.
+the repository ships no live config or provider/model rates. Config v3 can provision reviewed cost,
+schedule, and role policies for canary dispatch; actual rates, authority config, and broker-key
+provisioning remain activation prerequisites. An incomplete usage record already denies PR creation,
+and each explicit write command refuses a blocked preflight or unexpected policy digest. Governed
+intake is implemented but no live intake configuration or task has been provisioned. No live agent
+task or PR has been created by this code. Bounded PR-head observation and durable feedback evidence
+plus deterministic repair admission and fresh credentialless repair execution are implemented.
+Brokered repaired-branch update, crash reconciliation, authenticated head-lineage advancement, and
+re-observation are implemented. Repository/day and organization/day quotas, a sandboxed harness
+producer, autonomous broker discovery/queue/timer, telemetry-driven canary comparison, merge,
+release, rollback, and incident automation remain later stages. Deterministic assessment, bounded
+non-release cohort authority, durable admission, reservation-bound scheduled execution, and
+reservation-bound draft dispatch exist but remain unactivated.
 
 ## Dependency map
 

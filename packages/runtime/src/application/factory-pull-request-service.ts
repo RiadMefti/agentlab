@@ -13,9 +13,14 @@ import {
   factoryRepositoryGovernanceDenials,
   requireExactPolicyItem
 } from "./factory-pull-request-policy.js";
+import { factoryPullRequestCanaryCoordinatesSchema } from "./factory-pull-request-canary-authority.js";
 
 const brokerInputSchema = z
-  .object({ taskId: z.uuid(), correlationId: z.uuid().optional() })
+  .object({
+    taskId: z.uuid(),
+    correlationId: z.uuid().optional(),
+    canary: factoryPullRequestCanaryCoordinatesSchema.optional()
+  })
   .strict();
 const maximumPullRequestBodyCharacters = 16_384;
 
@@ -39,8 +44,28 @@ export class FactoryPullRequestService {
   public async openDraft(input: unknown): Promise<FactoryPullRequestOutcome> {
     const command = brokerInputSchema.parse(input);
     const task = await this.#requireTask(command.taskId);
+    const canaryReservationDigest = await this.dependencies.canaryAuthority.require(
+      task,
+      command.canary
+    );
     const existing = await this.dependencies.dispatches.findByTaskId(command.taskId);
-    if (existing !== null) return this.#dispatch.resume(task, existing);
+    if (existing !== null) {
+      const storedCanaryReservationDigest =
+        existing.run.schemaVersion === "agentlab.pull-request-dispatch.v2"
+          ? existing.run.canaryReservationDigest
+          : null;
+      if (storedCanaryReservationDigest !== canaryReservationDigest) {
+        throw new Error("Draft PR retry changed its immutable canary authority.");
+      }
+      if (
+        existing.run.schemaVersion === "agentlab.pull-request-dispatch.v2" &&
+        (existing.run.schedulePolicyDigest !== command.canary?.schedulePolicyDigest ||
+          existing.run.roleIdentityPolicyDigest !== command.canary.roleIdentityPolicyDigest)
+      ) {
+        throw new Error("Draft PR retry changed its immutable canary policy pins.");
+      }
+      return this.#dispatch.resume(task, existing);
+    }
     if (task.state !== "pr-proposed") {
       throw new Error("Draft PR creation requires a reviewed PR proposal.");
     }
@@ -118,7 +143,8 @@ export class FactoryPullRequestService {
     return this.#dispatch.start(
       task,
       proposal,
-      command.correlationId ?? z.uuid().parse(this.dependencies.createId())
+      command.correlationId ?? z.uuid().parse(this.dependencies.createId()),
+      command.canary ?? null
     );
   }
 

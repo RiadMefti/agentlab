@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 16;
+export const latestSchemaVersion = 17;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -3210,6 +3210,119 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 16;
+      COMMIT;
+    `);
+  }
+
+  if (version < 17) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE factory_pull_request_dispatches
+        ADD COLUMN canary_reservation_digest TEXT
+        REFERENCES factory_canary_task_reservations(reservation_digest)
+        CHECK (
+          canary_reservation_digest IS NULL OR
+          (length(canary_reservation_digest) = 71 AND
+            substr(canary_reservation_digest, 1, 7) = 'sha256:')
+        );
+      CREATE INDEX factory_pull_request_dispatches_canary_idx
+        ON factory_pull_request_dispatches(canary_reservation_digest)
+        WHERE canary_reservation_digest IS NOT NULL;
+
+      CREATE TRIGGER factory_pull_request_dispatches_canary_guard
+      BEFORE INSERT ON factory_pull_request_dispatches
+      WHEN (
+        json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.trigger') = 'scheduled' AND (
+          json_extract(NEW.dispatch_json, '$.schemaVersion')
+            IS NOT 'agentlab.pull-request-dispatch.v2' OR
+          NEW.canary_reservation_digest IS NULL OR
+          json_extract(NEW.dispatch_json, '$.canaryReservationDigest')
+            IS NOT NEW.canary_reservation_digest OR
+          json_extract(NEW.dispatch_json, '$.schedulePolicyDigest') IS NOT (
+            SELECT schedule_policy_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          json_extract(NEW.dispatch_json, '$.roleIdentityPolicyDigest') IS NOT (
+            SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.task_id IS NOT (
+            SELECT task_id FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.repository_id IS NOT (
+            SELECT repository_id FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.base_revision IS NOT (
+            SELECT base_revision FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          (SELECT risk_tier FROM factory_task_contracts WHERE task_id = NEW.task_id) IS NOT 'R1' OR
+          (SELECT maximum_risk_tier FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT 'R1' OR
+          (SELECT stage FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest)
+              IS NOT 'brokered-draft-pr' OR
+          (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+              SELECT json_extract(contract_json, '$.gateProfile.policyDigest')
+              FROM factory_task_contracts WHERE task_id = NEW.task_id
+          ) OR
+          NEW.created_at < (
+            SELECT reserved_at FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.created_at >= (
+            SELECT expires_at FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NOT EXISTS (
+            SELECT 1
+            FROM factory_schedule_events AS finished
+            JOIN factory_schedule_runs AS run ON run.run_id = finished.run_id
+            JOIN factory_canary_task_reservations AS reservation
+              ON reservation.reservation_digest = NEW.canary_reservation_digest
+            WHERE finished.task_id = NEW.task_id
+              AND finished.kind = 'task-finished'
+              AND json_extract(finished.event_json, '$.schemaVersion')
+                = 'agentlab.schedule-event.v2'
+              AND json_extract(finished.event_json, '$.canaryReservationDigest')
+                = NEW.canary_reservation_digest
+              AND json_extract(finished.event_json, '$.result') = 'ready-for-broker'
+              AND json_extract(finished.event_json, '$.preparationState') = 'prepared'
+              AND json_extract(finished.event_json, '$.taskState') = 'pr-proposed'
+              AND json_extract(finished.event_json, '$.contractDigest') = NEW.contract_digest
+              AND run.schedule_policy_digest = reservation.schedule_policy_digest
+              AND run.factory_policy_bundle_digest = reservation.policy_bundle_digest
+              AND json_extract(run.run_json, '$.roleIdentityPolicyDigest')
+                = reservation.role_identity_policy_digest
+              AND (
+                SELECT terminal.to_state FROM factory_schedule_events AS terminal
+                WHERE terminal.run_id = run.run_id
+                ORDER BY terminal.sequence DESC LIMIT 1
+              ) = 'completed'
+          )
+        )
+      ) OR (
+        json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.trigger') IS NOT 'scheduled' AND (
+          json_extract(NEW.dispatch_json, '$.schemaVersion')
+            IS NOT 'agentlab.pull-request-dispatch.v1' OR
+          NEW.canary_reservation_digest IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.canaryReservationDigest') IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.schedulePolicyDigest') IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.roleIdentityPolicyDigest') IS NOT NULL
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch canary authority mismatch');
+      END;
+
+      PRAGMA user_version = 17;
       COMMIT;
     `);
   }

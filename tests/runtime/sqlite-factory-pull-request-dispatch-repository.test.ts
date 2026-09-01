@@ -10,6 +10,7 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
+import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import {
   TEST_FACTORY_CORRELATION_ID,
   TEST_FACTORY_TASK_ID,
@@ -18,6 +19,16 @@ import {
   testFactoryContract,
   testTaskEvent
 } from "../helpers/factory.js";
+import {
+  persistFactoryCanaryAdmissionFixture,
+  testFactoryCanaryAdmissionFixture
+} from "../helpers/factory-canary-admission.js";
+import {
+  TEST_FACTORY_SCHEDULE_DEADLINE,
+  TEST_FACTORY_SCHEDULE_NOW,
+  TEST_FACTORY_SCHEDULED_FOR,
+  testFactorySchedulePolicy
+} from "../helpers/factory-schedule.js";
 
 const codec = new NodeFactoryDocumentCodec();
 const temporaryRoots: string[] = [];
@@ -134,6 +145,81 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
     }
   });
 
+  it("allows scheduled dispatch only from its exact completed brokered canary handoff", async () => {
+    const fixture = await scheduledRepositoryFixture();
+    try {
+      expect(() =>
+        fixture.dispatches.register(fixture.legacyRun, fixture.legacyRegistered)
+      ).toThrow(/canary authority mismatch/u);
+      expect(() =>
+        fixture.dispatches.register(fixture.substitutedRun, fixture.substitutedRegistered)
+      ).toThrow(/canary authority mismatch/u);
+      await expect(
+        fixture.dispatches.register(fixture.run, fixture.registered)
+      ).resolves.toMatchObject({
+        state: "ready",
+        run: {
+          schemaVersion: "agentlab.pull-request-dispatch.v2",
+          canaryReservationDigest: fixture.reservationDigest
+        }
+      });
+      const database = new DatabaseSync(fixture.databasePath);
+      try {
+        expect(
+          database
+            .prepare(
+              `SELECT canary_reservation_digest FROM factory_pull_request_dispatches
+               WHERE task_id = ?`
+            )
+            .get(TEST_FACTORY_TASK_ID)
+        ).toEqual({ canary_reservation_digest: fixture.reservationDigest });
+      } finally {
+        database.close();
+      }
+    } finally {
+      fixture.dispatches.close();
+      fixture.schedules.close();
+      fixture.tasks.close();
+    }
+  });
+
+  it("migrates version 16 to immutable canary-bound dispatch storage", async () => {
+    const fixture = await repositoryFixture();
+    fixture.dispatches.close();
+    fixture.tasks.close();
+    const legacy = new DatabaseSync(fixture.databasePath);
+    try {
+      legacy.exec(`
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
+        DROP INDEX factory_pull_request_dispatches_canary_idx;
+        ALTER TABLE factory_pull_request_dispatches DROP COLUMN canary_reservation_digest;
+        PRAGMA user_version = 16;
+      `);
+    } finally {
+      legacy.close();
+    }
+
+    const migrated = new SqliteFactoryPullRequestDispatchRepository(fixture.databasePath);
+    await expect(migrated.findByTaskId(TEST_FACTORY_TASK_ID)).resolves.toBeNull();
+    migrated.close();
+    const database = new DatabaseSync(fixture.databasePath);
+    try {
+      expect(
+        (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
+      ).toBe(latestSchemaVersion);
+      expect(
+        database
+          .prepare(
+            `SELECT COUNT(*) AS count FROM pragma_table_info('factory_pull_request_dispatches')
+             WHERE name = 'canary_reservation_digest'`
+          )
+          .get()
+      ).toEqual({ count: 1 });
+    } finally {
+      database.close();
+    }
+  });
+
   it("migrates a version-7 database without changing existing task data", async () => {
     const fixture = await repositoryFixture();
     fixture.dispatches.close();
@@ -141,6 +227,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;
         DROP TABLE factory_canary_task_reservations;
@@ -181,6 +268,243 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
     }
   });
 });
+
+async function scheduledRepositoryFixture() {
+  const root = mkdtempSync(join(tmpdir(), "agentlab-canary-pr-dispatch-repository-"));
+  temporaryRoots.push(root);
+  const databasePath = join(root, "agentlab.sqlite");
+  const schedulePolicy = codec.schedulePolicy(testFactorySchedulePolicy());
+  const admission = testFactoryCanaryAdmissionFixture({
+    schedulePolicyDigest: schedulePolicy.digest,
+    authorityExpiresAt: "2026-09-01T12:00:00.000Z",
+    canaryMaximumLifetimeSeconds: 172_800
+  });
+  const reservation = await persistFactoryCanaryAdmissionFixture(databasePath, admission);
+  const tasks = new SqliteFactoryRepository(databasePath);
+  const contract = codec.taskContract({
+    ...testFactoryContract(),
+    trigger: "scheduled",
+    repository: admission.preparation.request.repository,
+    conversationId: admission.preparation.request.conversationId,
+    budget: admission.preparation.authority.budgetCeiling,
+    gateProfile: {
+      ...testFactoryContract().gateProfile,
+      policyDigest: admission.preparation.authority.policyBundleDigest
+    },
+    expiresAt: admission.preparation.authority.expiresAt
+  });
+  const initial = codec.taskEvent(
+    testTaskEvent({
+      contractDigest: contract.digest,
+      eventId: "31313131-3131-4131-8131-313131313131",
+      sequence: 1,
+      previousEventDigest: null,
+      from: null,
+      to: "intake"
+    })
+  );
+  const evidence = codec.evidenceBundle(
+    testEvidenceBundle({
+      contractDigest: contract.digest,
+      bundleId: "32323232-3232-4232-8232-323232323232",
+      sequence: 1,
+      previousBundleDigest: null,
+      policyBundleDigest: contract.value.gateProfile.policyDigest
+    })
+  );
+  await tasks.create(contract, initial, evidence);
+  let previous = initial;
+  for (const [index, state] of (
+    [
+      "qualified",
+      "specified",
+      "planned",
+      "queued",
+      "executing",
+      "verifying",
+      "reviewing",
+      "pr-proposed"
+    ] as const
+  ).entries()) {
+    const sequence = index + 2;
+    const next = codec.taskEvent({
+      schemaVersion: "agentlab.task-event.v1",
+      eventId: `34343434-3434-4434-8434-${String(sequence).padStart(12, "0")}`,
+      taskId: contract.value.taskId,
+      sequence,
+      contractDigest: contract.digest,
+      previousEventDigest: previous.digest,
+      from: previous.value.to,
+      to: state,
+      actor: previous.value.actor,
+      occurredAt: `2026-08-30T12:${String(sequence).padStart(2, "0")}:00.000Z`,
+      reasonCode: "stage-complete",
+      summary: null,
+      evidenceBundleDigest: null,
+      correlationId: TEST_FACTORY_CORRELATION_ID
+    });
+    await tasks.append(next);
+    previous = next;
+  }
+
+  const schedules = new SqliteFactoryScheduleRepository(databasePath);
+  const scheduleRun = codec.scheduleRun({
+    schemaVersion: "agentlab.schedule-run.v2",
+    runId: "41414141-4141-4141-8141-414141414141",
+    schedulePolicyDigest: schedulePolicy.digest,
+    schedulePolicy: schedulePolicy.value,
+    factoryPolicyBundleDigest: admission.preparation.authority.policyBundleDigest,
+    roleIdentityPolicyDigest: reservation.value.roleIdentityPolicyDigest,
+    scheduledFor: TEST_FACTORY_SCHEDULED_FOR,
+    deadlineAt: TEST_FACTORY_SCHEDULE_DEADLINE,
+    createdAt: TEST_FACTORY_SCHEDULE_NOW,
+    correlationId: "42424242-4242-4242-8242-424242424242"
+  });
+  const registeredSchedule = codec.scheduleEvent({
+    ...scheduleEventBase(scheduleRun, null, "2026-08-31T12:05:00.000Z"),
+    kind: "registered",
+    from: null,
+    to: "ready",
+    reasonCode: "schedule-slot-registered"
+  });
+  await schedules.register(scheduleRun, registeredSchedule);
+  const claim = codec.scheduleEvent({
+    ...scheduleEventBase(scheduleRun, registeredSchedule, "2026-08-31T12:06:00.000Z"),
+    schemaVersion: "agentlab.schedule-event.v2",
+    kind: "task-claimed",
+    from: "ready",
+    to: "task-active",
+    taskId: contract.value.taskId,
+    requestDigest: admission.preparation.requestDigest,
+    authorityDigest: admission.preparation.authorityDigest,
+    taskCorrelationId: TEST_FACTORY_CORRELATION_ID,
+    canaryReservationDigest: reservation.digest,
+    reservation: reservation.value.budget,
+    reasonCode: "scheduled-task-claimed"
+  });
+  await schedules.append(claim);
+  const finished = codec.scheduleEvent({
+    ...scheduleEventBase(scheduleRun, claim, "2026-08-31T12:07:00.000Z"),
+    schemaVersion: "agentlab.schedule-event.v2",
+    kind: "task-finished",
+    from: "task-active",
+    to: "ready",
+    taskId: contract.value.taskId,
+    taskCorrelationId: TEST_FACTORY_CORRELATION_ID,
+    canaryReservationDigest: reservation.digest,
+    result: "ready-for-broker",
+    preparationState: "prepared",
+    taskState: "pr-proposed",
+    contractDigest: contract.digest,
+    reasonCodes: [],
+    reasonCode: "scheduled-task-ready-for-broker"
+  });
+  await schedules.append(finished);
+  const completed = codec.scheduleEvent({
+    ...scheduleEventBase(scheduleRun, finished, "2026-08-31T12:08:00.000Z"),
+    kind: "completed",
+    from: "ready",
+    to: "completed",
+    tasksClaimed: 1,
+    tasksFinished: 1,
+    tasksSkipped: 0,
+    reservedUsage: {
+      wallClockSeconds: reservation.value.budget.wallClockSeconds,
+      agentTurns: reservation.value.budget.maxAgentTurns,
+      toolCalls: reservation.value.budget.maxToolCalls,
+      inputTokens: reservation.value.budget.maxInputTokens,
+      outputTokens: reservation.value.budget.maxOutputTokens,
+      costMicrousd: reservation.value.budget.maxCostMicrousd,
+      processes: reservation.value.budget.maxProcesses,
+      outputBytes: reservation.value.budget.maxOutputBytes,
+      workers: reservation.value.budget.maxWorkers,
+      repairAttempts: reservation.value.budget.maxRepairAttempts,
+      changedFiles: reservation.value.budget.maxChangedFiles,
+      changedLines: reservation.value.budget.maxChangedLines
+    },
+    reasonCode: "schedule-slot-completed"
+  });
+  await schedules.append(completed);
+
+  const proposal = codec.pullRequestProposal({
+    schemaVersion: "agentlab.pull-request-proposal.v1",
+    taskId: contract.value.taskId,
+    contractDigest: contract.digest,
+    patchProposalDigest: testDigest("2"),
+    patchArtifactDigest: testDigest("3"),
+    changeSet: {
+      baseRevision: contract.value.repository.baseRevision,
+      headRevision: null,
+      changedPaths: ["docs/example.md"],
+      binaryPaths: [],
+      changedFiles: 1,
+      changedLines: 2
+    },
+    policyEvaluationDigest: testDigest("4"),
+    deduplicationKey: contract.value.deduplicationKey,
+    repositoryId: contract.value.repository.id,
+    baseRevision: contract.value.repository.baseRevision,
+    baseBranch: "main",
+    branchName: `agentlab/${contract.value.deduplicationKey.slice("sha256:".length)}`,
+    title: "docs: scheduled canary dispatch",
+    body: "Exact evaluated brokered proposal.",
+    draft: true,
+    createdAt: "2026-08-31T12:10:00.000Z"
+  });
+  const runValue = {
+    dispatchId,
+    taskId: contract.value.taskId,
+    contractDigest: contract.digest,
+    proposalDigest: proposal.digest,
+    proposal: proposal.value,
+    brokerId: brokerActor.id,
+    createdAt: proposal.value.createdAt,
+    correlationId: TEST_FACTORY_CORRELATION_ID
+  } as const;
+  const legacyRun = codec.pullRequestDispatchRun({
+    schemaVersion: "agentlab.pull-request-dispatch.v1",
+    ...runValue
+  });
+  const run = codec.pullRequestDispatchRun({
+    schemaVersion: "agentlab.pull-request-dispatch.v2",
+    ...runValue,
+    canaryReservationDigest: reservation.digest,
+    schedulePolicyDigest: schedulePolicy.digest,
+    roleIdentityPolicyDigest: reservation.value.roleIdentityPolicyDigest
+  });
+  const substitutedRun = codec.pullRequestDispatchRun({
+    ...run.value,
+    canaryReservationDigest: testDigest("f")
+  });
+  return {
+    databasePath,
+    tasks,
+    schedules,
+    dispatches: new SqliteFactoryPullRequestDispatchRepository(databasePath),
+    reservationDigest: reservation.digest,
+    legacyRun,
+    legacyRegistered: codec.pullRequestDispatchEvent({
+      ...eventBase(legacyRun, null),
+      kind: "registered",
+      from: null,
+      to: "ready"
+    }),
+    run,
+    registered: codec.pullRequestDispatchEvent({
+      ...eventBase(run, null),
+      kind: "registered",
+      from: null,
+      to: "ready"
+    }),
+    substitutedRun,
+    substitutedRegistered: codec.pullRequestDispatchEvent({
+      ...eventBase(substitutedRun, null),
+      kind: "registered",
+      from: null,
+      to: "ready"
+    })
+  };
+}
 
 async function repositoryFixture() {
   const root = mkdtempSync(join(tmpdir(), "agentlab-pr-dispatch-repository-"));
@@ -269,6 +593,30 @@ function event(
   return codec.pullRequestDispatchEvent({ ...eventBase(run, previous), ...fields });
 }
 
+function scheduleEventBase(
+  run: ReturnType<NodeFactoryDocumentCodec["scheduleRun"]>,
+  previous: ReturnType<NodeFactoryDocumentCodec["scheduleEvent"]> | null,
+  occurredAt: string
+) {
+  const sequence = (previous?.value.sequence ?? 0) + 1;
+  return {
+    schemaVersion: "agentlab.schedule-event.v1" as const,
+    eventId: `51515151-5151-4151-8151-${String(sequence).padStart(12, "0")}`,
+    runId: run.value.runId,
+    runDigest: run.digest,
+    sequence,
+    previousEventDigest: previous?.digest ?? null,
+    actor: {
+      kind: "control-plane" as const,
+      role: "policy-engine" as const,
+      id: "agentlab-scheduler",
+      sessionId: null
+    },
+    occurredAt,
+    correlationId: run.value.correlationId
+  };
+}
+
 function eventBase(
   run: ReturnType<NodeFactoryDocumentCodec["pullRequestDispatchRun"]>,
   previous: ReturnType<NodeFactoryDocumentCodec["pullRequestDispatchEvent"]> | null
@@ -284,7 +632,8 @@ function eventBase(
     sequence,
     previousEventDigest: previous?.digest ?? null,
     actor: brokerActor,
-    occurredAt: `2026-08-30T13:0${String(sequence - 1)}:00.000Z`,
+    occurredAt:
+      previous === null ? run.value.createdAt : `2026-08-30T13:0${String(sequence - 1)}:00.000Z`,
     reasonCode: "test-dispatch-event",
     summary: null,
     correlationId: TEST_FACTORY_CORRELATION_ID

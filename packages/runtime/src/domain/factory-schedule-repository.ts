@@ -17,6 +17,13 @@ export interface FactoryScheduleRunSnapshot {
   readonly events: readonly FactoryScheduleEvent[];
 }
 
+export interface FactoryScheduledTaskCompletion {
+  readonly run: FactoryScheduleRun;
+  readonly runDigest: Sha256Digest;
+  readonly state: FactoryScheduleRunState;
+  readonly event: Extract<FactoryScheduleEvent, { readonly kind: "task-finished" }>;
+}
+
 /** Append-only journal for one policy-pinned autonomous daily slot. */
 export interface FactoryScheduleRepository {
   register(
@@ -29,6 +36,7 @@ export interface FactoryScheduleRepository {
     scheduledFor: string
   ): Promise<FactoryScheduleRunSnapshot | null>;
   findOpen(): Promise<FactoryScheduleRunSnapshot | null>;
+  findTaskCompletion(taskId: string): Promise<FactoryScheduledTaskCompletion | null>;
   listEvents(runId: string): Promise<readonly FactoryScheduleEvent[]>;
   append(
     event: CanonicalFactoryDocument<FactoryScheduleEvent>

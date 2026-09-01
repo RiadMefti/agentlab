@@ -8,6 +8,10 @@ import {
   createConfiguredLocalFactoryBroker,
   createLocalFactoryBroker
 } from "../../packages/runtime/src/local-factory-broker.js";
+import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testDigest } from "../helpers/factory.js";
+import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
+import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const temporaryRoots: string[] = [];
 
@@ -79,6 +83,63 @@ describe("local factory broker composition", () => {
           }
         ]
       },
+      githubApp: {
+        clientId: "Iv1.agentlab-test",
+        installationId: 67_890,
+        privateKeyPath: join(root, "github-app.pem"),
+        trustedStatusChecks: [
+          { context: "verify", appId: 15_368 },
+          { context: "factory-sandbox", appId: 15_368 }
+        ]
+      }
+    });
+
+    await expect(runtime.close()).resolves.toBeUndefined();
+  });
+
+  it("constructs a v3 canary broker from exact schedule and role-policy pins", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "agentlab-local-broker-v3-")));
+    temporaryRoots.push(root);
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const costPolicy = {
+      schemaVersion: "agentlab.cost-policy.v1" as const,
+      id: "agentlab/live-costs",
+      version: "1.0.0",
+      rules: [
+        {
+          provider: "codex" as const,
+          model: "gpt-5.4",
+          accounting: {
+            mode: "token-rate" as const,
+            inputMicrousdPerMillionTokens: 1_000_000,
+            outputMicrousdPerMillionTokens: 2_000_000
+          }
+        }
+      ]
+    };
+    const runtime = createConfiguredLocalFactoryBroker({
+      schemaVersion: "agentlab.local-factory-broker.v3",
+      databasePath: join(root, "agentlab.sqlite"),
+      artifactRoot: join(root, "artifacts"),
+      temporaryRoot: join(root, "temporary"),
+      repositoryId: "riadmefti/agentlab",
+      repositoryNumericId: 12_345,
+      brokerId: "agentlab-pr-broker",
+      gitExecutable: join(root, "git"),
+      costPolicyPath: join(root, "cost-policy.json"),
+      schedulePolicyPath: join(root, "schedule-policy.json"),
+      roleIdentityPolicyPath: join(root, "role-identities.json"),
+      expectedRoleIdentityPolicyDigest,
+      costPolicy,
+      schedulePolicy: testFactorySchedulePolicy(),
+      roleIdentityPolicy,
       githubApp: {
         clientId: "Iv1.agentlab-test",
         installationId: 67_890,

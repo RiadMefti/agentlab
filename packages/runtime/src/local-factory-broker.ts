@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { factoryCostPolicySchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  factoryCostPolicySchema,
+  type FactoryCostPolicy,
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy,
+  type Sha256Digest
+} from "@agentlab/contracts";
 
 import { FactoryBrokerOperator } from "./application/factory-broker-operator.js";
 import {
@@ -16,6 +22,7 @@ import {
   FactoryEvidenceIngress
 } from "./application/factory-evidence-ingress.js";
 import { FactoryPullRequestService } from "./application/factory-pull-request-service.js";
+import { FactoryPullRequestCanaryAuthority } from "./application/factory-pull-request-canary-authority.js";
 import { FactoryPullRequestObservationService } from "./application/factory-pull-request-observation-service.js";
 import { FactoryPullRequestRepairAdmissionService } from "./application/factory-pull-request-repair-admission-service.js";
 import { FactoryPullRequestUpdateService } from "./application/factory-pull-request-update-service.js";
@@ -37,10 +44,13 @@ import {
   NodeFactoryDocumentCodec
 } from "./infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
+import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
+import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
+import { SqliteFactoryScheduleRepository } from "./infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 import { NodeCommandRunner } from "./infrastructure/process/command-runner.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
@@ -54,6 +64,9 @@ export interface LocalFactoryBrokerOptions {
   readonly brokerId: string;
   readonly gitExecutable: string;
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;
@@ -76,9 +89,43 @@ export function createLocalFactoryBroker(
   const repositories = new RuntimeRepositoryOwner();
   try {
     const documents = new NodeFactoryDocumentCodec();
+    const schedulePolicy =
+      options.schedulePolicy === undefined
+        ? null
+        : documents.schedulePolicy(options.schedulePolicy);
+    const roleIdentityPolicy =
+      options.roleIdentityPolicy === undefined
+        ? null
+        : documents.roleIdentityPolicy(options.roleIdentityPolicy);
+    if (
+      (roleIdentityPolicy === null) !==
+      (options.expectedRoleIdentityPolicyDigest === undefined)
+    ) {
+      throw new Error("Factory broker role identity policy and reviewed digest must be paired.");
+    }
+    if (
+      roleIdentityPolicy !== null &&
+      roleIdentityPolicy.digest !== options.expectedRoleIdentityPolicyDigest
+    ) {
+      throw new Error("Factory broker role identity policy changed after review.");
+    }
+    if ((schedulePolicy === null) !== (roleIdentityPolicy === null)) {
+      throw new Error(
+        "Factory canary broker schedule and role policies must be configured together."
+      );
+    }
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
+    const preparations = repositories.track(
+      new SqliteFactoryPreparationRepository(databasePath, { documents })
+    );
+    const canaryReservations = repositories.track(
+      new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
+    );
+    const schedules = repositories.track(
+      new SqliteFactoryScheduleRepository(databasePath, { documents })
+    );
     const dispatches = repositories.track(
       new SqliteFactoryPullRequestDispatchRepository(databasePath, { documents })
     );
@@ -94,10 +141,20 @@ export function createLocalFactoryBroker(
     );
     const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
-    const controlPlaneCredential = createFactoryEvidenceCredential();
-    const brokerCredential = createFactoryEvidenceCredential();
     const now = options.now ?? (() => new Date().toISOString());
     const createId = options.createId ?? randomUUID;
+    const canaryAuthority = new FactoryPullRequestCanaryAuthority({
+      policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicy?.digest ?? null,
+      roleIdentityPolicyDigest: roleIdentityPolicy?.digest ?? null,
+      preparations,
+      reservations: canaryReservations,
+      schedules,
+      documents,
+      now
+    });
+    const controlPlaneCredential = createFactoryEvidenceCredential();
+    const brokerCredential = createFactoryEvidenceCredential();
     const evidenceIngress = new FactoryEvidenceIngress({
       tasks: factory,
       evidence: factory,
@@ -166,6 +223,7 @@ export function createLocalFactoryBroker(
       artifacts,
       documents,
       remote,
+      canaryAuthority,
       now,
       createId
     });
@@ -258,8 +316,15 @@ export function createConfiguredLocalFactoryBroker(
     repositoryNumericId: config.repositoryNumericId,
     brokerId: config.brokerId,
     gitExecutable: config.gitExecutable,
-    ...(config.schemaVersion === "agentlab.local-factory-broker.v2"
-      ? { costPolicy: config.costPolicy }
+    ...(config.schemaVersion === "agentlab.local-factory-broker.v1"
+      ? {}
+      : { costPolicy: config.costPolicy }),
+    ...(config.schemaVersion === "agentlab.local-factory-broker.v3"
+      ? {
+          schedulePolicy: config.schedulePolicy,
+          roleIdentityPolicy: config.roleIdentityPolicy,
+          expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+        }
       : {}),
     githubApp: {
       clientId: config.githubApp.clientId,

@@ -462,14 +462,18 @@ one shared rate-card artifact without giving a model-bearing process broker cred
 file produces a changed enclosing policy digest; tasks pinned to another digest fail closed. No live
 rates are committed in this repository.
 
+The additive v3 broker config also requires canonical owner-only schedule and role-identity policy
+files plus the expected role-policy digest. It is the only broker configuration that can consume a
+scheduled canary reservation; v1/v2 remain valid for manual and recovery paths.
+
 The CLI has non-authorizing broker and worker preflight commands. They report deterministic
 non-secret JSON and close their runtimes before output. Normal SQLite initialization may still apply
 local schema migrations. A blocked result exits 2; an inspection or cleanup failure exits 1 without
-emitting a misleading readiness record. The separate `broker-open-draft` command is the only initial
-remote-write entry: exact argument order binds an owner-only config, task UUID, expected policy
-digest, and literal `--confirm-draft`. It does not call the write port unless broker preflight is
-clean and the policy pin matches; the inner service independently rechecks task state, exact
-evidence and complete usage, base revision, governance, authority, and policy around durable
+emitting a misleading readiness record. The separate `broker-open-draft` command is the manual
+initial remote-write entry: exact argument order binds an owner-only config, task UUID, expected
+policy digest, and literal `--confirm-draft`. It does not call the write port unless broker
+preflight is clean and the policy pin matches; the inner service independently rechecks task state,
+exact evidence and complete usage, base revision, governance, authority, and policy around durable
 idempotent dispatch. The authority switch still defaults off, and no broker or worker command can
 change it. The separate `@agentlab/runtime/factory-authority` entry is the local human
 administration boundary. Its owner-only v1 config pins only the durable ledger and operator ID; its
@@ -481,6 +485,13 @@ capability, and architecture fitness tests enforce that closure. OS account/file
 authorizes the local operation; operator ID is audit metadata rather than cryptographic personhood.
 Live key/config provisioning plus successful preflights are activation work, not assumptions. An
 empty rate card both adds `cost-policy-unconfigured` to preflight and denies draft mutation itself.
+
+The separate `broker-open-canary-draft` entry accepts no per-task confirmation. For a scheduled task
+it instead requires exact reservation, schedule-policy, role-policy, and factory-policy digests and
+config v3. The broker independently proves an unexpired R1 `brokered-draft-pr` reservation and exact
+completed v2 scheduler handoff before dispatch and every resumable checkpoint. Scheduled tasks
+cannot use the manual entry, non-scheduled tasks cannot present canary coordinates, and neither path
+can enable the broker, merge, or release. See [ADR 0015](0015-canary-bound-draft-pr-dispatch.md).
 
 The separate `broker-update-draft` command is the only repaired-branch write entry. Exact arguments
 bind the same owner-only config to a task UUID, repair-authorization digest, policy digest, and
@@ -546,6 +557,11 @@ digest. Injected failures after each checkpoint prove that a retry creates neith
 nor a second PR. A checkpoint that observes revocation performs no new write. If revocation races an
 already in-flight call, the exact remote result is journaled but cannot authorize the task
 transition; the dispatch remains recoverable for operator action.
+
+Scheduled initial dispatch uses `agentlab.pull-request-dispatch.v2`, which additionally binds the
+canary reservation, schedule policy, and role policy. SQLite v17 rejects a scheduled legacy run,
+authority substitution, or a run without the exact broker-stage reservation and completed scheduler
+handoff. Manual dispatch remains v1, and authenticated PR evidence distinguishes the two paths.
 
 PR CI observation now binds the actual head SHA, exact check context and App ID, bounded formal
 reviews, inline comments, conversation comments, the durable PR record digest, and one authenticated
@@ -631,11 +647,13 @@ denial. Multiple matched trials measure variance. Deterministic code/test/securi
 primary; read-only model graders add semantic coverage; humans periodically calibrate both. Trace
 and outcome data are kept with evidence, subject to retention and redaction policy.
 
-[ADR 0007](0007-deterministic-evaluation-and-canary-authority.md) now implements the first dormant
+[ADR 0007](0007-deterministic-evaluation-and-canary-authority.md) introduced the first dormant
 promotion slice: strict candidate/suite/matched-trial contracts, deterministic aggregate assessment,
 an append-only SQLite ledger, and a separate human authority that can issue only an expiring
-non-merge/non-release R0/R1 cohort. It does not yet implement the harness producer, grader-artifact
-attestation, cohort consumer, production sampling, automated rollback, or incident controller.
+non-merge/non-release R0/R1 cohort. Subsequent decisions add isolated attestation, task reservation,
+and exact cohort consumption through scheduled execution and draft dispatch. AgentLab still lacks
+the harness producer, content-addressed grader artifacts, production sampling, automated rollback,
+and incident controller.
 
 Rollout stages are: offline fixtures, read-only shadow runs, local patch generation with no broker,
 brokered draft PRs on selected R1 repositories, and limited R1 auto-open. Human merge remains the
@@ -693,23 +711,24 @@ broker, GitHub, providers, execution, and scheduler execution. The broker and wo
 self-enable, and the authority process cannot run work or perform a remote write. The
 provider-neutral, policy-pinned per-run cost accountant and pre-spawn admission checks also exist
 behind the separate worker port. Owner-only config v2 provisions the broker's canonical copy of the
-rate card, and the worker composition loads the same separate owner-only document without receiving
-broker credentials. The worker has a read-only fixed-argv host preflight that also proves canonical
-owner-only artifact and worktree roots, an exact provider/gate inventory, a globally serialized
-32-command queue, recovery access under normal-work blockers, and retryable process/repository/lease
-shutdown. Its public closure is mechanically barred from GitHub, broker, tmux, terminal, interactive
-discovery, and every provider module except the explicit factory adapter allowlist. The default
-bundle remains empty. The normal TUI has no enable or PR action; explicit non-interactive human
-commands can change only one named local switch at a time, while the explicit draft command remains
-blocked by current governance and provisioning controls. The explicit worker task command now
-supplies the local request-to-proposal driver, and the authorization-bound repair command has its
-own immutable SQLite v9 journal, fresh isolation, cumulative budgets, repeated gates, distinct
-review, and deterministic crash recovery. A one-shot daily scheduler now adds a strict owner-only
-policy, exact dual-digest pins, full-ceiling tick reservations, scheduled-only selection, a distinct
-human switch, and an immutable SQLite v11 claim/recovery journal. Duplicate and interrupted ticks
-are tested, but AgentLab installs no timer. No live configuration has been provisioned or invoked.
-No live authority change, agent task, PR, deployment, or publication has been performed through this
-code.
+rate card; v3 also pins the schedule and role policies for canary dispatch. The worker composition
+loads the same separate policy documents without receiving broker credentials. The worker has a
+read-only fixed-argv host preflight that also proves canonical owner-only artifact and worktree
+roots, an exact provider/gate inventory, a globally serialized 32-command queue, recovery access
+under normal-work blockers, and retryable process/repository/lease shutdown. Its public closure is
+mechanically barred from GitHub, broker, tmux, terminal, interactive discovery, and every provider
+module except the explicit factory adapter allowlist. The default bundle remains empty. The normal
+TUI has no enable or PR action; explicit non-interactive human commands can change only one named
+local switch at a time, while the explicit draft command remains blocked by current governance and
+provisioning controls. The explicit worker task command now supplies the local request-to-proposal
+driver, and the authorization-bound repair command has its own immutable SQLite v9 journal, fresh
+isolation, cumulative budgets, repeated gates, distinct review, and deterministic crash recovery. A
+one-shot daily scheduler now adds a strict owner-only policy, exact dual-digest pins, full-ceiling
+tick reservations, scheduled-only selection, a distinct human switch, and an immutable SQLite v11
+claim/recovery journal. Duplicate and interrupted ticks are tested, and scheduled draft dispatch now
+consumes the exact completed reservation through a v2 dispatch, but AgentLab installs no scheduler
+or broker timer/queue. No live configuration has been provisioned or invoked. No live authority
+change, agent task, PR, deployment, or publication has been performed through this code.
 
 The pre-contract intake is now a fifth mechanically separate runtime entry,
 `@agentlab/runtime/factory-intake`. It loads an owner-only configuration plus separately protected
@@ -748,20 +767,21 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    crash reconciler, and separate draft-only broker mechanics exist. The target-host
    recovery/sandbox CI, credentialless worker composition, isolated exact-repository credential
    adapter, broker-only composition, owner-only key provisioning boundary, operator preflights, and
-   fail-closed explicit draft command now exist. A separate governed intake composition now creates
-   the immutable preparation root from an owner-confirmed feature or bug report, and a separate
-   human-only authority composition owns atomic switch enable/disable without broker or scheduler
-   execution capability. The explicit worker task command now connects intake to the local
-   broker-ready proposal checkpoint without joining worker and broker authority. A separate bounded
-   read command records exact-head trusted checks and untrusted review feedback. A separate
-   admission command selects actionable facts, and the credentialless repair command consumes one
-   immutable authorization in a fresh worktree, repeats all gates and independent review, and stops
-   before a remote branch update. A separate confirmed broker command now advances only that exact
-   repaired draft through a deterministic non-force child commit, crash-durable journal,
-   authenticated evidence, and re-observable head lineage. Activation still requires the missing
-   review protections, provisioned live key/config and exact cost rules, passing live preflights,
-   separate human execution of the authority ceremony, and human merge. No scheduler, auto-merge,
-   release, or protected-path write is live; the local scheduler code stops before the broker.
+   fail-closed manual and reservation-bound scheduled draft commands now exist. A separate governed
+   intake composition now creates the immutable preparation root from an owner-confirmed feature or
+   bug report, and a separate human-only authority composition owns atomic switch enable/disable
+   without broker or scheduler execution capability. The explicit worker task command now connects
+   intake to the local broker-ready proposal checkpoint without joining worker and broker authority.
+   A separate bounded read command records exact-head trusted checks and untrusted review feedback.
+   A separate admission command selects actionable facts, and the credentialless repair command
+   consumes one immutable authorization in a fresh worktree, repeats all gates and independent
+   review, and stops before a remote branch update. A separate confirmed broker command now advances
+   only that exact repaired draft through a deterministic non-force child commit, crash-durable
+   journal, authenticated evidence, and re-observable head lineage. Activation still requires the
+   missing review protections, provisioned live key/config and exact cost rules, passing live
+   preflights, separate human execution of the authority ceremony, and human merge. No
+   scheduler/broker timer, auto-merge, release, or protected-path write is live; the local scheduler
+   code has no broker credential.
 5. **CI repair and operations:** credential rotation/monitoring, CODEOWNERS/last-push/approval
    rules, dashboards, alerts, quotas, and incident tooling. Deterministic feedback qualification,
    bounded fresh repair execution, brokered repaired-branch update, and exact-head re-observation
@@ -770,8 +790,9 @@ governance, empty-cost-policy, and default-off-authority blockers rather than we
    automation do not.
 6. **Eval and canary program:** deterministic matched-trial assessment, isolated signed eval
    attestation, and bounded human issuance of attestation-bound cohorts now exist. Golden-suite
-   execution, attested grader artifacts, a cohort consumer, shadow scheduling, production sampling,
-   provider/model/skill promotion, daily R0 then selected R1 scheduling, and rollback drills remain.
+   execution, attested grader artifacts, autonomous task discovery and broker consumption, shadow
+   telemetry, production sampling, provider/model/skill promotion, and rollback drills remain. Exact
+   cohort reservation now gates scheduled R1 execution and initial draft dispatch.
 7. **Controlled shipping:** merge queue and release/canary integration. Any R1 auto-merge is a new
    explicit ADR/policy approval; higher-risk human controls remain.
 
@@ -782,7 +803,7 @@ evidence-ingestion paths and OS-enforced process/CPU/memory ceilings for untrust
 repository code. Those mechanisms and the required target-host CI lane now exist; the configured
 broker preflight must still report ready under independently reviewed repository policy, including a
 reviewed non-empty rate card, before activation. Until then, authority remains default-off and
-preflight prevents the explicit CLI command from reaching the remote-write port.
+preflight prevents either initial-draft CLI command from reaching the remote-write port.
 
 ## Consequences and fitness functions
 

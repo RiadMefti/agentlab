@@ -22,7 +22,8 @@ import {
 } from "../../packages/runtime/src/domain/factory-schedule-integrity.js";
 import type {
   FactoryScheduleRepository,
-  FactoryScheduleRunSnapshot
+  FactoryScheduleRunSnapshot,
+  FactoryScheduledTaskCompletion
 } from "../../packages/runtime/src/domain/factory-schedule-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testDigest } from "../helpers/factory.js";
@@ -544,6 +545,26 @@ class MemoryScheduleRepository implements FactoryScheduleRepository {
     if (open.length > 1) throw new Error("Factory scheduler has multiple open runs.");
     const stored = open[0];
     return Promise.resolve(stored === undefined ? null : snapshot(stored.run, stored.events));
+  }
+
+  public findTaskCompletion(taskId: string): Promise<FactoryScheduledTaskCompletion | null> {
+    const completions = [...this.#runs.values()].flatMap((stored) => {
+      const event = stored.events.find(
+        ({ value }) => value.kind === "task-finished" && value.taskId === taskId
+      );
+      if (event?.value.kind !== "task-finished") return [];
+      const run = snapshot(stored.run, stored.events);
+      return [
+        {
+          run: run.run,
+          runDigest: run.runDigest,
+          state: run.state,
+          event: event.value
+        }
+      ];
+    });
+    if (completions.length > 1) throw new Error("Factory task has multiple completions.");
+    return Promise.resolve(completions[0] ?? null);
   }
 
   public listEvents(runId: string): Promise<readonly FactoryScheduleEvent[]> {

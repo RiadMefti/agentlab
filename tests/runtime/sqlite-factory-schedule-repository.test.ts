@@ -192,6 +192,17 @@ describe("SqliteFactoryScheduleRepository", () => {
       await expect(
         repository.findBySlot(schedule.policy.value.id, TEST_FACTORY_SCHEDULED_FOR)
       ).resolves.toMatchObject({ runDigest: schedule.run.digest, state: "completed" });
+      await expect(
+        repository.findTaskCompletion(preparation.request.taskId)
+      ).resolves.toMatchObject({
+        runDigest: schedule.run.digest,
+        state: "completed",
+        event: {
+          schemaVersion: "agentlab.schedule-event.v2",
+          canaryReservationDigest: reservation.digest,
+          result: "stopped"
+        }
+      });
       await expect(repository.listEvents(schedule.run.value.runId)).resolves.toHaveLength(4);
       await expect(repository.findOpen()).resolves.toBeNull();
     } finally {
@@ -257,6 +268,9 @@ describe("SqliteFactoryScheduleRepository", () => {
     const legacy = new DatabaseSync(databasePath);
     try {
       legacy.exec(`
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
+        DROP INDEX factory_pull_request_dispatches_canary_idx;
+        ALTER TABLE factory_pull_request_dispatches DROP COLUMN canary_reservation_digest;
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;
         PRAGMA user_version = 15;

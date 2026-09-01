@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 
 import type { FactoryScheduleEvent, FactoryScheduleRun } from "@agentlab/contracts";
+import { z } from "zod";
 
 import type {
   CanonicalFactoryDocument,
@@ -13,7 +14,8 @@ import {
 } from "../../domain/factory-schedule-integrity.js";
 import type {
   FactoryScheduleRepository,
-  FactoryScheduleRunSnapshot
+  FactoryScheduleRunSnapshot,
+  FactoryScheduledTaskCompletion
 } from "../../domain/factory-schedule-repository.js";
 import { NodeFactoryDocumentCodec } from "./canonical-factory-documents.js";
 import { openSqliteDatabase, type SqliteDatabaseOptions } from "./sqlite-database.js";
@@ -152,6 +154,44 @@ export class SqliteFactoryScheduleRepository implements FactoryScheduleRepositor
     }
     const row = rows[0];
     return Promise.resolve(row === undefined ? null : this.#snapshot(this.#runFromRow(row)));
+  }
+
+  public findTaskCompletion(taskIdInput: string): Promise<FactoryScheduledTaskCompletion | null> {
+    const taskId = z.uuid().parse(taskIdInput);
+    const rows = this.#database
+      .prepare(
+        `SELECT ${RUN_COLUMNS}
+         FROM factory_schedule_runs AS schedule_run
+         WHERE EXISTS (
+           SELECT 1 FROM factory_schedule_events AS event
+           WHERE event.run_id = schedule_run.run_id
+             AND event.task_id = ?
+             AND event.kind = 'task-finished'
+         )
+         ORDER BY schedule_run.scheduled_for, schedule_run.run_id
+         LIMIT 2`
+      )
+      .all(taskId) as unknown as ScheduleRunRow[];
+    if (rows.length > 1) {
+      throw new Error(`Factory task ${taskId} has multiple schedule completions.`);
+    }
+    const row = rows[0];
+    if (row === undefined) return Promise.resolve(null);
+    const snapshot = this.#snapshot(this.#runFromRow(row));
+    const events = snapshot.events.filter(
+      (event): event is Extract<FactoryScheduleEvent, { readonly kind: "task-finished" }> =>
+        event.kind === "task-finished" && event.taskId === taskId
+    );
+    const event = events[0];
+    if (events.length !== 1 || event === undefined) {
+      throw new Error(`Factory task ${taskId} has an ambiguous schedule completion.`);
+    }
+    return Promise.resolve({
+      run: snapshot.run,
+      runDigest: snapshot.runDigest,
+      state: snapshot.state,
+      event
+    });
   }
 
   public listEvents(runId: string): Promise<readonly FactoryScheduleEvent[]> {

@@ -101,6 +101,15 @@ export type CliAction =
       readonly confirmation: "confirm-draft";
     }
   | {
+      readonly kind: "factory-broker-open-canary-draft";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly reservationDigest: `sha256:${string}`;
+      readonly schedulePolicyDigest: `sha256:${string}`;
+      readonly roleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-broker-observe-pr";
       readonly configPath: string;
       readonly taskId: string;
@@ -156,6 +165,42 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const taskId = input[5];
     if (isNormalizedAbsolutePath(configPath) && isFactoryTaskId(taskId)) {
       return { kind: "factory-canary-reserve", configPath, taskId };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "broker-open-canary-draft" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--reservation" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--role-policy" &&
+    input[12] === "--policy"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    const reservationDigest = input[7];
+    const schedulePolicyDigest = input[9];
+    const roleIdentityPolicyDigest = input[11];
+    const expectedPolicyBundleDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(reservationDigest) &&
+      isSha256Digest(schedulePolicyDigest) &&
+      isSha256Digest(roleIdentityPolicyDigest) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-open-canary-draft",
+        configPath,
+        taskId,
+        reservationDigest,
+        schedulePolicyDigest,
+        roleIdentityPolicyDigest,
+        expectedPolicyBundleDigest
+      };
     }
   }
   if (
@@ -567,7 +612,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -647,6 +692,8 @@ Factory authority:
       Consume one exact authorization in a fresh credentialless repair worker; repeat all gates and independent review.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
+  agentlab factory broker-open-canary-draft --config <absolute-path> --task <uuid> --reservation <sha256> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Open or reconcile one scheduled draft only from exact evaluated brokered-PR authority.
   agentlab factory broker-update-draft --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-update
       Advance one repaired draft branch without force-push, then record its authenticated new head.
   agentlab factory broker-observe-pr --config <absolute-path> --task <uuid> --policy <sha256> --confirm-observe

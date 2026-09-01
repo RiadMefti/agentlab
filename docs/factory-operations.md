@@ -1,9 +1,9 @@
 # Local factory scheduler operations
 
-This runbook covers the dormant one-shot scheduler boundary. AgentLab does not install a timer,
-provision live policy, enable either authority switch, open a PR automatically, merge, or release.
-Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership plus the
-reviewed role-identity policy is the local authorization boundary.
+This runbook covers the dormant one-shot scheduler and canary-broker boundaries. AgentLab does not
+install a scheduler or broker timer, provision live policy, enable either authority switch, discover
+broker work, merge, or release. Use a dedicated non-shared worker OS account and retain the SQLite
+ledger; file ownership plus the reviewed role-identity policy is the local authorization boundary.
 
 ## Reviewed inputs
 
@@ -127,11 +127,26 @@ finish names the reservation digest, and the worker independently reloads it bef
 phase. A crash therefore retries the same claim and authority; an expired or legacy unbound claim
 stays blocked rather than running model work.
 
+6. For a cohort authorized specifically for `brokered-draft-pr`, a separate broker consumer may
+   submit the exact completed task. Broker config v3 must load the same cost, schedule, and
+   role-identity policies and pin the expected role-policy digest:
+
+   ```text
+   agentlab factory broker-open-canary-draft --config /absolute/broker.json --task 00000000-0000-4000-8000-000000000000 --reservation sha256:... --schedule-policy sha256:... --role-policy sha256:... --policy sha256:...
+   ```
+
+   This command has no per-task confirmation because the exact evaluated reservation is its
+   authority. It still requires clean broker preflight, an enabled broker switch, current authority,
+   complete usage, and repository governance. It independently proves the completed v2 scheduler
+   handoff before every durable dispatch phase. Exact retries are idempotent; changed coordinates
+   fail closed.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
-separate broker preflight, switch, and literal-confirmation ceremony. Do not put broker enablement,
-merge, release, or deployment into the scheduler timer.
+separate broker preflight and switch. Manual draft creation still requires literal confirmation;
+scheduled canary draft creation requires the exact reservation and scheduler handoff instead. Do not
+put broker enablement, merge, release, or deployment into the scheduler timer.
 
 To stop new or resumed scheduled work:
 
@@ -147,9 +162,9 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 No OS accounts, timer unit, live rate card, live worker/authority configuration, repository/day or
 organization/day quota ledger, cross-repository coordinator, scheduler dashboard/alerts, autonomous
-maintenance discovery, attested eval-harness producer, reservation-bound auto-broker, merge,
+maintenance discovery, attested eval-harness producer, broker discovery/queue/timer, merge,
 telemetry-driven canary, rollback controller, or incident automation is shipped. Deterministic
-assessment, human non-release cohorts, task reservation, and reservation-bound scheduled execution
-exist but are not provisioned or activated. See
+assessment, human non-release cohorts, task reservation, reservation-bound scheduled execution, and
+reservation-bound draft dispatch exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

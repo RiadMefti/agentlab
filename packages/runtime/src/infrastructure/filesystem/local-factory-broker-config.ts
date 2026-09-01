@@ -1,9 +1,17 @@
 import { isAbsolute, resolve } from "node:path";
 
-import { factoryIdentifierSchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  factoryIdentifierSchema,
+  sha256DigestSchema,
+  type FactoryCostPolicy,
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
+import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -63,13 +71,33 @@ const configV2Schema = z
     costPolicyPath: absolutePathSchema
   })
   .strict();
-const configSchema = z.discriminatedUnion("schemaVersion", [configV1Schema, configV2Schema]);
+const configV3Schema = z
+  .object({
+    schemaVersion: z.literal("agentlab.local-factory-broker.v3"),
+    ...configFields,
+    costPolicyPath: absolutePathSchema,
+    schedulePolicyPath: absolutePathSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema
+  })
+  .strict();
+const configSchema = z.discriminatedUnion("schemaVersion", [
+  configV1Schema,
+  configV2Schema,
+  configV3Schema
+]);
 
 export type LocalFactoryBrokerConfigV1 = z.infer<typeof configV1Schema>;
 export type LocalFactoryBrokerConfigV2 = z.infer<typeof configV2Schema> & {
   readonly costPolicy: FactoryCostPolicy;
 };
-export type LocalFactoryBrokerConfig = LocalFactoryBrokerConfigV1 | LocalFactoryBrokerConfigV2;
+export type LocalFactoryBrokerConfigV3 = z.infer<typeof configV3Schema> & {
+  readonly costPolicy: FactoryCostPolicy;
+  readonly schedulePolicy: FactorySchedulePolicy;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+};
+export type LocalFactoryBrokerConfig =
+  LocalFactoryBrokerConfigV1 | LocalFactoryBrokerConfigV2 | LocalFactoryBrokerConfigV3;
 
 /** Loads a strict owner-only broker configuration; the referenced key is not read here. */
 export async function loadLocalFactoryBrokerConfig(
@@ -88,8 +116,16 @@ export async function loadLocalFactoryBrokerConfig(
     content.fill(0);
   }
   if (config.schemaVersion === "agentlab.local-factory-broker.v1") return config;
-  const costPolicy = await loadLocalFactoryCostPolicy(config.costPolicyPath);
-  return { ...config, costPolicy };
+  if (config.schemaVersion === "agentlab.local-factory-broker.v2") {
+    const costPolicy = await loadLocalFactoryCostPolicy(config.costPolicyPath);
+    return { ...config, costPolicy };
+  }
+  const [costPolicy, schedulePolicy, roleIdentityPolicy] = await Promise.all([
+    loadLocalFactoryCostPolicy(config.costPolicyPath),
+    loadLocalFactorySchedulePolicy(config.schedulePolicyPath),
+    loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
+  ]);
+  return { ...config, costPolicy, schedulePolicy, roleIdentityPolicy };
 }
 
 function parseJson(value: string): unknown {

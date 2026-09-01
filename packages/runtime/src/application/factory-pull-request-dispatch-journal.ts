@@ -16,6 +16,7 @@ import type {
   FactoryPullRequestDispatchRepository,
   FactoryPullRequestDispatchSnapshot
 } from "../domain/factory-pull-request-dispatch-repository.js";
+import type { FactoryPullRequestCanaryCoordinates } from "./factory-pull-request-canary-authority.js";
 
 export interface FactoryPullRequestDispatchJournalDependencies {
   readonly dispatches: FactoryPullRequestDispatchRepository;
@@ -42,14 +43,16 @@ export class FactoryPullRequestDispatchJournalSession {
   public static async start(
     dependencies: FactoryPullRequestDispatchJournalDependencies,
     proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>,
-    correlationId: string
+    correlationId: string,
+    canary: FactoryPullRequestCanaryCoordinates | null = null
   ): Promise<FactoryPullRequestDispatchJournalSession> {
     const parsedCorrelationId = z.uuid().parse(correlationId);
     if ((await dependencies.dispatches.findByTaskId(proposal.value.taskId)) !== null) {
       throw new Error("Factory task already has a pull-request dispatch journal.");
     }
     const run = dependencies.documents.pullRequestDispatchRun({
-      schemaVersion: "agentlab.pull-request-dispatch.v1",
+      schemaVersion:
+        canary === null ? "agentlab.pull-request-dispatch.v1" : "agentlab.pull-request-dispatch.v2",
       dispatchId: uuid(dependencies),
       taskId: proposal.value.taskId,
       contractDigest: proposal.value.contractDigest,
@@ -57,7 +60,14 @@ export class FactoryPullRequestDispatchJournalSession {
       proposal: proposal.value,
       brokerId: factoryIdentifierSchema.parse(dependencies.brokerId),
       createdAt: proposal.value.createdAt,
-      correlationId: parsedCorrelationId
+      correlationId: parsedCorrelationId,
+      ...(canary === null
+        ? {}
+        : {
+            canaryReservationDigest: canary.reservationDigest,
+            schedulePolicyDigest: canary.schedulePolicyDigest,
+            roleIdentityPolicyDigest: canary.roleIdentityPolicyDigest
+          })
     });
     const registered = dependencies.documents.pullRequestDispatchEvent({
       schemaVersion: "agentlab.pull-request-dispatch-event.v1",

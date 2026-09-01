@@ -473,6 +473,7 @@ export class FactoryEvidencePublisher {
     readonly proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>;
     readonly record: FactoryPullRequestRecord;
     readonly authorizingPolicyItem: EvidenceItem;
+    readonly canaryReservationDigest: Sha256Digest | null;
   }): Promise<StoredEvidenceBundle> {
     if (
       input.authorizingPolicyItem.kind !== "policy" ||
@@ -512,7 +513,15 @@ export class FactoryEvidencePublisher {
           { name: "pull-request-number", value: String(input.record.number) },
           { name: "head-revision", value: input.record.headRevision },
           { name: "proposal-digest", value: input.proposal.digest },
-          { name: "proposal-artifact", value: proposalArtifact.digest }
+          { name: "proposal-artifact", value: proposalArtifact.digest },
+          ...(input.canaryReservationDigest === null
+            ? []
+            : [
+                {
+                  name: "canary-reservation-digest",
+                  value: input.canaryReservationDigest
+                }
+              ])
         ]
       })
     ]);

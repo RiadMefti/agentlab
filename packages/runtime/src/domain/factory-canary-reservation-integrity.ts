@@ -11,6 +11,7 @@ import type { FactoryCanaryReservationSnapshot } from "./factory-canary-reservat
 import type { CanonicalFactoryDocument, FactoryDocumentCodec } from "./factory-documents.js";
 import type { FactoryEvalSnapshot } from "./factory-evaluation-repository.js";
 import type { FactoryPreparationSnapshot } from "./factory-preparation-repository.js";
+import type { FactoryTaskSnapshot } from "./factory-task-repository.js";
 import { factoryTimestampAddSeconds } from "./factory-timestamp.js";
 
 export interface FactoryScheduledTaskReservationPins {
@@ -58,11 +59,47 @@ export function isFactoryCanaryReservationExecutableAt(
   now: string
 ): boolean {
   return (
+    isFactoryCanaryReservationCurrentAt(reservation, now) &&
     reservation.stage !== "read-only-shadow" &&
-    now >= reservation.reservedAt &&
-    now < reservation.expiresAt &&
     factoryTimestampAddSeconds(now, reservation.budget.wallClockSeconds) <= reservation.expiresAt
   );
+}
+
+export function isFactoryCanaryReservationCurrentAt(
+  reservation: FactoryCanaryTaskReservation,
+  now: string
+): boolean {
+  return now >= reservation.reservedAt && now < reservation.expiresAt;
+}
+
+/** Checks the exact task projection and elevated canary stage required by the credential broker. */
+export function assertFactoryBrokeredTaskReservation(
+  snapshot: FactoryCanaryReservationSnapshot,
+  preparation: FactoryPreparationSnapshot,
+  task: FactoryTaskSnapshot,
+  pins: FactoryScheduledTaskReservationPins,
+  documents: Pick<FactoryDocumentCodec, "canaryTaskReservation">
+): CanonicalFactoryDocument<FactoryCanaryTaskReservation> {
+  const reservation = assertFactoryScheduledTaskReservation(snapshot, preparation, pins, documents);
+  const contract = task.contract;
+  if (
+    reservation.value.stage !== "brokered-draft-pr" ||
+    preparation.state !== "prepared" ||
+    preparation.lastEvent.kind !== "prepared" ||
+    preparation.lastEvent.contractDigest !== task.contractDigest ||
+    contract.taskId !== preparation.request.taskId ||
+    contract.conversationId !== preparation.request.conversationId ||
+    contract.repository.id !== reservation.value.repository.id ||
+    contract.repository.baseRevision !== reservation.value.repository.baseRevision ||
+    contract.trigger !== "scheduled" ||
+    contract.gateProfile.policyDigest !== pins.policyBundleDigest ||
+    factoryRiskRank(contract.riskTier) > factoryRiskRank(reservation.value.maximumRiskTier) ||
+    !factoryBudgetFits(contract.budget, reservation.value.budget) ||
+    contract.expiresAt > preparation.authority.expiresAt
+  ) {
+    throw new Error("Factory task does not match its brokered canary reservation authority.");
+  }
+  return reservation;
 }
 
 export function assertFactoryCanaryTaskReservation(

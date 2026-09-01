@@ -348,6 +348,7 @@ describe("FactoryPullRequestService", () => {
       });
       const latest = await fixture.repository.latestEvidence(TEST_FACTORY_TASK_ID);
       expect(latest?.bundle.items.map(({ kind }) => kind)).toEqual(["policy", "pull-request"]);
+      expect(fixture.canaryAuthorityChecks).toEqual(Array.from({ length: 7 }, () => undefined));
     } finally {
       fixture.close();
     }
@@ -1145,6 +1146,7 @@ async function executionFixture(
     createId,
     controlPlaneActorId: "agentlab-execution"
   });
+  const canaryAuthorityChecks: unknown[] = [];
   const pullRequests = (remote: FactoryDraftPullRequestBroker) =>
     new FactoryPullRequestService({
       dispatches,
@@ -1158,6 +1160,15 @@ async function executionFixture(
       artifacts,
       documents,
       remote,
+      canaryAuthority: {
+        require: (_task, coordinates) => {
+          canaryAuthorityChecks.push(coordinates);
+          if (coordinates !== undefined) {
+            return Promise.reject(new Error("Manual test task received canary authority."));
+          }
+          return Promise.resolve(null);
+        }
+      },
       now,
       createId
     });
@@ -1262,6 +1273,7 @@ async function executionFixture(
     gates,
     workspaceRecovery,
     recovery,
+    canaryAuthorityChecks,
     task,
     policyDigest: policyBundle.digest,
     close: () => {

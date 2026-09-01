@@ -226,6 +226,7 @@ describe("SqliteFactoryPreparationRepository", () => {
     const historical = new DatabaseSync(databasePath);
     try {
       historical.exec(`
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;
         DROP TABLE factory_canary_task_reservations;

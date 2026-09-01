@@ -33,6 +33,7 @@ interface DispatchRunRow {
   readonly branch_name: unknown;
   readonly created_at: unknown;
   readonly correlation_id: unknown;
+  readonly canary_reservation_digest: unknown;
   readonly dispatch_json: unknown;
 }
 
@@ -62,7 +63,8 @@ interface DispatchEventRow {
 
 const RUN_COLUMNS = `
   dispatch_id, dispatch_digest, task_id, contract_digest, proposal_digest, broker_id,
-  repository_id, base_revision, branch_name, created_at, correlation_id, dispatch_json
+  repository_id, base_revision, branch_name, created_at, correlation_id,
+  canary_reservation_digest, dispatch_json
 `;
 
 const EVENT_COLUMNS = `
@@ -103,8 +105,9 @@ export class SqliteFactoryPullRequestDispatchRepository implements FactoryPullRe
         .prepare(
           `INSERT INTO factory_pull_request_dispatches (
             dispatch_id, dispatch_digest, task_id, contract_digest, proposal_digest, broker_id,
-            repository_id, base_revision, branch_name, created_at, correlation_id, dispatch_json
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            repository_id, base_revision, branch_name, created_at, correlation_id,
+            canary_reservation_digest, dispatch_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           run.value.dispatchId,
@@ -118,6 +121,9 @@ export class SqliteFactoryPullRequestDispatchRepository implements FactoryPullRe
           run.value.proposal.branchName,
           run.value.createdAt,
           run.value.correlationId,
+          run.value.schemaVersion === "agentlab.pull-request-dispatch.v2"
+            ? run.value.canaryReservationDigest
+            : null,
           run.json
         );
       this.#insertEvent(initialEvent);
@@ -216,6 +222,10 @@ export class SqliteFactoryPullRequestDispatchRepository implements FactoryPullRe
       row.branch_name !== run.value.proposal.branchName ||
       row.created_at !== run.value.createdAt ||
       row.correlation_id !== run.value.correlationId ||
+      row.canary_reservation_digest !==
+        (run.value.schemaVersion === "agentlab.pull-request-dispatch.v2"
+          ? run.value.canaryReservationDigest
+          : null) ||
       row.dispatch_json !== run.json
     ) {
       throw new Error(

@@ -224,6 +224,14 @@ the claim commits. On every process retry, the worker reloads that digest and re
 task/configuration and time-window checks before each resumable phase. A legacy unbound active claim
 stays blocked for operator recovery. Manual `worker-run` cannot consume a canary reservation.
 
+For `brokered-draft-pr`, the separate broker config v3 loads the same schedule and role policies.
+`broker-open-canary-draft` requires their exact digests plus the reservation and factory-policy
+digests. It independently resolves the completed v2 scheduler handoff, rejects manual/scheduled
+authority substitution, rechecks expiry before every resumable broker phase, records a v2 dispatch,
+and binds the reservation digest into authenticated PR evidence. The reservation replaces only the
+per-task draft confirmation; broker enablement, cost policy, repository governance, human merge, and
+the structural `autoMerge:false` and `release:false` limits still apply.
+
 ## Failure, recovery, and incident handling
 
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
@@ -247,8 +255,8 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
 grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
-identity or hardware-backed key custody where required; broker dispatch that requires a
-`brokered-draft-pr` reservation; telemetry/control comparison; revocation enforcement; alerting;
-rollback drills; and incident automation. Brokered PR creation remains separately human-confirmed
-and blocked by repository governance and live cost-policy prerequisites in
-[ADR 0006](decisions/0006-local-software-factory-control-plane.md).
+identity or hardware-backed key custody where required; autonomous broker discovery/queue/timer;
+telemetry/control comparison; revocation enforcement; alerting; rollback drills; and incident
+automation. Manual PR creation remains separately human-confirmed; evaluated canary PR creation is
+reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key
+prerequisites in [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

@@ -33,7 +33,9 @@ the outcome against its claim.
 Scheduled model work can no longer begin or resume from cohort authority alone. The scheduler and
 worker remain credentialless and still stop at a local `pr-proposed` checkpoint. This does not let
 the broker open a PR autonomously: broker dispatch does not yet require the exact reservation or its
-`brokered-draft-pr` stage. No live configuration, timer, task, account, or authority is activated.
+`brokered-draft-pr` stage. [ADR 0015](0015-canary-bound-draft-pr-dispatch.md) subsequently closes
+that broker-admission gap without activating a live queue or timer. No live configuration, timer,
+task, account, or authority is activated.
 
 ## Fitness functions
 
