@@ -203,7 +203,8 @@ export function reviewSkillManifests(
 }
 
 export function completedExternalPullRequestReviewDocuments(
-  fixture: ReturnType<typeof testExternalPullRequestReviewFixture>
+  fixture: ReturnType<typeof testExternalPullRequestReviewFixture>,
+  options: { readonly decision?: "split" | "changes-requested" | "approved" } = {}
 ): {
   readonly events: readonly CanonicalFactoryDocument<FactoryExternalPullRequestReviewEvent>[];
   readonly bundle: CanonicalFactoryDocument<FactoryExternalPullRequestReviewBundle>;
@@ -278,6 +279,14 @@ export function completedExternalPullRequestReviewDocuments(
         limits: fixture.policy.resourceLimits
       }
     });
+    const verdict =
+      options.decision === "changes-requested"
+        ? "changes-requested"
+        : options.decision === "approved"
+          ? "approved"
+          : index === 0
+            ? "approved"
+            : "changes-requested";
     const result = fixture.documents.externalPullRequestReviewResult({
       schemaVersion: "agentlab.external-pull-request-review-result.v1",
       reviewRunId: fixture.run.value.runId,
@@ -288,14 +297,15 @@ export function completedExternalPullRequestReviewDocuments(
       requestDigest,
       reviewerRecordDigest: record.digest,
       executionId,
-      verdict: index === 0 ? "approved" : "changes-requested",
-      summary: index === 0 ? "No blocking findings." : "A focused correction is required.",
+      verdict,
+      summary:
+        verdict === "approved" ? "No blocking findings." : "A focused correction is required.",
       findings:
-        index === 0
+        verdict === "approved"
           ? []
           : [
               {
-                id: "review/finding",
+                id: `review/finding-${String(index + 1)}`,
                 severity: "high",
                 path: "tracked.txt",
                 line: 1,
@@ -335,7 +345,12 @@ export function completedExternalPullRequestReviewDocuments(
     candidateDigest: fixture.candidateDocument.digest,
     patchDigest,
     reviewPolicyDigest: fixture.policyDocument.digest,
-    decision: "human-review-required",
+    decision:
+      options.decision === "changes-requested"
+        ? "changes-requested"
+        : options.decision === "approved"
+          ? "approved"
+          : "human-review-required",
     reviewerRecords: records.map(({ record }) => record.value),
     reviews: records.map(({ result }) => result.value),
     aggregateUsage: { ...usage(), workers: 1 },

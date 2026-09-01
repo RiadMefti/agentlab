@@ -125,7 +125,7 @@ describe("SqliteFactoryExternalPullRequestFeedbackRepository", () => {
     try {
       expect(
         (database.prepare("PRAGMA user_version").get() as { user_version: number }).user_version
-      ).toBe(22);
+      ).toBe(23);
       expect(() =>
         database
           .prepare(

@@ -195,6 +195,19 @@ body marker, reviewed head, and configured App user ID. Blind POST retry is forb
 unresolved or conflicting remote evidence reports attention. See
 [ADR 0025](decisions/0025-feedback-only-external-pull-request-review-publication.md).
 
+The fourth external-PR plane is deterministic repair admission through
+`@agentlab/runtime/factory-external-pull-request-repair-admission`. It runs under another exact
+non-root UID and has no provider, process, workspace, GitHub, credential, branch mutation, merge,
+deployment, or release path. A schema-v23 decision must join one completed review bundle to its
+exact completed feedback publication and a canonical admission policy that transitively pins future
+repair execution, cost, role, gate, and skill authority. Only unanimous `changes-requested` results
+within reviewed author/fork, age, severity, finding, file, and line limits can receive one expiring
+R1 authorization. The capability carries evidence digests and finding selectors, never contributor
+or review prose, and fixes publication to a future replacement draft with remote write, auto-merge,
+and release disabled. Denials are immutable too, exact retries are idempotent, and scheduler
+revocation before the transaction prevents authority creation. See
+[ADR 0026](decisions/0026-deterministic-external-pull-request-repair-admission.md).
+
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
 literal `--confirm-repair`. The application revalidates the task, completed dispatch, canonical PR
@@ -598,7 +611,9 @@ present patches, run independent reviewed skills in isolated provider sessions, 
 local review evidence, but it cannot fetch, approve, repair, push, merge, or release. A third,
 feedback-only broker can publish an exact completed bundle as deterministic `COMMENT` feedback and
 reconcile an uncertain write without granting approval, repair, branch mutation, merge, or release
-authority. None of the external-PR stages is part of the daily chain or provisioned with live
+authority. A fourth credentialless plane can make a bounded immutable repair-admission decision from
+that completed feedback, but external repair execution and replacement-draft publication are not yet
+implemented. None of the external-PR stages is part of the daily chain or provisioned with live
 policy, skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness,
 fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
 hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
@@ -634,6 +649,7 @@ maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ 
 external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
 external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
 external PR feedback ▶ @agentlab/runtime/factory-external-pull-request-feedback ▶ feedback-only publisher composition
+external PR admission ▶ @agentlab/runtime/factory-external-pull-request-repair-admission ▶ deterministic admission composition
 unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
@@ -685,10 +701,12 @@ The product-source rules are executable and fail closed:
   worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
   worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
   runtime.
-- External PR discovery, review, and feedback each have separate closed allowlists. Discovery can
-  only read GitHub, review can run pinned credentialless providers against local objects, and
-  feedback can only read the exact PR and submit a comment review through its dedicated App. No one
-  closure can combine model execution, a credential, branch mutation, merge, or release authority.
+- External PR discovery, review, feedback, and repair admission each have separate closed
+  allowlists. Discovery can only read GitHub, review can run pinned credentialless providers against
+  local objects, and feedback can only read the exact PR and submit a comment review through its
+  dedicated App. Admission can only read completed local evidence and write a bounded selectors-only
+  capability. No one closure can combine model execution, a credential, branch mutation, merge, or
+  release authority.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,

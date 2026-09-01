@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 22;
+export const latestSchemaVersion = 23;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -4643,6 +4643,179 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory external PR feedback record identity mismatch'); END;
 
       PRAGMA user_version = 22;
+      COMMIT;
+    `);
+  }
+
+  if (version < 23) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_repair_decisions (
+        decision_id TEXT PRIMARY KEY CHECK (length(decision_id) = 36),
+        decision_digest TEXT NOT NULL UNIQUE CHECK (
+          length(decision_digest) = 71 AND substr(decision_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        review_run_digest TEXT NOT NULL CHECK (
+          length(review_run_digest) = 71 AND substr(review_run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_publication_run_id TEXT NOT NULL CHECK (length(feedback_publication_run_id) = 36),
+        feedback_publication_run_digest TEXT NOT NULL CHECK (
+          length(feedback_publication_run_digest) = 71 AND
+          substr(feedback_publication_run_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_record_digest TEXT NOT NULL CHECK (
+          length(feedback_record_digest) = 71 AND substr(feedback_record_digest, 1, 7) = 'sha256:'
+        ),
+        admission_policy_digest TEXT NOT NULL CHECK (
+          length(admission_policy_digest) = 71 AND substr(admission_policy_digest, 1, 7) = 'sha256:'
+        ),
+        decision_status TEXT NOT NULL CHECK (decision_status IN ('authorized', 'denied')),
+        authorization_digest TEXT UNIQUE CHECK (
+          authorization_digest IS NULL OR
+          (length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:')
+        ),
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        decision_json TEXT NOT NULL CHECK (
+          length(decision_json) BETWEEN 2 AND 1048576 AND json_valid(decision_json)
+        ),
+        UNIQUE(bundle_digest, admission_policy_digest),
+        CHECK ((decision_status = 'authorized') = (authorization_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_external_pr_repair_decisions_policy_idx
+        ON factory_external_pr_repair_decisions(
+          repository_id, admission_policy_digest, created_at, decision_id
+        );
+
+      CREATE TABLE factory_external_pr_repair_authorizations (
+        authorization_id TEXT PRIMARY KEY CHECK (length(authorization_id) = 36),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        decision_id TEXT NOT NULL UNIQUE REFERENCES factory_external_pr_repair_decisions(decision_id),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        bundle_digest TEXT NOT NULL CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_record_digest TEXT NOT NULL CHECK (
+          length(feedback_record_digest) = 71 AND substr(feedback_record_digest, 1, 7) = 'sha256:'
+        ),
+        admission_policy_digest TEXT NOT NULL CHECK (
+          length(admission_policy_digest) = 71 AND substr(admission_policy_digest, 1, 7) = 'sha256:'
+        ),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        expires_at TEXT NOT NULL,
+        authorization_json TEXT NOT NULL CHECK (
+          length(authorization_json) BETWEEN 2 AND 33554432 AND json_valid(authorization_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_repair_decisions_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_decisions
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decisions are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_decisions_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_decisions
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decisions are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_decisions_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_decisions
+      WHEN
+        json_extract(NEW.decision_json, '$.decisionId') IS NOT NEW.decision_id OR
+        json_extract(NEW.decision_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.decision_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.decision_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.decision_json, '$.reviewRunDigest') IS NOT NEW.review_run_digest OR
+        json_extract(NEW.decision_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.decision_json, '$.feedbackPublicationRunId')
+          IS NOT NEW.feedback_publication_run_id OR
+        json_extract(NEW.decision_json, '$.feedbackPublicationRunDigest')
+          IS NOT NEW.feedback_publication_run_digest OR
+        json_extract(NEW.decision_json, '$.feedbackRecordDigest')
+          IS NOT NEW.feedback_record_digest OR
+        json_extract(NEW.decision_json, '$.admissionPolicyDigest')
+          IS NOT NEW.admission_policy_digest OR
+        json_extract(NEW.decision_json, '$.status') IS NOT NEW.decision_status OR
+        json_extract(NEW.decision_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.decision_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.decision_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.decision_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.decision_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.decision_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-admission' OR
+        json_extract(NEW.decision_json, '$.actor.sessionId') IS NOT NEW.decision_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_feedback_runs AS feedback
+          JOIN factory_external_pr_feedback_records AS record
+            ON record.publication_run_id = feedback.publication_run_id
+          WHERE feedback.publication_run_id = NEW.feedback_publication_run_id
+            AND feedback.run_digest = NEW.feedback_publication_run_digest
+            AND feedback.repository_id = NEW.repository_id
+            AND feedback.pull_request_number = NEW.pull_request_number
+            AND feedback.review_run_id = NEW.review_run_id
+            AND feedback.review_run_digest = NEW.review_run_digest
+            AND feedback.bundle_digest = NEW.bundle_digest
+            AND record.record_digest = NEW.feedback_record_digest
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_feedback_events AS event
+              WHERE event.publication_run_id = feedback.publication_run_id
+                AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decision identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_authorizations_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_authorizations
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorizations are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_authorizations_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_authorizations
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorizations are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_authorizations_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_authorizations
+      WHEN
+        json_extract(NEW.authorization_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.authorization_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.authorization_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.authorization_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.authorization_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.authorization_json, '$.feedbackRecordDigest')
+          IS NOT NEW.feedback_record_digest OR
+        json_extract(NEW.authorization_json, '$.admissionPolicyDigest')
+          IS NOT NEW.admission_policy_digest OR
+        json_extract(NEW.authorization_json, '$.expectedHeadRevision')
+          IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.authorization_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.authorization_json, '$.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.release') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.publicationMode') IS NOT 'replacement-draft' OR
+        json_extract(NEW.authorization_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.authorization_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.authorization_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-admission' OR
+        json_extract(NEW.authorization_json, '$.actor.sessionId') IS NOT NEW.authorization_id OR
+        NOT EXISTS (
+          SELECT 1 FROM factory_external_pr_repair_decisions AS decision
+          WHERE decision.decision_id = NEW.decision_id
+            AND decision.decision_status = 'authorized'
+            AND decision.authorization_digest = NEW.authorization_digest
+            AND decision.repository_id = NEW.repository_id
+            AND decision.pull_request_number = NEW.pull_request_number
+            AND decision.review_run_id = NEW.review_run_id
+            AND decision.bundle_digest = NEW.bundle_digest
+            AND decision.feedback_record_digest = NEW.feedback_record_digest
+            AND decision.admission_policy_digest = NEW.admission_policy_digest
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorization identity mismatch'); END;
+
+      PRAGMA user_version = 23;
       COMMIT;
     `);
   }

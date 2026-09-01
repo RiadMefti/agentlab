@@ -24,6 +24,9 @@ import type {
   FactoryExternalPullRequestFeedbackPolicy,
   FactoryExternalPullRequestFeedbackRecord,
   FactoryExternalPullRequestFeedbackRun,
+  FactoryExternalPullRequestRepairAdmissionPolicy,
+  FactoryExternalPullRequestRepairAuthorization,
+  FactoryExternalPullRequestRepairDecision,
   FactoryExternalPullRequestDiscoveryEvent,
   FactoryExternalPullRequestDiscoveryPolicy,
   FactoryExternalPullRequestDiscoveryRun,
@@ -96,6 +99,15 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestRepairAdmissionPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairAdmissionPolicy>;
+  externalPullRequestRepairAuthorization(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairAuthorization>;
+  externalPullRequestRepairDecision(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestRepairDecision>;
   externalPullRequestFeedbackPolicy(
     input: unknown
   ): CanonicalFactoryDocument<FactoryExternalPullRequestFeedbackPolicy>;

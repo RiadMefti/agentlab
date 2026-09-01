@@ -140,6 +140,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-external-pull-request-feedback.ts",
         default: "./dist/local-factory-external-pull-request-feedback.js",
         types: "./dist/local-factory-external-pull-request-feedback.d.ts"
+      },
+      "./factory-external-pull-request-repair-admission": {
+        source: "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts",
+        default: "./dist/local-factory-external-pull-request-repair-admission.js",
+        types: "./dist/local-factory-external-pull-request-repair-admission.d.ts"
       }
     }
   }
@@ -423,6 +428,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
         isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -445,6 +451,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
         isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -465,6 +472,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
         isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -531,6 +539,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-external-pull-request-feedback.ts",
       description: "feedback-only external pull-request publisher composition",
       forbidden: externalPullRequestFeedbackCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts",
+      description: "deterministic external pull-request repair admission composition",
+      forbidden: externalPullRequestRepairAdmissionCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -616,6 +629,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-external-pull-request-feedback.ts",
       description: "feedback-only external pull-request publisher command",
       forbidden: externalPullRequestFeedbackCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-repair-admission.ts",
+      description: "deterministic external pull-request repair admission command",
+      forbidden: externalPullRequestRepairAdmissionCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -665,6 +683,7 @@ function brokerCommandForbidden(path: string): boolean {
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
     isFactoryExternalPullRequestFeedbackModule(path) ||
+    isFactoryExternalPullRequestRepairAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -683,6 +702,7 @@ function workerCommandForbidden(path: string): boolean {
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
     isFactoryExternalPullRequestFeedbackModule(path) ||
+    isFactoryExternalPullRequestRepairAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -1591,6 +1611,94 @@ function externalPullRequestFeedbackCommandForbidden(path: string): boolean {
   return false;
 }
 
+const factoryExternalPullRequestRepairAdmissionDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-repository.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestRepairAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-repair-admission-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-repair-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestRepairAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-admission-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-admission-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryExternalPullRequestRepairAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
+    path.startsWith(
+      "packages/runtime/src/application/factory-external-pull-request-repair-admission-"
+    ) ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-repair-admission-coordinator.ts" ||
+    path.startsWith(
+      "packages/runtime/src/domain/factory-external-pull-request-repair-admission-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-admission-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-admission-"
+    )
+  );
+}
+
+function externalPullRequestRepairAdmissionCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryExternalPullRequestReviewModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestRepairAdmissionDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestRepairAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestRepairAdmissionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/contracts/src/")) return "contracts";
   if (path.startsWith("packages/launcher/src/")) return "launcher";
@@ -1612,7 +1720,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||
-    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts"
+    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts"
   ) {
     return "runtime-composition";
   }

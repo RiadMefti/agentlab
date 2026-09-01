@@ -63,6 +63,10 @@
     "./factory-external-pull-request-feedback": {
       "types": "./dist/local-factory-external-pull-request-feedback.d.ts",
       "default": "./dist/local-factory-external-pull-request-feedback.js"
+    },
+    "./factory-external-pull-request-repair-admission": {
+      "types": "./dist/local-factory-external-pull-request-repair-admission.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-admission.js"
     }
   },
   "files": [

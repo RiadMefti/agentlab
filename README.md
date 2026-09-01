@@ -180,6 +180,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   review. SQLite v22 journals intent before POST and reconciles uncertain outcomes by exact marker
   and App user ID without blind duplicate writes. It has no provider, branch write, approval,
   repair, merge, deployment, or release capability.
+- `agentlab factory external-pr-repair-admission-preflight --config ...` verifies the separate
+  non-root deterministic authority plane, all transitive policy pins, and the scheduler switch.
+  `external-pr-repair-admission-tick` consumes only a completed review joined to its completed
+  feedback publication and records one immutable schema-v23 authorization or denial. The capability
+  selects findings by identity without copying untrusted prose, permits one future credentialless
+  repair, requires replacement-draft publication, and grants no remote write, merge, deployment, or
+  release authority.
 - `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
   configuration, exact policy pins, read-only installation token, and remote repository identity.
   `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
@@ -346,7 +353,9 @@ external pull-request inventory; and
 [ADR 0024](docs/decisions/0024-credentialless-external-pull-request-review-evidence.md) for isolated
 local external-review evidence; and
 [ADR 0025](docs/decisions/0025-feedback-only-external-pull-request-review-publication.md) for the
-separate advisory publication boundary. The dormant procedures are in
+separate advisory publication boundary; and
+[ADR 0026](docs/decisions/0026-deterministic-external-pull-request-repair-admission.md) for the
+selectors-only external repair authority boundary. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

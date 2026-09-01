@@ -499,6 +499,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_repair_authorizations;
+        DROP TABLE factory_external_pr_repair_decisions;
         DROP TABLE factory_external_pr_feedback_records;
         DROP TABLE factory_external_pr_feedback_events;
         DROP TABLE factory_external_pr_feedback_runs;
@@ -564,6 +566,8 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_repair_authorizations;
+        DROP TABLE factory_external_pr_repair_decisions;
         DROP TABLE factory_external_pr_feedback_records;
         DROP TABLE factory_external_pr_feedback_events;
         DROP TABLE factory_external_pr_feedback_runs;

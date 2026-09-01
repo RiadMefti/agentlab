@@ -455,6 +455,52 @@ whose POST has not started. Read-only reconciliation of a potentially completed 
 permitted so evidence is not lost. No timer, account, App, policy, or authority switch is installed
 or enabled by AgentLab.
 
+## External pull-request repair admission
+
+Run deterministic repair admission under a separate non-root account. Its owner-only config schema
+is `agentlab.local-factory-external-pull-request-repair-admission.v1` and contains only the durable
+database path, exact repository, `processUserId`, admission-policy path, and expected canonical
+digest. It has no GitHub App or provider configuration. A minimal policy is:
+
+```json
+{
+  "schemaVersion": "agentlab.external-pull-request-repair-admission-policy.v1",
+  "id": "agentlab/external-pull-request-repair-admission",
+  "version": "1.0.0",
+  "repositoryId": "owner/repository",
+  "reviewPolicyDigest": "sha256:...",
+  "feedbackPolicyDigest": "sha256:...",
+  "repairExecutionPolicyDigest": "sha256:...",
+  "costPolicyDigest": "sha256:...",
+  "roleIdentityPolicyDigest": "sha256:...",
+  "gateProfileDigest": "sha256:...",
+  "skillPackageDigests": ["sha256:..."],
+  "allowedAuthorAssociations": ["owner", "member", "collaborator", "contributor"],
+  "allowForks": false,
+  "minimumFindingSeverity": "high",
+  "maximumFindings": 8,
+  "maximumChangedFiles": 20,
+  "maximumChangedLines": 500,
+  "maximumReviewAgeHours": 24,
+  "authorizationTtlSeconds": 900,
+  "maximumCandidatesPerTick": 3,
+  "maximumRiskTier": "R1"
+}
+```
+
+```text
+agentlab factory external-pr-repair-admission-preflight --config /absolute/external-pr-repair-admission.json
+agentlab factory external-pr-repair-admission-tick --config /absolute/external-pr-repair-admission.json --admission-policy sha256:... --review-policy sha256:... --feedback-policy sha256:... --repair-execution-policy sha256:... --cost-policy sha256:... --role-policy sha256:... --gate-profile sha256:...
+```
+
+Preflight reports all transitive pins and the scheduler switch without writing. A tick considers
+only schema-v21 review bundles whose exact schema-v22 feedback journal completed. SQLite schema v23
+atomically records authorized and denied decisions. Authorizations contain finding IDs and evidence
+digests, not model or contributor prose, permit one future credentialless attempt, and require a
+replacement draft. They grant no remote write, merge, deployment, or release authority. Disable the
+scheduler to stop new admissions; existing immutable decisions remain evidence and must not be
+deleted or edited.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -485,8 +531,8 @@ sandboxed eval producer with content-addressed evidence now exists. Durable read
 discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
 bounded read-only external pull-request inventory, credentialless isolated external review evidence,
-feedback-only external review publication, and a content-addressed separated-service renderer exist
-but are not provisioned or activated. External repair admission and safe contributor/fork repair
-publication are not yet implemented. See
-[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
-are required before calling the factory self-maintaining.
+feedback-only external review publication, deterministic external repair admission, and a
+content-addressed separated-service renderer exist but are not provisioned or activated. External
+repair execution and safe contributor/fork replacement-draft publication are not yet implemented.
+See [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining
+controls are required before calling the factory self-maintaining.

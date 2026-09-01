@@ -6,6 +6,7 @@ export * from "./factory-eval-production.js";
 export * from "./factory-external-pull-request-discovery.js";
 export * from "./factory-external-pull-request-review.js";
 export * from "./factory-external-pull-request-feedback.js";
+export * from "./factory-external-pull-request-repair-admission.js";
 export * from "./factory-execution.js";
 export * from "./factory-pull-request-observation.js";
 export * from "./factory-pull-request-repair.js";

@@ -94,6 +94,28 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-external-pull-request-repair-admission-preflight") {
+    const { runFactoryExternalPullRequestRepairAdmissionPreflight } =
+      await import("./run-factory-external-pull-request-repair-admission.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairAdmissionPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-admission-tick") {
+    const { runFactoryExternalPullRequestRepairAdmissionTick } =
+      await import("./run-factory-external-pull-request-repair-admission.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairAdmissionTick(action.configPath, {
+      expectedAdmissionPolicyDigest: action.expectedAdmissionPolicyDigest,
+      expectedReviewPolicyDigest: action.expectedReviewPolicyDigest,
+      expectedFeedbackPolicyDigest: action.expectedFeedbackPolicyDigest,
+      expectedRepairExecutionPolicyDigest: action.expectedRepairExecutionPolicyDigest,
+      expectedCostPolicyDigest: action.expectedCostPolicyDigest,
+      expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest,
+      expectedGateProfileDigest: action.expectedGateProfileDigest
+    });
+    return;
+  }
   if (action.kind === "factory-maintenance-discovery-tick") {
     const { runFactoryMaintenanceDiscoveryTick } =
       await import("./run-factory-maintenance-discovery.js");
