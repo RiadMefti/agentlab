@@ -103,6 +103,8 @@ import type {
   FactoryMaintenanceDiscoveryRunRecord,
   FactoryMaintenanceDiscoveryRunRequest,
   FactoryMaintenanceFinding,
+  FactoryOperationsHealthPolicy,
+  FactoryOperationsHealthReport,
   FactorySpecification,
   ImmutableTaskContract,
   Sha256Digest,
@@ -117,6 +119,8 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  operationsHealthPolicy(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthPolicy>;
+  operationsHealthReport(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthReport>;
   dailyQuotaPolicy(input: unknown): CanonicalFactoryDocument<FactoryDailyQuotaPolicy>;
   dailyQuotaReservation(input: unknown): CanonicalFactoryDocument<FactoryDailyQuotaReservation>;
   externalPullRequestReplacementDraftPolicy(

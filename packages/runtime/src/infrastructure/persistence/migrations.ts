@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+export const FACTORY_DATABASE_SCHEMA_VERSION = 27;
+
 export const latestSchemaVersion = 27;
 
 /** Applies forward-only SQLite migrations in transactions. */

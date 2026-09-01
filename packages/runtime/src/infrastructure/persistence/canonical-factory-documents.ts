@@ -105,6 +105,8 @@ import {
   factoryMaintenanceDiscoveryRunRequestSchema,
   factoryMaintenanceDiscoveryRunSchema,
   factoryMaintenanceFindingSchema,
+  factoryOperationsHealthPolicySchema,
+  factoryOperationsHealthReportSchema,
   factorySpecificationSchema,
   immutableTaskContractSchema,
   taskEventSchema
@@ -116,6 +118,14 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public operationsHealthPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryOperationsHealthPolicySchema.parse(input));
+  }
+
+  public operationsHealthReport(input: unknown) {
+    return encodeCanonicalDocument(factoryOperationsHealthReportSchema.parse(input));
+  }
+
   public dailyQuotaPolicy(input: unknown) {
     return encodeCanonicalDocument(factoryDailyQuotaPolicySchema.parse(input));
   }

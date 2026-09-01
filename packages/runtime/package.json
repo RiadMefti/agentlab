@@ -48,6 +48,10 @@
       "types": "./dist/local-factory-orchestration.d.ts",
       "default": "./dist/local-factory-orchestration.js"
     },
+    "./factory-operations-health": {
+      "types": "./dist/local-factory-operations-health.d.ts",
+      "default": "./dist/local-factory-operations-health.js"
+    },
     "./factory-maintenance-discovery": {
       "types": "./dist/local-factory-maintenance-discovery.d.ts",
       "default": "./dist/local-factory-maintenance-discovery.js"

@@ -121,6 +121,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         default: "./dist/local-factory-orchestration.js",
         types: "./dist/local-factory-orchestration.d.ts"
       },
+      "./factory-operations-health": {
+        source: "packages/runtime/src/local-factory-operations-health.ts",
+        default: "./dist/local-factory-operations-health.js",
+        types: "./dist/local-factory-operations-health.d.ts"
+      },
       "./factory-maintenance-discovery": {
         source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
         default: "./dist/local-factory-maintenance-discovery.js",
@@ -446,6 +451,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -471,6 +477,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -494,6 +501,7 @@ function compositionBoundaryViolations(
         isFactoryExternalPullRequestRepairAdmissionModule(path) ||
         isFactoryExternalPullRequestRepairExecutionModule(path) ||
         isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -540,6 +548,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-orchestration.ts",
       description: "read-only orchestration renderer",
       forbidden: orchestrationCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-operations-health.ts",
+      description: "credentialless read-only operations health composition",
+      forbidden: operationsHealthCommandForbidden
     },
     {
       entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
@@ -647,6 +660,11 @@ function compositionBoundaryViolations(
       forbidden: orchestrationCommandForbidden
     },
     {
+      entry: "apps/tui/src/run-factory-operations-health.ts",
+      description: "credentialless read-only operations health command",
+      forbidden: operationsHealthCommandForbidden
+    },
+    {
       entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
       description: "credentialless maintenance discovery command",
       forbidden: maintenanceDiscoveryCommandForbidden
@@ -737,6 +755,7 @@ function brokerCommandForbidden(path: string): boolean {
     isFactoryExternalPullRequestRepairAdmissionModule(path) ||
     isFactoryExternalPullRequestRepairExecutionModule(path) ||
     isFactoryExternalPullRequestRepairQualificationModule(path) ||
+    isFactoryOperationsHealthModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -758,6 +777,7 @@ function workerCommandForbidden(path: string): boolean {
     isFactoryExternalPullRequestRepairAdmissionModule(path) ||
     isFactoryExternalPullRequestRepairExecutionModule(path) ||
     isFactoryExternalPullRequestRepairQualificationModule(path) ||
+    isFactoryOperationsHealthModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -1252,6 +1272,64 @@ function orchestrationCommandForbidden(path: string): boolean {
   if (path.startsWith("packages/runtime/src/application/")) return true;
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryOrchestrationInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryOperationsHealthDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-daily-quota-integrity.ts",
+  "packages/runtime/src/domain/factory-daily-quota-repository.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-operations-health-source.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-task-state.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts"
+]);
+
+const factoryOperationsHealthApplicationModules = new Set([
+  "packages/runtime/src/application/factory-operations-health-service.ts",
+  "packages/runtime/src/application/local-factory-operations-health-coordinator.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryOperationsHealthInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts"
+]);
+
+function isFactoryOperationsHealthModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-operations-health.ts" ||
+    path === "packages/runtime/src/application/factory-operations-health-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-operations-health-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts"
+  );
+}
+
+function operationsHealthCommandForbidden(path: string): boolean {
+  if (
+    path.startsWith("packages/runtime/src/local-") &&
+    path !== "packages/runtime/src/local-factory-operations-health.ts"
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryOperationsHealthDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryOperationsHealthApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryOperationsHealthInfrastructureModules.has(path);
   }
   return false;
 }
@@ -2107,6 +2185,7 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-canary-authority.ts" ||
     path === "packages/runtime/src/local-factory-canary-admission.ts" ||
     path === "packages/runtime/src/local-factory-orchestration.ts" ||
+    path === "packages/runtime/src/local-factory-operations-health.ts" ||
     path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||

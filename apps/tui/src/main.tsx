@@ -332,6 +332,11 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryAuthorityStatus(action.configPath);
     return;
   }
+  if (action.kind === "factory-operations-health") {
+    const { runFactoryOperationsHealth } = await import("./run-factory-operations-health.js");
+    process.exitCode = await runFactoryOperationsHealth(action.configPath);
+    return;
+  }
   if (action.kind === "factory-broker-authority") {
     const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryBrokerAuthority(

@@ -1258,6 +1258,7 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory intake-register --config");
     expect(helpText).toContain("factory worker-preflight --config");
     expect(helpText).toContain("factory orchestration-render --config");
+    expect(helpText).toContain("factory operations-health --config");
     expect(helpText).toContain("factory maintenance-discovery-preflight --config");
     expect(helpText).toContain("factory maintenance-discovery-tick --config");
     expect(helpText).toContain("factory external-pr-review-preflight --config");
@@ -1293,6 +1294,23 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("--confirm-run");
     expect(helpText).toContain("AGENTLAB_DISABLE_MOUSE");
     expect(helpText).toContain("keep mouse input local");
+  });
+
+  it("parses only an absolute operations health config path", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "operations-health",
+        "--config",
+        "/private/agentlab/operations-health.json"
+      ])
+    ).toEqual({
+      kind: "factory-operations-health",
+      configPath: "/private/agentlab/operations-health.json"
+    });
+    expect(() =>
+      parseCliArguments(["factory", "operations-health", "--config", "health.json"])
+    ).toThrow(/Usage/u);
   });
 
   it("rejects unknown flags and ambiguous arguments", () => {

@@ -365,8 +365,11 @@ sharing broker credentials; broker config v4 also pins the schedule, daily quota
 needed for reservation-bound dispatch. The dormant daily-cycle v3 orders discovery → canary
 admission → quota-bound scheduler → brokered draft/repair stages while keeping separate fixed-UID
 configs; legacy manifests remain readable but cannot render an executable cycle. The current
-repository governance blocks the write commands. No unit is installed or activated, and no live
-factory task or PR has been created through these factory commands. See
+repository also exposes a separate policy-pinned, query-only operations-health command that
+revalidates canonical ledger documents, reports schedule/task/quota health, and returns
+monitor-friendly healthy/degraded/critical exit codes without any worker, broker, provider, GitHub,
+or authority-mutation port. Repository governance blocks the write commands. No unit is installed or
+activated, and no live factory task or PR has been created through these factory commands. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
@@ -400,7 +403,8 @@ strict post-repair gate and independent-review boundary; and
 [ADR 0029](docs/decisions/0029-brokered-external-pull-request-replacement-drafts.md) for the
 contributor-safe publication boundary; and
 [ADR 0030](docs/decisions/0030-durable-daily-aggregate-quotas.md) for host-local repository and
-organization daily ceilings. The dormant procedures are in
+organization daily ceilings; and [ADR 0031](docs/decisions/0031-query-only-operations-health.md) for
+the credentialless ledger health projection. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

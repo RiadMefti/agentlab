@@ -627,6 +627,48 @@ Preserve the branch, SQLite, artifacts, and journal for investigation. Disable e
 approve, merge, deploy, or release from this account. No App, account, key, policy, switch, timer,
 or live config is provisioned or enabled by AgentLab.
 
+## Query-only operations health
+
+Run health inspection from a distinct credentialless account with read permission to the ledger and
+owner-only policy/config files. The command never acquires a writer lease and has no control,
+provider, GitHub, worker, broker, merge, or release capability.
+
+```json
+{
+  "schemaVersion": "agentlab.operations-health-policy.v1",
+  "id": "agentlab/operations-health",
+  "version": "1.0.0",
+  "lookbackSeconds": 86400,
+  "maximumScheduleOverrunSeconds": 300,
+  "maximumInFlightSilenceSeconds": 3600,
+  "quotaWarningBasisPoints": 8000,
+  "maximumRecordsPerSection": 1000
+}
+```
+
+```json
+{
+  "schemaVersion": "agentlab.local-factory-operations-health.v1",
+  "databasePath": "/var/lib/agentlab/factory.sqlite",
+  "observerId": "operations-observer",
+  "healthPolicyPath": "/etc/agentlab/operations-health-policy.json",
+  "expectedHealthPolicyDigest": "sha256:...",
+  "dailyQuotaPolicyPath": "/etc/agentlab/daily-quota-policy.json",
+  "expectedDailyQuotaPolicyDigest": "sha256:..."
+}
+```
+
+```text
+agentlab factory operations-health --config /etc/agentlab/operations-health.json
+```
+
+The single-line output contains `report` and `reportDigest`. Exit 0 is healthy, 2 is degraded, and 3
+is critical. Critical means the report recommends containment; it does not change either switch.
+Capture the complete line in an append-only monitoring destination before acting on it. A failed
+projection, unsupported database schema, policy drift, invalid canonical/materialized join, or
+record-limit truncation fails closed. No health timer, dashboard, alert transport, or automatic
+incident action is installed by AgentLab.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -649,17 +691,18 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, installed timer, live rate card/config/cohort/quota policy, reviewed case bank or
-installed eval harness, cross-host/global quota coordinator, scheduler dashboard/alerts, secretless
-hosted-provider eval gateway, owner-provisioned activation, merge, telemetry-driven canary, rollback
-controller, or incident automation is shipped. A separate offline sandboxed eval producer with
-content-addressed evidence now exists. Durable read-only maintenance discovery, bounded consumption
-of a human non-release cohort, host-local repository/day and organization/day quota enforcement,
-reservation-bound scheduled execution/draft dispatch, slot-bound PR observation/repair, brokered
-repaired-branch publication, bounded read-only external pull-request inventory, credentialless
-isolated external review evidence, feedback-only external review publication, deterministic external
-repair admission, credentialless one-attempt external repair execution, credentialless strict
-post-repair qualification, a separately credentialed contributor-safe replacement-draft publisher,
-and a content-addressed separated-service renderer exist but are not provisioned or activated. See
-[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
-are required before calling the factory self-maintaining.
+No OS accounts, installed timer, live rate card/config/cohort/quota/health policy, reviewed case
+bank or installed eval harness, cross-host/global quota coordinator, installed dashboard/alert
+delivery, secretless hosted-provider eval gateway, owner-provisioned activation, merge,
+telemetry-driven canary, rollback controller, or incident automation is shipped. A separate offline
+sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
+discovery, bounded consumption of a human non-release cohort, host-local repository/day and
+organization/day quota enforcement, reservation-bound scheduled execution/draft dispatch, slot-bound
+PR observation/repair, brokered repaired-branch publication, bounded read-only external pull-request
+inventory, credentialless isolated external review evidence, feedback-only external review
+publication, deterministic external repair admission, credentialless one-attempt external repair
+execution, credentialless strict post-repair qualification, a separately credentialed
+contributor-safe replacement-draft publisher, a content-addressed separated-service renderer, and a
+query-only content-addressed operations-health report exist but are not provisioned or activated.
+See [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining
+controls are required before calling the factory self-maintaining.

@@ -717,6 +717,15 @@ authority, durable admission, reservation-bound scheduled execution, draft dispa
 repair consumption, repaired-branch publication, and dormant orchestration rendering exist but
 remain unactivated.
 
+The separate `@agentlab/runtime/factory-operations-health` composition opens that ledger with SQLite
+read-only and `query_only`, pins strict owner-reviewed health and daily-quota policies, and
+revalidates canonical control, schedule, task, and quota documents against materialized columns. It
+emits one content-addressed healthy/degraded/critical report covering authority state, recent/open
+schedules, recent/active tasks, and current UTC-day quota utilization. Its architecture closure has
+no writer lease, agent/provider, GitHub, authority mutation, worker, broker, terminal, tmux, merge,
+release, deployment, rollback, or incident port. No monitor unit, alert delivery, automatic
+containment, or report archive is provisioned.
+
 ## Dependency map
 
 Arrows are compile-time dependencies. Runtime control flow may travel in the opposite direction

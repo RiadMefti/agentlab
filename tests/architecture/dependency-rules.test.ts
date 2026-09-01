@@ -997,6 +997,10 @@ function architectureFixture(): string {
         default: "./dist/local-factory-orchestration.js",
         types: "./dist/local-factory-orchestration.d.ts"
       },
+      "./factory-operations-health": {
+        default: "./dist/local-factory-operations-health.js",
+        types: "./dist/local-factory-operations-health.d.ts"
+      },
       "./factory-maintenance-discovery": {
         default: "./dist/local-factory-maintenance-discovery.js",
         types: "./dist/local-factory-maintenance-discovery.d.ts"
@@ -1046,6 +1050,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-canary-authority.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-canary-admission.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-operations-health.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
   write(
