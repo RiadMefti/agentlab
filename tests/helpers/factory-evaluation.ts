@@ -115,6 +115,7 @@ export function testFactoryConfigurationCandidate(input: {
   readonly baseRevision?: string;
   readonly policyBundleDigest?: Sha256Digest;
   readonly schedulePolicyDigest?: Sha256Digest | null;
+  readonly harnessDigest?: Sha256Digest;
   readonly skillPackageDigests?: readonly Sha256Digest[];
   readonly createdAt?: string;
 }): FactoryConfigurationCandidate {
@@ -127,7 +128,7 @@ export function testFactoryConfigurationCandidate(input: {
     policyBundleDigest: input.policyBundleDigest ?? testEvalDigest(2),
     schedulePolicyDigest:
       input.schedulePolicyDigest === undefined ? testEvalDigest(3) : input.schedulePolicyDigest,
-    harnessDigest: testEvalDigest(4),
+    harnessDigest: input.harnessDigest ?? testEvalDigest(4),
     providerConfigurationDigest: testEvalDigest(input.providerDigestIndex),
     skillPackageDigests: input.skillPackageDigests ?? [testEvalDigest(7), testEvalDigest(8)],
     createdAt: input.createdAt ?? "2026-08-30T10:00:00.000Z"

@@ -32,6 +32,10 @@
       "types": "./dist/local-factory-eval-attestor.d.ts",
       "default": "./dist/local-factory-eval-attestor.js"
     },
+    "./factory-eval-producer": {
+      "types": "./dist/local-factory-eval-producer.d.ts",
+      "default": "./dist/local-factory-eval-producer.js"
+    },
     "./factory-canary-authority": {
       "types": "./dist/local-factory-canary-authority.d.ts",
       "default": "./dist/local-factory-canary-authority.js"

@@ -107,6 +107,10 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-maintenance-discovery",
           "packages/runtime/src/local-factory-maintenance-discovery.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-eval-producer",
+          "packages/runtime/src/local-factory-eval-producer.ts"
         )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
@@ -118,7 +122,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-canary-authority.ts"),
       source("packages/runtime/src/local-factory-canary-admission.ts"),
       source("packages/runtime/src/local-factory-orchestration.ts"),
-      source("packages/runtime/src/local-factory-maintenance-discovery.ts")
+      source("packages/runtime/src/local-factory-maintenance-discovery.ts"),
+      source("packages/runtime/src/local-factory-eval-producer.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -165,6 +170,40 @@ describe("architecture dependency rules", () => {
         "packages/runtime/src/infrastructure/github/github-rest-client.ts",
         "packages/runtime/src/infrastructure/providers/model.ts",
         "packages/runtime/src/local-factory-broker.ts"
+      ])
+    );
+  });
+
+  it("keeps offline eval production separate from providers, signing, and authority", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-eval-producer.ts", [
+        local(
+          "./application/factory-eval-production-service.js",
+          "packages/runtime/src/application/factory-eval-production-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-eval-production-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("apps/tui/src/run-factory-eval-producer.ts", [
+        local(
+          "@agentlab/runtime/factory-eval-attestor",
+          "packages/runtime/src/local-factory-eval-attestor.ts"
+        )
+      ]),
+      source("packages/runtime/src/local-factory-eval-attestor.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(2);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/providers/model.ts",
+        "packages/runtime/src/local-factory-eval-attestor.ts"
       ])
     );
   });
@@ -781,6 +820,10 @@ function architectureFixture(): string {
       "./factory-maintenance-discovery": {
         default: "./dist/local-factory-maintenance-discovery.js",
         types: "./dist/local-factory-maintenance-discovery.d.ts"
+      },
+      "./factory-eval-producer": {
+        default: "./dist/local-factory-eval-producer.js",
+        types: "./dist/local-factory-eval-producer.d.ts"
       }
     }
   });
@@ -796,6 +839,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-canary-admission.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
   return root;
 }
 

@@ -1,6 +1,6 @@
 # ADR 0009: isolate eval signing from verification and authority
 
-**Status:** Accepted; implemented but not consumed by canary authority
+**Status:** Accepted; implemented and consumed by dormant canary authority
 
 **Date:** 2026-08-31
 
@@ -24,7 +24,7 @@ provenance, and a valid signature does not prove that the stated trials were hon
 Add a third exact promotion composition and keep all three roles disjoint:
 
 ```text
-external harness emits exact eval-run
+sandboxed offline producer emits exact eval-run
              │
              ├──▶ credentialless evaluator ──▶ immutable run + deterministic assessment
              │
@@ -96,12 +96,16 @@ evaluation, a new signed artifact, independent review, and a later explicit auth
 
 ## Deliberate exclusions
 
-AgentLab still does not execute the eval harness, attest grader artifacts independently, protect a
-private key in hardware, publish transparency-log entries, consume a cohort, or turn an attestation
-into task/scheduler/broker/merge/release authority. The signer authenticates bytes and key custody;
-it does not establish that an external harness was honest. Canary issuance still reads the
-deterministic assessment only. Cohort consumption must be a later crash-durable change that requires
-a currently valid verified attestation and aggregate reservation accounting.
+> **2026-09-01 update:** [ADR 0022](0022-sandboxed-eval-evidence-production.md) adds the omitted
+> offline harness and content-addressed grader-evidence producer. Signing remains a later disjoint
+> process and authenticates the completed run rather than each grader artifact independently.
+
+AgentLab still does not attest grader artifacts independently, protect a private key in hardware, or
+publish transparency-log entries. The signer itself cannot consume a cohort or turn an attestation
+into task/scheduler/broker/merge/release authority. It authenticates bytes and key custody; it does
+not establish that an installed harness was honest. Later decisions made verified attestation
+mandatory for canary issuance and added separately crash-durable aggregate cohort reservation;
+neither capability is reachable from the signer.
 
 ## Fitness functions
 

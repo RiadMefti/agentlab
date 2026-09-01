@@ -18,14 +18,15 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use eight
-separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
-switch operator, a credential-bearing draft-PR broker, a credentialless governed intake operator, a
-credentialless deterministic evaluator/verifier, an isolated key-bearing eval attestor, and a
-separate human canary-authority operator, plus a credentialless canary-admission operator. Only the
-broker may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has
-no HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command
-language, MCP bridge, or provider-session translation layer.
+The interactive product is local-only and single-process. Optional factory operations use separate,
+short-lived local compositions: a credentialless model-bearing worker, a human-only local switch
+operator, a credential-bearing draft-PR broker, credentialless governed intake and maintenance
+discovery operators, an offline sandboxed eval producer, a credentialless deterministic
+evaluator/verifier, an isolated key-bearing eval attestor, a separate human canary-authority
+operator, a credentialless canary-admission operator, and a read-only unit renderer. Only the broker
+may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has no
+HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command language,
+MCP bridge, or provider-session translation layer.
 
 ## Two paths
 
@@ -53,19 +54,19 @@ stays behind ports. Deterministic code—not captain instructions—owns task st
 budgets, gates, evidence, and remote authority.
 
 The source tree now contains the dormant stages 1–4 safety path, bounded local scheduler admission,
-and a dormant eval-promotion ledger: strict contracts; immutable SQLite task/evidence/eval journals;
-deterministic risk and promotion policy; kill switches; content-addressed artifacts; exact-base
-disposable worktrees; bounded provider-native implement, repair, and independent-review adapters;
-sandboxed deterministic gates; authenticated evidence channels; and a separate GitHub adapter that
-can reconstruct one exact patch and request only a draft PR after rechecking repository governance.
-Factory policy 1.3 conservatively classifies the complete allowed write scope before execution,
-binds preparation evidence to the compiled contract, and pins per-tier process-tree limits. Every
-agent or gate executor requires an injected OS isolator; the Linux adapter creates a unique
-transient systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no unbounded
-fallback. The wrapper strips its user-manager environment before starting the target. Deterministic
-gates run Bubblewrap inside that scope. The model-bearing subprocess environment is allowlisted and
-excludes repository, cloud, and package credentials. The broker credential is acquired only at the
-separate broker boundary.
+and a dormant eval-production/promotion lane: strict contracts; immutable SQLite task/evidence/eval
+journals; deterministic risk and promotion policy; kill switches; content-addressed artifacts;
+exact-base disposable worktrees; bounded provider-native implement, repair, and independent-review
+adapters; sandboxed deterministic gates; authenticated evidence channels; and a separate GitHub
+adapter that can reconstruct one exact patch and request only a draft PR after rechecking repository
+governance. Factory policy 1.3 conservatively classifies the complete allowed write scope before
+execution, binds preparation evidence to the compiled contract, and pins per-tier process-tree
+limits. Every agent or gate executor requires an injected OS isolator; the Linux adapter creates a
+unique transient systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no
+unbounded fallback. The wrapper strips its user-manager environment before starting the target.
+Deterministic gates run Bubblewrap inside that scope. The model-bearing subprocess environment is
+allowlisted and excludes repository, cloud, and package credentials. The broker credential is
+acquired only at the separate broker boundary.
 
 That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
 requests an installation token for one configured numeric repository ID with only `checks:read`,
@@ -265,26 +266,38 @@ rechecks and reports that policy digest, and schedule-run v2 persists it across 
 [ADR 0011](decisions/0011-enforced-signer-worker-identities.md) and
 [Local factory scheduler operations](factory-operations.md).
 
-Configuration promotion is a separate three-process boundary accepted by
+Configuration promotion is a separate four-process boundary accepted by
 [ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and
-[ADR 0009](decisions/0009-isolated-eval-attestation.md). The exact
-`@agentlab/runtime/factory-evaluator` composition is credentialless: it ingests one strict
+[ADR 0009](decisions/0009-isolated-eval-attestation.md), with offline evidence production defined by
+[ADR 0022](decisions/0022-sandboxed-eval-evidence-production.md). The exact
+`@agentlab/runtime/factory-eval-producer` composition accepts one digest-pinned immutable production
+job and runs only administrator-installed baseline, challenger, and grader executables. Each exact
+executable is re-hashed before use and after execution. Fixed protocols run sequentially in
+no-network, empty-home bubblewrap sandboxes inside resource-bounded systemd user scopes. Fixtures,
+outputs, traces, stdout/stderr, grader evidence, requests, isolation, timings, and complete usage
+are content-addressed. SQLite version 19 stores the immutable job and append-only pre/post-execution
+journal; a dangling active scope is never rerun and becomes terminal only after exact systemd
+inactivity is confirmed. Only a complete matched matrix emits `agentlab.eval-run.v1`. The producer
+has no provider secret, evaluator, signer, human authority, scheduler, broker, GitHub, merge, or
+release capability, and is intentionally absent from the daily maintenance chain.
+
+The exact `@agentlab/runtime/factory-evaluator` composition is credentialless: it ingests one strict
 owner-only matched eval report from a pinned gate-runner ID, computes conservative deterministic
 metrics from raw samples, and records one pass/deny assessment. Config v2 also pins one Ed25519
 public key and independent freshness/lifetime limits. The evaluator can verify a canonical DSSE
 in-toto statement against the exact immutable run and assessment and append one attestation record.
 It has no signer, provider executor, process runner, worktree, GitHub, authority switch, merge, or
-release port.
+release port. The producer's run grants no authority and must traverse this evaluator boundary.
 
 The exact `@agentlab/runtime/factory-eval-attestor` composition receives only the same strict run,
 runner identity, private-key coordinate, key ID, role-identity policy, and timing bounds. It proves
 the configured non-root signer UID before key access, emits one portable signed artifact, and has no
 database, verifier ledger, provider, process, repository, GitHub, broker, authority, merge, release,
 or canary port. Signing and verification are separate crypto modules and separate transitive
-executable allowlists. A signature authenticates exact bytes and key custody; the repository still
-does not ship the harness that proves trials were honestly executed. Each predicate binds the shared
-role-policy digest, and the evaluator independently pins it; this prevents a valid signer key from
-silently authenticating a different signer/worker deployment.
+executable allowlists. A signature authenticates exact bytes and key custody; the sandboxed producer
+proves recorded lineage and isolation, not that an installed harness or grader was honest. Each
+predicate binds the shared role-policy digest, and the evaluator independently pins it; this
+prevents a valid signer key from silently authenticating a different signer/worker deployment.
 
 The distinct `@agentlab/runtime/factory-canary-authority` composition accepts only an exact verified
 attestation digest and one strict owner-only human request. Config v2 independently pins and
@@ -538,21 +551,22 @@ re-observation are implemented. A bounded daily-slot consumer joins scheduled ca
 authenticated observations and deterministic repair admission, and a recovery-first credentialless
 consumer now turns exact authorizations into gated local repair proposals. A separate recovery-first
 broker consumer publishes those proposals through the existing durable non-force update service and
-returns them to exact-head observation. Durable bounded daily maintenance discovery and automatic
-consumption of pre-existing human cohort authority are implemented. Repository/day and
-organization/day quotas, a sandboxed harness producer, owner-provisioned activation,
-telemetry-driven canary comparison, merge, release, rollback, and incident automation remain later
-stages. A read-only daily-cycle compiler now verifies one owner-only manifest, reviewed policy
-digests, the AgentLab executable digest, distinct worker, broker, and attestor UIDs, repair
-ceilings, and timeouts. It emits a content-addressed system-level systemd bundle whose
-non-persistent UTC timer chains fixed-argv one-shot services across separate UIDs, stops on any
-nonzero result, signals an incident target, and finally re-observes the last published head. Every
-stage first runs fixed `/usr/bin/sha256sum` argv against the generated exact executable check
-record, so binary drift stops before AgentLab runs. The renderer cannot write or install artifacts,
-call the service manager, change authority, or touch the ledger. Deterministic assessment, bounded
-non-release cohort authority, durable admission, reservation-bound scheduled execution, draft
-dispatch, PR maintenance, repair consumption, repaired-branch publication, and dormant orchestration
-rendering exist but remain unactivated.
+returns them to exact-head observation. Durable bounded daily maintenance discovery, automatic
+consumption of pre-existing human cohort authority, and a separate offline sandboxed eval producer
+are implemented. The producer is not part of the daily chain and has no provisioned harness,
+fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
+hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
+merge, release, rollback, and incident automation remain later stages. A read-only daily-cycle
+compiler now verifies one owner-only manifest, reviewed policy digests, the AgentLab executable
+digest, distinct worker, broker, and attestor UIDs, repair ceilings, and timeouts. It emits a
+content-addressed system-level systemd bundle whose non-persistent UTC timer chains fixed-argv
+one-shot services across separate UIDs, stops on any nonzero result, signals an incident target, and
+finally re-observes the last published head. Every stage first runs fixed `/usr/bin/sha256sum` argv
+against the generated exact executable check record, so binary drift stops before AgentLab runs. The
+renderer cannot write or install artifacts, call the service manager, change authority, or touch the
+ledger. Deterministic assessment, bounded non-release cohort authority, durable admission,
+reservation-bound scheduled execution, draft dispatch, PR maintenance, repair consumption,
+repaired-branch publication, and dormant orchestration rendering exist but remain unactivated.
 
 ## Dependency map
 
@@ -565,6 +579,7 @@ intake operator ───▶ @agentlab/runtime/factory-intake ▶ local-factory-
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
 human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
+eval producer ──────▶ @agentlab/runtime/factory-eval-producer ▶ local-factory-eval-producer composition
 eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ local-factory-evaluator composition
 eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
@@ -582,15 +597,15 @@ unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ loc
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                                                               | May depend on workspace areas                  |
-| ------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                                                          | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                                                       | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                       | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                      | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, intake, worker, evaluator, admission, authorities, broker, and dormant unit rendering | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                            | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff                                              | launcher                                       |
+| Area                      | Owns                                                                                                             | May depend on workspace areas                  |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                                                                        | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                                                                     | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                                     | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                                    | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, eval producer/evaluator, admission, authorities, broker, and dormant unit rendering | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                                          | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                                                            | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -599,9 +614,9 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, evaluator, eval-attestor, switch-authority, canary-authority, canary-admission,
-  maintenance-discovery, and orchestration-renderer subpaths are exact; every runtime deep import
-  fails.
+  broker, worker, eval-producer, evaluator, eval-attestor, switch-authority, canary-authority,
+  canary-admission, maintenance-discovery, and orchestration-renderer subpaths are exact; every
+  runtime deep import fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
@@ -610,11 +625,13 @@ The product-source rules are executable and fail closed:
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
-- Evaluator, eval-attestor, canary-authority, and canary-admission closures have separate exact
-  allowlists. None can reach provider, process-execution, GitHub, broker, merge, release, tmux,
-  terminal, or interactive modules. The evaluator cannot reach signing or human canary issuance; the
-  attestor cannot reach the evaluator, SQLite, or any authority. Canary admission cannot issue human
-  authority or execute the task it reserves.
+- Eval-producer, evaluator, eval-attestor, canary-authority, and canary-admission closures have
+  separate exact allowlists. The producer may reach only its offline sandbox/process, artifact, and
+  production-ledger adapters; it cannot reach providers, secrets, evaluation/signing/authority,
+  scheduler, broker, GitHub, merge, release, tmux, terminal, or interactive modules. The remaining
+  promotion closures cannot reach provider or process execution. The evaluator cannot reach signing
+  or human canary issuance; the attestor cannot reach the evaluator, SQLite, or any authority.
+  Canary admission cannot issue human authority or execute the task it reserves.
 - Maintenance discovery has its own exact allowlist. It may reuse read-only provider, isolated
   worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
   worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
@@ -655,6 +672,7 @@ never exclude workspace production source.
 | Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`             |
 | Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                |
 | Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`             |
+| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`         |
 | Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`         |
 | Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`      |
 | Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`      |

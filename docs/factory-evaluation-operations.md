@@ -1,20 +1,22 @@
 # Local factory evaluation, attestation, and canary-authority operations
 
-This runbook covers the dormant offline promotion ledger accepted by
+This runbook covers the dormant offline promotion lane accepted by
 [ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and the isolated signing
-boundary in [ADR 0009](decisions/0009-isolated-eval-attestation.md). It does not run an eval
-harness, consume a cohort, contact GitHub, merge, release, deploy, or roll back production.
+boundary in [ADR 0009](decisions/0009-isolated-eval-attestation.md), including the sandboxed
+producer in [ADR 0022](decisions/0022-sandboxed-eval-evidence-production.md). It does not consume a
+cohort, contact GitHub, merge, release, deploy, or roll back production.
 
 ## Trust boundary
 
-Use distinct non-shared operating-system accounts for the external harness, key-bearing attestor,
-credentialless evaluator/verifier, and human release controller. Only the attestor account receives
-the private key. Only the evaluator and human authority receive sequential access to the durable
-SQLite ledger. Keep all files outside the source repository.
+Use distinct non-shared operating-system accounts for the offline producer, key-bearing attestor,
+credentialless evaluator/verifier, and human release controller. Only the producer may execute
+installed eval harnesses; only the attestor receives the private key. Give producer, evaluator, and
+human authority sequential writer access to the durable SQLite ledger, never simultaneous access.
+Keep all files outside the source repository.
 
-Config, role-policy, eval-run, signed-artifact, and canary-request files must be owner-only regular
-files with one link. Symlinks, hard links, group/world permissions, unstable reads, unknown fields,
-and oversized input are rejected.
+Config, production-job, role-policy, eval-run, signed-artifact, and canary-request files must be
+owner-only regular files with one link. Symlinks, hard links, group/world permissions, unstable
+reads, unknown fields, and oversized input are rejected.
 
 ```text
 install -d -m 700 /absolute/private/agentlab
@@ -23,9 +25,87 @@ chmod 600 /absolute/private/agentlab/*.{json,pem}
 
 Runner and operator IDs are audit identities. Authentication comes from operating-system isolation,
 file ownership, private-key custody, the pinned public-key ID, and the exclusive writer lease. A
-signature authenticates exact bytes; it does not prove that the external harness honestly ran the
-trials. Preserve raw runs, grader evidence, signed artifacts, public keys, and ledger backups under
-the organization's retention policy.
+signature authenticates exact bytes; sandboxing and lineage do not prove that an installed harness
+or grader is honest. Preserve raw runs, subject traces, grader evidence, signed artifacts, public
+keys, and ledger backups under the organization's retention policy.
+
+## Produce one matched run offline
+
+The producer is a separate credentialless process. Its owner-only
+`agentlab.local-factory-eval-producer.v1` config names dedicated database, content-addressed
+artifact, and ephemeral workspace roots; the roots must not overlap. It maps each reviewed harness
+or grader descriptor digest to one absolute executable and exact executable digest:
+
+```json
+{
+  "schemaVersion": "agentlab.local-factory-eval-producer.v1",
+  "databasePath": "/absolute/private/producer/agentlab.sqlite",
+  "artifactRoot": "/absolute/private/producer/artifacts",
+  "workspaceRoot": "/absolute/private/producer/workspaces",
+  "runnerId": "trusted-eval-runner",
+  "executables": [
+    {
+      "descriptorDigest": "sha256:...",
+      "executable": "/opt/agentlab-evals/baseline",
+      "executableDigest": "sha256:...",
+      "version": "1.0.0"
+    },
+    {
+      "descriptorDigest": "sha256:...",
+      "executable": "/opt/agentlab-evals/challenger",
+      "executableDigest": "sha256:...",
+      "version": "1.1.0"
+    },
+    {
+      "descriptorDigest": "sha256:...",
+      "executable": "/opt/agentlab-evals/grader",
+      "executableDigest": "sha256:...",
+      "version": "1.0.0"
+    }
+  ],
+  "systemd": {
+    "runExecutable": "/usr/bin/systemd-run",
+    "controlExecutable": "/usr/bin/systemctl",
+    "environmentExecutable": "/usr/bin/env",
+    "version": "systemd 257"
+  },
+  "sandbox": {
+    "bubblewrapExecutable": "/usr/bin/bwrap",
+    "runtimeRoots": ["/opt/agentlab-evals"]
+  }
+}
+```
+
+The separate owner-only `agentlab.eval-production-job.v1` embeds the exact suite, case bank,
+baseline/challenger candidates, their distinct harness descriptors, grader descriptor, budgets,
+resource limits, runner, creation/deadline window, and correlation ID. Every embedded object has a
+matching canonical digest. Fixtures are preloaded content-addressed artifacts. Case seeds are
+unique, the matrix matches the suite exactly, and the aggregate budget reserves all three
+invocations per trial. Review the canonical job out of band and pin its complete SHA-256 digest
+before execution.
+
+```text
+agentlab factory eval-producer-preflight \
+  --config /absolute/private/producer/producer.json \
+  --job /absolute/private/producer/job.json \
+  --job-digest sha256:...
+
+agentlab factory eval-produce \
+  --config /absolute/private/producer/producer.json \
+  --job /absolute/private/producer/job.json \
+  --job-digest sha256:...
+```
+
+Preflight revalidates every digest, fixture, executable binding, matrix, reservation, runner, and
+validity window without starting a harness. Production launches fixed `subject`/`grade` protocols
+sequentially in offline bubblewrap sandboxes inside bounded systemd scopes. The emitted terminal
+result names the exact run artifact and digest; a failed result is final and nonzero. Exact
+completed retries do not execute again. Copy the run artifact by digest to the evaluator account
+through a reviewed read-only transfer and verify its SHA-256 before changing ownership or
+permissions. Never give the producer provider, signing, GitHub, broker, or release credentials.
+
+This lane is intentionally absent from the daily maintenance timer. A candidate cannot originate or
+schedule its own qualification.
 
 ## Provision one Ed25519 trust root
 
@@ -86,7 +166,7 @@ than the signer's and can never exceed one day for issuance delay or seven days 
 }
 ```
 
-The eval harness must emit a complete `agentlab.eval-run.v1` with:
+The producer emits a complete `agentlab.eval-run.v1` with:
 
 ```text
 schemaVersion, runId, suiteDigest, suite,
@@ -275,16 +355,28 @@ authority-mutation capability.
 
 ## Failure, recovery, and incident handling
 
+Production records a start event before each harness launch. If the process dies, retry only the
+same job and digest. An exact active or uncertain systemd scope blocks without changing evidence;
+confirmed inactive scope without terminal evidence records `interrupted-execution` and is never
+rerun. Do not delete its workspace, edit the journal, reuse its job ID, or splice samples from a new
+job. A normal restart may reuse only already finished canonical subject evidence. Deadline, budget,
+executable drift, malformed or incomplete usage, artifact substitution, unsafe output metadata, and
+unconfirmed cleanup all fail closed. Unconfirmed cleanup deliberately leaves the active checkpoint
+and workspace intact until exact scope state can be established. Launched failures retain bounded
+stdout/stderr and either complete reported usage or the full reserved invocation ceiling; unknown
+consumption is never treated as zero.
+
 Run/assessment and approval/cohort pairs commit atomically; an attestation is one immutable append.
 On failure, preserve the database and source evidence and retry only exact input. SQLite rejects
 updates and deletes. Stop if key ID, signature, payload, statement, run/assessment linkage, sample
 order, fixture/seed integrity, policy recomputation, freshness, expiry, stage, repository, risk,
 human sample, task count, or budget differs. A critical safety violation is unconditional denial.
 
-For suspected key or harness compromise:
+For suspected key, harness, grader, sandbox-host, or artifact compromise:
 
 1. Disable scheduler and broker switches; stop evaluation, signing, and canary commands.
-2. Preserve database/WAL, runs, artifacts, key IDs, grader evidence, and relevant logs read-only.
+2. Preserve database/WAL, jobs, runs, subject/grader artifacts, scope state, executable digests, key
+   IDs, and relevant logs read-only.
 3. Quarantine affected candidates and all work derived from them; determine the first bad run.
 4. Rotate the signing key and any independently exposed credentials. Never rewrite old records.
 5. Repair the harness, rerun representative matched trials, sign with the new key, independently
@@ -294,11 +386,13 @@ The current slice does not automate revocation, rollback, notification, or incid
 
 ## Activation gaps
 
-Before production activation, AgentLab still needs a sandboxed harness producer; content-addressed
-grader artifacts; a brokered multi-account storage boundary for the shared ledger; stronger runner
-identity or hardware-backed key custody where required; owner-installed timers; telemetry/control
-comparison; revocation enforcement; alerting; rollback drills; and incident automation. Manual PR
-creation remains separately human-confirmed; evaluated canary PR creation, slot-bound maintenance,
-credentialless repair consumption, and brokered repair publication are reservation-bound but
-unprovisioned and blocked by repository governance and live policy/config/key prerequisites in
-[ADR 0006](decisions/0006-local-software-factory-control-plane.md).
+Before production activation, AgentLab still needs reviewed case banks and installed offline
+harnesses, or a secretless broker for hosted-provider evals; a brokered multi-account storage
+boundary for the shared ledger; stronger runner identity or hardware-backed key custody where
+required; owner-installed timers; telemetry/control comparison; revocation enforcement; alerting;
+rollback drills; and incident automation. The producer and its content-addressed subject/grader
+evidence exist but no account, config, fixture, executable, candidate, or job is provisioned. Manual
+PR creation remains separately human-confirmed; evaluated canary PR creation, slot-bound
+maintenance, credentialless repair consumption, and brokered repair publication are
+reservation-bound but unprovisioned and blocked by repository governance and live policy/config/key
+prerequisites in [ADR 0006](decisions/0006-local-software-factory-control-plane.md).

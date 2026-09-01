@@ -141,8 +141,12 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   has no scheduler execution, provider, process, or GitHub port. The separate
   `@agentlab/runtime/factory-intake` composition can register only owner-confirmed local feature or
   bug reports under repository-owned policy; it has no model or remote authority. The credentialless
-  `@agentlab/runtime/factory-evaluator` records complete matched eval reports, deterministic
-  assessments, and public-key-verified attestation records. The isolated
+  `@agentlab/runtime/factory-eval-producer` runs only digest-pinned administrator-installed subject
+  and grader executables through an offline bubblewrap/systemd boundary, journals every invocation,
+  stores raw content-addressed evidence, and emits a complete matched run. It cannot assess or sign
+  that run, issue authority, join the daily chain, or reach a provider, GitHub, merge, or release.
+  The credentialless `@agentlab/runtime/factory-evaluator` records complete matched eval reports,
+  deterministic assessments, and public-key-verified attestation records. The isolated
   `@agentlab/runtime/factory-eval-attestor` can only sign a fresh exact run and cannot reach SQLite.
   The separate human-only `@agentlab/runtime/factory-canary-authority` re-verifies one exact signed
   eval record and can issue only an expiring R0/R1 cohort with `autoMerge:false` and
@@ -150,6 +154,11 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   policy-pinned read-only scout and registers deterministic scheduled intake; it cannot reserve or
   execute that work. Evaluator and authority compositions cannot execute a model, contact GitHub,
   merge, or release.
+- `agentlab factory eval-producer-preflight --config ... --job ... --job-digest ...` revalidates one
+  immutable suite/case-bank/candidate/harness/grader matrix, complete budget reservation, fixtures,
+  executable digests, runner, and deadline without launching a process. `eval-produce` executes its
+  fixed offline protocols under per-invocation and aggregate bounds; SQLite v19 and immutable
+  artifacts make exact retries and crash recovery fail closed.
 - `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
   candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
   regression, flake, cost, and latency metrics from raw samples, and atomically records one
@@ -267,11 +276,11 @@ an exact task UUID, operator-pinned policy digest, and literal confirmation. Eva
 initial-draft and repaired-branch paths instead require exact reservation, schedule, role, and
 factory-policy lineage through their bounded consumers. All invoke only the broker after a clean
 preflight, and their inner services recheck policy, evidence, base revision, governance, and the
-broker kill switch. Both switches remain default-off. The eval slice accepts a strict owner-only
-matched report, signs and verifies its exact bytes through disjoint local compositions, and can
-issue a structurally non-merge/non-release cohort after human sample review and fresh attestation
-re-verification. It does not yet provide the harness producer; reservation consumption exists but is
-not provisioned or activated. Scheduled config v3 and eval signing now pin one canonical role
+broker kill switch. Both switches remain default-off. The eval slice produces a strict owner-only
+matched report from digest-pinned offline harnesses, signs and verifies its exact bytes through
+disjoint local compositions, and can issue a structurally non-merge/non-release cohort after human
+sample review and fresh attestation re-verification. The producer and reservation consumer exist but
+neither is provisioned or activated. Scheduled config v3 and eval signing now pin one canonical role
 policy: distinct non-root worker/signer UIDs plus the exact signer key and runner, with the policy
 digest carried in every signed eval predicate. No accounts are provisioned or activated.
 Provider-neutral per-run and per-tick reservation accounting are policy-pinned and fail-closed, and
@@ -298,8 +307,9 @@ credentialless repair consumption; and
 [ADR 0019](docs/decisions/0019-recovery-first-canary-pr-update-consumer.md) for recovery-first
 brokered repair publication; and
 [ADR 0021](docs/decisions/0021-durable-maintenance-discovery-and-canary-consumption.md) for daily
-maintenance intake and bounded cohort consumption. The dormant procedures are in
-[Local factory scheduler operations](docs/factory-operations.md) and
+maintenance intake and bounded cohort consumption; and
+[ADR 0022](docs/decisions/0022-sandboxed-eval-evidence-production.md) for offline eval production.
+The dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development

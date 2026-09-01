@@ -55,8 +55,10 @@ The dormant factory can now create a bounded daily maintenance request and make 
 existing scheduler without giving model output authority. Activation still requires owner-created
 accounts/configs/policies/rates, an external evaluated candidate and fresh human cohort, repository
 governance, monitoring, and explicit switches/timer installation. The current loop ends at an open
-draft PR and bounded repair updates. Eval-harness production, fleet quotas, merge, release,
-telemetry canaries, rollback, revocation, and incident automation remain future capabilities.
+draft PR and bounded repair updates. The separately dormant offline eval-harness producer is defined
+by [ADR 0022](0022-sandboxed-eval-evidence-production.md); hosted-provider eval brokerage, fleet
+quotas, merge, release, telemetry canaries, rollback, revocation, and incident automation remain
+future capabilities.
 
 ## Fitness functions
 

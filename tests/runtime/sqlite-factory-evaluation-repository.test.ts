@@ -150,6 +150,8 @@ describe("SQLite factory evaluation repositories", () => {
         ALTER TABLE factory_canary_approvals DROP COLUMN attestation_digest;
         ALTER TABLE factory_canary_cohorts DROP COLUMN role_identity_policy_digest;
         ALTER TABLE factory_canary_cohorts DROP COLUMN attestation_digest;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 13;
@@ -248,6 +250,8 @@ describe("SQLite factory evaluation repositories", () => {
         DROP TABLE factory_canary_approvals;
         DROP TABLE factory_eval_assessments;
         DROP TABLE factory_eval_runs;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 11;

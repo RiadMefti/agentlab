@@ -101,6 +101,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         default: "./dist/local-factory-eval-attestor.js",
         types: "./dist/local-factory-eval-attestor.d.ts"
       },
+      "./factory-eval-producer": {
+        source: "packages/runtime/src/local-factory-eval-producer.ts",
+        default: "./dist/local-factory-eval-producer.js",
+        types: "./dist/local-factory-eval-producer.d.ts"
+      },
       "./factory-canary-authority": {
         source: "packages/runtime/src/local-factory-canary-authority.ts",
         default: "./dist/local-factory-canary-authority.js",
@@ -396,6 +401,7 @@ function compositionBoundaryViolations(
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
@@ -414,6 +420,7 @@ function compositionBoundaryViolations(
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
@@ -430,6 +437,7 @@ function compositionBoundaryViolations(
         isFactoryAuthorityModule(path) ||
         isFactoryEvaluatorModule(path) ||
         isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
@@ -459,6 +467,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-eval-attestor.ts",
       description: "isolated eval attestor composition",
       forbidden: evalAttestorCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-eval-producer.ts",
+      description: "offline eval producer composition",
+      forbidden: evalProducerCommandForbidden
     },
     {
       entry: "packages/runtime/src/local-factory-canary-authority.ts",
@@ -526,6 +539,11 @@ function compositionBoundaryViolations(
       forbidden: evalAttestorCommandForbidden
     },
     {
+      entry: "apps/tui/src/run-factory-eval-producer.ts",
+      description: "offline eval producer command",
+      forbidden: evalProducerCommandForbidden
+    },
+    {
       entry: "apps/tui/src/run-factory-canary-authority.ts",
       description: "human canary authority command",
       forbidden: canaryAuthorityCommandForbidden
@@ -589,6 +607,7 @@ function brokerCommandForbidden(path: string): boolean {
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
@@ -605,6 +624,7 @@ function workerCommandForbidden(path: string): boolean {
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
@@ -695,6 +715,7 @@ function intakeCommandForbidden(path: string): boolean {
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
@@ -717,6 +738,7 @@ function authorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
@@ -776,6 +798,7 @@ function evaluatorCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
@@ -826,6 +849,7 @@ function evalAttestorCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
     isFactoryEvaluatorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
@@ -836,6 +860,89 @@ function evalAttestorCommandForbidden(path: string): boolean {
   }
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryEvalAttestorInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryEvalProducerApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-production-service.ts",
+  "packages/runtime/src/application/local-factory-eval-producer-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryEvalProducerInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-producer-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-production-job.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-factory-eval-executable-resolver.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-production-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/bubblewrap-factory-eval-sandbox.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/local-factory-eval-harness-executor.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-eval-process-recovery.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts"
+]);
+
+function isFactoryEvalProducerModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-eval-producer.ts" ||
+    path === "packages/runtime/src/application/factory-eval-production-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-eval-producer-coordinator.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-harness.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-production-integrity.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-production-repository.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-producer-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-production-job.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/pinned-factory-eval-executable-resolver.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-production-repository.ts" ||
+    path === "packages/runtime/src/infrastructure/process/bubblewrap-factory-eval-sandbox.ts" ||
+    path === "packages/runtime/src/infrastructure/process/local-factory-eval-harness-executor.ts" ||
+    path === "packages/runtime/src/infrastructure/process/systemd-factory-eval-process-recovery.ts"
+  );
+}
+
+function evalProducerCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryEvalProducerApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryEvalProducerInfrastructureModules.has(path);
   }
   return false;
 }
@@ -888,6 +995,7 @@ function canaryAuthorityCommandForbidden(path: string): boolean {
     (isFactoryEvaluatorModule(path) &&
       path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
@@ -952,6 +1060,7 @@ function canaryAdmissionCommandForbidden(path: string): boolean {
     (isFactoryEvaluatorModule(path) &&
       path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path)
   ) {
     return true;
@@ -999,6 +1108,7 @@ function orchestrationCommandForbidden(path: string): boolean {
     isFactoryAuthorityModule(path) ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path)
   ) {
@@ -1091,6 +1201,7 @@ function maintenanceDiscoveryCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-authority.ts" ||
     isFactoryEvaluatorModule(path) ||
     isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
     isFactoryOrchestrationModule(path) ||
@@ -1123,6 +1234,7 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-intake.ts" ||
     path === "packages/runtime/src/local-factory-evaluator.ts" ||
     path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
+    path === "packages/runtime/src/local-factory-eval-producer.ts" ||
     path === "packages/runtime/src/local-factory-canary-authority.ts" ||
     path === "packages/runtime/src/local-factory-canary-admission.ts" ||
     path === "packages/runtime/src/local-factory-orchestration.ts" ||

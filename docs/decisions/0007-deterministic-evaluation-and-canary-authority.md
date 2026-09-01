@@ -110,15 +110,19 @@ an incident; they do not edit ledger rows.
 
 ## Deliberate exclusions
 
+> **2026-09-01 update:** [ADR 0022](0022-sandboxed-eval-evidence-production.md) now implements the
+> omitted offline harness, raw artifact, and matched-run producer. The other exclusions below remain
+> accurate; the producer is not provisioned and still cannot grant authority.
+
 This decision does not implement the eval harness that executes cases, stores grader artifacts, or
 signs its report. The current process trusts an owner-only report from the configured runner ID and
 then independently recomputes only deterministic aggregate policy. It also does not consume a
 cohort, schedule shadow tasks, sample production, open PRs automatically, merge, release, observe an
 SLO, roll back, or page an incident owner. Those are separate future authority surfaces.
 
-Until a tested harness producer and cohort consumer exist, this feature is a dormant promotion
-ledger and human authorization boundary—not an autonomous canary controller. No configuration is
-provisioned by the repository and no authority is enabled by default.
+The later producer and cohort consumer remain dormant and separately bounded. Together they still do
+not form an autonomous canary controller. No configuration is provisioned by the repository and no
+authority is enabled by default.
 
 ## Consequences and fitness functions
 

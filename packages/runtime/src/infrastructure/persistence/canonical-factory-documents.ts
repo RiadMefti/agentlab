@@ -12,6 +12,17 @@ import {
   factoryEvalAssessmentSchema,
   factoryEvalAttestationRecordSchema,
   factoryEvalAttestationStatementSchema,
+  factoryEvalCaseBankSchema,
+  factoryEvalGraderDescriptorSchema,
+  factoryEvalGraderEvidenceSchema,
+  factoryEvalGraderRequestSchema,
+  factoryEvalInvocationFailureEvidenceSchema,
+  factoryEvalHarnessDescriptorSchema,
+  factoryEvalProductionEventSchema,
+  factoryEvalProductionJobSchema,
+  factoryEvalSampleSchema,
+  factoryEvalSubjectEvidenceSchema,
+  factoryEvalSubjectRequestSchema,
   factoryEvalRunSchema,
   factoryEvalSuiteSchema,
   factoryDsseEnvelopeSchema,
@@ -154,6 +165,50 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public evalSuite(input: unknown) {
     return encodeCanonicalDocument(factoryEvalSuiteSchema.parse(input));
+  }
+
+  public evalCaseBank(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalCaseBankSchema.parse(input));
+  }
+
+  public evalHarnessDescriptor(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalHarnessDescriptorSchema.parse(input));
+  }
+
+  public evalGraderDescriptor(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderDescriptorSchema.parse(input));
+  }
+
+  public evalProductionJob(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalProductionJobSchema.parse(input));
+  }
+
+  public evalProductionEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalProductionEventSchema.parse(input));
+  }
+
+  public evalSubjectRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSubjectRequestSchema.parse(input));
+  }
+
+  public evalSubjectEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSubjectEvidenceSchema.parse(input));
+  }
+
+  public evalGraderRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderRequestSchema.parse(input));
+  }
+
+  public evalGraderEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderEvidenceSchema.parse(input));
+  }
+
+  public evalInvocationFailureEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalInvocationFailureEvidenceSchema.parse(input));
+  }
+
+  public evalSample(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSampleSchema.parse(input));
   }
 
   public evalRun(input: unknown) {

@@ -273,6 +273,8 @@ describe("SqliteFactoryScheduleRepository", () => {
         ALTER TABLE factory_pull_request_dispatches DROP COLUMN canary_reservation_digest;
         DROP TRIGGER factory_schedule_events_canary_finish_guard;
         DROP TRIGGER factory_schedule_events_canary_claim_guard;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 15;

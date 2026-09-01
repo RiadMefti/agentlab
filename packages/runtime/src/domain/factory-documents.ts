@@ -8,6 +8,17 @@ import type {
   FactoryEvalAssessment,
   FactoryEvalAttestationRecord,
   FactoryEvalAttestationStatement,
+  FactoryEvalCaseBank,
+  FactoryEvalGraderDescriptor,
+  FactoryEvalGraderEvidence,
+  FactoryEvalGraderRequest,
+  FactoryEvalInvocationFailureEvidence,
+  FactoryEvalHarnessDescriptor,
+  FactoryEvalProductionEvent,
+  FactoryEvalProductionJob,
+  FactoryEvalSample,
+  FactoryEvalSubjectEvidence,
+  FactoryEvalSubjectRequest,
   FactoryEvalRun,
   FactoryEvalSuite,
   FactoryDsseEnvelope,
@@ -101,6 +112,19 @@ export interface FactoryDocumentCodec {
   controlEvent(input: unknown): CanonicalFactoryDocument<FactoryControlEvent>;
   configurationCandidate(input: unknown): CanonicalFactoryDocument<FactoryConfigurationCandidate>;
   evalSuite(input: unknown): CanonicalFactoryDocument<FactoryEvalSuite>;
+  evalCaseBank(input: unknown): CanonicalFactoryDocument<FactoryEvalCaseBank>;
+  evalHarnessDescriptor(input: unknown): CanonicalFactoryDocument<FactoryEvalHarnessDescriptor>;
+  evalGraderDescriptor(input: unknown): CanonicalFactoryDocument<FactoryEvalGraderDescriptor>;
+  evalProductionJob(input: unknown): CanonicalFactoryDocument<FactoryEvalProductionJob>;
+  evalProductionEvent(input: unknown): CanonicalFactoryDocument<FactoryEvalProductionEvent>;
+  evalSubjectRequest(input: unknown): CanonicalFactoryDocument<FactoryEvalSubjectRequest>;
+  evalSubjectEvidence(input: unknown): CanonicalFactoryDocument<FactoryEvalSubjectEvidence>;
+  evalGraderRequest(input: unknown): CanonicalFactoryDocument<FactoryEvalGraderRequest>;
+  evalGraderEvidence(input: unknown): CanonicalFactoryDocument<FactoryEvalGraderEvidence>;
+  evalInvocationFailureEvidence(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryEvalInvocationFailureEvidence>;
+  evalSample(input: unknown): CanonicalFactoryDocument<FactoryEvalSample>;
   evalRun(input: unknown): CanonicalFactoryDocument<FactoryEvalRun>;
   evalAssessment(input: unknown): CanonicalFactoryDocument<FactoryEvalAssessment>;
   evalAttestationStatement(

@@ -348,12 +348,13 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, installed timer, live rate card/config/cohort, repository/day or organization/day
-quota ledger, cross-repository coordinator, scheduler dashboard/alerts, attested eval-harness
-producer, owner-provisioned activation, merge, telemetry-driven canary, rollback controller, or
-incident automation is shipped. Durable read-only maintenance discovery, bounded consumption of a
-human non-release cohort, reservation-bound scheduled execution/draft dispatch, slot-bound PR
-observation/repair, brokered repaired-branch publication, and a content-addressed separated-service
-renderer exist but are not provisioned or activated. See
+No OS accounts, installed timer, live rate card/config/cohort, reviewed case bank or installed eval
+harness, repository/day or organization/day quota ledger, cross-repository coordinator, scheduler
+dashboard/alerts, secretless hosted-provider eval gateway, owner-provisioned activation, merge,
+telemetry-driven canary, rollback controller, or incident automation is shipped. A separate offline
+sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
+discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
+execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
+and a content-addressed separated-service renderer exist but are not provisioned or activated. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

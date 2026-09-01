@@ -89,7 +89,42 @@ describe("terminal CLI", () => {
 
   it("requires exact eval and human canary authority coordinates", () => {
     const assessment = `sha256:${"a".repeat(64)}`;
+    const productionJob = `sha256:${"b".repeat(64)}`;
     const taskId = "10000000-0000-4000-8000-000000000001";
+    expect(
+      parseCliArguments([
+        "factory",
+        "eval-producer-preflight",
+        "--config",
+        "/private/agentlab/eval-producer.json",
+        "--job",
+        "/private/agentlab/eval-production-job.json",
+        "--job-digest",
+        productionJob
+      ])
+    ).toEqual({
+      kind: "factory-eval-producer-preflight",
+      configPath: "/private/agentlab/eval-producer.json",
+      jobPath: "/private/agentlab/eval-production-job.json",
+      expectedJobDigest: productionJob
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "eval-produce",
+        "--config",
+        "/private/agentlab/eval-producer.json",
+        "--job",
+        "/private/agentlab/eval-production-job.json",
+        "--job-digest",
+        productionJob
+      ])
+    ).toEqual({
+      kind: "factory-eval-produce",
+      configPath: "/private/agentlab/eval-producer.json",
+      jobPath: "/private/agentlab/eval-production-job.json",
+      expectedJobDigest: productionJob
+    });
     expect(
       parseCliArguments([
         "factory",
@@ -188,6 +223,18 @@ describe("terminal CLI", () => {
       configPath: "/private/agentlab/canary-admission.json",
       taskId
     });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "eval-produce",
+        "--config",
+        "/private/agentlab/eval-producer.json",
+        "--job",
+        "/private/agentlab/eval-production-job.json",
+        "--job-digest",
+        "not-a-digest"
+      ])
+    ).toThrow(/Usage/u);
     expect(() =>
       parseCliArguments([
         "factory",

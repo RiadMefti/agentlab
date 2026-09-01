@@ -182,6 +182,8 @@ describe("SqliteFactoryPullRequestUpdateRepository", () => {
         DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
         PRAGMA user_version = 9;

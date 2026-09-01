@@ -67,6 +67,24 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-eval-producer-preflight") {
+    const { runFactoryEvalProducerPreflight } = await import("./run-factory-eval-producer.js");
+    process.exitCode = await runFactoryEvalProducerPreflight(
+      action.configPath,
+      action.jobPath,
+      action.expectedJobDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-produce") {
+    const { runFactoryEvalProduce } = await import("./run-factory-eval-producer.js");
+    process.exitCode = await runFactoryEvalProduce(
+      action.configPath,
+      action.jobPath,
+      action.expectedJobDigest
+    );
+    return;
+  }
   if (action.kind === "factory-eval-sign") {
     const { runFactoryEvalSign } = await import("./run-factory-eval-attestor.js");
     process.exitCode = await runFactoryEvalSign(

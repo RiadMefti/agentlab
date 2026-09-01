@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 18;
+export const latestSchemaVersion = 19;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -3563,6 +3563,250 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 18;
+      COMMIT;
+    `);
+  }
+
+  if (version < 19) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_production_jobs (
+        job_id TEXT PRIMARY KEY CHECK (length(job_id) = 36),
+        job_digest TEXT NOT NULL UNIQUE CHECK (
+          length(job_digest) = 71 AND substr(job_digest, 1, 7) = 'sha256:'
+        ),
+        runner_id TEXT NOT NULL CHECK (length(runner_id) BETWEEN 1 AND 128),
+        suite_digest TEXT NOT NULL CHECK (
+          length(suite_digest) = 71 AND substr(suite_digest, 1, 7) = 'sha256:'
+        ),
+        case_bank_digest TEXT NOT NULL CHECK (
+          length(case_bank_digest) = 71 AND substr(case_bank_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_candidate_digest TEXT NOT NULL CHECK (
+          length(baseline_candidate_digest) = 71 AND
+          substr(baseline_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_harness_digest TEXT NOT NULL CHECK (
+          length(baseline_harness_digest) = 71 AND
+          substr(baseline_harness_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_harness_digest TEXT NOT NULL CHECK (
+          length(challenger_harness_digest) = 71 AND
+          substr(challenger_harness_digest, 1, 7) = 'sha256:'
+        ),
+        grader_digest TEXT NOT NULL CHECK (
+          length(grader_digest) = 71 AND substr(grader_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        job_json TEXT NOT NULL CHECK (
+          length(job_json) BETWEEN 2 AND 16777216 AND json_valid(job_json)
+        ),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_eval_production_jobs_created_idx
+        ON factory_eval_production_jobs(created_at, job_id);
+
+      CREATE TABLE factory_eval_production_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        job_id TEXT NOT NULL REFERENCES factory_eval_production_jobs(job_id),
+        job_digest TEXT NOT NULL CHECK (
+          length(job_digest) = 71 AND substr(job_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 100000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'subject-started', 'subject-finished', 'grader-started',
+          'sample-recorded', 'completed', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'subject-active', 'grader-active', 'completed', 'failed'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'subject-active', 'grader-active', 'completed', 'failed')
+        ),
+        case_id TEXT CHECK (case_id IS NULL OR length(case_id) BETWEEN 1 AND 128),
+        trial INTEGER CHECK (trial IS NULL OR trial BETWEEN 1 AND 20),
+        candidate_role TEXT CHECK (
+          candidate_role IS NULL OR candidate_role IN ('baseline', 'challenger')
+        ),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        evidence_digest TEXT CHECK (
+          evidence_digest IS NULL OR
+          (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')
+        ),
+        sample_digest TEXT CHECK (
+          sample_digest IS NULL OR
+          (length(sample_digest) = 71 AND substr(sample_digest, 1, 7) = 'sha256:')
+        ),
+        eval_run_digest TEXT CHECK (
+          eval_run_digest IS NULL OR
+          (length(eval_run_digest) = 71 AND substr(eval_run_digest, 1, 7) = 'sha256:')
+        ),
+        eval_run_artifact_json TEXT CHECK (
+          eval_run_artifact_json IS NULL OR json_valid(eval_run_artifact_json)
+        ),
+        usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 8388608 AND json_valid(event_json)
+        ),
+        UNIQUE(job_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_eval_production_events_job_idx
+        ON factory_eval_production_events(job_id, sequence);
+
+      CREATE TRIGGER factory_eval_production_jobs_no_update
+      BEFORE UPDATE ON factory_eval_production_jobs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production jobs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_production_jobs_no_delete
+      BEFORE DELETE ON factory_eval_production_jobs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production jobs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_production_jobs_identity_guard
+      BEFORE INSERT ON factory_eval_production_jobs
+      WHEN
+        json_extract(NEW.job_json, '$.jobId') IS NOT NEW.job_id OR
+        json_extract(NEW.job_json, '$.runnerId') IS NOT NEW.runner_id OR
+        json_extract(NEW.job_json, '$.suiteDigest') IS NOT NEW.suite_digest OR
+        json_extract(NEW.job_json, '$.caseBankDigest') IS NOT NEW.case_bank_digest OR
+        json_extract(NEW.job_json, '$.baselineCandidateDigest')
+          IS NOT NEW.baseline_candidate_digest OR
+        json_extract(NEW.job_json, '$.baselineHarnessDigest')
+          IS NOT NEW.baseline_harness_digest OR
+        json_extract(NEW.job_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.job_json, '$.challengerHarnessDigest')
+          IS NOT NEW.challenger_harness_digest OR
+        json_extract(NEW.job_json, '$.graderDigest') IS NOT NEW.grader_digest OR
+        json_extract(NEW.job_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.job_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.job_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production job identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_eval_production_events_no_update
+      BEFORE UPDATE ON factory_eval_production_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production events are append-only');
+      END;
+      CREATE TRIGGER factory_eval_production_events_no_delete
+      BEFORE DELETE ON factory_eval_production_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production events are append-only');
+      END;
+      CREATE TRIGGER factory_eval_production_events_identity_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        NEW.job_digest IS NOT (
+          SELECT job_digest FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.jobId') IS NOT NEW.job_id OR
+        json_extract(NEW.event_json, '$.jobDigest') IS NOT NEW.job_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest')
+          IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.caseId') IS NOT NEW.case_id OR
+        json_extract(NEW.event_json, '$.trial') IS NOT NEW.trial OR
+        json_extract(NEW.event_json, '$.candidateRole') IS NOT NEW.candidate_role OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.sampleDigest') IS NOT NEW.sample_digest OR
+        json_extract(NEW.event_json, '$.evalRunDigest') IS NOT NEW.eval_run_digest OR
+        json_extract(NEW.event_json, '$.evalRunArtifact')
+          IS NOT json(NEW.eval_run_artifact_json) OR
+        json_extract(NEW.event_json, '$.usage') IS NOT json(NEW.usage_json) OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT 'agentlab-eval-producer' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'gate-runner' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.job_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event identity mismatch');
+      END;
+      CREATE TRIGGER factory_eval_production_events_chain_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id
+        ), 1) OR
+        (NEW.sequence = 1 AND
+          (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event chain mismatch');
+      END;
+      CREATE TRIGGER factory_eval_production_events_transition_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'subject-started' AND NEW.from_state IN ('ready', 'subject-active') AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'subject-finished' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'grader-started' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'grader-active') OR
+        (NEW.kind = 'sample-recorded' AND NEW.from_state = 'grader-active' AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'subject-active', 'grader-active') AND
+          NEW.to_state = 'failed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory eval production transition');
+      END;
+      CREATE TRIGGER factory_eval_production_events_time_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 19;
       COMMIT;
     `);
   }

@@ -682,10 +682,11 @@ Current scheduling uses deduplicated owner-confirmed intake, one exact daily UTC
 candidate list, task count, start deadline, per-tick reservation ceiling, SQLite single-writer
 lease, prior-day open-run reconciliation, and a separate human kill switch. Multiple open runs or
 policy drift on an open run fail closed before a new slot. It does not yet implement blackout
-windows, repository/day or organization/day quotas, global concurrency/cost coordination, or
-autonomous maintenance discovery. The scheduler runs only already-authorized R1 requests and stops
-at a local proposal; it does not invent R2-R4 scope. Future maintenance discovery must start in
-read-only inventory/shadow mode and advance only through the eval and canary policy.
+windows, repository/day or organization/day quotas, or global concurrency/cost coordination.
+[ADR 0021](0021-durable-maintenance-discovery-and-canary-consumption.md) later added separate
+read-only autonomous maintenance discovery. The scheduler runs only already-authorized R1 requests
+and stops at a local proposal; it does not invent R2-R4 scope. Future maintenance discovery must
+start in read-only inventory/shadow mode and advance only through the eval and canary policy.
 
 ## Evaluation, canary, rollback, and incidents
 
@@ -700,9 +701,10 @@ and outcome data are kept with evidence, subject to retention and redaction poli
 promotion slice: strict candidate/suite/matched-trial contracts, deterministic aggregate assessment,
 an append-only SQLite ledger, and a separate human authority that can issue only an expiring
 non-merge/non-release R0/R1 cohort. Subsequent decisions add isolated attestation, task reservation,
-and exact cohort consumption through scheduled execution and draft dispatch. AgentLab still lacks
-the harness producer, content-addressed grader artifacts, production sampling, automated rollback,
-and incident controller.
+and exact cohort consumption through scheduled execution and draft dispatch.
+[ADR 0022](0022-sandboxed-eval-evidence-production.md) later added the separate offline harness and
+content-addressed grader-artifact producer. AgentLab still lacks hosted-provider eval brokerage,
+production sampling, automated rollback, and an incident controller.
 
 Rollout stages are: offline fixtures, read-only shadow runs, local patch generation with no broker,
 brokered draft PRs on selected R1 repositories, and limited R1 auto-open. Human merge remains the

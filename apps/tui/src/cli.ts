@@ -37,6 +37,18 @@ export type CliAction =
       readonly confirmation: "assess-eval";
     }
   | {
+      readonly kind: "factory-eval-producer-preflight";
+      readonly configPath: string;
+      readonly jobPath: string;
+      readonly expectedJobDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-eval-produce";
+      readonly configPath: string;
+      readonly jobPath: string;
+      readonly expectedJobDigest: `sha256:${string}`;
+    }
+  | {
       readonly kind: "factory-eval-sign";
       readonly configPath: string;
       readonly runPath: string;
@@ -243,6 +255,33 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         expectedFactoryPolicyBundleDigest,
         expectedPreparationGrantDigest,
         expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    (input[1] === "eval-producer-preflight" || input[1] === "eval-produce") &&
+    input[2] === "--config" &&
+    input[4] === "--job" &&
+    input[6] === "--job-digest"
+  ) {
+    const configPath = input[3];
+    const jobPath = input[5];
+    const expectedJobDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isNormalizedAbsolutePath(jobPath) &&
+      isSha256Digest(expectedJobDigest)
+    ) {
+      return {
+        kind:
+          input[1] === "eval-producer-preflight"
+            ? "factory-eval-producer-preflight"
+            : "factory-eval-produce",
+        configPath,
+        jobPath,
+        expectedJobDigest
       };
     }
   }
@@ -866,7 +905,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -920,6 +959,10 @@ Factory authority:
       Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
   agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register[-scheduled]
       Register one owner-authored feature or bug report for explicit or autonomous execution.
+  agentlab factory eval-producer-preflight --config <absolute-path> --job <absolute-path> --job-digest <sha256>
+      Verify the exact offline case bank, fixtures, harnesses, grader, executable hashes, budgets, and sandbox contract without executing a trial.
+  agentlab factory eval-produce --config <absolute-path> --job <absolute-path> --job-digest <sha256>
+      Produce or recover one complete matched content-addressed eval run; never assess, sign, authorize, schedule, or write remotely.
   agentlab factory eval-assess --config <absolute-path> --run <absolute-path> --confirm-assess
       Record complete matched trials and compute a deterministic promotion assessment; no model or remote access.
   agentlab factory eval-sign --config <absolute-path> --run <absolute-path> --confirm-sign
