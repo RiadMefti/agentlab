@@ -125,6 +125,11 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
         default: "./dist/local-factory-maintenance-discovery.js",
         types: "./dist/local-factory-maintenance-discovery.d.ts"
+      },
+      "./factory-external-pull-request-discovery": {
+        source: "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+        default: "./dist/local-factory-external-pull-request-discovery.js",
+        types: "./dist/local-factory-external-pull-request-discovery.d.ts"
       }
     }
   }
@@ -405,6 +410,7 @@ function compositionBoundaryViolations(
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -424,6 +430,7 @@ function compositionBoundaryViolations(
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
@@ -441,6 +448,7 @@ function compositionBoundaryViolations(
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -492,6 +500,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
       description: "credentialless maintenance discovery composition",
       forbidden: maintenanceDiscoveryCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+      description: "read-only external pull-request discovery composition",
+      forbidden: externalPullRequestDiscoveryCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -562,6 +575,11 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
       description: "credentialless maintenance discovery command",
       forbidden: maintenanceDiscoveryCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-discovery.ts",
+      description: "read-only external pull-request discovery command",
+      forbidden: externalPullRequestDiscoveryCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -1220,6 +1238,104 @@ function maintenanceDiscoveryCommandForbidden(path: string): boolean {
   return false;
 }
 
+const factoryExternalPullRequestDiscoveryDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-discovery-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-discovery-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-source.ts",
+  "packages/runtime/src/domain/factory-schedule-time.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/repository-path-policy.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestDiscoveryApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-discovery-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-discovery-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestDiscoveryInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-discovery-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-external-pull-request-source.ts",
+  "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
+  "packages/runtime/src/infrastructure/github/github-read-only-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-owned-pull-request-index.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryExternalPullRequestDiscoveryModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-external-pull-request-discovery-") ||
+    path.startsWith("packages/runtime/src/domain/factory-external-pull-request-discovery-") ||
+    path === "packages/runtime/src/domain/factory-external-pull-request-policy.ts" ||
+    path === "packages/runtime/src/domain/factory-external-pull-request-source.ts" ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-discovery-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-"
+    ) ||
+    path === "packages/runtime/src/infrastructure/github/github-external-pull-request-source.ts" ||
+    path === "packages/runtime/src/infrastructure/github/github-read-only-installation-client.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-owned-pull-request-index.ts"
+  );
+}
+
+function externalPullRequestDiscoveryCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestDiscoveryDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestDiscoveryApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestDiscoveryInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/contracts/src/")) return "contracts";
   if (path.startsWith("packages/launcher/src/")) return "launcher";
@@ -1238,7 +1354,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-canary-authority.ts" ||
     path === "packages/runtime/src/local-factory-canary-admission.ts" ||
     path === "packages/runtime/src/local-factory-orchestration.ts" ||
-    path === "packages/runtime/src/local-factory-maintenance-discovery.ts"
+    path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts"
   ) {
     return "runtime-composition";
   }

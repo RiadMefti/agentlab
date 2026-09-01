@@ -111,6 +111,10 @@ describe("architecture dependency rules", () => {
         local(
           "@agentlab/runtime/factory-eval-producer",
           "packages/runtime/src/local-factory-eval-producer.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-discovery",
+          "packages/runtime/src/local-factory-external-pull-request-discovery.ts"
         )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
@@ -123,7 +127,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-canary-admission.ts"),
       source("packages/runtime/src/local-factory-orchestration.ts"),
       source("packages/runtime/src/local-factory-maintenance-discovery.ts"),
-      source("packages/runtime/src/local-factory-eval-producer.ts")
+      source("packages/runtime/src/local-factory-eval-producer.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-discovery.ts")
     ]);
 
     expect(report.violations).toEqual([]);
@@ -824,6 +829,10 @@ function architectureFixture(): string {
       "./factory-eval-producer": {
         default: "./dist/local-factory-eval-producer.js",
         types: "./dist/local-factory-eval-producer.d.ts"
+      },
+      "./factory-external-pull-request-discovery": {
+        default: "./dist/local-factory-external-pull-request-discovery.js",
+        types: "./dist/local-factory-external-pull-request-discovery.d.ts"
       }
     }
   });
@@ -840,6 +849,11 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+    "export {};\n"
+  );
   return root;
 }
 

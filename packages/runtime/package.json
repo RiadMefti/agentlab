@@ -51,6 +51,10 @@
     "./factory-maintenance-discovery": {
       "types": "./dist/local-factory-maintenance-discovery.d.ts",
       "default": "./dist/local-factory-maintenance-discovery.js"
+    },
+    "./factory-external-pull-request-discovery": {
+      "types": "./dist/local-factory-external-pull-request-discovery.d.ts",
+      "default": "./dist/local-factory-external-pull-request-discovery.js"
     }
   },
   "files": [

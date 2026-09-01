@@ -216,6 +216,10 @@ describe("SqliteFactoryEvalAttestationRepository", () => {
         DROP TABLE factory_eval_production_jobs;
         DROP TABLE factory_maintenance_discovery_events;
         DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_discovery_candidates;
+        DROP TABLE factory_external_pr_discovery_snapshots;
+        DROP TABLE factory_external_pr_discovery_events;
+        DROP TABLE factory_external_pr_discovery_runs;
         PRAGMA user_version = 12;
       `);
     } finally {

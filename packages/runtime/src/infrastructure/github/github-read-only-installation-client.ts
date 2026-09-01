@@ -2,21 +2,16 @@ import { request as httpsRequest } from "node:https";
 
 import { z } from "zod";
 
-import { GitHubApiError } from "./github-rest-client.js";
 import type {
   CreateGitHubAppInstallationTokenInput,
   GitHubAppInstallationApi
 } from "./github-app-installation-api.js";
+import { GitHubApiError } from "./github-rest-client.js";
 
-export type {
-  CreateGitHubAppInstallationTokenInput,
-  GitHubAppInstallationApi
-} from "./github-app-installation-api.js";
-
-export const githubPullRequestBrokerPermissions = Object.freeze({
+export const githubPullRequestReaderPermissions = Object.freeze({
   checks: "read",
-  contents: "write",
-  pull_requests: "write"
+  contents: "read",
+  pull_requests: "read"
 } as const);
 
 const requestSchema = z
@@ -31,22 +26,22 @@ const requestSchema = z
   })
   .strict();
 
-export interface GitHubAppInstallationRestClientOptions {
+export interface GitHubReadOnlyInstallationRestClientOptions {
   readonly timeoutMs?: number;
   readonly maximumResponseBytes?: number;
   readonly userAgent?: string;
 }
 
-/** Fixed-purpose client that can mint only the broker's exact repository-scoped permissions. */
-export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi {
+/** Fixed-purpose client that can request only exact-repository PR-reader permissions. */
+export class GitHubReadOnlyInstallationRestClient implements GitHubAppInstallationApi {
   readonly #timeoutMs: number;
   readonly #maximumResponseBytes: number;
   readonly #userAgent: string;
 
-  public constructor(options: GitHubAppInstallationRestClientOptions = {}) {
+  public constructor(options: GitHubReadOnlyInstallationRestClientOptions = {}) {
     this.#timeoutMs = options.timeoutMs ?? 20_000;
     this.#maximumResponseBytes = options.maximumResponseBytes ?? 1 * 1_024 * 1_024;
-    this.#userAgent = options.userAgent ?? "agentlab-factory-broker";
+    this.#userAgent = options.userAgent ?? "agentlab-factory-pr-reader";
     if (!Number.isSafeInteger(this.#timeoutMs) || this.#timeoutMs < 1) {
       throw new Error("GitHub App API timeout must be a positive integer.");
     }
@@ -54,7 +49,7 @@ export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi
       throw new Error("GitHub App API response limit must be a positive integer.");
     }
     if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,255}$/u.test(this.#userAgent)) {
-      throw new Error("GitHub App API user agent must be a bounded HTTP token.");
+      throw new Error("GitHub API user agent must be a bounded HTTP token.");
     }
   }
 
@@ -62,15 +57,10 @@ export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi
     const input = requestSchema.parse(inputValue);
     const payload = JSON.stringify({
       repository_ids: [input.repositoryNumericId],
-      permissions: githubPullRequestBrokerPermissions
+      permissions: githubPullRequestReaderPermissions
     });
     return new Promise((resolve, reject) => {
       let settled = false;
-      const succeed = (value: unknown): void => {
-        if (settled) return;
-        settled = true;
-        resolve(value);
-      };
       const fail = (error: Error): void => {
         if (settled) return;
         settled = true;
@@ -99,7 +89,7 @@ export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi
             if (settled) return;
             bytes += chunk.byteLength;
             if (bytes > this.#maximumResponseBytes) {
-              fail(new Error("GitHub App API response exceeded its size limit."));
+              fail(new Error("GitHub API response exceeded its size limit."));
               response.destroy();
               request.destroy();
               return;
@@ -113,13 +103,15 @@ export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi
               fail(
                 new GitHubApiError(
                   status,
-                  `GitHub API returned ${String(status)} while minting an installation token.`
+                  `GitHub API returned ${String(status)} while minting a read-only installation token.`
                 )
               );
               return;
             }
             try {
-              succeed(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);
+              const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+              settled = true;
+              resolve(value);
             } catch (error: unknown) {
               fail(new Error("GitHub App API returned invalid JSON.", { cause: error }));
             }
@@ -132,9 +124,9 @@ export class GitHubAppInstallationRestClient implements GitHubAppInstallationApi
           });
         }
       );
-      request.setTimeout(this.#timeoutMs, () => {
-        request.destroy(new Error("GitHub App API request timed out."));
-      });
+      request.setTimeout(this.#timeoutMs, () =>
+        request.destroy(new Error("GitHub App API request timed out."))
+      );
       request.on("error", (error) => {
         fail(new Error("GitHub App API request failed.", { cause: error }));
       });

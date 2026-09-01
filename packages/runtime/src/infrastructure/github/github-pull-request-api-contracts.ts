@@ -35,6 +35,45 @@ export const githubAuthorAssociationSchema = z.enum([
   "OWNER"
 ]);
 
+export const githubExternalPullRequestListItemSchema = z.looseObject({
+  number: z.number().int().positive()
+});
+
+export const githubExternalPullRequestSchema = githubPullRequestSchema.extend({
+  updated_at: z.iso.datetime(),
+  changed_files: z.number().int().min(0).max(10_000),
+  additions: z.number().int().min(0).max(10_000_000),
+  deletions: z.number().int().min(0).max(10_000_000),
+  user: githubAuthorSchema,
+  author_association: githubAuthorAssociationSchema,
+  base: z.object({
+    ref: z.string(),
+    sha: gitObjectIdSchema,
+    repo: z.object({ full_name: z.string().min(3).max(140) })
+  }),
+  head: z.object({
+    ref: z.string(),
+    sha: gitObjectIdSchema,
+    repo: z.object({ full_name: z.string().min(3).max(140) }).nullable()
+  })
+});
+
+export const githubPullRequestFileSchema = z.object({
+  sha: gitObjectIdSchema,
+  filename: z.string().min(1).max(1_024),
+  previous_filename: z.string().min(1).max(1_024).optional(),
+  status: z.enum(["added", "modified", "removed", "renamed", "copied", "changed", "unchanged"]),
+  additions: z.number().int().min(0).max(1_000_000),
+  deletions: z.number().int().min(0).max(1_000_000),
+  changes: z.number().int().min(0).max(1_000_000)
+});
+
+export const githubRepositoryIdentitySchema = z.object({
+  id: githubNumericIdSchema,
+  full_name: z.string().min(3).max(140),
+  default_branch: z.string().min(1).max(255)
+});
+
 export const githubPullRequestReviewSchema = z.object({
   id: githubNumericIdSchema,
   user: githubAuthorSchema,

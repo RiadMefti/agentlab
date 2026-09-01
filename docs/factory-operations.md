@@ -326,6 +326,44 @@ failed units only after review. Upstream semantics are documented for
 and
 [`systemd-analyze verify`](https://www.freedesktop.org/software/systemd/man/latest/systemd-analyze.html#systemd-analyze%20verify%20FILE%E2%80%A6).
 
+## External pull-request inventory
+
+Use a separate GitHub App installation for read-only external pull-request discovery. Do not reuse
+the draft/update broker App, its key, or its operating-system account. The installation token must
+grant exactly `checks:read`, `contents:read`, and `pull_requests:read`. Keep the strict discovery
+config, policy, schedule policy, and private key owner-only and pin both policy digests in the
+config. A minimal policy has this shape:
+
+```json
+{
+  "schemaVersion": "agentlab.external-pull-request-discovery-policy.v1",
+  "policyId": "external-pr-inventory",
+  "revision": 1,
+  "maximumPullRequestsPerTick": 10,
+  "maximumChangedFilesPerPullRequest": 50,
+  "allowDrafts": false,
+  "allowForks": false,
+  "agentReviewLabels": ["agent-review"],
+  "humanReviewLabels": ["security", "release"]
+}
+```
+
+The owner-only config uses schema `agentlab.local-factory-external-pull-request-discovery.v1` and
+supplies the database and artifact paths, exact repository owner/name/ID, observer ID, policy and
+schedule paths with expected digests, and the reader App client ID, installation ID, and private-key
+path. Preflight acquires a short-lived read-only installation token and verifies the remote
+repository identity; it does not write a discovery run. Then run one resolved daily slot:
+
+```text
+agentlab factory external-pr-discovery-preflight --config /absolute/external-pr-discovery.json
+agentlab factory external-pr-discovery-tick --config /absolute/external-pr-discovery.json --discovery-policy sha256:... --schedule-policy sha256:...
+```
+
+Exit zero means the immutable snapshot was completed or replayed exactly. A nonzero exit records a
+redacted failed run when persistence is available. An `agent-review-candidate` result is only a
+queue classification: this lane does not review, check out, repair, comment, approve, merge,
+release, issue authority, or install a timer.
+
 ## Authority and incident stop
 
 The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
@@ -355,6 +393,8 @@ telemetry-driven canary, rollback controller, or incident automation is shipped.
 sandboxed eval producer with content-addressed evidence now exists. Durable read-only maintenance
 discovery, bounded consumption of a human non-release cohort, reservation-bound scheduled
 execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch publication,
-and a content-addressed separated-service renderer exist but are not provisioned or activated. See
+bounded read-only external pull-request inventory, and a content-addressed separated-service
+renderer exist but are not provisioned or activated. External code review, isolated checkout, review
+evidence, feedback publication, and repair admission are not yet implemented. See
 [Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
 are required before calling the factory self-maintaining.

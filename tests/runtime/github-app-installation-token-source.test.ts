@@ -71,6 +71,41 @@ describe("GitHubAppInstallationTokenSource", () => {
     await expect(source.token("other/repository")).rejects.toThrow(/another repository/u);
   });
 
+  it("accepts only exact read permissions for the separate PR-reader profile", async () => {
+    const readResponse = {
+      ...tokenResponse("ghs_reader"),
+      permissions: {
+        checks: "read",
+        contents: "read",
+        metadata: "read",
+        pull_requests: "read"
+      }
+    };
+    const accepted = new GitHubAppInstallationTokenSource({
+      clientId: "Iv1.agentlab-test",
+      installationId,
+      repositoryId,
+      repositoryNumericId,
+      signer: new RecordingSigner(),
+      api: new RecordingInstallationApi(() => readResponse),
+      permissionProfile: "pull-request-reader",
+      now: () => nowMilliseconds
+    });
+    await expect(accepted.token(repositoryId)).resolves.toBe("ghs_reader");
+
+    const rejected = new GitHubAppInstallationTokenSource({
+      clientId: "Iv1.agentlab-test",
+      installationId,
+      repositoryId,
+      repositoryNumericId,
+      signer: new RecordingSigner(),
+      api: new RecordingInstallationApi(() => tokenResponse("ghs_writer")),
+      permissionProfile: "pull-request-reader",
+      now: () => nowMilliseconds
+    });
+    await expect(rejected.token(repositoryId)).rejects.toThrow(/pull-request-reader boundary/u);
+  });
+
   it.each([
     {
       name: "missing checks-read permission",
@@ -99,7 +134,7 @@ describe("GitHubAppInstallationTokenSource", () => {
         ...tokenResponse("ghs_wrong_repository"),
         repositories: [{ id: repositoryNumericId + 1, full_name: "riadmefti/other" }]
       },
-      message: /exact broker repository/u
+      message: /exact factory repository/u
     },
     {
       name: "unsafe lifetime",

@@ -23,6 +23,11 @@ import {
   factoryEvalSampleSchema,
   factoryEvalSubjectEvidenceSchema,
   factoryEvalSubjectRequestSchema,
+  factoryExternalPullRequestCandidateSchema,
+  factoryExternalPullRequestDiscoveryEventSchema,
+  factoryExternalPullRequestDiscoveryPolicySchema,
+  factoryExternalPullRequestDiscoveryRunSchema,
+  factoryExternalPullRequestDiscoverySnapshotSchema,
   factoryEvalRunSchema,
   factoryEvalSuiteSchema,
   factoryDsseEnvelopeSchema,
@@ -79,6 +84,26 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public externalPullRequestDiscoveryPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryPolicySchema.parse(input));
+  }
+
+  public externalPullRequestDiscoveryRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryRunSchema.parse(input));
+  }
+
+  public externalPullRequestDiscoveryEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryEventSchema.parse(input));
+  }
+
+  public externalPullRequestDiscoverySnapshot(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoverySnapshotSchema.parse(input));
+  }
+
+  public externalPullRequestCandidate(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestCandidateSchema.parse(input));
+  }
+
   public intakeRequest(input: unknown) {
     return encodeCanonicalDocument(factoryIntakeRequestSchema.parse(input));
   }

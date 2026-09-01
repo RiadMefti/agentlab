@@ -156,6 +156,17 @@ remain explicitly untrusted fields inside the content-addressed artifact, while 
 counts, revisions, digests, and a deterministic facts-only disposition. The command cannot update
 the branch, invoke a provider, transition into repair, merge, or release.
 
+The separate `external-pr-discovery-tick` command inventories bounded external pull requests through
+`@agentlab/runtime/factory-external-pull-request-discovery`. Its dedicated GitHub App token requests
+exactly `checks:read`, `contents:read`, and `pull_requests:read`; the composition has no provider,
+process, checkout, broker-write, merge, or release port. One policy-pinned daily slot reads no more
+than its configured pull-request and changed-file ceilings, checks the repository identity, and
+re-reads each pull request after its files so a mutable head, base, state, or detail fails closed.
+Titles, bodies, and file paths remain untrusted fields in a canonical content-addressed snapshot.
+SQLite schema v20 appends immutable run, event, snapshot, and candidate records. Deterministic
+dispositions only create inventory for a future review stage; they confer no execution or GitHub
+write authority.
+
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
 literal `--confirm-repair`. The application revalidates the task, completed dispatch, canonical PR
@@ -553,7 +564,9 @@ consumer now turns exact authorizations into gated local repair proposals. A sep
 broker consumer publishes those proposals through the existing durable non-force update service and
 returns them to exact-head observation. Durable bounded daily maintenance discovery, automatic
 consumption of pre-existing human cohort authority, and a separate offline sandboxed eval producer
-are implemented. The producer is not part of the daily chain and has no provisioned harness,
+are implemented. A separate bounded external pull-request inventory now journals stable heads and
+changed paths with a read-only App, but it does not review code, check out branches, repair, or
+publish feedback. The producer is not part of the daily chain and has no provisioned harness,
 fixture, candidate, job, or account. Repository/day and organization/day quotas, a secretless
 hosted-provider eval gateway, owner-provisioned activation, telemetry-driven canary comparison,
 merge, release, rollback, and incident automation remain later stages. A read-only daily-cycle

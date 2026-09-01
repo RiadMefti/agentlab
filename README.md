@@ -152,12 +152,22 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   eval record and can issue only an expiring R0/R1 cohort with `autoMerge:false` and
   `release:false`. The credentialless `@agentlab/runtime/factory-maintenance-discovery` runs only a
   policy-pinned read-only scout and registers deterministic scheduled intake; it cannot reserve or
-  execute that work. Evaluator and authority compositions cannot execute a model, contact GitHub,
-  merge, or release.
+  execute that work. The separate `@agentlab/runtime/factory-external-pull-request-discovery`
+  composition uses a dedicated read-only GitHub App identity to inventory a bounded page of open
+  pull requests and changed paths into an immutable daily journal. It treats titles, bodies, and
+  paths as untrusted evidence and can only classify work for later agent or human review; it cannot
+  invoke a model, check out code, comment, approve, repair, merge, or release. Evaluator and
+  authority compositions cannot execute a model, contact GitHub, merge, or release.
+- `agentlab factory external-pr-discovery-preflight --config ...` validates the owner-only reader
+  configuration, exact policy pins, read-only installation token, and remote repository identity.
+  `external-pr-discovery-tick` uses exact `checks:read`, `contents:read`, and `pull_requests:read`
+  installation permissions, re-reads each pull request around its bounded changed-file query, and
+  records a content-addressed snapshot plus deterministic dispositions. An `agent-review-candidate`
+  disposition is inventory, not review or execution authority.
 - `agentlab factory eval-producer-preflight --config ... --job ... --job-digest ...` revalidates one
   immutable suite/case-bank/candidate/harness/grader matrix, complete budget reservation, fixtures,
   executable digests, runner, and deadline without launching a process. `eval-produce` executes its
-  fixed offline protocols under per-invocation and aggregate bounds; SQLite v19 and immutable
+  fixed offline protocols under per-invocation and aggregate bounds; SQLite v20 and immutable
   artifacts make exact retries and crash recovery fail closed.
 - `agentlab factory eval-assess --config ... --run ... --confirm-assess` validates canonical
   candidate/suite identities and the complete matched trial matrix, derives confidence, safety,
@@ -308,8 +318,10 @@ credentialless repair consumption; and
 brokered repair publication; and
 [ADR 0021](docs/decisions/0021-durable-maintenance-discovery-and-canary-consumption.md) for daily
 maintenance intake and bounded cohort consumption; and
-[ADR 0022](docs/decisions/0022-sandboxed-eval-evidence-production.md) for offline eval production.
-The dormant procedures are in [Local factory scheduler operations](docs/factory-operations.md) and
+[ADR 0022](docs/decisions/0022-sandboxed-eval-evidence-production.md) for offline eval production;
+and [ADR 0023](docs/decisions/0023-read-only-external-pull-request-discovery.md) for bounded
+external pull-request inventory. The dormant procedures are in
+[Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 
 ## Development

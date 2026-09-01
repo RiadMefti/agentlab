@@ -85,6 +85,36 @@ describe("terminal CLI", () => {
       kind: "factory-maintenance-discovery-preflight",
       configPath: "/private/agentlab/discovery.json"
     });
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-discovery-preflight",
+        "--config",
+        "/private/agentlab/pr-reader.json"
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-discovery-preflight",
+      configPath: "/private/agentlab/pr-reader.json"
+    });
+    const discoveryPolicy = `sha256:${"a".repeat(64)}`;
+    const schedulePolicy = `sha256:${"b".repeat(64)}`;
+    expect(
+      parseCliArguments([
+        "factory",
+        "external-pr-discovery-tick",
+        "--config",
+        "/private/agentlab/pr-reader.json",
+        "--discovery-policy",
+        discoveryPolicy,
+        "--schedule-policy",
+        schedulePolicy
+      ])
+    ).toEqual({
+      kind: "factory-external-pull-request-discovery-tick",
+      configPath: "/private/agentlab/pr-reader.json",
+      expectedDiscoveryPolicyDigest: discoveryPolicy,
+      expectedSchedulePolicyDigest: schedulePolicy
+    });
   });
 
   it("requires exact eval and human canary authority coordinates", () => {

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 19;
+export const latestSchemaVersion = 20;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -3807,6 +3807,291 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 19;
+      COMMIT;
+    `);
+  }
+
+  if (version < 20) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_discovery_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        observer_id TEXT NOT NULL CHECK (length(observer_id) BETWEEN 1 AND 128),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND
+          substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND
+          substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 4194304 AND json_valid(run_json)
+        ),
+        UNIQUE(repository_id, schedule_policy_digest, scheduled_for),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_discovery_runs_created_idx
+        ON factory_external_pr_discovery_runs(created_at, run_id);
+
+      CREATE TABLE factory_external_pr_discovery_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 8),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'inventory-started', 'recovered', 'snapshot-recorded',
+          'completed', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'fetching', 'recorded', 'completed', 'failed')
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'fetching', 'recorded', 'completed', 'failed')
+        ),
+        snapshot_digest TEXT CHECK (
+          snapshot_digest IS NULL OR
+          (length(snapshot_digest) = 71 AND substr(snapshot_digest, 1, 7) = 'sha256:')
+        ),
+        snapshot_artifact_digest TEXT CHECK (
+          snapshot_artifact_digest IS NULL OR
+          (length(snapshot_artifact_digest) = 71 AND
+            substr(snapshot_artifact_digest, 1, 7) = 'sha256:')
+        ),
+        snapshot_artifact_size INTEGER CHECK (
+          snapshot_artifact_size IS NULL OR snapshot_artifact_size BETWEEN 1 AND 16777216
+        ),
+        agent_review_candidates INTEGER CHECK (
+          agent_review_candidates IS NULL OR agent_review_candidates BETWEEN 0 AND 25
+        ),
+        human_review_required INTEGER CHECK (
+          human_review_required IS NULL OR human_review_required BETWEEN 0 AND 25
+        ),
+        deferred INTEGER CHECK (deferred IS NULL OR deferred BETWEEN 0 AND 25),
+        factory_owned INTEGER CHECK (factory_owned IS NULL OR factory_owned BETWEEN 0 AND 25),
+        has_more INTEGER CHECK (has_more IS NULL OR has_more IN (0, 1)),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_discovery_snapshots (
+        run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        snapshot_digest TEXT NOT NULL UNIQUE CHECK (
+          length(snapshot_digest) = 71 AND substr(snapshot_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        observer_id TEXT NOT NULL CHECK (length(observer_id) BETWEEN 1 AND 128),
+        scheduled_for TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        has_more INTEGER NOT NULL CHECK (has_more IN (0, 1)),
+        snapshot_json TEXT NOT NULL CHECK (
+          length(snapshot_json) BETWEEN 2 AND 16777216 AND json_valid(snapshot_json)
+        )
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_discovery_candidates (
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_discovery_runs(run_id),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        head_revision TEXT NOT NULL CHECK (length(head_revision) IN (40, 64)),
+        disposition TEXT NOT NULL CHECK (disposition IN (
+          'agent-review-candidate', 'human-review-required', 'deferred', 'factory-owned'
+        )),
+        candidate_digest TEXT NOT NULL CHECK (
+          length(candidate_digest) = 71 AND substr(candidate_digest, 1, 7) = 'sha256:'
+        ),
+        candidate_json TEXT NOT NULL CHECK (
+          length(candidate_json) BETWEEN 2 AND 1048576 AND json_valid(candidate_json)
+        ),
+        PRIMARY KEY(run_id, pull_request_number)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_candidates_disposition_idx
+        ON factory_external_pr_discovery_candidates(
+          repository_id, disposition, pull_request_number
+        );
+
+      CREATE TRIGGER factory_external_pr_discovery_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.observerId') IS NOT NEW.observer_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_events_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.snapshotDigest') IS NOT NEW.snapshot_digest OR
+        json_extract(NEW.event_json, '$.snapshotArtifact.digest') IS NOT NEW.snapshot_artifact_digest OR
+        json_extract(NEW.event_json, '$.snapshotArtifact.sizeBytes') IS NOT NEW.snapshot_artifact_size OR
+        json_extract(NEW.event_json, '$.agentReviewCandidates') IS NOT NEW.agent_review_candidates OR
+        json_extract(NEW.event_json, '$.humanReviewRequired') IS NOT NEW.human_review_required OR
+        json_extract(NEW.event_json, '$.deferred') IS NOT NEW.deferred OR
+        json_extract(NEW.event_json, '$.factoryOwned') IS NOT NEW.factory_owned OR
+        json_extract(NEW.event_json, '$.hasMore') IS NOT NEW.has_more OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'maintenance-scout' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT observer_id FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'inventory-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'fetching') OR
+        (NEW.kind = 'recovered' AND NEW.from_state = 'fetching' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'snapshot-recorded' AND NEW.from_state = 'fetching' AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state = 'fetching' AND NEW.to_state = 'failed')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR discovery transition'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'inventory-started', 'recovered', 'failed') AND
+          NEW.snapshot_digest IS NULL AND NEW.snapshot_artifact_digest IS NULL AND
+          NEW.snapshot_artifact_size IS NULL AND NEW.agent_review_candidates IS NULL AND
+          NEW.human_review_required IS NULL AND NEW.deferred IS NULL AND
+          NEW.factory_owned IS NULL AND NEW.has_more IS NULL) OR
+        (NEW.kind = 'snapshot-recorded' AND NEW.snapshot_digest IS NOT NULL AND
+          NEW.snapshot_artifact_digest IS NEW.snapshot_digest AND
+          NEW.snapshot_artifact_size IS NOT NULL AND NEW.agent_review_candidates IS NULL AND
+          NEW.human_review_required IS NULL AND NEW.deferred IS NULL AND
+          NEW.factory_owned IS NULL AND NEW.has_more IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.snapshot_digest IS NULL AND
+          NEW.snapshot_artifact_digest IS NULL AND NEW.snapshot_artifact_size IS NULL AND
+          NEW.agent_review_candidates IS NOT NULL AND NEW.human_review_required IS NOT NULL AND
+          NEW.deferred IS NOT NULL AND NEW.factory_owned IS NOT NULL AND NEW.has_more IS NOT NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_time_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_snapshots
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshots are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_snapshots
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshots are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_snapshots
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.snapshot_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.snapshot_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.snapshot_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.snapshot_json, '$.observerId') IS NOT NEW.observer_id OR
+        json_extract(NEW.snapshot_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.snapshot_json, '$.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.snapshot_json, '$.hasMore') IS NOT NEW.has_more
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshot identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_candidates_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_candidates
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidates are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_candidates_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_candidates
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidates are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_candidates_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_candidates
+      WHEN
+        json_extract(NEW.candidate_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.candidate_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.candidate_json, '$.head.revision') IS NOT NEW.head_revision OR
+        json_extract(NEW.candidate_json, '$.disposition') IS NOT NEW.disposition
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidate identity mismatch'); END;
+
+      PRAGMA user_version = 20;
       COMMIT;
     `);
   }

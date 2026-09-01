@@ -45,6 +45,22 @@ async function main(): Promise<void> {
     process.exitCode = await runFactoryMaintenanceDiscoveryPreflight(action.configPath);
     return;
   }
+  if (action.kind === "factory-external-pull-request-discovery-preflight") {
+    const { runFactoryExternalPullRequestDiscoveryPreflight } =
+      await import("./run-factory-external-pull-request-discovery.js");
+    process.exitCode = await runFactoryExternalPullRequestDiscoveryPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-discovery-tick") {
+    const { runFactoryExternalPullRequestDiscoveryTick } =
+      await import("./run-factory-external-pull-request-discovery.js");
+    process.exitCode = await runFactoryExternalPullRequestDiscoveryTick(
+      action.configPath,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedSchedulePolicyDigest
+    );
+    return;
+  }
   if (action.kind === "factory-maintenance-discovery-tick") {
     const { runFactoryMaintenanceDiscoveryTick } =
       await import("./run-factory-maintenance-discovery.js");

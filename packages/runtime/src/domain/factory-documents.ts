@@ -19,6 +19,11 @@ import type {
   FactoryEvalSample,
   FactoryEvalSubjectEvidence,
   FactoryEvalSubjectRequest,
+  FactoryExternalPullRequestCandidate,
+  FactoryExternalPullRequestDiscoveryEvent,
+  FactoryExternalPullRequestDiscoveryPolicy,
+  FactoryExternalPullRequestDiscoveryRun,
+  FactoryExternalPullRequestDiscoverySnapshot,
   FactoryEvalRun,
   FactoryEvalSuite,
   FactoryDsseEnvelope,
@@ -80,6 +85,21 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  externalPullRequestDiscoveryPolicy(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestDiscoveryPolicy>;
+  externalPullRequestDiscoveryRun(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestDiscoveryRun>;
+  externalPullRequestDiscoveryEvent(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestDiscoveryEvent>;
+  externalPullRequestDiscoverySnapshot(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestDiscoverySnapshot>;
+  externalPullRequestCandidate(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryExternalPullRequestCandidate>;
   intakeRequest(input: unknown): CanonicalFactoryDocument<FactoryIntakeRequest>;
   maintenanceDiscoveryPolicy(
     input: unknown
