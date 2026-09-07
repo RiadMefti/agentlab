@@ -31,13 +31,16 @@ describe("local factory authority composition", () => {
     expect(Object.keys(runtime.commands).sort()).toEqual([
       "inspect",
       "setBrokerAuthority",
+      "setMergeBrokerAuthority",
       "setSchedulerAuthority"
     ]);
     await expect(runtime.commands.inspect()).resolves.toMatchObject({
       schedulerEnabled: false,
       prBrokerEnabled: false,
+      mergeBrokerEnabled: false,
       recentSchedulerEvents: [],
-      recentBrokerEvents: []
+      recentBrokerEvents: [],
+      recentMergeBrokerEvents: []
     });
     await expect(
       runtime.commands.setBrokerAuthority({

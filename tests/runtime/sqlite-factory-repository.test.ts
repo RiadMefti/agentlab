@@ -133,7 +133,11 @@ describe("SqliteFactoryRepository", () => {
   it("keeps scheduler and PR broker disabled until a human enables each control", async () => {
     const repository = new SqliteFactoryRepository(":memory:");
     try {
-      await expect(repository.state()).resolves.toEqual({ scheduler: false, prBroker: false });
+      await expect(repository.state()).resolves.toEqual({
+        scheduler: false,
+        prBroker: false,
+        mergeBroker: false
+      });
       const enabled = codec.controlEvent(
         testControlEvent({
           eventId: "88888888-8888-4888-8888-888888888888",
@@ -143,7 +147,8 @@ describe("SqliteFactoryRepository", () => {
       );
       await expect(repository.record(enabled)).resolves.toEqual({
         scheduler: true,
-        prBroker: false
+        prBroker: false,
+        mergeBroker: false
       });
       await expect(repository.history("scheduler", 10)).resolves.toEqual([enabled.value]);
       expect(() =>
@@ -186,13 +191,15 @@ describe("SqliteFactoryRepository", () => {
     try {
       await expect(repository.record(enable, false)).resolves.toEqual({
         scheduler: false,
-        prBroker: true
+        prBroker: true,
+        mergeBroker: false
       });
       await expect(repository.record(staleDisable, false)).resolves.toBeNull();
       await expect(repository.history("pr-broker", 10)).resolves.toEqual([enable.value]);
       await expect(repository.record(disable, true)).resolves.toEqual({
         scheduler: false,
-        prBroker: false
+        prBroker: false,
+        mergeBroker: false
       });
       await expect(repository.history("pr-broker", 10)).resolves.toEqual([
         disable.value,

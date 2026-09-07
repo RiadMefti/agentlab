@@ -109,7 +109,12 @@ export class FactoryOperationsHealthService {
       authority: {
         schedulerEnabled: observation.authority.scheduler,
         prBrokerEnabled: observation.authority.prBroker,
-        autonomousDraftsEnabled: observation.authority.scheduler && observation.authority.prBroker
+        autonomousDraftsEnabled: observation.authority.scheduler && observation.authority.prBroker,
+        mergeBrokerEnabled: observation.authority.mergeBroker ?? false,
+        autonomousMergesEnabled:
+          observation.authority.scheduler &&
+          observation.authority.prBroker &&
+          (observation.authority.mergeBroker ?? false)
       },
       schedules,
       tasks,

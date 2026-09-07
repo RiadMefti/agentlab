@@ -6,7 +6,9 @@ import { factoryOperationsHealthReportSchema } from "./factory-operations-health
 const authorityStateSchema = z
   .object({
     schedulerEnabled: z.boolean(),
-    prBrokerEnabled: z.boolean()
+    prBrokerEnabled: z.boolean(),
+    /** Absent only on containments recorded before merge authority existed. */
+    mergeBrokerEnabled: z.boolean().optional()
   })
   .strict();
 
@@ -20,6 +22,8 @@ export const factoryIncidentContainmentSchema = z
     authorityBefore: authorityStateSchema,
     brokerDisableEventDigest: sha256DigestSchema.nullable(),
     schedulerDisableEventDigest: sha256DigestSchema.nullable(),
+    /** Absent only on containments recorded before merge authority existed. */
+    mergeBrokerDisableEventDigest: sha256DigestSchema.nullable().optional(),
     actor: factoryActorSchema,
     containedAt: factoryTimestampSchema
   })
@@ -37,12 +41,24 @@ export const factoryIncidentContainmentSchema = z
     }
     if (
       !containment.authorityBefore.schedulerEnabled &&
-      !containment.authorityBefore.prBrokerEnabled
+      !containment.authorityBefore.prBrokerEnabled &&
+      !(containment.authorityBefore.mergeBrokerEnabled ?? false)
     ) {
       context.addIssue({
         code: "custom",
         path: ["authorityBefore"],
         message: "Incident containment must remove at least one enabled authority."
+      });
+    }
+    if (
+      (containment.authorityBefore.mergeBrokerEnabled ?? false) !==
+      (containment.mergeBrokerDisableEventDigest !== undefined &&
+        containment.mergeBrokerDisableEventDigest !== null)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["mergeBrokerDisableEventDigest"],
+        message: "Merge-broker disable evidence must exactly match prior merge authority."
       });
     }
     if (

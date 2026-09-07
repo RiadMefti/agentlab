@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  factoryAutonomousMergePolicySchema,
   factoryCostPolicySchema,
   factoryDailyQuotaPolicySchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryCostPolicy,
   type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
@@ -31,7 +33,12 @@ import { FactoryPullRequestCanaryAuthority } from "./application/factory-pull-re
 import { FactoryPullRequestObservationService } from "./application/factory-pull-request-observation-service.js";
 import { FactoryPullRequestRepairAdmissionService } from "./application/factory-pull-request-repair-admission-service.js";
 import { FactoryPullRequestUpdateService } from "./application/factory-pull-request-update-service.js";
-import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
+import {
+  createAutonomousR1FactoryPolicyBundle,
+  FactoryPolicyEngine,
+  defaultFactoryPolicyBundle
+} from "./domain/factory-policy.js";
+import { assertFactoryProcessUserIdentity } from "./domain/factory-role-identity.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import type { LocalFactoryBrokerConfig } from "./infrastructure/filesystem/local-factory-broker-config.js";
 import { FileGitHubAppPrivateKeySource } from "./infrastructure/github/file-github-app-private-key-source.js";
@@ -77,6 +84,9 @@ export interface LocalFactoryBrokerOptions {
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;
@@ -139,6 +149,46 @@ export function createLocalFactoryBroker(
     ) {
       throw new Error("Factory broker repository is not authorized by its daily quota policy.");
     }
+    const autonomousMergePolicy =
+      options.autonomousMergePolicy === undefined
+        ? null
+        : documents.autonomousMergePolicy(
+            factoryAutonomousMergePolicySchema.parse(options.autonomousMergePolicy)
+          );
+    if (
+      [
+        autonomousMergePolicy,
+        options.expectedAutonomousMergePolicyDigest,
+        options.expectedFactoryPolicyBundleDigest
+      ].filter((value) => value !== null && value !== undefined).length !== 0 &&
+      (autonomousMergePolicy === null ||
+        options.expectedAutonomousMergePolicyDigest === undefined ||
+        options.expectedFactoryPolicyBundleDigest === undefined)
+    ) {
+      throw new Error(
+        "Factory broker autonomous merge policy and reviewed digests must be paired."
+      );
+    }
+    if (
+      autonomousMergePolicy !== null &&
+      (autonomousMergePolicy.digest !== options.expectedAutonomousMergePolicyDigest ||
+        autonomousMergePolicy.value.repositoryId !== options.repositoryId ||
+        schedulePolicy === null ||
+        dailyQuotaPolicy === null ||
+        roleIdentityPolicy === null ||
+        autonomousMergePolicy.value.schedulePolicyDigest !== schedulePolicy.digest ||
+        autonomousMergePolicy.value.dailyQuotaPolicyDigest !== dailyQuotaPolicy.digest ||
+        autonomousMergePolicy.value.roleIdentityPolicyDigest !== roleIdentityPolicy.digest)
+    ) {
+      throw new Error("Factory broker autonomous merge policy coordinates changed after review.");
+    }
+    if (autonomousMergePolicy !== null) {
+      assertFactoryProcessUserIdentity(
+        "PR broker",
+        autonomousMergePolicy.value.prBrokerUserId,
+        process.getuid?.()
+      );
+    }
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
@@ -179,7 +229,17 @@ export function createLocalFactoryBroker(
     const costPolicy = factoryCostPolicySchema.parse(
       options.costPolicy ?? defaultFactoryPolicyBundle.costPolicy
     );
-    const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
+    const policyBundle = encodeCanonicalDocument(
+      autonomousMergePolicy === null
+        ? { ...defaultFactoryPolicyBundle, costPolicy }
+        : createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: autonomousMergePolicy })
+    );
+    if (
+      autonomousMergePolicy !== null &&
+      policyBundle.digest !== options.expectedFactoryPolicyBundleDigest
+    ) {
+      throw new Error("Factory broker policy bundle changed after review.");
+    }
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
     const now = options.now ?? (() => new Date().toISOString());
     const createId = options.createId ?? randomUUID;
@@ -417,14 +477,23 @@ export function createConfiguredLocalFactoryBroker(
       ? {}
       : { costPolicy: config.costPolicy }),
     ...(config.schemaVersion === "agentlab.local-factory-broker.v3" ||
-    config.schemaVersion === "agentlab.local-factory-broker.v4"
+    config.schemaVersion === "agentlab.local-factory-broker.v4" ||
+    config.schemaVersion === "agentlab.local-factory-broker.v5"
       ? {
           schedulePolicy: config.schedulePolicy,
-          ...(config.schemaVersion === "agentlab.local-factory-broker.v4"
+          ...(config.schemaVersion === "agentlab.local-factory-broker.v4" ||
+          config.schemaVersion === "agentlab.local-factory-broker.v5"
             ? { dailyQuotaPolicy: config.dailyQuotaPolicy }
             : {}),
           roleIdentityPolicy: config.roleIdentityPolicy,
-          expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+          expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest,
+          ...(config.schemaVersion === "agentlab.local-factory-broker.v5"
+            ? {
+                autonomousMergePolicy: config.autonomousMergePolicy,
+                expectedAutonomousMergePolicyDigest: config.expectedMergePolicyDigest,
+                expectedFactoryPolicyBundleDigest: config.expectedFactoryPolicyBundleDigest
+              }
+            : {})
         }
       : {}),
     githubApp: {

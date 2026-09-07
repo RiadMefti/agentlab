@@ -1,4 +1,5 @@
 import type {
+  FactoryAutonomousMergePolicy,
   FactoryCostPolicy,
   FactoryDailyQuotaPolicy,
   FactoryRoleIdentityPolicy,
@@ -83,6 +84,9 @@ interface ExpectedOptions {
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
@@ -240,7 +244,8 @@ type ExpectedConfigKeys =
   | "costPolicy"
   | "schedulePolicy"
   | "dailyQuotaPolicy"
-  | "roleIdentityPolicy";
+  | "roleIdentityPolicy"
+  | "autonomousMergePolicy";
 
 export type FactoryWorkerPublicApiAssertions = [
   Assert<Equal<FactoryAgentProviderBinding, ExpectedProviderBinding>>,

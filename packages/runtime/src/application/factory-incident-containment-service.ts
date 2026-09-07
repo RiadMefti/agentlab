@@ -40,7 +40,7 @@ export interface FactoryIncidentContainmentServiceDependencies {
   readonly createId: () => string;
 }
 
-/** Recomputes health internally and can only remove scheduler and PR-broker authority. */
+/** Recomputes health internally and can only remove merge, PR-broker, and scheduler authority. */
 export class FactoryIncidentContainmentService {
   readonly #controllerId: string;
 
@@ -64,11 +64,15 @@ export class FactoryIncidentContainmentService {
         report,
         "already-contained",
         authorityBefore,
-        { scheduler: false, prBroker: false },
+        { scheduler: false, prBroker: false, mergeBroker: false },
         existing
       );
     }
-    if (!authorityBefore.prBroker && !authorityBefore.scheduler) {
+    if (
+      !authorityBefore.prBroker &&
+      !authorityBefore.scheduler &&
+      !(authorityBefore.mergeBroker ?? false)
+    ) {
       return result(report, "already-contained", authorityBefore, authorityBefore, null);
     }
 
@@ -80,6 +84,17 @@ export class FactoryIncidentContainmentService {
       sessionId: null
     };
     const reason = containmentReason(report);
+    const mergeBrokerDisableEvent = authorityBefore.mergeBroker
+      ? this.dependencies.documents.controlEvent({
+          schemaVersion: "agentlab.control-event.v1",
+          eventId: this.dependencies.createId(),
+          control: "merge-broker",
+          enabled: false,
+          actor,
+          occurredAt: containedAt,
+          reason
+        })
+      : null;
     const brokerDisableEvent = authorityBefore.prBroker
       ? this.dependencies.documents.controlEvent({
           schemaVersion: "agentlab.control-event.v1",
@@ -109,8 +124,10 @@ export class FactoryIncidentContainmentService {
       healthReport: report.value,
       authorityBefore: {
         schedulerEnabled: authorityBefore.scheduler,
-        prBrokerEnabled: authorityBefore.prBroker
+        prBrokerEnabled: authorityBefore.prBroker,
+        mergeBrokerEnabled: authorityBefore.mergeBroker ?? false
       },
+      mergeBrokerDisableEventDigest: mergeBrokerDisableEvent?.digest ?? null,
       brokerDisableEventDigest: brokerDisableEvent?.digest ?? null,
       schedulerDisableEventDigest: schedulerDisableEvent?.digest ?? null,
       actor,
@@ -118,6 +135,7 @@ export class FactoryIncidentContainmentService {
     });
     const stored = await this.dependencies.repository.disableAtomically({
       expectedAuthority: authorityBefore,
+      mergeBrokerDisableEvent,
       brokerDisableEvent,
       schedulerDisableEvent,
       containment
@@ -129,7 +147,7 @@ export class FactoryIncidentContainmentService {
       report,
       "contained",
       authorityBefore,
-      { scheduler: false, prBroker: false },
+      { scheduler: false, prBroker: false, mergeBroker: false },
       stored
     );
   }
@@ -142,9 +160,19 @@ function reportAuthority(report: FactoryOperationsHealthReport): FactoryAuthorit
   ) {
     throw new Error("Incident controller observed an inconsistent authority projection.");
   }
+  if (
+    report.authority.autonomousMergesEnabled !== undefined &&
+    report.authority.autonomousMergesEnabled !==
+      (report.authority.schedulerEnabled &&
+        report.authority.prBrokerEnabled &&
+        (report.authority.mergeBrokerEnabled ?? false))
+  ) {
+    throw new Error("Incident controller observed an inconsistent merge-authority projection.");
+  }
   return {
     scheduler: report.authority.schedulerEnabled,
-    prBroker: report.authority.prBrokerEnabled
+    prBroker: report.authority.prBrokerEnabled,
+    mergeBroker: report.authority.mergeBrokerEnabled ?? false
   };
 }
 

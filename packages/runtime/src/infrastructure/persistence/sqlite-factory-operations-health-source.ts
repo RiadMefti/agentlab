@@ -174,7 +174,8 @@ export class SqliteFactoryOperationsHealthSource implements FactoryOperationsHea
       const observation: FactoryOperationsHealthObservation = {
         authority: {
           scheduler: this.#control("scheduler"),
-          prBroker: this.#control("pr-broker")
+          prBroker: this.#control("pr-broker"),
+          mergeBroker: this.#control("merge-broker")
         },
         schedules: scheduleRows
           .slice(0, query.maximumRecordsPerSection)
@@ -206,10 +207,12 @@ export class SqliteFactoryOperationsHealthSource implements FactoryOperationsHea
   }
 
   #control(control: FactoryControlName): boolean {
+    const table =
+      control === "merge-broker" ? "factory_merge_control_events" : "factory_control_events";
     const row = this.#database
       .prepare(
         `SELECT event_digest, control_name, enabled, event_json
-         FROM factory_control_events WHERE control_name = ? ORDER BY sequence DESC LIMIT 1`
+         FROM ${table} WHERE control_name = ? ORDER BY sequence DESC LIMIT 1`
       )
       .get(control) as ControlRow | undefined;
     if (row === undefined) return false;

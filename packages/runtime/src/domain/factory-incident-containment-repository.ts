@@ -12,9 +12,10 @@ export interface FactoryIncidentContainmentSnapshot {
   readonly containmentDigest: Sha256Digest;
 }
 
-/** Complete material for one broker-first, scheduler-second, disable-only transaction. */
+/** Complete material for one merger-first, PR-broker-second, scheduler-last disable transaction. */
 export interface FactoryIncidentDisableCommand {
   readonly expectedAuthority: FactoryAuthorityState;
+  readonly mergeBrokerDisableEvent: CanonicalFactoryDocument<FactoryControlEvent> | null;
   readonly brokerDisableEvent: CanonicalFactoryDocument<FactoryControlEvent> | null;
   readonly schedulerDisableEvent: CanonicalFactoryDocument<FactoryControlEvent> | null;
   readonly containment: CanonicalFactoryDocument<FactoryIncidentContainment>;

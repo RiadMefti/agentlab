@@ -131,6 +131,16 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         default: "./dist/local-factory-incident-containment.js",
         types: "./dist/local-factory-incident-containment.d.ts"
       },
+      "./factory-autonomous-merge-admission": {
+        source: "packages/runtime/src/local-factory-autonomous-merge-admission.ts",
+        default: "./dist/local-factory-autonomous-merge-admission.js",
+        types: "./dist/local-factory-autonomous-merge-admission.d.ts"
+      },
+      "./factory-autonomous-merger": {
+        source: "packages/runtime/src/local-factory-autonomous-merger.ts",
+        default: "./dist/local-factory-autonomous-merger.js",
+        types: "./dist/local-factory-autonomous-merger.d.ts"
+      },
       "./factory-maintenance-discovery": {
         source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
         default: "./dist/local-factory-maintenance-discovery.js",
@@ -449,6 +459,8 @@ function compositionBoundaryViolations(
         isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
@@ -476,6 +488,8 @@ function compositionBoundaryViolations(
         isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
@@ -501,6 +515,8 @@ function compositionBoundaryViolations(
         isFactoryEvalProducerModule(path) ||
         isFactoryCanaryAuthorityModule(path) ||
         isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
         isFactoryMaintenanceDiscoveryModule(path) ||
         isFactoryExternalPullRequestDiscoveryModule(path) ||
         isFactoryExternalPullRequestReviewModule(path) ||
@@ -566,6 +582,16 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-incident-containment.ts",
       description: "credentialless disable-only incident composition",
       forbidden: incidentContainmentCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-autonomous-merge-admission.ts",
+      description: "credentialless autonomous merge admission composition",
+      forbidden: autonomousMergeAdmissionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-autonomous-merger.ts",
+      description: "isolated autonomous merge-queue composition",
+      forbidden: autonomousMergerCommandForbidden
     },
     {
       entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
@@ -681,6 +707,16 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-incident-containment.ts",
       description: "credentialless disable-only incident command",
       forbidden: incidentContainmentCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-autonomous-merge-admission.ts",
+      description: "credentialless autonomous merge admission command",
+      forbidden: autonomousMergeAdmissionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-autonomous-merger.ts",
+      description: "isolated autonomous merge-queue command",
+      forbidden: autonomousMergerCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
@@ -1249,6 +1285,7 @@ const factoryOrchestrationDomainModules = new Set([
 ]);
 
 const factoryOrchestrationInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts",
@@ -1281,7 +1318,9 @@ function orchestrationCommandForbidden(path: string): boolean {
     isFactoryEvalAttestorModule(path) ||
     isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
-    isFactoryCanaryAdmissionModule(path)
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryAutonomousMergeAdmissionModule(path) ||
+    isFactoryAutonomousMergerModule(path)
   ) {
     return true;
   }
@@ -1421,6 +1460,145 @@ function incidentContainmentCommandForbidden(path: string): boolean {
   return false;
 }
 
+const factoryAutonomousMergeAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts",
+  "packages/runtime/src/application/factory-control-plane.ts",
+  "packages/runtime/src/application/factory-evidence-ingress.ts",
+  "packages/runtime/src/application/factory-evidence-publisher.ts",
+  "packages/runtime/src/application/factory-pull-request-canary-authority.ts",
+  "packages/runtime/src/application/factory-pull-request-lineage.ts",
+  "packages/runtime/src/application/factory-pull-request-repair-evidence.ts",
+  "packages/runtime/src/application/local-factory-autonomous-merge-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryAutonomousMergeAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-reservation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-daily-quota-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-update-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryAutonomousMergeAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-autonomous-merge-admission.ts" ||
+    path === "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts" ||
+    path ===
+      "packages/runtime/src/application/local-factory-autonomous-merge-admission-coordinator.ts"
+  );
+}
+
+function autonomousMergeAdmissionCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-autonomous-merge-admission.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryAutonomousMergeAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryAutonomousMergeAdmissionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryAutonomousMergerApplicationModules = new Set([
+  "packages/runtime/src/application/factory-autonomous-merge-service.ts",
+  "packages/runtime/src/application/factory-control-plane.ts",
+  "packages/runtime/src/application/factory-evidence-ingress.ts",
+  "packages/runtime/src/application/factory-evidence-publisher.ts",
+  "packages/runtime/src/application/local-factory-autonomous-merger-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryAutonomousMergerInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts",
+  "packages/runtime/src/infrastructure/github/github-graphql-client.ts",
+  "packages/runtime/src/infrastructure/github/github-merger-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-autonomous-merge-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryAutonomousMergerModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-autonomous-merger.ts" ||
+    path === "packages/runtime/src/application/factory-autonomous-merge-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-autonomous-merger-coordinator.ts" ||
+    path === "packages/runtime/src/domain/factory-autonomous-merge-broker.ts" ||
+    path === "packages/runtime/src/domain/factory-autonomous-merge-repository.ts" ||
+    path === "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-autonomous-merge-repository.ts"
+  );
+}
+
+function autonomousMergerCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-autonomous-merger.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryAutonomousMergerApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryAutonomousMergerInfrastructureModules.has(path);
+  }
+  return false;
+}
+
 const factoryMaintenanceDiscoveryApplicationModules = new Set([
   "packages/runtime/src/application/factory-maintenance-discovery-intake.ts",
   "packages/runtime/src/application/factory-maintenance-discovery-prompt-renderer.ts",
@@ -1445,6 +1623,8 @@ const factoryMaintenanceDiscoveryInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
   "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
@@ -1502,6 +1682,8 @@ function maintenanceDiscoveryCommandForbidden(path: string): boolean {
     isFactoryEvalProducerModule(path) ||
     isFactoryCanaryAuthorityModule(path) ||
     isFactoryCanaryAdmissionModule(path) ||
+    isFactoryAutonomousMergeAdmissionModule(path) ||
+    isFactoryAutonomousMergerModule(path) ||
     isFactoryOrchestrationModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
@@ -2274,6 +2456,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-orchestration.ts" ||
     path === "packages/runtime/src/local-factory-operations-health.ts" ||
     path === "packages/runtime/src/local-factory-incident-containment.ts" ||
+    path === "packages/runtime/src/local-factory-autonomous-merge-admission.ts" ||
+    path === "packages/runtime/src/local-factory-autonomous-merger.ts" ||
     path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
     path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||

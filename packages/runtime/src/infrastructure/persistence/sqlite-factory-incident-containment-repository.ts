@@ -40,8 +40,10 @@ interface ContainmentRow {
   readonly observed_at: unknown;
   readonly broker_was_enabled: unknown;
   readonly scheduler_was_enabled: unknown;
+  readonly merge_broker_was_enabled: unknown;
   readonly broker_disable_event_digest: unknown;
   readonly scheduler_disable_event_digest: unknown;
+  readonly merge_broker_disable_event_digest: unknown;
   readonly contained_at: unknown;
   readonly containment_json: unknown;
 }
@@ -52,14 +54,15 @@ const CONTROL_COLUMNS = `
 const CONTAINMENT_COLUMNS = `
   containment_id, containment_digest, health_report_digest, health_policy_digest,
   daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
-  broker_disable_event_digest, scheduler_disable_event_digest, contained_at, containment_json
+  merge_broker_was_enabled, broker_disable_event_digest, scheduler_disable_event_digest,
+  merge_broker_disable_event_digest, contained_at, containment_json
 `;
 
 export interface SqliteFactoryIncidentContainmentRepositoryOptions extends SqliteDatabaseOptions {
   readonly documents?: FactoryDocumentCodec;
 }
 
-/** Persists broker-first and scheduler-second disable evidence in one SQLite transaction. */
+/** Persists merger-first, PR-broker-second, scheduler-last disable evidence atomically. */
 export class SqliteFactoryIncidentContainmentRepository implements FactoryIncidentContainmentRepository {
   readonly #database: DatabaseSync;
   readonly #documents: FactoryDocumentCodec;
@@ -81,6 +84,9 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
         const existing = this.#find(verified.containment.value.healthReportDigest);
         if (existing !== null) return existing;
         if (!sameAuthority(this.#authorityState(), verified.expectedAuthority)) return null;
+        if (verified.mergeBrokerDisableEvent !== null) {
+          this.#insertControlEvent(verified.mergeBrokerDisableEvent);
+        }
         if (verified.brokerDisableEvent !== null) {
           this.#insertControlEvent(verified.brokerDisableEvent);
         }
@@ -116,11 +122,20 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
     if (
       expected.prBroker !== before.prBrokerEnabled ||
       expected.scheduler !== before.schedulerEnabled ||
+      (expected.mergeBroker ?? false) !== (before.mergeBrokerEnabled ?? false) ||
       containment.value.healthReport.authority.prBrokerEnabled !== expected.prBroker ||
-      containment.value.healthReport.authority.schedulerEnabled !== expected.scheduler
+      containment.value.healthReport.authority.schedulerEnabled !== expected.scheduler ||
+      (containment.value.healthReport.authority.mergeBrokerEnabled ?? false) !==
+        (expected.mergeBroker ?? false)
     ) {
       throw new Error("Incident containment authority does not match its critical observation.");
     }
+    const mergeBrokerDisableEvent = this.#verifyDisableEvent(
+      command.mergeBrokerDisableEvent,
+      "merge-broker",
+      expected.mergeBroker ?? false,
+      containment
+    );
     const brokerDisableEvent = this.#verifyDisableEvent(
       command.brokerDisableEvent,
       "pr-broker",
@@ -133,7 +148,13 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
       expected.scheduler,
       containment
     );
-    return { expectedAuthority: expected, brokerDisableEvent, schedulerDisableEvent, containment };
+    return {
+      expectedAuthority: expected,
+      mergeBrokerDisableEvent,
+      brokerDisableEvent,
+      schedulerDisableEvent,
+      containment
+    };
   }
 
   #verifyDisableEvent(
@@ -142,16 +163,18 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
     required: boolean,
     containment: CanonicalFactoryDocument<FactoryIncidentContainment>
   ): CanonicalFactoryDocument<FactoryControlEvent> | null {
-    if ((claim !== null) !== required) {
+    if ((claim != null) !== required) {
       throw new Error(`Incident containment ${control} disable evidence is incomplete.`);
     }
-    if (claim === null) return null;
+    if (claim == null) return null;
     const event = this.#documents.controlEvent(claim.value);
     assertDocumentClaim(claim, event, `${control} disable event`);
     const recordedDigest =
-      control === "pr-broker"
-        ? containment.value.brokerDisableEventDigest
-        : containment.value.schedulerDisableEventDigest;
+      control === "merge-broker"
+        ? (containment.value.mergeBrokerDisableEventDigest ?? null)
+        : control === "pr-broker"
+          ? containment.value.brokerDisableEventDigest
+          : containment.value.schedulerDisableEventDigest;
     if (
       event.value.control !== control ||
       event.value.enabled ||
@@ -166,9 +189,13 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
   }
 
   #insertControlEvent(event: CanonicalFactoryDocument<FactoryControlEvent>): void {
+    const table =
+      event.value.control === "merge-broker"
+        ? "factory_merge_control_events"
+        : "factory_control_events";
     this.#database
       .prepare(
-        `INSERT INTO factory_control_events (
+        `INSERT INTO ${table} (
           event_id, event_digest, control_name, enabled, event_json, occurred_at, reason
         ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
@@ -190,9 +217,10 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
         `INSERT INTO factory_incident_containments (
           containment_id, containment_digest, health_report_digest, health_policy_digest,
           daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
-          broker_disable_event_digest, scheduler_disable_event_digest, contained_at,
+          merge_broker_was_enabled, broker_disable_event_digest,
+          scheduler_disable_event_digest, merge_broker_disable_event_digest, contained_at,
           containment_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         value.containmentId,
@@ -203,8 +231,10 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
         value.healthReport.observedAt,
         value.authorityBefore.prBrokerEnabled ? 1 : 0,
         value.authorityBefore.schedulerEnabled ? 1 : 0,
+        value.authorityBefore.mergeBrokerEnabled ? 1 : 0,
         value.brokerDisableEventDigest,
         value.schedulerDisableEventDigest,
+        value.mergeBrokerDisableEventDigest ?? null,
         value.containedAt,
         containment.json
       );
@@ -235,13 +265,22 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
       row.observed_at !== containment.value.healthReport.observedAt ||
       row.broker_was_enabled !== (containment.value.authorityBefore.prBrokerEnabled ? 1 : 0) ||
       row.scheduler_was_enabled !== (containment.value.authorityBefore.schedulerEnabled ? 1 : 0) ||
+      row.merge_broker_was_enabled !==
+        (containment.value.authorityBefore.mergeBrokerEnabled ? 1 : 0) ||
       row.broker_disable_event_digest !== containment.value.brokerDisableEventDigest ||
       row.scheduler_disable_event_digest !== containment.value.schedulerDisableEventDigest ||
+      row.merge_broker_disable_event_digest !==
+        (containment.value.mergeBrokerDisableEventDigest ?? null) ||
       row.contained_at !== containment.value.containedAt ||
       row.containment_json !== containment.json
     ) {
       throw new Error("Stored factory incident containment failed immutable validation.");
     }
+    this.#validateStoredDisableEvent(
+      containment.value.mergeBrokerDisableEventDigest ?? null,
+      "merge-broker",
+      containment
+    );
     this.#validateStoredDisableEvent(
       containment.value.brokerDisableEventDigest,
       "pr-broker",
@@ -261,8 +300,10 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
     containment: CanonicalFactoryDocument<FactoryIncidentContainment>
   ): void {
     if (digest === null) return;
+    const table =
+      control === "merge-broker" ? "factory_merge_control_events" : "factory_control_events";
     const row = this.#database
-      .prepare(`SELECT ${CONTROL_COLUMNS} FROM factory_control_events WHERE event_digest = ?`)
+      .prepare(`SELECT ${CONTROL_COLUMNS} FROM ${table} WHERE event_digest = ?`)
       .get(digest) as ControlRow | undefined;
     if (row === undefined) throw new Error("Stored incident disable event is missing.");
     const event = this.#controlFromRow(row);
@@ -280,14 +321,17 @@ export class SqliteFactoryIncidentContainmentRepository implements FactoryIncide
   #authorityState(): FactoryAuthorityState {
     return {
       scheduler: this.#latestControlValue("scheduler"),
-      prBroker: this.#latestControlValue("pr-broker")
+      prBroker: this.#latestControlValue("pr-broker"),
+      mergeBroker: this.#latestControlValue("merge-broker")
     };
   }
 
   #latestControlValue(control: FactoryControlName): boolean {
+    const table =
+      control === "merge-broker" ? "factory_merge_control_events" : "factory_control_events";
     const row = this.#database
       .prepare(
-        `SELECT ${CONTROL_COLUMNS} FROM factory_control_events
+        `SELECT ${CONTROL_COLUMNS} FROM ${table}
          WHERE control_name = ? ORDER BY sequence DESC LIMIT 1`
       )
       .get(control) as ControlRow | undefined;
@@ -338,7 +382,11 @@ function snapshot(
 }
 
 function sameAuthority(left: FactoryAuthorityState, right: FactoryAuthorityState): boolean {
-  return left.scheduler === right.scheduler && left.prBroker === right.prBroker;
+  return (
+    left.scheduler === right.scheduler &&
+    left.prBroker === right.prBroker &&
+    (left.mergeBroker ?? false) === (right.mergeBroker ?? false)
+  );
 }
 
 function sameActor(

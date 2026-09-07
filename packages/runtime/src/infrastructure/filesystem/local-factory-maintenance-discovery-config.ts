@@ -63,7 +63,7 @@ type ParsedConfig = z.infer<typeof configSchema>;
 
 export type LocalFactoryMaintenanceDiscoveryConfig = ParsedConfig & {
   readonly workerConfig: LocalFactoryWorkerConfig & {
-    readonly schemaVersion: "agentlab.local-factory-worker.v3";
+    readonly schemaVersion: "agentlab.local-factory-worker.v3" | "agentlab.local-factory-worker.v5";
     readonly schedulePolicy: NonNullable<LocalFactoryWorkerConfig["schedulePolicy"]>;
     readonly roleIdentityPolicy: NonNullable<LocalFactoryWorkerConfig["roleIdentityPolicy"]>;
   };
@@ -103,11 +103,20 @@ export async function loadLocalFactoryMaintenanceDiscoveryConfig(
     Promise.all(config.preparationSkillPackagePaths.map(loadFactorySkillPackage))
   ]);
   if (
-    workerConfig.schemaVersion !== "agentlab.local-factory-worker.v3" ||
+    (workerConfig.schemaVersion !== "agentlab.local-factory-worker.v3" &&
+      workerConfig.schemaVersion !== "agentlab.local-factory-worker.v5") ||
     workerConfig.schedulePolicy === undefined ||
     workerConfig.roleIdentityPolicy === undefined
   ) {
-    throw new Error("Maintenance discovery requires a scheduled factory worker v3 configuration.");
+    throw new Error(
+      "Maintenance discovery requires a scheduled factory worker v3 or v5 configuration."
+    );
+  }
+  if (
+    workerConfig.schemaVersion === "agentlab.local-factory-worker.v5" &&
+    workerConfig.repositoryId !== config.repositoryId
+  ) {
+    throw new Error("Maintenance discovery repository changed after autonomous merge review.");
   }
   for (const [candidate, label] of [
     [workerConfig.artifactRoot, "artifact root"],

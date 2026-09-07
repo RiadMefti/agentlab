@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 import {
+  factoryAutonomousMergePolicySchema,
   factoryCostPolicySchema,
   factoryDailyQuotaPolicySchema,
   factorySchedulePolicySchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryCostPolicy,
   type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
@@ -45,7 +47,11 @@ import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
 import { FactoryCostAccountant } from "./domain/factory-cost-accounting.js";
 import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import type { FactoryGateDefinition } from "./domain/factory-gate.js";
-import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
+import {
+  createAutonomousR1FactoryPolicyBundle,
+  FactoryPolicyEngine,
+  defaultFactoryPolicyBundle
+} from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import { factoryPathsOverlap } from "./infrastructure/filesystem/factory-workspace-paths.js";
 import { GitFactoryRepositoryRevisionReader } from "./infrastructure/filesystem/git-factory-repository-revision.js";
@@ -107,6 +113,9 @@ export interface LocalFactoryWorkerOptions {
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
@@ -147,6 +156,40 @@ export function createLocalFactoryWorker(
   if (schedulePolicy !== null && identityPolicy === null) {
     throw new Error("Scheduled factory work requires an enforced role identity policy.");
   }
+  const autonomousMergePolicy =
+    options.autonomousMergePolicy === undefined
+      ? null
+      : documents.autonomousMergePolicy(
+          factoryAutonomousMergePolicySchema.parse(options.autonomousMergePolicy)
+        );
+  if (
+    [
+      autonomousMergePolicy,
+      options.expectedAutonomousMergePolicyDigest,
+      options.expectedFactoryPolicyBundleDigest
+    ].filter((value) => value !== null && value !== undefined).length !== 0 &&
+    (autonomousMergePolicy === null ||
+      options.expectedAutonomousMergePolicyDigest === undefined ||
+      options.expectedFactoryPolicyBundleDigest === undefined)
+  ) {
+    throw new Error("Factory worker autonomous merge policy and reviewed digests must be paired.");
+  }
+  const schedulePolicyDocument =
+    schedulePolicy === null ? null : documents.schedulePolicy(schedulePolicy);
+  const dailyQuotaPolicyDocument =
+    dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy);
+  if (
+    autonomousMergePolicy !== null &&
+    (autonomousMergePolicy.digest !== options.expectedAutonomousMergePolicyDigest ||
+      schedulePolicyDocument === null ||
+      dailyQuotaPolicyDocument === null ||
+      identityPolicy === null ||
+      autonomousMergePolicy.value.schedulePolicyDigest !== schedulePolicyDocument.digest ||
+      autonomousMergePolicy.value.dailyQuotaPolicyDigest !== dailyQuotaPolicyDocument.digest ||
+      autonomousMergePolicy.value.roleIdentityPolicyDigest !== identityPolicy.digest)
+  ) {
+    throw new Error("Factory worker autonomous merge policy coordinates changed after review.");
+  }
   if (identityPolicy !== null) {
     assertFactoryProcessRoleIdentity(identityPolicy.value, "worker", process.getuid?.());
   }
@@ -163,8 +206,6 @@ export function createLocalFactoryWorker(
     if (writerLease.databasePath === ":memory:") {
       throw new Error("The local factory worker requires a durable SQLite database.");
     }
-    const schedulePolicyDocument =
-      schedulePolicy === null ? null : documents.schedulePolicy(schedulePolicy);
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
@@ -200,7 +241,17 @@ export function createLocalFactoryWorker(
         ? null
         : repositories.track(new SqliteFactoryCanaryPullRequestRepairQueue(databasePath));
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
-    const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
+    const policyBundle = encodeCanonicalDocument(
+      autonomousMergePolicy === null
+        ? { ...defaultFactoryPolicyBundle, costPolicy }
+        : createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: autonomousMergePolicy })
+    );
+    if (
+      autonomousMergePolicy !== null &&
+      policyBundle.digest !== options.expectedFactoryPolicyBundleDigest
+    ) {
+      throw new Error("Factory worker policy bundle changed after review.");
+    }
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
     const costAccountant = new FactoryCostAccountant(policyBundle.digest, costPolicy);
     const resources = new RuntimeResourceOwner();
@@ -420,8 +471,7 @@ export function createLocalFactoryWorker(
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
-      dailyQuotaPolicyDigest:
-        dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy).digest,
+      dailyQuotaPolicyDigest: dailyQuotaPolicyDocument?.digest ?? null,
       costPolicyConfigured: costPolicy.rules.length > 0,
       configuredProviders: options.providers.map(({ provider }) => provider),
       gateIds: gates.availableGateIds(),
@@ -439,8 +489,7 @@ export function createLocalFactoryWorker(
       policyBundleDigest: policyBundle.digest,
       schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
       roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
-      dailyQuotaPolicy:
-        dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy),
+      dailyQuotaPolicy: dailyQuotaPolicyDocument,
       preparations,
       reservations: canaryReservations,
       schedules,
@@ -461,12 +510,12 @@ export function createLocalFactoryWorker(
       now
     });
     const scheduledPolicies =
-      schedulePolicyDocument === null || dailyQuotaPolicy === null
+      schedulePolicyDocument === null || dailyQuotaPolicyDocument === null
         ? null
         : {
             schedule: schedulePolicyDocument,
             identity: requiredRoleIdentityPolicy(identityPolicy),
-            dailyQuota: documents.dailyQuotaPolicy(dailyQuotaPolicy)
+            dailyQuota: dailyQuotaPolicyDocument
           };
     const dailyQuotaService =
       scheduledPolicies === null
@@ -580,7 +629,9 @@ export function createConfiguredLocalFactoryWorker(
   }
   if (config.schemaVersion === "agentlab.local-factory-worker.v3") {
     if (config.schedulePolicy !== undefined) {
-      throw new Error("Scheduled factory work requires a v4 worker config with daily quotas.");
+      throw new Error(
+        "Scheduled factory work requires a v4 or v5 worker config with daily quotas."
+      );
     }
     const roleIdentityPolicy = config.roleIdentityPolicy;
     if (roleIdentityPolicy === undefined) {
@@ -624,6 +675,35 @@ export function createConfiguredLocalFactoryWorker(
       dailyQuotaPolicy: config.dailyQuotaPolicy,
       roleIdentityPolicy: config.roleIdentityPolicy,
       expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+    });
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v5") {
+    if (
+      config.schedulePolicy === undefined ||
+      config.dailyQuotaPolicy === undefined ||
+      config.roleIdentityPolicy === undefined ||
+      config.autonomousMergePolicy === undefined
+    ) {
+      throw new Error("Factory worker v5 configuration lost a required autonomous merge policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      schedulePolicy: config.schedulePolicy,
+      dailyQuotaPolicy: config.dailyQuotaPolicy,
+      roleIdentityPolicy: config.roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest,
+      autonomousMergePolicy: config.autonomousMergePolicy,
+      expectedAutonomousMergePolicyDigest: config.expectedMergePolicyDigest,
+      expectedFactoryPolicyBundleDigest: config.expectedFactoryPolicyBundleDigest
     });
   }
   return createLocalFactoryWorker({

@@ -8,10 +8,19 @@ export function assertFactoryProcessRoleIdentity(
   role: EnforcedFactoryProcessRole,
   userId: number | undefined
 ): void {
+  const expectedUserId = role === "worker" ? policy.worker.userId : policy.evalAttestor.userId;
+  assertFactoryProcessUserIdentity(role, expectedUserId, userId);
+}
+
+/** Enforces a separately reviewed POSIX identity for a narrow authority-bearing process. */
+export function assertFactoryProcessUserIdentity(
+  role: string,
+  expectedUserId: number,
+  userId: number | undefined
+): void {
   if (userId === undefined || !Number.isSafeInteger(userId) || userId < 1) {
     throw new Error(`Factory ${role} requires a non-root POSIX process identity.`);
   }
-  const expectedUserId = role === "worker" ? policy.worker.userId : policy.evalAttestor.userId;
   if (userId !== expectedUserId) {
     throw new Error(`Factory ${role} process identity does not match its reviewed policy.`);
   }

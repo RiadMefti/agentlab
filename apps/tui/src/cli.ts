@@ -27,6 +27,38 @@ export type CliAction =
       readonly expectedHealthPolicyDigest: `sha256:${string}`;
       readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
     }
+  | { readonly kind: "factory-autonomous-merge-admission-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-autonomous-merge-admit";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly observationDigest: `sha256:${string}`;
+      readonly canaryReservationDigest: `sha256:${string}`;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-autonomous-merge-admission-tick";
+      readonly configPath: string;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | { readonly kind: "factory-autonomous-merger-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-autonomous-merger-tick";
+      readonly configPath: string;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
   | { readonly kind: "factory-maintenance-discovery-preflight"; readonly configPath: string }
   | {
       readonly kind: "factory-external-pull-request-discovery-preflight";
@@ -224,6 +256,14 @@ export type CliAction =
       readonly enabled: boolean;
       readonly reason: string;
       readonly confirmation: "enable-scheduler" | "disable-scheduler";
+    }
+  | {
+      readonly kind: "factory-merge-broker-authority";
+      readonly configPath: string;
+      readonly expectedEnabled: boolean;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly confirmation: "enable-autonomous-merge" | "disable-autonomous-merge";
     }
   | {
       readonly kind: "factory-broker-open-draft";
@@ -1040,6 +1080,38 @@ export function parseCliArguments(input: readonly string[]): CliAction {
   if (
     input.length === 11 &&
     input[0] === "factory" &&
+    input[1] === "merge-authority" &&
+    input[2] === "--config" &&
+    input[4] === "--expected" &&
+    input[6] === "--to" &&
+    input[8] === "--reason"
+  ) {
+    const configPath = input[3];
+    const expectedEnabled = authorityState(input[5]);
+    const enabled = authorityState(input[7]);
+    const reason = input[9];
+    const confirmation = mergeAuthorityConfirmation(input[10], enabled);
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      expectedEnabled !== null &&
+      enabled !== null &&
+      expectedEnabled !== enabled &&
+      isFactoryAuthorityReason(reason) &&
+      confirmation !== null
+    ) {
+      return {
+        kind: "factory-merge-broker-authority",
+        configPath,
+        expectedEnabled,
+        enabled,
+        reason,
+        confirmation
+      };
+    }
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
     input[1] === "worker-repair-pr" &&
     input[2] === "--config" &&
     input[4] === "--task" &&
@@ -1229,6 +1301,105 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admission-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-autonomous-merge-admission-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 20 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admit" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--observation" &&
+    input[8] === "--reservation" &&
+    input[10] === "--merge-policy" &&
+    input[12] === "--policy" &&
+    input[14] === "--schedule-policy" &&
+    input[16] === "--daily-quota" &&
+    input[18] === "--role-policy"
+  ) {
+    const [configPath, taskId] = [input[3], input[5]];
+    const observationDigest = input[7];
+    const canaryReservationDigest = input[9];
+    const expectedMergePolicyDigest = input[11];
+    const expectedFactoryPolicyBundleDigest = input[13];
+    const expectedSchedulePolicyDigest = input[15];
+    const expectedDailyQuotaPolicyDigest = input[17];
+    const expectedRoleIdentityPolicyDigest = input[19];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(observationDigest) &&
+      isSha256Digest(canaryReservationDigest) &&
+      isSha256Digest(expectedMergePolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-autonomous-merge-admit",
+        configPath,
+        taskId,
+        observationDigest,
+        canaryReservationDigest,
+        expectedMergePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
+        expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "merger-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-autonomous-merger-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admission-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--merge-policy" &&
+    input[6] === "--policy" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--daily-quota" &&
+    input[12] === "--role-policy"
+  ) {
+    const parsed = mergeTickCoordinates(input);
+    if (parsed !== null) {
+      return { kind: "factory-autonomous-merge-admission-tick", ...parsed };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "merger-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--merge-policy" &&
+    input[6] === "--policy" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--daily-quota" &&
+    input[12] === "--role-policy"
+  ) {
+    const parsed = mergeTickCoordinates(input);
+    if (parsed !== null) return { kind: "factory-autonomous-merger-tick", ...parsed };
+  }
+  if (
     input.length === 11 &&
     input[0] === "factory" &&
     input[1] === "scheduler-authority" &&
@@ -1341,7 +1512,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|operations-health|incident-containment|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|operations-health|incident-containment|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|merge-authority ...|merge-admission-preflight|merge-admit ...|merge-admission-tick ...|merger-preflight|merger-tick ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -1349,6 +1520,37 @@ function authorityState(value: string | undefined): boolean | null {
   if (value === "enabled") return true;
   if (value === "disabled") return false;
   return null;
+}
+
+function mergeTickCoordinates(input: readonly string[]): {
+  readonly configPath: string;
+  readonly expectedMergePolicyDigest: `sha256:${string}`;
+  readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+  readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+  readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+  readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+} | null {
+  const configPath = input[3];
+  const expectedMergePolicyDigest = input[5];
+  const expectedFactoryPolicyBundleDigest = input[7];
+  const expectedSchedulePolicyDigest = input[9];
+  const expectedDailyQuotaPolicyDigest = input[11];
+  const expectedRoleIdentityPolicyDigest = input[13];
+  return isNormalizedAbsolutePath(configPath) &&
+    isSha256Digest(expectedMergePolicyDigest) &&
+    isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+    isSha256Digest(expectedSchedulePolicyDigest) &&
+    isSha256Digest(expectedDailyQuotaPolicyDigest) &&
+    isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ? {
+        configPath,
+        expectedMergePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
+        expectedRoleIdentityPolicyDigest
+      }
+    : null;
 }
 
 function authorityConfirmation(
@@ -1370,6 +1572,19 @@ function schedulerAuthorityConfirmation(
 ): "enable-scheduler" | "disable-scheduler" | null {
   if (enabled === true && value === "--confirm-enable-scheduler") return "enable-scheduler";
   if (enabled === false && value === "--confirm-disable-scheduler") return "disable-scheduler";
+  return null;
+}
+
+function mergeAuthorityConfirmation(
+  value: string | undefined,
+  enabled: boolean | null
+): "enable-autonomous-merge" | "disable-autonomous-merge" | null {
+  if (enabled === true && value === "--confirm-enable-autonomous-merge") {
+    return "enable-autonomous-merge";
+  }
+  if (enabled === false && value === "--confirm-disable-autonomous-merge") {
+    return "disable-autonomous-merge";
+  }
   return null;
 }
 
@@ -1449,6 +1664,18 @@ Factory authority:
       Compare-and-set only the local autonomous scheduler switch; never executes work or contacts GitHub.
   agentlab factory broker-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-draft-broker
       Compare-and-set only the local draft-PR switch; never enables scheduling or contacts GitHub.
+  agentlab factory merge-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-autonomous-merge
+      Compare-and-set only the local autonomous-merge switch; never executes work or contacts GitHub.
+  agentlab factory merge-admission-preflight --config <absolute-path>
+      Verify the credentialless exact-policy admission boundary without issuing merge authority.
+  agentlab factory merge-admit --config <absolute-path> --task <uuid> --observation <sha256> --reservation <sha256> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Issue one short-lived exact-head authorization; never loads credentials or writes GitHub.
+  agentlab factory merge-admission-tick --config <absolute-path> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Admit one bounded page of clear scheduled PR heads without loading remote credentials.
+  agentlab factory merger-preflight --config <absolute-path>
+      Verify the isolated merge-queue broker boundary without changing GitHub.
+  agentlab factory merger-tick --config <absolute-path> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Reconcile one bounded recovery-first page through GitHub's merge queue; release remains forbidden.
   agentlab factory broker-preflight --config <absolute-path>
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>

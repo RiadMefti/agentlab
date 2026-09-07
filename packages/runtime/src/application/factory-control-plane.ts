@@ -164,7 +164,8 @@ export class FactoryControlPlane {
       command.nextState !== "expired" &&
       command.nextState !== "cancelled" &&
       command.nextState !== "failed" &&
-      command.nextState !== "quarantined"
+      command.nextState !== "quarantined" &&
+      !(await this.#isExpiredAutonomousMergeReadback(snapshot, command, occurredAt))
     ) {
       throw new ConflictError("Factory task contract has expired.");
     }
@@ -250,7 +251,7 @@ export class FactoryControlPlane {
       usageComplete: command.usageComplete,
       evidenceBundleDigests: evidenceBundles.map(({ digest }) => digest),
       approvals: command.approvals,
-      authority,
+      authority: { scheduler: authority.scheduler, prBroker: authority.prBroker },
       scheduled: command.scheduled,
       decision
     });
@@ -469,6 +470,90 @@ export class FactoryControlPlane {
     return stored;
   }
 
+  /** Expiry revokes new work, not the recording of a previously authorized remote outcome. */
+  async #isExpiredAutonomousMergeReadback(
+    snapshot: FactoryTaskSnapshot,
+    command: z.infer<typeof transitionInputSchema>,
+    now: string
+  ): Promise<boolean> {
+    if (
+      snapshot.state !== "merge-queued" ||
+      command.nextState !== "merged" ||
+      snapshot.contract.approvals.merge.mode !== "automatic" ||
+      command.actor.kind !== "broker" ||
+      command.actor.role !== "merger" ||
+      command.evidenceBundleDigest === undefined ||
+      command.evidenceBundleDigest === null
+    )
+      return false;
+    const bundles = await this.dependencies.evidence.listEvidence(snapshot.contract.taskId);
+    const latest = bundles.at(-1);
+    if (latest?.digest !== command.evidenceBundleDigest) return false;
+    const queued = bundles.find(({ digest }) => digest === snapshot.lastEvent.evidenceBundleDigest);
+    const authorizationItem = queued?.bundle.items.find(
+      (item) =>
+        item.kind === "merge" &&
+        item.result === "pass" &&
+        item.artifact.mediaType ===
+          "application/vnd.agentlab.autonomous-merge-authorization.v1+json" &&
+        item.producer.kind === "control-plane" &&
+        item.producer.role === "policy-engine" &&
+        item.producer.id === "agentlab-policy"
+    );
+    if (authorizationItem === undefined) return false;
+    const authorization = this.dependencies.documents.autonomousMergeAuthorization(
+      parseJson(
+        await this.dependencies.artifacts.readText(
+          authorizationItem.artifact.digest,
+          authorizationItem.artifact.sizeBytes + 1
+        )
+      )
+    );
+    if (
+      authorization.digest !== authorizationItem.artifact.digest ||
+      authorizationItem.subjectDigest !== authorization.digest ||
+      authorization.value.taskId !== snapshot.contract.taskId ||
+      authorization.value.contractDigest !== snapshot.contractDigest ||
+      authorization.value.repositoryId !== snapshot.contract.repository.id
+    )
+      return false;
+    for (const item of latest.bundle.items) {
+      if (
+        item.kind !== "merge" ||
+        item.result !== "pass" ||
+        item.artifact.mediaType !== "application/vnd.agentlab.autonomous-merge-record.v1+json" ||
+        item.producer.kind !== "broker" ||
+        item.producer.role !== "merger" ||
+        item.producer.id !== command.actor.id ||
+        item.subjectDigest !== authorization.digest
+      )
+        continue;
+      const record = this.dependencies.documents.autonomousMergeRecord(
+        parseJson(
+          await this.dependencies.artifacts.readText(
+            item.artifact.digest,
+            item.artifact.sizeBytes + 1
+          )
+        )
+      );
+      if (
+        record.digest === item.artifact.digest &&
+        record.value.taskId === snapshot.contract.taskId &&
+        record.value.contractDigest === snapshot.contractDigest &&
+        record.value.authorizationDigest === authorization.digest &&
+        record.value.repositoryId === authorization.value.repositoryId &&
+        record.value.pullRequestNumber === authorization.value.pullRequestNumber &&
+        record.value.pullRequestUrl === authorization.value.pullRequestUrl &&
+        record.value.expectedHeadRevision === authorization.value.expectedHeadRevision &&
+        record.value.mergerId === command.actor.id &&
+        record.value.recordedAt === item.createdAt &&
+        record.value.recordedAt <= now
+      )
+        return true;
+    }
+    return false;
+  }
+
   async #requireTask(taskId: string): Promise<FactoryTaskSnapshot> {
     const task = await this.dependencies.tasks.findById(taskId);
     if (task === null) throw new NotFoundError(`Factory task ${taskId} does not exist.`);
@@ -513,6 +598,9 @@ function assertAuthorityActor(nextState: FactoryTaskState, actor: FactoryActor):
   if (nextState === "merge-queued" && actor.kind === "human" && actor.role === "merger") {
     return;
   }
+  if (nextState === "merge-queued" && actor.kind === "broker" && actor.role === "merger") {
+    return;
+  }
   if (
     (nextState === "canary" || nextState === "released") &&
     actor.kind === "human" &&
@@ -527,8 +615,15 @@ function assertLedgerActor(nextState: FactoryTaskState, actor: FactoryActor): vo
   if (actor.kind === "agent") {
     throw new ConflictError("Agent output cannot mutate the authoritative task ledger.");
   }
-  if (actor.kind === "broker" && (nextState !== "pr-open" || actor.role !== "pr-broker")) {
-    throw new ConflictError("The PR broker may record only the PR-open transition.");
+  if (actor.kind === "broker") {
+    const allowed =
+      (nextState === "pr-open" && actor.role === "pr-broker") ||
+      ((nextState === "merge-queued" || nextState === "merged") && actor.role === "merger");
+    if (!allowed) {
+      throw new ConflictError(
+        "A broker may record only its exact PR-open, merge-queued, or merged transition."
+      );
+    }
   }
 }
 

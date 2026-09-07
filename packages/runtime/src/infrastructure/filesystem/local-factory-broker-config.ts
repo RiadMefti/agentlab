@@ -3,6 +3,7 @@ import { isAbsolute, resolve } from "node:path";
 import {
   factoryIdentifierSchema,
   sha256DigestSchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryCostPolicy,
   type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
@@ -11,6 +12,7 @@ import {
 import { z } from "zod";
 
 import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
+import { loadLocalFactoryAutonomousMergePolicies } from "./local-factory-autonomous-merge-config.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
 import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
 import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
@@ -96,11 +98,28 @@ const configV4Schema = z
     expectedRoleIdentityPolicyDigest: sha256DigestSchema
   })
   .strict();
+const configV5Schema = z
+  .object({
+    schemaVersion: z.literal("agentlab.local-factory-broker.v5"),
+    ...configFields,
+    costPolicyPath: absolutePathSchema,
+    schedulePolicyPath: absolutePathSchema,
+    dailyQuotaPolicyPath: absolutePathSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    mergePolicyPath: absolutePathSchema,
+    expectedFactoryPolicyBundleDigest: sha256DigestSchema,
+    expectedSchedulePolicyDigest: sha256DigestSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
+    expectedMergePolicyDigest: sha256DigestSchema
+  })
+  .strict();
 const configSchema = z.discriminatedUnion("schemaVersion", [
   configV1Schema,
   configV2Schema,
   configV3Schema,
-  configV4Schema
+  configV4Schema,
+  configV5Schema
 ]);
 
 export type LocalFactoryBrokerConfigV1 = z.infer<typeof configV1Schema>;
@@ -118,11 +137,19 @@ export type LocalFactoryBrokerConfigV4 = z.infer<typeof configV4Schema> & {
   readonly dailyQuotaPolicy: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
 };
+export type LocalFactoryBrokerConfigV5 = z.infer<typeof configV5Schema> & {
+  readonly costPolicy: FactoryCostPolicy;
+  readonly schedulePolicy: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy: FactoryDailyQuotaPolicy;
+  readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
+  readonly autonomousMergePolicy: FactoryAutonomousMergePolicy;
+};
 export type LocalFactoryBrokerConfig =
   | LocalFactoryBrokerConfigV1
   | LocalFactoryBrokerConfigV2
   | LocalFactoryBrokerConfigV3
-  | LocalFactoryBrokerConfigV4;
+  | LocalFactoryBrokerConfigV4
+  | LocalFactoryBrokerConfigV5;
 
 /** Loads a strict owner-only broker configuration; the referenced key is not read here. */
 export async function loadLocalFactoryBrokerConfig(
@@ -139,6 +166,30 @@ export async function loadLocalFactoryBrokerConfig(
     config = configSchema.parse(parseJson(content.toString("utf8")));
   } finally {
     content.fill(0);
+  }
+  if (config.schemaVersion === "agentlab.local-factory-broker.v5") {
+    const policies = await loadLocalFactoryAutonomousMergePolicies(config);
+    const trustedChecks = new Map(
+      config.githubApp.trustedStatusChecks.map(({ context, appId }) => [
+        context,
+        `github-app/${String(appId)}`
+      ])
+    );
+    if (
+      policies.mergePolicy.value.requiredStatusChecks.some(
+        ({ context, producerId }) => trustedChecks.get(context) !== producerId
+      )
+    ) {
+      throw new Error("Factory broker trusted status-check identities changed after review.");
+    }
+    return {
+      ...config,
+      costPolicy: policies.costPolicy,
+      schedulePolicy: policies.schedulePolicy,
+      dailyQuotaPolicy: policies.dailyQuotaPolicy,
+      roleIdentityPolicy: policies.roleIdentityPolicy,
+      autonomousMergePolicy: policies.mergePolicy.value
+    };
   }
   if (config.schemaVersion === "agentlab.local-factory-broker.v1") return config;
   if (config.schemaVersion === "agentlab.local-factory-broker.v2") {

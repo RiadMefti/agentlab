@@ -148,6 +148,45 @@ describe("factory daily-cycle contracts", () => {
       }).success
     ).toBe(false);
   });
+
+  it("pins separate admission configuration and merger identity in v5", () => {
+    const manifest = {
+      ...validManifest(),
+      schemaVersion: "agentlab.daily-cycle-manifest.v5",
+      incident: { userId: 1_004, configPath: "/etc/agentlab/incident.json" },
+      merger: { userId: 1_005, configPath: "/etc/agentlab/merger.json" },
+      incidentCommandTimeoutSeconds: 120,
+      mergeAdmissionCommandTimeoutSeconds: 300,
+      mergerCommandTimeoutSeconds: 900,
+      operationsHealthPolicyPath: "/etc/agentlab/operations-health-policy.json",
+      mergeAdmissionConfigPath: "/etc/agentlab/merge-admission.json",
+      mergePolicyPath: "/etc/agentlab/merge-policy.json",
+      expectedOperationsHealthPolicyDigest: testDigest("a"),
+      expectedMergePolicyDigest: testDigest("b"),
+      maintenanceDiscoveryConfigPath: "/etc/agentlab/maintenance-discovery.json",
+      canaryAdmissionConfigPath: "/etc/agentlab/canary-admission.json",
+      dailyQuotaPolicyPath: "/etc/agentlab/daily-quota.json",
+      expectedDailyQuotaPolicyDigest: testDigest("9"),
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8")
+    } as const;
+
+    expect(factoryDailyCycleManifestSchema.parse(manifest)).toEqual(manifest);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        merger: { ...manifest.merger, userId: manifest.broker.userId }
+      }).success
+    ).toBe(false);
+    expect(
+      factoryDailyCycleManifestSchema.safeParse({
+        ...manifest,
+        mergeAdmissionConfigPath: manifest.worker.configPath
+      }).success
+    ).toBe(false);
+  });
 });
 
 function validManifest() {

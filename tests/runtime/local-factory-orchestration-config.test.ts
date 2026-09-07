@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadLocalFactoryOrchestrationConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.js";
 import { encodeCanonicalDocument } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryAutonomousMergePolicy } from "../helpers/factory-autonomous-merge.js";
 import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import { testFactoryOperationsHealthPolicy } from "../helpers/factory-operations-health.js";
@@ -129,6 +130,82 @@ describe("local factory orchestration configuration boundary", () => {
     });
     await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
       /operations health policy changed/u
+    );
+  });
+
+  it("loads v5 only when merger, broker, and every autonomous policy pin agree", async () => {
+    const fixture = await createFixture();
+    const dailyQuotaPolicyPath = join(fixture.root, "daily-quota.json");
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy();
+    const operationsHealthPolicyPath = join(fixture.root, "operations-health.json");
+    const operationsHealthPolicy = testFactoryOperationsHealthPolicy();
+    const mergePolicyPath = join(fixture.root, "merge-policy.json");
+    const unavailableUserIds = new Set<number>([
+      process.getuid?.() ?? 0,
+      fixture.manifest.worker.userId,
+      fixture.manifest.broker.userId,
+      fixture.roleIdentityPolicy.evalAttestor.userId
+    ]);
+    const [incidentUserId, mergerUserId] = [1_004, 1_005, 1_006, 1_007, 1_008].filter(
+      (candidate) => !unavailableUserIds.has(candidate)
+    );
+    if (incidentUserId === undefined || mergerUserId === undefined) {
+      throw new Error("No isolated autonomous merge test identities.");
+    }
+    const schedulePolicyDigest = encodeCanonicalDocument(fixture.schedulePolicy).digest;
+    const dailyQuotaPolicyDigest = encodeCanonicalDocument(dailyQuotaPolicy).digest;
+    const roleIdentityPolicyDigest = encodeCanonicalDocument(fixture.roleIdentityPolicy).digest;
+    const mergePolicy = testFactoryAutonomousMergePolicy({
+      mergerUserId,
+      prBrokerUserId: fixture.manifest.broker.userId,
+      schedulePolicyDigest,
+      dailyQuotaPolicyDigest,
+      roleIdentityPolicyDigest
+    });
+    const manifest = {
+      ...fixture.manifest,
+      schemaVersion: "agentlab.daily-cycle-manifest.v5",
+      incident: { userId: incidentUserId, configPath: join(fixture.root, "incident.json") },
+      merger: { userId: mergerUserId, configPath: join(fixture.root, "merger.json") },
+      incidentCommandTimeoutSeconds: 120,
+      mergeAdmissionCommandTimeoutSeconds: 300,
+      mergerCommandTimeoutSeconds: 900,
+      operationsHealthPolicyPath,
+      mergeAdmissionConfigPath: join(fixture.root, "merge-admission.json"),
+      mergePolicyPath,
+      expectedOperationsHealthPolicyDigest: encodeCanonicalDocument(operationsHealthPolicy).digest,
+      expectedMergePolicyDigest: encodeCanonicalDocument(mergePolicy).digest,
+      maintenanceDiscoveryConfigPath: join(fixture.root, "maintenance-discovery.json"),
+      canaryAdmissionConfigPath: join(fixture.root, "canary-admission.json"),
+      dailyQuotaPolicyPath,
+      expectedDailyQuotaPolicyDigest: dailyQuotaPolicyDigest,
+      expectedMaintenanceDiscoveryPolicyDigest: testDigest("5"),
+      expectedPreparationGrantDigest: testDigest("6"),
+      expectedCanaryCohortDigest: testDigest("7"),
+      expectedCanaryCandidateDigest: testDigest("8")
+    } as const;
+    await Promise.all([
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(operationsHealthPolicyPath, operationsHealthPolicy),
+      writePrivateJson(mergePolicyPath, mergePolicy),
+      writePrivateJson(fixture.configPath, manifest)
+    ]);
+
+    await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).resolves.toEqual({
+      ...manifest,
+      schedulePolicy: fixture.schedulePolicy,
+      roleIdentityPolicy: fixture.roleIdentityPolicy,
+      dailyQuotaPolicy,
+      operationsHealthPolicy,
+      autonomousMergePolicy: mergePolicy
+    });
+
+    await writePrivateJson(fixture.configPath, {
+      ...manifest,
+      merger: { ...manifest.merger, userId: incidentUserId }
+    });
+    await expect(loadLocalFactoryOrchestrationConfig(fixture.configPath)).rejects.toThrow(
+      /separate operating-system identity/u
     );
   });
 

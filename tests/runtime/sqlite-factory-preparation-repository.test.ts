@@ -268,6 +268,10 @@ describe("SqliteFactoryPreparationRepository", () => {
         DROP TABLE factory_external_pr_feedback_records;
         DROP TABLE factory_external_pr_feedback_events;
         DROP TABLE factory_incident_containments;
+        DROP TABLE factory_autonomous_merge_records;
+        DROP TABLE factory_autonomous_merge_events;
+        DROP TABLE factory_autonomous_merge_runs;
+        DROP TABLE factory_merge_control_events;
         DROP TRIGGER factory_control_events_identity_guard;
         DROP TABLE factory_external_pr_feedback_runs;
         DROP TABLE factory_external_pr_review_bundles;

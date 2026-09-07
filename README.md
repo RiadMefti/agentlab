@@ -259,13 +259,13 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   scheduler switch and schedule ceilings, reuses the full signature/freshness/risk/aggregate-budget
   checks, and cannot issue authority or run work.
 - `agentlab factory scheduler-tick --config ... --schedule-policy ... --daily-quota ... --policy ...`
-  runs or reconciles one exact daily UTC slot from an owner-only worker v4 config. Before model
-  work, SQLite schema 28 preserves schema-27 quota enforcement and adds append-only atomic incident
-  containment; quota admission reserves the task's full ceiling and one possible draft against exact
-  repository/day and organization/day limits. Schedule-run/event v3 bind that immutable reservation,
-  the canary authority, policy digests, and the durable correlation reused after interruption. The
-  worker independently rechecks the chain before each resumable phase. It cannot open a PR, mutate
-  authority, merge, or release.
+  runs or reconciles one exact daily UTC slot from an owner-only worker v4 or v5 config. Before
+  model work, SQLite schema 31 preserves schema-27 quota enforcement and adds append-only atomic
+  incident containment; quota admission reserves the task's full ceiling and one possible draft
+  against exact repository/day and organization/day limits. Schedule-run/event v3 bind that
+  immutable reservation, the canary authority, policy digests, and the durable correlation reused
+  after interruption. The worker independently rechecks the chain before each resumable phase. It
+  cannot open a PR, mutate authority, merge, or release.
 - `agentlab factory broker-open-canary-draft --config ... --task ... --reservation ... --schedule-policy ... --role-policy ... --policy ...`
   accepts only a completed scheduled R1 proposal with an exact current `brokered-draft-pr`
   reservation. Broker config v4 loads the same schedule, daily-quota, and role policies; SQLite v17
@@ -284,6 +284,15 @@ precedence. Provider credentials remain in each CLI's own local authentication s
   creates the existing immutable repair authorization. Exact retries resume from observation
   evidence without another remote read. It cannot execute a repair, update a branch, merge, or
   release.
+- `agentlab factory merge-admission-tick --config ... --merge-policy ... --policy ... --schedule-policy ... --daily-quota ... --role-policy ...`
+  credentiallessly derives one bounded page of short-lived exact-head authorizations from scheduled
+  R1 contracts, live canary reservations, complete patch/usage evidence, broker-authenticated clear
+  observations, pinned successful checks, independent reviews, and all three authority switches.
+- `agentlab factory merger-tick --config ... --merge-policy ... --policy ... --schedule-policy ... --daily-quota ... --role-policy ...`
+  runs under a distinct UID and GitHub App, records intent before each mutation, marks the exact
+  draft ready, and enqueues the authorized head with `expectedHeadOid`. It reconciles the merge
+  queue and records exact completion evidence; direct merge, release, and provider execution are
+  unreachable.
 - `agentlab factory worker-run --config ... --task ... --policy ... --confirm-run` resumes one
   registered task through preparation, immutable contract materialization, isolated implementation,
   strict gates, independent review, and bounded repair. It stops at `pr-proposed`; opening the draft
@@ -335,7 +344,7 @@ multi-megabyte ANSI throughput and the one-attachment invariant. See
 [Architecture](docs/architecture.md) for the complete boundaries.
 
 The repository also contains a tested, staged software-factory safety kernel, governed local intake,
-credentialless local worker and evaluator compositions, two human-only authority compositions,
+credentialless local worker and evaluator compositions, separated human-only authority compositions,
 bounded daily scheduler, and draft-PR broker. None is connected to the interactive runtime. No live
 schedule/eval policy, timer, worker, evaluator, broker, or authority configuration is provisioned or
 enabled. Intake accepts a strict owner-only `feature` or `bug` submission, derives task identity and
@@ -346,36 +355,41 @@ scheduler selection. The worker has a bounded serialized command port and read-o
 covering its pinned toolchain, schedule-policy digest, and owner-only storage roots, but no GitHub
 or authority-control capability. Its manual task runner, daily scheduler, and authorization-bound PR
 repair runner are crash-resumable and stop before remote writes. Separate CLI commands inspect local
-authority and compare-and-set the scheduler and broker switches independently; that human-only
-process cannot run agents or contact GitHub. Manual initial-draft and repaired-branch writes require
-an exact task UUID, operator-pinned policy digest, and literal confirmation. Evaluated scheduled
-initial-draft and repaired-branch paths instead require exact reservation, schedule, role, and
-factory-policy lineage through their bounded consumers. All invoke only the broker after a clean
-preflight, and their inner services recheck policy, evidence, base revision, governance, and the
-broker kill switch. Both switches remain default-off. The eval slice produces a strict owner-only
-matched report from digest-pinned offline harnesses, signs and verifies its exact bytes through
-disjoint local compositions, and can issue a structurally non-merge/non-release cohort after human
-sample review and fresh attestation re-verification. The producer and reservation consumer exist but
-neither is provisioned or activated. Scheduled config v4 and eval signing now pin one canonical role
-policy: distinct non-root worker/signer UIDs plus the exact signer key and runner, with the policy
-digest carried in every signed eval predicate. No accounts are provisioned or activated.
-Provider-neutral per-run, per-tick, and host-local repository/organization daily reservation
-accounting are policy-pinned and fail-closed, and the shipped live rate card is intentionally empty.
-Owner-only worker and broker config can load the same separate strict cost-policy file without
-sharing broker credentials; broker config v4 also pins the schedule, daily quota, and role policies
-needed for reservation-bound dispatch. The dormant daily-cycle v4 orders independent health and
+authority and compare-and-set the scheduler, PR-broker, and merge-broker switches independently;
+that human-only process cannot run agents or contact GitHub. Manual initial-draft and
+repaired-branch writes require an exact task UUID, operator-pinned policy digest, and literal
+confirmation. Evaluated scheduled initial-draft and repaired-branch paths instead require exact
+reservation, schedule, role, and factory-policy lineage through their bounded consumers. All invoke
+only the broker after a clean preflight, and their inner services recheck policy, evidence, base
+revision, governance, and the broker kill switch. All three switches remain default-off. The eval
+slice produces a strict owner-only matched report from digest-pinned offline harnesses, signs and
+verifies its exact bytes through disjoint local compositions, and can issue a structurally
+non-merge/non-release cohort after human sample review and fresh attestation re-verification. The
+producer and reservation consumer exist but neither is provisioned or activated. Scheduled config v5
+and eval signing now pin one canonical role policy: distinct non-root worker/signer UIDs plus the
+exact signer key and runner, with the policy digest carried in every signed eval predicate. No
+accounts are provisioned or activated. Provider-neutral per-run, per-tick, and host-local
+repository/organization daily reservation accounting are policy-pinned and fail-closed, and the
+shipped live rate card is intentionally empty. Owner-only worker and broker config can load the same
+separate strict cost-policy file without sharing broker credentials; broker config v5 also pins the
+schedule, daily quota, role, merge, and compiled factory policies needed for reservation-bound
+dispatch and exact policy continuity. The dormant daily-cycle v5 orders independent health and
 disable-only containment → discovery → canary admission → quota-bound scheduler → brokered
-draft/repair stages while keeping separate fixed-UID configs; legacy manifests remain readable but
+draft/repair → final exact-head observation → credentialless merge admission → isolated GitHub
+merge-queue broker while keeping separate fixed-UID configs; legacy manifests remain readable but
 cannot render an executable cycle. The current repository also exposes a separate policy-pinned,
 query-only operations-health command that revalidates canonical ledger documents, reports
 schedule/task/quota health, and returns monitor-friendly healthy/degraded/critical exit codes
 without any worker, broker, provider, GitHub, or authority-mutation port. A distinct credentialless
-incident command recomputes that health and can only atomically disable broker and scheduler
-authority while journaling the exact evidence; it has no enable path. Repository governance blocks
-the write commands. No unit is installed or activated, and no live factory task or PR has been
-created through these factory commands. See
-[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
-activation blockers, and later phases, and
+incident command recomputes that health and can only atomically disable merge broker, PR broker, and
+scheduler authority while journaling the exact evidence; it has no enable path. Automatic merge is
+restricted to scheduled R1 tasks whose immutable contracts opt in, fresh exact-head evidence with
+the pinned successful check set, a live canary reservation, a short-lived single-use authorization,
+and GitHub's merge queue. The merger adapter has no direct-merge or release operation and records
+intent before remote mutation. Repository governance blocks live write commands. No unit is
+installed or activated, and no live factory task or PR has been created or merged through these
+factory commands. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
+implemented controls, activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;
@@ -410,7 +424,8 @@ contributor-safe publication boundary; and
 organization daily ceilings; [ADR 0031](docs/decisions/0031-query-only-operations-health.md) for the
 credentialless ledger health projection; and
 [ADR 0032](docs/decisions/0032-durable-disable-only-incident-containment.md) for atomic disable-only
-containment. The dormant procedures are in
+containment; and [ADR 0033](docs/decisions/0033-policy-bound-autonomous-r1-merge-queue.md) for
+exact-head, queue-backed autonomous R1 merge. The dormant procedures are in
 [Local factory scheduler operations](docs/factory-operations.md) and
 [Local factory evaluation operations](docs/factory-evaluation-operations.md).
 

@@ -42,12 +42,13 @@ export async function runFactorySchedulerTick(
   }
   const config = await dependencies.loadConfig(configPath);
   if (
-    config.schemaVersion !== "agentlab.local-factory-worker.v4" ||
+    (config.schemaVersion !== "agentlab.local-factory-worker.v4" &&
+      config.schemaVersion !== "agentlab.local-factory-worker.v5") ||
     config.schedulePolicy === undefined ||
     config.dailyQuotaPolicy === undefined
   ) {
     throw new Error(
-      "Factory scheduler requires a v4 worker config with schedule, quota, and role policies."
+      "Factory scheduler requires a v4 or v5 worker config with schedule, quota, and role policies."
     );
   }
   const runtime = dependencies.createRuntime(config);

@@ -44,7 +44,11 @@ const authoritySummarySchema = z
   .object({
     schedulerEnabled: z.boolean(),
     prBrokerEnabled: z.boolean(),
-    autonomousDraftsEnabled: z.boolean()
+    autonomousDraftsEnabled: z.boolean(),
+    /** Absent only on health reports produced before autonomous merge authority existed. */
+    mergeBrokerEnabled: z.boolean().optional(),
+    /** Absent only on health reports produced before autonomous merge authority existed. */
+    autonomousMergesEnabled: z.boolean().optional()
   })
   .strict();
 
@@ -150,6 +154,29 @@ export const factoryOperationsHealthReportSchema = z
         code: "custom",
         path: ["incidentRecommended"],
         message: "Only critical operations health reports recommend incident containment."
+      });
+    }
+    if (
+      report.authority.autonomousDraftsEnabled !==
+      (report.authority.schedulerEnabled && report.authority.prBrokerEnabled)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["authority", "autonomousDraftsEnabled"],
+        message: "Autonomous draft authority must be the scheduler and PR-broker conjunction."
+      });
+    }
+    if (
+      report.authority.autonomousMergesEnabled !== undefined &&
+      report.authority.autonomousMergesEnabled !==
+        (report.authority.schedulerEnabled &&
+          report.authority.prBrokerEnabled &&
+          (report.authority.mergeBrokerEnabled ?? false))
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["authority", "autonomousMergesEnabled"],
+        message: "Autonomous merge authority must require every factory authority switch."
       });
     }
   });

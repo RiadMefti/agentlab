@@ -1252,6 +1252,158 @@ describe("terminal CLI", () => {
     ).toThrow(/Usage/u);
   });
 
+  it("keeps autonomous merge authority on its own exact compare-and-set command", () => {
+    expect(
+      parseCliArguments([
+        "factory",
+        "merge-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Approved bounded autonomous merge.",
+        "--confirm-enable-autonomous-merge"
+      ])
+    ).toEqual({
+      kind: "factory-merge-broker-authority",
+      configPath: "/private/agentlab/authority.json",
+      expectedEnabled: false,
+      enabled: true,
+      reason: "Approved bounded autonomous merge.",
+      confirmation: "enable-autonomous-merge"
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "merge-authority",
+        "--config",
+        "/private/agentlab/authority.json",
+        "--expected",
+        "disabled",
+        "--to",
+        "enabled",
+        "--reason",
+        "Wrong confirmation.",
+        "--confirm-disable-autonomous-merge"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
+  it("parses only exact policy-pinned autonomous merge commands", () => {
+    const digests = Array.from(
+      { length: 7 },
+      (_, index) => `sha256:${String(index + 1).repeat(64)}`
+    );
+    expect(
+      parseCliArguments([
+        "factory",
+        "merge-admission-preflight",
+        "--config",
+        "/private/agentlab/merge-admission.json"
+      ])
+    ).toEqual({
+      kind: "factory-autonomous-merge-admission-preflight",
+      configPath: "/private/agentlab/merge-admission.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "merge-admit",
+        "--config",
+        "/private/agentlab/merge-admission.json",
+        "--task",
+        "0198f005-4ec4-7000-8000-000000000001",
+        "--observation",
+        digests[0] ?? "",
+        "--reservation",
+        digests[1] ?? "",
+        "--merge-policy",
+        digests[2] ?? "",
+        "--policy",
+        digests[3] ?? "",
+        "--schedule-policy",
+        digests[4] ?? "",
+        "--daily-quota",
+        digests[5] ?? "",
+        "--role-policy",
+        digests[6] ?? ""
+      ])
+    ).toMatchObject({
+      kind: "factory-autonomous-merge-admit",
+      taskId: "0198f005-4ec4-7000-8000-000000000001",
+      observationDigest: digests[0],
+      expectedRoleIdentityPolicyDigest: digests[6]
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "merge-admission-tick",
+        "--config",
+        "/private/agentlab/merge-admission.json",
+        "--merge-policy",
+        digests[0] ?? "",
+        "--policy",
+        digests[1] ?? "",
+        "--schedule-policy",
+        digests[2] ?? "",
+        "--daily-quota",
+        digests[3] ?? "",
+        "--role-policy",
+        digests[4] ?? ""
+      ])
+    ).toMatchObject({
+      kind: "factory-autonomous-merge-admission-tick",
+      expectedMergePolicyDigest: digests[0],
+      expectedRoleIdentityPolicyDigest: digests[4]
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "merger-preflight",
+        "--config",
+        "/private/agentlab/merger.json"
+      ])
+    ).toEqual({
+      kind: "factory-autonomous-merger-preflight",
+      configPath: "/private/agentlab/merger.json"
+    });
+    expect(
+      parseCliArguments([
+        "factory",
+        "merger-tick",
+        "--config",
+        "/private/agentlab/merger.json",
+        "--merge-policy",
+        digests[0] ?? "",
+        "--policy",
+        digests[1] ?? "",
+        "--schedule-policy",
+        digests[2] ?? "",
+        "--daily-quota",
+        digests[3] ?? "",
+        "--role-policy",
+        digests[4] ?? ""
+      ])
+    ).toMatchObject({
+      kind: "factory-autonomous-merger-tick",
+      expectedMergePolicyDigest: digests[0],
+      expectedRoleIdentityPolicyDigest: digests[4]
+    });
+    expect(() =>
+      parseCliArguments([
+        "factory",
+        "merger-tick",
+        "--config",
+        "/private/agentlab/merger.json",
+        "--merge-policy",
+        "not-a-digest"
+      ])
+    ).toThrow(/Usage/u);
+  });
+
   it("documents explicit factory commands and the child-mouse emergency kill switch", () => {
     expect(helpText).toContain("factory broker-preflight --config");
     expect(helpText).toContain("factory intake-preflight --config");
@@ -1287,6 +1439,12 @@ describe("terminal CLI", () => {
     expect(helpText).toContain("factory authority-status --config");
     expect(helpText).toContain("factory broker-authority --config");
     expect(helpText).toContain("factory scheduler-authority --config");
+    expect(helpText).toContain("factory merge-authority --config");
+    expect(helpText).toContain("factory merge-admission-preflight --config");
+    expect(helpText).toContain("factory merge-admit --config");
+    expect(helpText).toContain("factory merge-admission-tick --config");
+    expect(helpText).toContain("factory merger-preflight --config");
+    expect(helpText).toContain("factory merger-tick --config");
     expect(helpText).toContain("never enables scheduling or contacts GitHub");
     expect(helpText).toContain("--confirm-draft");
     expect(helpText).toContain("--confirm-update");

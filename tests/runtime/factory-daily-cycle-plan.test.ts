@@ -129,6 +129,45 @@ describe("factory daily-cycle compiler", () => {
     });
   });
 
+  it("renders the dormant v5 merge-admission and isolated merger tail", () => {
+    const manifest = validAutonomousManifest();
+    const schedule = testFactorySchedulePolicy({
+      tickBudget: { ...testFactorySchedulePolicy().tickBudget, maxRepairAttempts: 2 }
+    });
+    const roles = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const plan = compileFactoryDailyCyclePlan(manifest, schedule, roles);
+    const bundle = renderSystemdFactoryDailyCycle(manifest, plan);
+
+    expect(plan.stages.slice(-3).map(({ id, role }) => `${id}:${role}`)).toEqual([
+      "maintenance-3:broker",
+      "merge-admission:worker",
+      "merger:merger"
+    ]);
+    expect(bundle).toMatchObject({
+      schemaVersion: "agentlab.daily-cycle-bundle.v5",
+      mergePolicyDigest: manifest.expectedMergePolicyDigest
+    });
+    expect(bundle.units).toHaveLength(16);
+    const maintenance = requiredUnit(bundle.units, "agentlab-factory-maintenance-3.service");
+    expect(maintenance.content).toContain("OnSuccess=agentlab-factory-merge-admission.service");
+    const admission = requiredUnit(bundle.units, "agentlab-factory-merge-admission.service");
+    expect(admission.content).toContain("User=1001\n");
+    expect(admission.content).toContain('"merge-admission-tick"');
+    expect(admission.content).toContain(manifest.mergeAdmissionConfigPath);
+    expect(admission.content).toContain("TimeoutStartSec=300s");
+    expect(admission.content).toContain("OnSuccess=agentlab-factory-merger.service");
+    const merger = requiredUnit(bundle.units, "agentlab-factory-merger.service");
+    expect(merger.content).toContain("User=1005\n");
+    expect(merger.content).toContain('"merger-tick"');
+    expect(merger.content).toContain(manifest.expectedMergePolicyDigest);
+    expect(merger.content).not.toContain("OnSuccess=");
+    expect(merger.content).not.toContain("XDG_RUNTIME_DIR");
+  });
+
   it("refuses legacy manifests that cannot run critical-health containment first", () => {
     const manifest = validManifest();
     const {
@@ -157,7 +196,7 @@ describe("factory daily-cycle compiler", () => {
         schedule,
         roles
       )
-    ).toThrow(/requires a v4 manifest/u);
+    ).toThrow(/requires a v4 or v5 manifest/u);
   });
 
   it("rejects identity collapse, excessive repair rounds, and truncating worker timeouts", () => {
@@ -233,6 +272,19 @@ function validManifest() {
     expectedPreparationGrantDigest: testDigest("6"),
     expectedCanaryCohortDigest: testDigest("7"),
     expectedCanaryCandidateDigest: testDigest("8")
+  } as const;
+}
+
+function validAutonomousManifest() {
+  return {
+    ...validManifest(),
+    schemaVersion: "agentlab.daily-cycle-manifest.v5",
+    merger: { userId: 1_005, configPath: "/private/merger.json" },
+    mergeAdmissionConfigPath: "/private/merge-admission.json",
+    mergePolicyPath: "/private/merge-policy.json",
+    expectedMergePolicyDigest: testDigest("b"),
+    mergeAdmissionCommandTimeoutSeconds: 300,
+    mergerCommandTimeoutSeconds: 900
   } as const;
 }
 

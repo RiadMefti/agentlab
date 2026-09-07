@@ -78,6 +78,8 @@ export type {
   FactoryAuthorityInspection,
   FactoryBrokerAuthorityCommand,
   FactoryBrokerAuthorityChange,
+  FactoryMergeBrokerAuthorityCommand,
+  FactoryMergeBrokerAuthorityChange,
   FactorySchedulerAuthorityCommand,
   FactorySchedulerAuthorityChange
 } from "./application/factory-authority-operator.js";

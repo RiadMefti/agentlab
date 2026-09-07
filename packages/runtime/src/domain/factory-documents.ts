@@ -1,6 +1,11 @@
 import type {
   EvidenceBundle,
   FactoryControlEvent,
+  FactoryAutonomousMergeAuthorization,
+  FactoryAutonomousMergeEvent,
+  FactoryAutonomousMergePolicy,
+  FactoryAutonomousMergeRecord,
+  FactoryAutonomousMergeRun,
   FactoryCanaryApproval,
   FactoryCanaryCohort,
   FactoryCanaryTaskReservation,
@@ -120,6 +125,13 @@ export interface CanonicalFactoryDocument<Value> {
 
 /** Canonical encoding and hashing port; callers never hash ad-hoc JSON. */
 export interface FactoryDocumentCodec {
+  autonomousMergePolicy(input: unknown): CanonicalFactoryDocument<FactoryAutonomousMergePolicy>;
+  autonomousMergeAuthorization(
+    input: unknown
+  ): CanonicalFactoryDocument<FactoryAutonomousMergeAuthorization>;
+  autonomousMergeRun(input: unknown): CanonicalFactoryDocument<FactoryAutonomousMergeRun>;
+  autonomousMergeEvent(input: unknown): CanonicalFactoryDocument<FactoryAutonomousMergeEvent>;
+  autonomousMergeRecord(input: unknown): CanonicalFactoryDocument<FactoryAutonomousMergeRecord>;
   incidentContainment(input: unknown): CanonicalFactoryDocument<FactoryIncidentContainment>;
   operationsHealthPolicy(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthPolicy>;
   operationsHealthReport(input: unknown): CanonicalFactoryDocument<FactoryOperationsHealthReport>;

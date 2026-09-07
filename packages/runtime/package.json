@@ -56,6 +56,14 @@
       "types": "./dist/local-factory-incident-containment.d.ts",
       "default": "./dist/local-factory-incident-containment.js"
     },
+    "./factory-autonomous-merge-admission": {
+      "types": "./dist/local-factory-autonomous-merge-admission.d.ts",
+      "default": "./dist/local-factory-autonomous-merge-admission.js"
+    },
+    "./factory-autonomous-merger": {
+      "types": "./dist/local-factory-autonomous-merger.d.ts",
+      "default": "./dist/local-factory-autonomous-merger.js"
+    },
     "./factory-maintenance-discovery": {
       "types": "./dist/local-factory-maintenance-discovery.d.ts",
       "default": "./dist/local-factory-maintenance-discovery.js"

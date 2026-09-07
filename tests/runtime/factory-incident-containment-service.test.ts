@@ -34,8 +34,12 @@ describe("FactoryIncidentContainmentService", () => {
     }
   );
 
-  it("creates only broker-first and scheduler-second disable evidence for critical health", async () => {
-    const report = criticalReport({ schedulerEnabled: true, prBrokerEnabled: true });
+  it("creates merger-first, PR-broker-second, scheduler-last disable evidence", async () => {
+    const report = criticalReport({
+      schedulerEnabled: true,
+      prBrokerEnabled: true,
+      mergeBrokerEnabled: true
+    });
     let captured: FactoryIncidentDisableCommand | null = null;
     const disableAtomically = vi.fn((command: FactoryIncidentDisableCommand) => {
       captured = command;
@@ -49,13 +53,18 @@ describe("FactoryIncidentContainmentService", () => {
 
     expect(result).toMatchObject({
       status: "contained",
-      authorityBefore: { scheduler: true, prBroker: true },
-      authorityAfter: { scheduler: false, prBroker: false }
+      authorityBefore: { scheduler: true, prBroker: true, mergeBroker: true },
+      authorityAfter: { scheduler: false, prBroker: false, mergeBroker: false }
     });
     expect(captured).not.toBeNull();
     const command = captured as unknown as FactoryIncidentDisableCommand;
-    expect(command.brokerDisableEvent?.value).toMatchObject({
+    expect(command.mergeBrokerDisableEvent?.value).toMatchObject({
       eventId: "20000000-0000-4000-8000-000000000002",
+      control: "merge-broker",
+      enabled: false
+    });
+    expect(command.brokerDisableEvent?.value).toMatchObject({
+      eventId: "30000000-0000-4000-8000-000000000003",
       control: "pr-broker",
       enabled: false,
       actor: {
@@ -66,13 +75,14 @@ describe("FactoryIncidentContainmentService", () => {
       }
     });
     expect(command.schedulerDisableEvent?.value).toMatchObject({
-      eventId: "30000000-0000-4000-8000-000000000003",
+      eventId: "40000000-0000-4000-8000-000000000004",
       control: "scheduler",
       enabled: false
     });
     expect(command.containment.value).toMatchObject({
-      containmentId: "40000000-0000-4000-8000-000000000004",
+      containmentId: "50000000-0000-4000-8000-000000000005",
       healthReportDigest: report.digest,
+      mergeBrokerDisableEventDigest: command.mergeBrokerDisableEvent?.digest,
       brokerDisableEventDigest: command.brokerDisableEvent?.digest,
       schedulerDisableEventDigest: command.schedulerDisableEvent?.digest
     });
@@ -127,12 +137,18 @@ function service(
 function criticalReport(authority: {
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly mergeBrokerEnabled?: boolean;
 }) {
   return documents.operationsHealthReport(
     testFactoryOperationsHealthReport({
       authority: {
         ...authority,
-        autonomousDraftsEnabled: authority.schedulerEnabled && authority.prBrokerEnabled
+        mergeBrokerEnabled: authority.mergeBrokerEnabled ?? false,
+        autonomousDraftsEnabled: authority.schedulerEnabled && authority.prBrokerEnabled,
+        autonomousMergesEnabled:
+          authority.schedulerEnabled &&
+          authority.prBrokerEnabled &&
+          (authority.mergeBrokerEnabled ?? false)
       },
       status: "critical",
       incidentRecommended: true,

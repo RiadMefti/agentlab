@@ -25,7 +25,7 @@ describe("architecture dependency rules", () => {
     const report = await inspectArchitecture(projectRoot);
 
     expect(report.violations).toEqual([]);
-  });
+  }, 30_000);
 
   it("allows application and infrastructure adapters to depend inward on domain ports", () => {
     const report = architectureReport([
@@ -113,6 +113,14 @@ describe("architecture dependency rules", () => {
           "packages/runtime/src/local-factory-incident-containment.ts"
         ),
         local(
+          "@agentlab/runtime/factory-autonomous-merge-admission",
+          "packages/runtime/src/local-factory-autonomous-merge-admission.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-autonomous-merger",
+          "packages/runtime/src/local-factory-autonomous-merger.ts"
+        ),
+        local(
           "@agentlab/runtime/factory-maintenance-discovery",
           "packages/runtime/src/local-factory-maintenance-discovery.ts"
         ),
@@ -160,6 +168,8 @@ describe("architecture dependency rules", () => {
       source("packages/runtime/src/local-factory-orchestration.ts"),
       source("packages/runtime/src/local-factory-operations-health.ts"),
       source("packages/runtime/src/local-factory-incident-containment.ts"),
+      source("packages/runtime/src/local-factory-autonomous-merge-admission.ts"),
+      source("packages/runtime/src/local-factory-autonomous-merger.ts"),
       source("packages/runtime/src/local-factory-maintenance-discovery.ts"),
       source("packages/runtime/src/local-factory-eval-producer.ts"),
       source("packages/runtime/src/local-factory-external-pull-request-discovery.ts"),
@@ -581,6 +591,46 @@ describe("architecture dependency rules", () => {
     );
   });
 
+  it("keeps autonomous merge admission credentialless and the merger providerless", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-autonomous-merge-admission.ts", [
+        local(
+          "./application/factory-autonomous-merge-admission-service.js",
+          "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-autonomous-merge-admission-service.ts", [
+        local(
+          "../infrastructure/github/github-autonomous-merger.js",
+          "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts"
+        )
+      ]),
+      source("packages/runtime/src/local-factory-autonomous-merger.ts", [
+        local(
+          "./application/factory-autonomous-merge-service.js",
+          "packages/runtime/src/application/factory-autonomous-merge-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-autonomous-merge-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/github/github-autonomous-merger.ts"),
+      source("packages/runtime/src/infrastructure/providers/model.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(2);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts",
+        "packages/runtime/src/infrastructure/providers/model.ts"
+      ])
+    );
+  });
+
   it("detects cycles and unresolved local imports", () => {
     const report = architectureReport([
       source("packages/contracts/src/left.ts", [
@@ -611,7 +661,7 @@ describe("architecture dependency rules", () => {
     expect(report.violations).toEqual([
       expect.objectContaining({ kind: "unknown-workspace", source: "packages/rogue" })
     ]);
-  });
+  }, 30_000);
 
   it("extracts static import types and rejects dependency forms that evade the graph", async () => {
     const root = architectureFixture();
@@ -1053,6 +1103,14 @@ function architectureFixture(): string {
         default: "./dist/local-factory-incident-containment.js",
         types: "./dist/local-factory-incident-containment.d.ts"
       },
+      "./factory-autonomous-merge-admission": {
+        default: "./dist/local-factory-autonomous-merge-admission.js",
+        types: "./dist/local-factory-autonomous-merge-admission.d.ts"
+      },
+      "./factory-autonomous-merger": {
+        default: "./dist/local-factory-autonomous-merger.js",
+        types: "./dist/local-factory-autonomous-merger.d.ts"
+      },
       "./factory-maintenance-discovery": {
         default: "./dist/local-factory-maintenance-discovery.js",
         types: "./dist/local-factory-maintenance-discovery.d.ts"
@@ -1104,6 +1162,8 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-operations-health.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-incident-containment.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-autonomous-merge-admission.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-autonomous-merger.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
   write(

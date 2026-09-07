@@ -5,7 +5,7 @@ import {
   type FactorySchedulePolicy
 } from "@agentlab/contracts";
 
-export type FactoryDailyCycleRole = "worker" | "broker" | "incident";
+export type FactoryDailyCycleRole = "worker" | "broker" | "incident" | "merger";
 
 export interface FactoryDailyCycleStage {
   readonly id: string;
@@ -23,7 +23,9 @@ export interface FactoryDailyCyclePlan {
 
 type ExecutableFactoryDailyCycleManifest = Extract<
   FactoryDailyCycleManifest,
-  { readonly schemaVersion: "agentlab.daily-cycle-manifest.v4" }
+  {
+    readonly schemaVersion: "agentlab.daily-cycle-manifest.v4" | "agentlab.daily-cycle-manifest.v5";
+  }
 >;
 
 /** Compiles reviewed policy into a fixed, shell-free incident/worker/broker command sequence. */
@@ -33,8 +35,13 @@ export function compileFactoryDailyCyclePlan(
   roleIdentityPolicy: FactoryRoleIdentityPolicy
 ): FactoryDailyCyclePlan {
   const manifest = factoryDailyCycleManifestSchema.parse(manifestInput);
-  if (manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v4") {
-    throw new Error("Daily cycle rendering requires a v4 manifest with incident containment.");
+  if (
+    manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v4" &&
+    manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v5"
+  ) {
+    throw new Error(
+      "Daily cycle rendering requires a v4 or v5 manifest with incident containment."
+    );
   }
   validateIdentityAndBudget(manifest, schedulePolicy, roleIdentityPolicy);
   const commonArguments = [
@@ -144,6 +151,53 @@ export function compileFactoryDailyCyclePlan(
       ])
     );
   }
+  if (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5") {
+    if (manifest.maximumRepairRounds === 0) {
+      stages.push(
+        stage(manifest, "maintenance-1", "broker", [
+          "factory",
+          "broker-pr-maintenance-tick",
+          "--config",
+          manifest.broker.configPath,
+          ...commonArguments
+        ])
+      );
+    }
+    const mergeArguments = [
+      "--merge-policy",
+      manifest.expectedMergePolicyDigest,
+      "--policy",
+      manifest.expectedFactoryPolicyBundleDigest,
+      "--schedule-policy",
+      manifest.expectedSchedulePolicyDigest,
+      "--daily-quota",
+      manifest.expectedDailyQuotaPolicyDigest,
+      "--role-policy",
+      manifest.expectedRoleIdentityPolicyDigest
+    ] as const;
+    stages.push(
+      stage(
+        manifest,
+        "merge-admission",
+        "worker",
+        [
+          "factory",
+          "merge-admission-tick",
+          "--config",
+          manifest.mergeAdmissionConfigPath,
+          ...mergeArguments
+        ],
+        manifest.mergeAdmissionCommandTimeoutSeconds
+      ),
+      stage(manifest, "merger", "merger", [
+        "factory",
+        "merger-tick",
+        "--config",
+        manifest.merger.configPath,
+        ...mergeArguments
+      ])
+    );
+  }
   return Object.freeze({ scheduleAtUtc: schedulePolicy.cadence.at, stages: Object.freeze(stages) });
 }
 
@@ -163,6 +217,12 @@ function validateIdentityAndBudget(
       "Daily cycle incident controller and evaluation attestor identities must remain separate."
     );
   }
+  if (
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5" &&
+    manifest.merger.userId === roleIdentityPolicy.evalAttestor.userId
+  ) {
+    throw new Error("Daily cycle merger and evaluation attestor identities must remain separate.");
+  }
   if (manifest.maximumRepairRounds > schedulePolicy.tickBudget.maxRepairAttempts) {
     throw new Error("Daily cycle repair rounds exceed the reviewed schedule budget.");
   }
@@ -175,10 +235,17 @@ function stage(
   manifest: ExecutableFactoryDailyCycleManifest,
   id: string,
   role: FactoryDailyCycleRole,
-  arguments_: readonly string[]
+  arguments_: readonly string[],
+  timeoutSeconds?: number
 ): FactoryDailyCycleStage {
   const identity =
-    role === "worker" ? manifest.worker : role === "broker" ? manifest.broker : manifest.incident;
+    role === "worker"
+      ? manifest.worker
+      : role === "broker"
+        ? manifest.broker
+        : role === "merger" && manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+          ? manifest.merger
+          : manifest.incident;
   return Object.freeze({
     id,
     role,
@@ -186,10 +253,13 @@ function stage(
     executable: manifest.agentlabExecutable.path,
     arguments: Object.freeze([...arguments_]),
     timeoutSeconds:
-      role === "worker"
+      timeoutSeconds ??
+      (role === "worker"
         ? manifest.workerCommandTimeoutSeconds
         : role === "broker"
           ? manifest.brokerCommandTimeoutSeconds
-          : manifest.incidentCommandTimeoutSeconds
+          : role === "merger" && manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+            ? manifest.mergerCommandTimeoutSeconds
+            : manifest.incidentCommandTimeoutSeconds)
   });
 }

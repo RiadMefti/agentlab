@@ -2,6 +2,7 @@ import type {
   FactoryDailyCycleBundle,
   FactoryDailyCycleManifest,
   FactoryDailyQuotaPolicy,
+  FactoryAutonomousMergePolicy,
   FactoryOperationsHealthPolicy,
   FactoryRoleIdentityPolicy,
   FactorySchedulePolicy
@@ -51,7 +52,8 @@ type ConfigKeys =
   | "schedulePolicy"
   | "roleIdentityPolicy"
   | "dailyQuotaPolicy"
-  | "operationsHealthPolicy";
+  | "operationsHealthPolicy"
+  | "autonomousMergePolicy";
 
 export type FactoryOrchestrationPublicApiAssertions = [
   Assert<Equal<keyof FactoryDailyCycleManifest, ManifestKeys>>,
@@ -60,6 +62,12 @@ export type FactoryOrchestrationPublicApiAssertions = [
   Assert<Equal<LocalFactoryOrchestrationConfig["roleIdentityPolicy"], FactoryRoleIdentityPolicy>>,
   Assert<
     Equal<LocalFactoryOrchestrationConfig["dailyQuotaPolicy"], FactoryDailyQuotaPolicy | undefined>
+  >,
+  Assert<
+    Equal<
+      LocalFactoryOrchestrationConfig["autonomousMergePolicy"],
+      FactoryAutonomousMergePolicy | undefined
+    >
   >,
   Assert<
     Equal<

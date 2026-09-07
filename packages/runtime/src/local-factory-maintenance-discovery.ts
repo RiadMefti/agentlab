@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  factoryAutonomousMergePolicySchema,
   factoryCostPolicySchema,
+  factoryDailyQuotaPolicySchema,
   factoryMaintenanceDiscoveryPolicySchema,
   factoryPreparationAuthorityGrantSchema,
   factorySchedulePolicySchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
   type FactoryMaintenanceDiscoveryPolicy,
   type FactoryPreparationAuthorityGrant,
   type FactoryRoleIdentityPolicy,
@@ -29,7 +33,11 @@ import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
 import { FactorySkillPackagePublisher } from "./application/factory-skill-package-publisher.js";
 import { FactoryCostAccountant } from "./domain/factory-cost-accounting.js";
 import { FactoryPreparationAuthorityIssuer } from "./domain/factory-preparation-authority.js";
-import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
+import {
+  createAutonomousR1FactoryPolicyBundle,
+  FactoryPolicyEngine,
+  defaultFactoryPolicyBundle
+} from "./domain/factory-policy.js";
 import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import type { FactoryGateDefinition } from "./domain/factory-gate.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
@@ -84,8 +92,12 @@ export interface LocalFactoryMaintenanceDiscoveryOptions {
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy: FactoryCostPolicy;
   readonly schedulePolicy: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly discoveryPolicy: FactoryMaintenanceDiscoveryPolicy;
   readonly discoverySkillPackage: FactorySkillPackage;
   readonly preparationGrant: FactoryPreparationAuthorityGrant;
@@ -105,11 +117,45 @@ export function createLocalFactoryMaintenanceDiscovery(
   const schedulePolicy = documents.schedulePolicy(
     factorySchedulePolicySchema.parse(options.schedulePolicy)
   );
+  const dailyQuotaPolicy =
+    options.dailyQuotaPolicy === undefined
+      ? null
+      : documents.dailyQuotaPolicy(factoryDailyQuotaPolicySchema.parse(options.dailyQuotaPolicy));
   const roleIdentityPolicy = documents.roleIdentityPolicy(options.roleIdentityPolicy);
   if (roleIdentityPolicy.digest !== options.expectedRoleIdentityPolicyDigest) {
     throw new Error("Maintenance discovery role identity policy changed after review.");
   }
   assertFactoryProcessRoleIdentity(roleIdentityPolicy.value, "worker", process.getuid?.());
+  const autonomousMergePolicy =
+    options.autonomousMergePolicy === undefined
+      ? null
+      : documents.autonomousMergePolicy(
+          factoryAutonomousMergePolicySchema.parse(options.autonomousMergePolicy)
+        );
+  if (
+    [
+      autonomousMergePolicy,
+      options.expectedAutonomousMergePolicyDigest,
+      options.expectedFactoryPolicyBundleDigest
+    ].filter((value) => value !== null && value !== undefined).length !== 0 &&
+    (autonomousMergePolicy === null ||
+      options.expectedAutonomousMergePolicyDigest === undefined ||
+      options.expectedFactoryPolicyBundleDigest === undefined)
+  ) {
+    throw new Error(
+      "Maintenance discovery autonomous merge policy and reviewed digests must be paired."
+    );
+  }
+  if (
+    autonomousMergePolicy !== null &&
+    (autonomousMergePolicy.digest !== options.expectedAutonomousMergePolicyDigest ||
+      autonomousMergePolicy.value.repositoryId !== options.repositoryId ||
+      autonomousMergePolicy.value.schedulePolicyDigest !== schedulePolicy.digest ||
+      autonomousMergePolicy.value.dailyQuotaPolicyDigest !== dailyQuotaPolicy?.digest ||
+      autonomousMergePolicy.value.roleIdentityPolicyDigest !== roleIdentityPolicy.digest)
+  ) {
+    throw new Error("Maintenance discovery autonomous merge coordinates changed after review.");
+  }
   const discoveryPolicy = documents.maintenanceDiscoveryPolicy(
     factoryMaintenanceDiscoveryPolicySchema.parse(options.discoveryPolicy)
   );
@@ -166,7 +212,17 @@ export function createLocalFactoryMaintenanceDiscovery(
       new SqliteFactoryMaintenanceDiscoveryRepository(databasePath, { documents })
     );
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
-    const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
+    const policyBundle = encodeCanonicalDocument(
+      autonomousMergePolicy === null
+        ? { ...defaultFactoryPolicyBundle, costPolicy }
+        : createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: autonomousMergePolicy })
+    );
+    if (
+      autonomousMergePolicy !== null &&
+      policyBundle.digest !== options.expectedFactoryPolicyBundleDigest
+    ) {
+      throw new Error("Maintenance discovery factory policy bundle changed after review.");
+    }
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
     const costAccountant = new FactoryCostAccountant(policyBundle.digest, costPolicy);
     const authorityIssuer = new FactoryPreparationAuthorityIssuer(
@@ -330,6 +386,14 @@ export function createConfiguredLocalFactoryMaintenanceDiscovery(
     gates: worker.gates,
     costPolicy: worker.costPolicy,
     schedulePolicy: worker.schedulePolicy,
+    ...(worker.schemaVersion === "agentlab.local-factory-worker.v5"
+      ? {
+          dailyQuotaPolicy: worker.dailyQuotaPolicy,
+          autonomousMergePolicy: worker.autonomousMergePolicy,
+          expectedAutonomousMergePolicyDigest: worker.expectedMergePolicyDigest,
+          expectedFactoryPolicyBundleDigest: worker.expectedFactoryPolicyBundleDigest
+        }
+      : {}),
     roleIdentityPolicy: worker.roleIdentityPolicy,
     expectedRoleIdentityPolicyDigest: worker.expectedRoleIdentityPolicyDigest,
     discoveryPolicy: config.discoveryPolicy,

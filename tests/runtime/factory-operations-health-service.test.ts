@@ -37,7 +37,9 @@ describe("FactoryOperationsHealthService", () => {
       authority: {
         schedulerEnabled: false,
         prBrokerEnabled: false,
-        autonomousDraftsEnabled: false
+        autonomousDraftsEnabled: false,
+        mergeBrokerEnabled: false,
+        autonomousMergesEnabled: false
       },
       schedules: { observed: 0, overdue: 0 },
       tasks: { observed: 0, quarantined: 0 },
@@ -51,7 +53,7 @@ describe("FactoryOperationsHealthService", () => {
   it("degrades on recent failed work and reviewed quota warning thresholds", async () => {
     const observation: FactoryOperationsHealthObservation = {
       ...emptyObservation(),
-      authority: { scheduler: true, prBroker: true },
+      authority: { scheduler: true, prBroker: true, mergeBroker: true },
       tasks: [taskObservation("failed", "2026-08-31T12:40:00.000Z")],
       dailyQuotaReservations: [quotaReservation()]
     };
@@ -62,6 +64,7 @@ describe("FactoryOperationsHealthService", () => {
     expect(report.value.incidentRecommended).toBe(false);
     expect(report.value.reasonCodes).toEqual(["daily-quota-warning", "recent-failed-task"]);
     expect(report.value.authority.autonomousDraftsEnabled).toBe(true);
+    expect(report.value.authority.autonomousMergesEnabled).toBe(true);
     expect(report.value.dailyQuota.organization).toMatchObject({
       tasksReserved: 1,
       draftPullRequestsReserved: 1,

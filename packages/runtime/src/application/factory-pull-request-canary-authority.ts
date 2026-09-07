@@ -1,6 +1,7 @@
 import {
   factoryTimestampSchema,
   sha256DigestSchema,
+  type FactoryCanaryTaskReservation,
   type FactoryDailyQuotaPolicy,
   type Sha256Digest
 } from "@agentlab/contracts";
@@ -59,6 +60,13 @@ export class FactoryPullRequestCanaryAuthority {
     task: FactoryTaskSnapshot,
     coordinates: FactoryPullRequestCanaryCoordinates | undefined
   ): Promise<Sha256Digest | null> {
+    return (await this.requireReservation(task, coordinates))?.digest ?? null;
+  }
+
+  public async requireReservation(
+    task: FactoryTaskSnapshot,
+    coordinates: FactoryPullRequestCanaryCoordinates | undefined
+  ): Promise<CanonicalFactoryDocument<FactoryCanaryTaskReservation> | null> {
     if (task.contract.trigger !== "scheduled") {
       if (coordinates !== undefined) {
         throw new Error("Non-scheduled draft PR work cannot consume canary broker authority.");
@@ -149,6 +157,6 @@ export class FactoryPullRequestCanaryAuthority {
     if (dailyQuota.reservationDigest !== event.dailyQuotaReservationDigest) {
       throw new Error("Scheduled draft PR work changed its daily quota reservation.");
     }
-    return document.digest;
+    return document;
   }
 }

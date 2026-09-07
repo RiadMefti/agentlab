@@ -17,10 +17,10 @@ const documents = new NodeFactoryDocumentCodec();
 const containedAt = "2026-08-31T12:00:01.000Z";
 
 describe("SqliteFactoryIncidentContainmentRepository", () => {
-  it("atomically records broker-first and scheduler-second disable evidence", async () => {
-    const path = enabledDatabase();
+  it("atomically records merger-first, PR-broker-second, scheduler-last disable evidence", async () => {
+    const path = enabledDatabase(true);
     const repository = new SqliteFactoryIncidentContainmentRepository(path, { documents });
-    const command = disableCommand({ scheduler: true, prBroker: true });
+    const command = disableCommand({ scheduler: true, prBroker: true, mergeBroker: true });
 
     const stored = await repository.disableAtomically(command);
 
@@ -44,6 +44,15 @@ describe("SqliteFactoryIncidentContainmentRepository", () => {
         .map((row) => row.control_name)
         .reverse()
     ).toEqual(["pr-broker", "scheduler"]);
+    expect(
+      database
+        .prepare(
+          `SELECT control_name FROM factory_merge_control_events
+           ORDER BY sequence DESC LIMIT 2`
+        )
+        .all()
+        .map((row) => row.control_name)
+    ).toEqual(["merge-broker", "merge-broker"]);
     expect(() =>
       database.prepare("UPDATE factory_incident_containments SET contained_at = contained_at").run()
     ).toThrow(/append-only/u);
@@ -158,7 +167,7 @@ describe("SqliteFactoryIncidentContainmentRepository", () => {
   });
 });
 
-function enabledDatabase(): string {
+function enabledDatabase(enableMergeBroker = false): string {
   const root = mkdtempSync(join(tmpdir(), "agentlab-incident-repository-"));
   const path = join(root, "factory.sqlite");
   const repository = new SqliteFactoryRepository(path, { documents });
@@ -171,6 +180,17 @@ function enabledDatabase(): string {
       })
     )
   );
+  if (enableMergeBroker) {
+    void repository.record(
+      documents.controlEvent(
+        testControlEvent({
+          eventId: "25000000-0000-4000-8000-000000000002",
+          control: "merge-broker",
+          enabled: true
+        })
+      )
+    );
+  }
   void repository.record(
     documents.controlEvent(
       testControlEvent({
@@ -187,6 +207,7 @@ function enabledDatabase(): string {
 function disableCommand(
   authority: FactoryAuthorityState,
   ids: {
+    readonly mergeBrokerEventId?: string;
     readonly brokerEventId?: string;
     readonly schedulerEventId?: string;
   } = {}
@@ -196,7 +217,10 @@ function disableCommand(
       authority: {
         schedulerEnabled: authority.scheduler,
         prBrokerEnabled: authority.prBroker,
-        autonomousDraftsEnabled: authority.scheduler && authority.prBroker
+        autonomousDraftsEnabled: authority.scheduler && authority.prBroker,
+        mergeBrokerEnabled: authority.mergeBroker ?? false,
+        autonomousMergesEnabled:
+          authority.scheduler && authority.prBroker && (authority.mergeBroker ?? false)
       },
       status: "critical",
       incidentRecommended: true,
@@ -210,6 +234,17 @@ function disableCommand(
     sessionId: null
   };
   const reason = `Automatic containment for critical health report ${report.digest}: overdue-schedule-run.`;
+  const mergeBrokerDisableEvent = authority.mergeBroker
+    ? documents.controlEvent({
+        schemaVersion: "agentlab.control-event.v1",
+        eventId: ids.mergeBrokerEventId ?? "25000000-0000-4000-8000-000000000003",
+        control: "merge-broker",
+        enabled: false,
+        actor,
+        occurredAt: containedAt,
+        reason
+      })
+    : null;
   const brokerDisableEvent = authority.prBroker
     ? documents.controlEvent({
         schemaVersion: "agentlab.control-event.v1",
@@ -239,8 +274,10 @@ function disableCommand(
     healthReport: report.value,
     authorityBefore: {
       schedulerEnabled: authority.scheduler,
-      prBrokerEnabled: authority.prBroker
+      prBrokerEnabled: authority.prBroker,
+      mergeBrokerEnabled: authority.mergeBroker ?? false
     },
+    mergeBrokerDisableEventDigest: mergeBrokerDisableEvent?.digest ?? null,
     brokerDisableEventDigest: brokerDisableEvent?.digest ?? null,
     schedulerDisableEventDigest: schedulerDisableEvent?.digest ?? null,
     actor,
@@ -248,6 +285,7 @@ function disableCommand(
   });
   return {
     expectedAuthority: authority,
+    mergeBrokerDisableEvent,
     brokerDisableEvent,
     schedulerDisableEvent,
     containment

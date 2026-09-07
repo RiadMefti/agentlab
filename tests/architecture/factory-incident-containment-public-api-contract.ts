@@ -65,8 +65,16 @@ interface ExpectedResult {
   readonly status: "healthy" | "degraded" | "contained" | "already-contained";
   readonly report: FactoryOperationsHealthReport;
   readonly reportDigest: Sha256Digest;
-  readonly authorityBefore: { readonly scheduler: boolean; readonly prBroker: boolean };
-  readonly authorityAfter: { readonly scheduler: boolean; readonly prBroker: boolean };
+  readonly authorityBefore: {
+    readonly scheduler: boolean;
+    readonly prBroker: boolean;
+    readonly mergeBroker?: boolean;
+  };
+  readonly authorityAfter: {
+    readonly scheduler: boolean;
+    readonly prBroker: boolean;
+    readonly mergeBroker?: boolean;
+  };
   readonly containment: FactoryIncidentContainment | null;
   readonly containmentDigest: Sha256Digest | null;
 }

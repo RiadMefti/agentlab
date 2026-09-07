@@ -125,7 +125,8 @@ describe("FactoryControlPlane", () => {
     try {
       await expect(fixture.repository.state()).resolves.toEqual({
         scheduler: false,
-        prBroker: false
+        prBroker: false,
+        mergeBroker: false
       });
       await expect(
         fixture.controlPlane.setAuthority({
@@ -142,7 +143,7 @@ describe("FactoryControlPlane", () => {
           actor: requester,
           reason: "Enable the bounded draft-PR lane."
         })
-      ).resolves.toEqual({ scheduler: false, prBroker: true });
+      ).resolves.toEqual({ scheduler: false, prBroker: true, mergeBroker: false });
       await expect(
         fixture.controlPlane.setAuthority({
           control: "pr-broker",
@@ -150,7 +151,7 @@ describe("FactoryControlPlane", () => {
           actor: policyActor,
           reason: "Circuit breaker opened."
         })
-      ).resolves.toEqual({ scheduler: false, prBroker: false });
+      ).resolves.toEqual({ scheduler: false, prBroker: false, mergeBroker: false });
     } finally {
       fixture.repository.close();
     }

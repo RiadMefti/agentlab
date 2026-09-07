@@ -13,6 +13,7 @@ import {
 } from "@agentlab/contracts";
 
 import {
+  createAutonomousR1FactoryPolicyBundle,
   defaultFactoryPolicyBundle,
   factoryPolicyBundleMediaType,
   FactoryPolicyEngine,
@@ -23,6 +24,7 @@ import {
   NodeFactoryDocumentCodec
 } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { testFactoryContract } from "../helpers/factory.js";
+import { testFactoryAutonomousMergePolicy } from "../helpers/factory-autonomous-merge.js";
 
 const codec = new NodeFactoryDocumentCodec();
 const policyDigest = encodeCanonicalDocument(defaultFactoryPolicyBundle).digest;
@@ -424,6 +426,71 @@ describe("FactoryPolicyEngine", () => {
       "stage-forbidden"
     );
   });
+
+  it("permits automatic merge only for the separately pinned scheduled R1 cohort", () => {
+    const mergePolicy = codec.autonomousMergePolicy(testFactoryAutonomousMergePolicy());
+    const bundle = createAutonomousR1FactoryPolicyBundle({
+      costPolicy: defaultFactoryPolicyBundle.costPolicy,
+      mergePolicy
+    });
+    const bundleDocument = encodeCanonicalDocument(bundle);
+    const autonomousEngine = new FactoryPolicyEngine(bundleDocument.digest, bundle);
+    const scheduledContract = policyContract({
+      trigger: "scheduled",
+      gateProfile: {
+        id: "baseline/r1",
+        version: "2.0.0",
+        policyDigest: bundleDocument.digest
+      },
+      approvals: {
+        execution: { mode: "automatic" },
+        pullRequestCreation: { mode: "automatic" },
+        merge: { mode: "automatic" },
+        release: { mode: "forbidden" }
+      }
+    });
+    const pullRequest = r1PullRequestInput(scheduledContract);
+    const required = autonomousEngine.evaluate({
+      ...pullRequest,
+      scheduled: true,
+      authority: { scheduler: true, prBroker: true, mergeBroker: true }
+    }).requiredGateIds;
+    const mergeInput: FactoryPolicyEvaluation = {
+      ...pullRequest,
+      stage: "merge",
+      scheduled: true,
+      authority: { scheduler: true, prBroker: false, mergeBroker: true },
+      evidence: [
+        ...passingEvidence(required, pullRequest.contract.digest, bundleDocument.digest),
+        evidence({ index: 91, kind: "pull-request" })
+      ]
+    };
+
+    expect(factoryPolicyBundleMediaType(bundle)).toBe(
+      "application/vnd.agentlab.factory-policy.v3+json"
+    );
+    expect(autonomousEngine.evaluate(mergeInput)).toMatchObject({
+      outcome: "allow",
+      effectiveRiskTier: "R1",
+      requiredHumanApprovals: 0,
+      reasonCodes: []
+    });
+    expect(autonomousEngine.evaluate({ ...mergeInput, stage: "release" }).reasonCodes).toContain(
+      "stage-forbidden"
+    );
+
+    const manualContract = policyContract({
+      gateProfile: scheduledContract.gateProfile,
+      approvals: scheduledContract.approvals
+    });
+    expect(
+      autonomousEngine.evaluate({
+        ...mergeInput,
+        contract: codec.taskContract(manualContract),
+        scheduled: false
+      }).reasonCodes
+    ).toContain("approval-policy/merge-automatic-forbidden");
+  });
 });
 
 function policyContract(overrides: Partial<ImmutableTaskContract> = {}): ImmutableTaskContract {
@@ -497,7 +564,8 @@ function executionInput(contract: ImmutableTaskContract): FactoryPolicyEvaluatio
 
 function passingEvidence(
   requiredGateIds: readonly string[],
-  contractDigestValue: Sha256Digest
+  contractDigestValue: Sha256Digest,
+  policyDigestValue: Sha256Digest = policyDigest
 ): readonly EvidenceItem[] {
   const kinds: readonly EvidenceKind[] = [
     "contract",
@@ -517,7 +585,7 @@ function passingEvidence(
         kind === "contract" || kind === "skill"
           ? contractDigestValue
           : kind === "policy"
-            ? policyDigest
+            ? policyDigestValue
             : approvalSubject,
       ...(kind === "patch"
         ? {
@@ -558,7 +626,11 @@ function passingEvidence(
       kind: "provenance",
       producer: resourceIsolationProducer,
       subjectDigest: contractDigestValue,
-      claims: resourceClaims({ name: "execution-id", value: numberedUuid(80) }, numberedUuid(80))
+      claims: resourceClaims(
+        { name: "execution-id", value: numberedUuid(80) },
+        numberedUuid(80),
+        policyDigestValue
+      )
     })
   );
   for (const [index, gateId] of requiredGateIds.entries()) {
@@ -588,7 +660,7 @@ function passingEvidence(
           kind: "provenance",
           subjectDigest: approvalSubject,
           producer: resourceIsolationProducer,
-          claims: resourceClaims({ name: "gate-id", value: gateId }, isolationId)
+          claims: resourceClaims({ name: "gate-id", value: gateId }, isolationId, policyDigestValue)
         })
       );
     }
@@ -660,12 +732,13 @@ const resourceIsolationProducer = {
 
 function resourceClaims(
   link: { readonly name: string; readonly value: string },
-  isolationId: string
+  isolationId: string,
+  policyDigestValue: Sha256Digest = policyDigest
 ) {
   return [
     link,
     { name: "isolation-id", value: isolationId },
-    { name: "policy-bundle-digest", value: policyDigest },
+    { name: "policy-bundle-digest", value: policyDigestValue },
     { name: "isolation-mechanism", value: "linux/systemd-user-scope" }
   ];
 }

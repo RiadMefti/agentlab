@@ -13,6 +13,7 @@ import {
   type LocalFactoryBrokerRuntime
 } from "@agentlab/runtime/factory-broker";
 import type {
+  FactoryAutonomousMergePolicy,
   FactoryCostPolicy,
   FactoryDailyQuotaPolicy,
   FactoryRoleIdentityPolicy,
@@ -85,6 +86,24 @@ type ExpectedConfig = ExpectedConfigFields &
         dailyQuotaPolicy: FactoryDailyQuotaPolicy;
         roleIdentityPolicy: FactoryRoleIdentityPolicy;
       }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v5";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        dailyQuotaPolicyPath: string;
+        roleIdentityPolicyPath: string;
+        mergePolicyPath: string;
+        expectedFactoryPolicyBundleDigest: Sha256Digest;
+        expectedSchedulePolicyDigest: Sha256Digest;
+        expectedDailyQuotaPolicyDigest: Sha256Digest;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        expectedMergePolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        dailyQuotaPolicy: FactoryDailyQuotaPolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+        autonomousMergePolicy: FactoryAutonomousMergePolicy;
+      }
   );
 
 interface ExpectedOptions {
@@ -100,6 +119,9 @@ interface ExpectedOptions {
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
   readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;

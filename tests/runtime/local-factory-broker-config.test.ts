@@ -3,10 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { factoryCostPolicySchema } from "@agentlab/contracts";
 
 import { loadLocalFactoryBrokerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-broker-config.js";
 import { loadLocalFactoryCostPolicy } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.js";
-import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { createAutonomousR1FactoryPolicyBundle } from "../../packages/runtime/src/domain/factory-policy.js";
+import {
+  encodeCanonicalDocument,
+  NodeFactoryDocumentCodec
+} from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryAutonomousMergePolicy } from "../helpers/factory-autonomous-merge.js";
 import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
 import { testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
 import {
@@ -37,7 +43,7 @@ describe("local factory broker configuration boundary", () => {
     const root = await temporaryRoot();
     const path = join(root, "broker.json");
     const costPolicyPath = join(root, "cost-policy.json");
-    const costPolicy = validCostPolicy();
+    const costPolicy = factoryCostPolicySchema.parse(validCostPolicy());
     const config = {
       ...validConfig(root),
       schemaVersion: "agentlab.local-factory-broker.v2" as const,
@@ -151,6 +157,104 @@ describe("local factory broker configuration boundary", () => {
       expectedDailyQuotaPolicyDigest: codec.dailyQuotaPolicy(unauthorizedPolicy).digest
     });
     await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/not authorized/u);
+  });
+
+  it("loads v5 only when broker checks and all autonomous policy digests agree", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "broker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const dailyQuotaPolicyPath = join(root, "daily-quota-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const mergePolicyPath = join(root, "merge-policy.json");
+    const costPolicy = factoryCostPolicySchema.parse(validCostPolicy());
+    const schedulePolicy = testFactorySchedulePolicy();
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy({
+      repositories: [
+        {
+          repositoryId: "riadmefti/agentlab",
+          maximumTasksPerDay: 3,
+          maximumDraftPullRequestsPerDay: 3,
+          budget: testFactoryScheduleBudget()
+        }
+      ]
+    });
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testDigest("8"),
+      workerUserId: 1_001,
+      attestorUserId: 1_002
+    });
+    const codec = new NodeFactoryDocumentCodec();
+    const schedule = codec.schedulePolicy(schedulePolicy);
+    const dailyQuota = codec.dailyQuotaPolicy(dailyQuotaPolicy);
+    const roles = codec.roleIdentityPolicy(roleIdentityPolicy);
+    const mergePolicy = testFactoryAutonomousMergePolicy({
+      schedulePolicyDigest: schedule.digest,
+      dailyQuotaPolicyDigest: dailyQuota.digest,
+      roleIdentityPolicyDigest: roles.digest,
+      requiredStatusChecks: [
+        { context: "verify", producerId: "github-app/15368" },
+        { context: "factory-sandbox", producerId: "github-app/15368" }
+      ]
+    });
+    const merge = codec.autonomousMergePolicy(mergePolicy);
+    const factoryPolicyBundle = encodeCanonicalDocument(
+      createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: merge })
+    );
+    const config = {
+      ...validConfig(root),
+      schemaVersion: "agentlab.local-factory-broker.v5" as const,
+      costPolicyPath,
+      schedulePolicyPath,
+      dailyQuotaPolicyPath,
+      roleIdentityPolicyPath,
+      mergePolicyPath,
+      expectedFactoryPolicyBundleDigest: factoryPolicyBundle.digest,
+      expectedSchedulePolicyDigest: schedule.digest,
+      expectedDailyQuotaPolicyDigest: dailyQuota.digest,
+      expectedRoleIdentityPolicyDigest: roles.digest,
+      expectedMergePolicyDigest: merge.digest
+    };
+    await Promise.all([
+      writePrivateJson(costPolicyPath, costPolicy),
+      writePrivateJson(schedulePolicyPath, schedulePolicy),
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy),
+      writePrivateJson(mergePolicyPath, mergePolicy),
+      writePrivateJson(path, config)
+    ]);
+
+    await expect(loadLocalFactoryBrokerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      dailyQuotaPolicy,
+      roleIdentityPolicy,
+      autonomousMergePolicy: mergePolicy
+    });
+
+    await writePrivateJson(mergePolicyPath, {
+      ...mergePolicy,
+      requiredStatusChecks: [
+        { context: "verify", producerId: "github-app/999" },
+        { context: "factory-sandbox", producerId: "github-app/15368" }
+      ]
+    });
+    const changedMerge = codec.autonomousMergePolicy({
+      ...mergePolicy,
+      requiredStatusChecks: [
+        { context: "verify", producerId: "github-app/999" },
+        { context: "factory-sandbox", producerId: "github-app/15368" }
+      ]
+    });
+    await writePrivateJson(path, {
+      ...config,
+      expectedMergePolicyDigest: changedMerge.digest,
+      expectedFactoryPolicyBundleDigest: encodeCanonicalDocument(
+        createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: changedMerge })
+      ).digest
+    });
+    await expect(loadLocalFactoryBrokerConfig(path)).rejects.toThrow(/status-check identities/u);
   });
 
   it("rejects unknown fields, unsafe numbers, relative fields, and malformed JSON", async () => {

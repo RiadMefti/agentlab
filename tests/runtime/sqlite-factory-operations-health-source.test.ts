@@ -59,7 +59,7 @@ describe("SqliteFactoryOperationsHealthSource", () => {
     database.close();
     chmodSync(path, 0o600);
 
-    expect(() => new SqliteFactoryOperationsHealthSource(path)).toThrow(/schema 28/u);
+    expect(() => new SqliteFactoryOperationsHealthSource(path)).toThrow(/schema 31/u);
     expect(() => new SqliteFactoryOperationsHealthSource(join(root, "missing.sqlite"))).toThrow();
   });
 });

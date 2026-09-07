@@ -115,7 +115,7 @@ describe("factory scheduler tick CLI runner", () => {
           write: vi.fn()
         }
       )
-    ).rejects.toThrow(/v4 worker config/u);
+    ).rejects.toThrow(/v4 or v5 worker config/u);
     expect(createRuntime).not.toHaveBeenCalled();
   });
 

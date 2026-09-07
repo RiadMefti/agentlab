@@ -12,9 +12,13 @@ export function renderConfiguredLocalFactoryDailyCycle(
     schedulePolicy,
     roleIdentityPolicy,
     dailyQuotaPolicy: _dailyQuotaPolicy,
+    operationsHealthPolicy: _operationsHealthPolicy,
+    autonomousMergePolicy: _autonomousMergePolicy,
     ...manifest
   } = config;
   void _dailyQuotaPolicy;
+  void _operationsHealthPolicy;
+  void _autonomousMergePolicy;
   const plan = compileFactoryDailyCyclePlan(manifest, schedulePolicy, roleIdentityPolicy);
   return renderSystemdFactoryDailyCycle(manifest, plan);
 }

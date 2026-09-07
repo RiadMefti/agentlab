@@ -346,6 +346,35 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-autonomous-merge-admission-preflight") {
+    const { runFactoryAutonomousMergeAdmissionPreflight } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmissionPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merge-admit") {
+    const { runFactoryAutonomousMergeAdmission } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmission(action);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merge-admission-tick") {
+    const { runFactoryAutonomousMergeAdmissionTick } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmissionTick(action);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merger-preflight") {
+    const { runFactoryAutonomousMergerPreflight } =
+      await import("./run-factory-autonomous-merger.js");
+    process.exitCode = await runFactoryAutonomousMergerPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merger-tick") {
+    const { runFactoryAutonomousMergerTick } = await import("./run-factory-autonomous-merger.js");
+    process.exitCode = await runFactoryAutonomousMergerTick(action);
+    return;
+  }
   if (action.kind === "factory-broker-authority") {
     const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryBrokerAuthority(
@@ -360,6 +389,17 @@ async function main(): Promise<void> {
   if (action.kind === "factory-scheduler-authority") {
     const { runFactorySchedulerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactorySchedulerAuthority(
+      action.configPath,
+      action.expectedEnabled,
+      action.enabled,
+      action.reason,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-merge-broker-authority") {
+    const { runFactoryMergeBrokerAuthority } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactoryMergeBrokerAuthority(
       action.configPath,
       action.expectedEnabled,
       action.enabled,

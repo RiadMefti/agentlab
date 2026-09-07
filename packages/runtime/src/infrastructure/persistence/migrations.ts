@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const FACTORY_DATABASE_SCHEMA_VERSION = 28;
+export const FACTORY_DATABASE_SCHEMA_VERSION = 31;
 
-export const latestSchemaVersion = 28;
+export const latestSchemaVersion = 31;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -6276,6 +6276,413 @@ export function migrate(database: DatabaseSync): void {
       BEGIN SELECT RAISE(ABORT, 'factory incident containment identity mismatch'); END;
 
       PRAGMA user_version = 28;
+      COMMIT;
+    `);
+  }
+
+  if (version < 29) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_merge_control_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE CHECK (length(event_id) = 36),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        control_name TEXT NOT NULL CHECK (control_name = 'merge-broker'),
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 65536 AND json_valid(event_json)
+        ),
+        occurred_at TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 500)
+      ) STRICT;
+      CREATE INDEX factory_merge_control_events_name_idx
+        ON factory_merge_control_events(control_name, sequence DESC);
+      CREATE TRIGGER factory_merge_control_events_no_update
+      BEFORE UPDATE ON factory_merge_control_events
+      BEGIN SELECT RAISE(ABORT, 'factory merge control events are append-only'); END;
+      CREATE TRIGGER factory_merge_control_events_no_delete
+      BEFORE DELETE ON factory_merge_control_events
+      BEGIN SELECT RAISE(ABORT, 'factory merge control events are append-only'); END;
+      CREATE TRIGGER factory_merge_control_events_identity_guard
+      BEFORE INSERT ON factory_merge_control_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.control-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.control') IS NOT NEW.control_name OR
+        json_extract(NEW.event_json, '$.enabled') IS NOT NEW.enabled OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reason') IS NOT NEW.reason
+      BEGIN SELECT RAISE(ABORT, 'factory merge control event identity mismatch'); END;
+      PRAGMA user_version = 29;
+      COMMIT;
+    `);
+  }
+
+  if (version < 30) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_autonomous_merge_runs (
+        merge_run_id TEXT PRIMARY KEY CHECK (length(merge_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_id TEXT NOT NULL UNIQUE CHECK (length(authorization_id) = 36),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_json TEXT NOT NULL CHECK (
+          length(authorization_json) BETWEEN 2 AND 8388608 AND json_valid(authorization_json)
+        ),
+        task_id TEXT NOT NULL UNIQUE REFERENCES factory_task_contracts(task_id),
+        contract_digest TEXT NOT NULL REFERENCES factory_task_contracts(contract_digest),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 7 AND 64),
+        merge_policy_digest TEXT NOT NULL CHECK (
+          length(merge_policy_digest) = 71 AND substr(merge_policy_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL CHECK (deadline_at > created_at),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 8388608 AND json_valid(run_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_runs_active_idx
+        ON factory_autonomous_merge_runs(repository_id, merge_policy_digest, created_at);
+      CREATE TRIGGER factory_autonomous_merge_runs_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_runs
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge runs are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_runs_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_runs
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge runs are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_runs_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_runs
+      WHEN
+        json_extract(NEW.run_json, '$.schemaVersion') IS NOT 'agentlab.autonomous-merge-run.v1' OR
+        json_extract(NEW.run_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.run_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.run_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.run_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.run_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.mergePolicyDigest') IS NOT NEW.merge_policy_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.authorization_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-authorization.v1' OR
+        json_extract(NEW.authorization_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.authorization_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.authorization_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.authorization_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.authorization_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.authorization_json, '$.expectedHeadRevision') IS NOT
+          NEW.expected_head_revision OR
+        json_extract(NEW.authorization_json, '$.mergePolicyDigest') IS NOT NEW.merge_policy_digest
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge run identity mismatch'); END;
+
+      CREATE TABLE factory_autonomous_merge_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        merge_run_id TEXT NOT NULL REFERENCES factory_autonomous_merge_runs(merge_run_id),
+        run_digest TEXT NOT NULL REFERENCES factory_autonomous_merge_runs(run_digest),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 9),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT REFERENCES factory_autonomous_merge_events(event_digest),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'evidence-recorded',
+          'completed', 'stale', 'quarantined'
+        )),
+        from_state TEXT CHECK (from_state IS NULL OR from_state IN (
+          'ready', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'merge-evidence-recorded'
+        )),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'merge-evidence-recorded',
+          'completed', 'stale', 'quarantined'
+        )),
+        merge_queue_entry_id TEXT,
+        merged_revision TEXT,
+        merged_at TEXT,
+        record_digest TEXT UNIQUE,
+        evidence_bundle_digest TEXT REFERENCES factory_evidence_bundles(bundle_digest),
+        task_event_digest TEXT UNIQUE REFERENCES factory_task_events(event_digest),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 8388608 AND json_valid(event_json)
+        ),
+        UNIQUE (merge_run_id, sequence),
+        CHECK ((kind = 'registered') = (sequence = 1)),
+        CHECK ((kind = 'registered') = (previous_event_digest IS NULL)),
+        CHECK ((kind = 'registered') = (from_state IS NULL)),
+        CHECK ((kind IN ('enqueued', 'merged')) = (merge_queue_entry_id IS NOT NULL)),
+        CHECK ((kind = 'merged') = (merged_revision IS NOT NULL)),
+        CHECK ((kind = 'merged') = (merged_at IS NOT NULL)),
+        CHECK ((kind = 'evidence-recorded') = (record_digest IS NOT NULL)),
+        CHECK ((kind = 'evidence-recorded') = (evidence_bundle_digest IS NOT NULL)),
+        CHECK ((kind = 'completed') = (task_event_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_events_run_idx
+        ON factory_autonomous_merge_events(merge_run_id, sequence);
+      CREATE TRIGGER factory_autonomous_merge_events_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_events
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge events are append-only'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_events
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge events are append-only'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_sequence_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_autonomous_merge_events
+        WHERE merge_run_id = NEW.merge_run_id
+      ), 1)
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge sequence mismatch'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_chain_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+        SELECT event_digest FROM factory_autonomous_merge_events
+        WHERE merge_run_id = NEW.merge_run_id ORDER BY sequence DESC LIMIT 1
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge digest chain mismatch'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.mergeQueueEntryId') IS NOT NEW.merge_queue_entry_id OR
+        json_extract(NEW.event_json, '$.mergedRevision') IS NOT NEW.merged_revision OR
+        json_extract(NEW.event_json, '$.mergedAt') IS NOT NEW.merged_at OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json_extract(NEW.event_json, '$.evidenceBundleDigest') IS NOT
+          NEW.evidence_bundle_digest OR
+        json_extract(NEW.event_json, '$.taskEventDigest') IS NOT NEW.task_event_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'merger' OR
+        json_type(NEW.event_json, '$.actor.sessionId') IS NOT 'null'
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge event identity mismatch'); END;
+
+      CREATE TABLE factory_autonomous_merge_records (
+        merge_run_id TEXT PRIMARY KEY REFERENCES factory_autonomous_merge_runs(merge_run_id),
+        run_digest TEXT NOT NULL UNIQUE REFERENCES factory_autonomous_merge_runs(run_digest),
+        record_digest TEXT NOT NULL UNIQUE CHECK (
+          length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_digest TEXT NOT NULL UNIQUE REFERENCES
+          factory_autonomous_merge_runs(authorization_digest),
+        merged_revision TEXT NOT NULL CHECK (length(merged_revision) BETWEEN 7 AND 64),
+        merge_queue_entry_id TEXT NOT NULL CHECK (length(merge_queue_entry_id) BETWEEN 1 AND 256),
+        merged_at TEXT NOT NULL,
+        recorded_at TEXT NOT NULL CHECK (recorded_at >= merged_at),
+        record_json TEXT NOT NULL CHECK (
+          length(record_json) BETWEEN 2 AND 8388608 AND json_valid(record_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_records_merged_idx
+        ON factory_autonomous_merge_records(merged_at, merge_run_id);
+      CREATE TRIGGER factory_autonomous_merge_records_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_records
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge records are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_records_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_records
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge records are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_records_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_records
+      WHEN
+        json_extract(NEW.record_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-record.v1' OR
+        json_extract(NEW.record_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.authorizationDigest') IS NOT
+          NEW.authorization_digest OR
+        json_extract(NEW.record_json, '$.mergedRevision') IS NOT NEW.merged_revision OR
+        json_extract(NEW.record_json, '$.mergeQueueEntryId') IS NOT NEW.merge_queue_entry_id OR
+        json_extract(NEW.record_json, '$.mergedAt') IS NOT NEW.merged_at OR
+        json_extract(NEW.record_json, '$.recordedAt') IS NOT NEW.recorded_at
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge record identity mismatch'); END;
+      PRAGMA user_version = 30;
+      COMMIT;
+    `);
+  }
+
+  if (version < 31) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      DROP TRIGGER factory_incident_containments_identity_guard;
+      DROP TRIGGER factory_incident_containments_no_update;
+      DROP TRIGGER factory_incident_containments_no_delete;
+      CREATE TABLE factory_incident_containments_v31 (
+        containment_id TEXT PRIMARY KEY CHECK (length(containment_id) = 36),
+        containment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(containment_digest) = 71 AND substr(containment_digest, 1, 7) = 'sha256:'
+        ),
+        health_report_digest TEXT NOT NULL UNIQUE CHECK (
+          length(health_report_digest) = 71 AND substr(health_report_digest, 1, 7) = 'sha256:'
+        ),
+        health_policy_digest TEXT NOT NULL CHECK (
+          length(health_policy_digest) = 71 AND substr(health_policy_digest, 1, 7) = 'sha256:'
+        ),
+        daily_quota_policy_digest TEXT NOT NULL CHECK (
+          length(daily_quota_policy_digest) = 71 AND
+          substr(daily_quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        observed_at TEXT NOT NULL,
+        broker_was_enabled INTEGER NOT NULL CHECK (broker_was_enabled IN (0, 1)),
+        scheduler_was_enabled INTEGER NOT NULL CHECK (scheduler_was_enabled IN (0, 1)),
+        merge_broker_was_enabled INTEGER NOT NULL CHECK (
+          merge_broker_was_enabled IN (0, 1)
+        ),
+        broker_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        scheduler_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        merge_broker_disable_event_digest TEXT UNIQUE
+          REFERENCES factory_merge_control_events(event_digest),
+        contained_at TEXT NOT NULL,
+        containment_json TEXT NOT NULL CHECK (
+          length(containment_json) BETWEEN 2 AND 8388608 AND json_valid(containment_json)
+        ),
+        CHECK (
+          broker_was_enabled = 1 OR scheduler_was_enabled = 1 OR
+          merge_broker_was_enabled = 1
+        ),
+        CHECK ((broker_was_enabled = 1) = (broker_disable_event_digest IS NOT NULL)),
+        CHECK ((scheduler_was_enabled = 1) = (scheduler_disable_event_digest IS NOT NULL)),
+        CHECK (
+          (merge_broker_was_enabled = 1) =
+          (merge_broker_disable_event_digest IS NOT NULL)
+        )
+      ) STRICT;
+      INSERT INTO factory_incident_containments_v31 (
+        containment_id, containment_digest, health_report_digest, health_policy_digest,
+        daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
+        merge_broker_was_enabled, broker_disable_event_digest,
+        scheduler_disable_event_digest, merge_broker_disable_event_digest, contained_at,
+        containment_json
+      )
+      SELECT
+        containment_id, containment_digest, health_report_digest, health_policy_digest,
+        daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
+        0, broker_disable_event_digest, scheduler_disable_event_digest, NULL, contained_at,
+        containment_json
+      FROM factory_incident_containments;
+      DROP TABLE factory_incident_containments;
+      ALTER TABLE factory_incident_containments_v31 RENAME TO factory_incident_containments;
+      CREATE INDEX factory_incident_containments_observed_idx
+        ON factory_incident_containments(observed_at DESC, containment_id DESC);
+      CREATE UNIQUE INDEX factory_incident_containments_merge_disable_idx
+        ON factory_incident_containments(merge_broker_disable_event_digest)
+        WHERE merge_broker_disable_event_digest IS NOT NULL;
+      CREATE TRIGGER factory_incident_containments_no_update
+      BEFORE UPDATE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_no_delete
+      BEFORE DELETE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_identity_guard
+      BEFORE INSERT ON factory_incident_containments
+      WHEN
+        json_extract(NEW.containment_json, '$.schemaVersion') IS NOT
+          'agentlab.incident-containment.v1' OR
+        json_extract(NEW.containment_json, '$.containmentId') IS NOT NEW.containment_id OR
+        json_extract(NEW.containment_json, '$.healthReportDigest') IS NOT
+          NEW.health_report_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.healthPolicyDigest') IS NOT
+          NEW.health_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.dailyQuotaPolicyDigest') IS NOT
+          NEW.daily_quota_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.containment_json, '$.healthReport.status') IS NOT 'critical' OR
+        json_extract(NEW.containment_json, '$.healthReport.incidentRecommended') IS NOT 1 OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.mergeBrokerEnabled') IS NOT
+          NEW.merge_broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.mergeBrokerEnabled') IS NOT
+          NEW.merge_broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.brokerDisableEventDigest') IS NOT
+          NEW.broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.schedulerDisableEventDigest') IS NOT
+          NEW.scheduler_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.mergeBrokerDisableEventDigest') IS NOT
+          NEW.merge_broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.containment_json, '$.actor.role') IS NOT 'incident-commander' OR
+        json_type(NEW.containment_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.containment_json, '$.containedAt') IS NOT NEW.contained_at OR
+        NEW.contained_at < NEW.observed_at OR
+        (NEW.broker_was_enabled = 0 AND NEW.scheduler_was_enabled = 0 AND
+          NEW.merge_broker_was_enabled = 0) OR
+        ((NEW.broker_was_enabled = 1) != (NEW.broker_disable_event_digest IS NOT NULL)) OR
+        ((NEW.scheduler_was_enabled = 1) !=
+          (NEW.scheduler_disable_event_digest IS NOT NULL)) OR
+        ((NEW.merge_broker_was_enabled = 1) !=
+          (NEW.merge_broker_disable_event_digest IS NOT NULL)) OR
+        (NEW.merge_broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_merge_control_events
+          WHERE event_digest = NEW.merge_broker_disable_event_digest
+            AND control_name = 'merge-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.broker_disable_event_digest
+            AND control_name = 'pr-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.scheduler_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.scheduler_disable_event_digest
+            AND control_name = 'scheduler'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory incident containment identity mismatch'); END;
+      PRAGMA user_version = 31;
       COMMIT;
     `);
   }

@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 import {
   evidenceBundleSchema,
+  factoryAutonomousMergeAuthorizationSchema,
+  factoryAutonomousMergeEventSchema,
+  factoryAutonomousMergePolicySchema,
+  factoryAutonomousMergeRecordSchema,
+  factoryAutonomousMergeRunSchema,
   factoryAgentRunRequestSchema,
   factoryAgentRunRecordSchema,
   factoryCanaryApprovalSchema,
@@ -119,6 +124,26 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public autonomousMergePolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergePolicySchema.parse(input));
+  }
+
+  public autonomousMergeAuthorization(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeAuthorizationSchema.parse(input));
+  }
+
+  public autonomousMergeRun(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeRunSchema.parse(input));
+  }
+
+  public autonomousMergeEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeEventSchema.parse(input));
+  }
+
+  public autonomousMergeRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeRecordSchema.parse(input));
+  }
+
   public incidentContainment(input: unknown) {
     return encodeCanonicalDocument(factoryIncidentContainmentSchema.parse(input));
   }

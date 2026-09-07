@@ -45,3 +45,8 @@ Nothing is installed, enabled, scheduled, pushed, deployed, or provisioned by th
 delivery, cross-host coordination, signed external archival, merge, release, deployment rollback,
 and incident communications remain outside this controller. Operators must preserve the SQLite
 ledger and containment output and independently provision monitoring before activation.
+
+ADR 0033 subsequently adds an independent merge switch and merger. SQLite schema 31 extends the same
+atomic containment transaction to disable merge broker first, then PR broker, then scheduler, and
+binds all three event digests to the canonical critical-health record. Legacy schema-28 records
+remain readable.

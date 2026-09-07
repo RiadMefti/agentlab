@@ -36,8 +36,11 @@ export async function runFactoryBrokerPullRequestUpdateTick(
     expectedFactoryPolicyBundleDigest
   );
   const config = await dependencies.loadConfig(configPath);
-  if (config.schemaVersion !== "agentlab.local-factory-broker.v4") {
-    throw new Error("Factory PR update tick requires broker config v4 with daily quotas.");
+  if (
+    config.schemaVersion !== "agentlab.local-factory-broker.v4" &&
+    config.schemaVersion !== "agentlab.local-factory-broker.v5"
+  ) {
+    throw new Error("Factory PR update tick requires broker config v4 or v5 with daily quotas.");
   }
   const runtime = dependencies.createRuntime(config);
   let report: FactoryCanaryPullRequestUpdateTickReport;

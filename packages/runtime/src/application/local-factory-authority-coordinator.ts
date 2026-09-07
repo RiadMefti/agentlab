@@ -3,6 +3,7 @@ import type {
   FactoryAuthorityInspection,
   FactoryAuthorityOperator,
   FactoryBrokerAuthorityChange,
+  FactoryMergeBrokerAuthorityChange,
   FactorySchedulerAuthorityChange
 } from "./factory-authority-operator.js";
 import type { RuntimeRepositoryOwner } from "./runtime-repository-owner.js";
@@ -12,6 +13,7 @@ export interface FactoryAuthorityCommandPort {
   inspect(): Promise<FactoryAuthorityInspection>;
   setBrokerAuthority(input: unknown): Promise<FactoryBrokerAuthorityChange>;
   setSchedulerAuthority(input: unknown): Promise<FactorySchedulerAuthorityChange>;
+  setMergeBrokerAuthority(input: unknown): Promise<FactoryMergeBrokerAuthorityChange>;
 }
 
 export interface LocalFactoryAuthorityRuntime {
@@ -46,7 +48,9 @@ export class LocalFactoryAuthorityCoordinator implements LocalFactoryAuthorityRu
       setBrokerAuthority: (input) =>
         this.#tasks.run(() => dependencies.operator.setBrokerAuthority(input)),
       setSchedulerAuthority: (input) =>
-        this.#tasks.run(() => dependencies.operator.setSchedulerAuthority(input))
+        this.#tasks.run(() => dependencies.operator.setSchedulerAuthority(input)),
+      setMergeBrokerAuthority: (input) =>
+        this.#tasks.run(() => dependencies.operator.setMergeBrokerAuthority(input))
     };
   }
 

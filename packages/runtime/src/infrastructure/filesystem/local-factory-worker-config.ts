@@ -2,6 +2,7 @@ import { isAbsolute, parse, resolve } from "node:path";
 
 import {
   sha256DigestSchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryCostPolicy,
   type FactoryDailyQuotaPolicy,
   type FactoryRoleIdentityPolicy,
@@ -13,6 +14,7 @@ import type { FactoryGateDefinition } from "../../domain/factory-gate.js";
 import type { FactoryAgentProviderBinding } from "../providers/pinned-factory-agent-provider-resolver.js";
 import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
+import { loadLocalFactoryAutonomousMergePolicies } from "./local-factory-autonomous-merge-config.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
 import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
 import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
@@ -125,7 +127,29 @@ const configV4Schema = commonConfigSchema
   })
   .superRefine(validateWorkerConfig);
 
-const configSchema = z.union([configV1Schema, configV2Schema, configV3Schema, configV4Schema]);
+const configV5Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v5"),
+    repositoryId: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,38})\/[a-z0-9._-]{1,100}$/u),
+    schedulePolicyPath: absolutePathSchema,
+    dailyQuotaPolicyPath: absolutePathSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    mergePolicyPath: absolutePathSchema,
+    expectedFactoryPolicyBundleDigest: sha256DigestSchema,
+    expectedSchedulePolicyDigest: sha256DigestSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
+    expectedMergePolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configSchema = z.union([
+  configV1Schema,
+  configV2Schema,
+  configV3Schema,
+  configV4Schema,
+  configV5Schema
+]);
 
 const requiredGateEvidence = {
   format: "test",
@@ -174,6 +198,7 @@ export type LocalFactoryWorkerConfig = ParsedLocalFactoryWorkerConfig & {
   readonly schedulePolicy?: FactorySchedulePolicy;
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
 };
@@ -193,6 +218,17 @@ export async function loadLocalFactoryWorkerConfig(
     config = configSchema.parse(parseJson(content.toString("utf8")));
   } finally {
     content.fill(0);
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v5") {
+    const policies = await loadLocalFactoryAutonomousMergePolicies(config);
+    return {
+      ...config,
+      costPolicy: policies.costPolicy,
+      schedulePolicy: policies.schedulePolicy,
+      dailyQuotaPolicy: policies.dailyQuotaPolicy,
+      roleIdentityPolicy: policies.roleIdentityPolicy,
+      autonomousMergePolicy: policies.mergePolicy.value
+    };
   }
   const costPolicy = await loadLocalFactoryCostPolicy(config.costPolicyPath);
   const schedulePolicy =

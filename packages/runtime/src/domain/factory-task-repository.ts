@@ -31,6 +31,7 @@ export interface FactoryTaskRepository {
     conversationId: string,
     limit: number
   ): Promise<readonly FactoryTaskSnapshot[]>;
+  listByState(state: FactoryTaskState, limit: number): Promise<readonly FactoryTaskSnapshot[]>;
   listEvents(taskId: string): Promise<readonly TaskEvent[]>;
   append(event: CanonicalFactoryDocument<TaskEvent>): Promise<FactoryTaskSnapshot | null>;
   close(): void;
@@ -39,6 +40,8 @@ export interface FactoryTaskRepository {
 export interface FactoryAuthorityState {
   readonly scheduler: boolean;
   readonly prBroker: boolean;
+  /** Present only for schema-v29 repositories; legacy read projections treat omission as disabled. */
+  readonly mergeBroker?: boolean;
 }
 
 export interface FactoryControlRepository {

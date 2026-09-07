@@ -7,6 +7,8 @@ import {
   type FactoryAuthorityInspection,
   type FactoryBrokerAuthorityChange,
   type FactoryBrokerAuthorityCommand,
+  type FactoryMergeBrokerAuthorityChange,
+  type FactoryMergeBrokerAuthorityCommand,
   type FactorySchedulerAuthorityChange,
   type FactorySchedulerAuthorityCommand,
   type LocalFactoryAuthorityConfig,
@@ -52,18 +54,21 @@ interface ExpectedCommand {
 }
 
 interface ExpectedInspection {
-  readonly schemaVersion: "agentlab.authority-inspection.v2";
+  readonly schemaVersion: "agentlab.authority-inspection.v3";
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly mergeBrokerEnabled: boolean;
   readonly recentSchedulerEvents: readonly FactoryControlEvent[];
   readonly recentBrokerEvents: readonly FactoryControlEvent[];
+  readonly recentMergeBrokerEvents: readonly FactoryControlEvent[];
 }
 
 interface ExpectedChange {
-  readonly schemaVersion: "agentlab.authority-change-result.v1";
+  readonly schemaVersion: "agentlab.authority-change-result.v2";
   readonly changed: true;
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly mergeBrokerEnabled: boolean;
   readonly event: FactoryControlEvent;
   readonly eventDigest: Sha256Digest;
 }
@@ -76,10 +81,28 @@ interface ExpectedSchedulerCommand {
 }
 
 interface ExpectedSchedulerChange {
-  readonly schemaVersion: "agentlab.scheduler-authority-change-result.v1";
+  readonly schemaVersion: "agentlab.scheduler-authority-change-result.v2";
   readonly changed: true;
   readonly schedulerEnabled: boolean;
   readonly prBrokerEnabled: boolean;
+  readonly mergeBrokerEnabled: boolean;
+  readonly event: FactoryControlEvent;
+  readonly eventDigest: Sha256Digest;
+}
+
+interface ExpectedMergeBrokerCommand {
+  expectedEnabled: boolean;
+  enabled: boolean;
+  reason: string;
+  confirmation: "enable-autonomous-merge" | "disable-autonomous-merge";
+}
+
+interface ExpectedMergeBrokerChange {
+  readonly schemaVersion: "agentlab.merge-broker-authority-change-result.v1";
+  readonly changed: true;
+  readonly schedulerEnabled: boolean;
+  readonly prBrokerEnabled: boolean;
+  readonly mergeBrokerEnabled: boolean;
   readonly event: FactoryControlEvent;
   readonly eventDigest: Sha256Digest;
 }
@@ -89,13 +112,15 @@ export type FactoryAuthorityPublicApiAssertions = [
   Assert<Equal<LocalFactoryAuthorityOptions, ExpectedOptions>>,
   Assert<Equal<FactoryBrokerAuthorityCommand, ExpectedCommand>>,
   Assert<Equal<FactorySchedulerAuthorityCommand, ExpectedSchedulerCommand>>,
+  Assert<Equal<FactoryMergeBrokerAuthorityCommand, ExpectedMergeBrokerCommand>>,
   Assert<Equal<FactoryAuthorityInspection, ExpectedInspection>>,
   Assert<Equal<FactoryBrokerAuthorityChange, ExpectedChange>>,
   Assert<Equal<FactorySchedulerAuthorityChange, ExpectedSchedulerChange>>,
+  Assert<Equal<FactoryMergeBrokerAuthorityChange, ExpectedMergeBrokerChange>>,
   Assert<
     Equal<
       keyof FactoryAuthorityCommandPort,
-      "inspect" | "setBrokerAuthority" | "setSchedulerAuthority"
+      "inspect" | "setBrokerAuthority" | "setSchedulerAuthority" | "setMergeBrokerAuthority"
     >
   >,
   Assert<Equal<keyof LocalFactoryAuthorityRuntime, "commands" | "close">>,

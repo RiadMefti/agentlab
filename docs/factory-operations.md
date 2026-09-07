@@ -1,20 +1,20 @@
 # Local factory scheduler operations
 
-This runbook covers the dormant one-shot discovery, scheduler, and canary-broker boundaries.
-AgentLab does not install a timer, provision live policy, enable either authority switch, merge, or
-release. It can discover bounded maintenance and derive pending broker work during explicit one-shot
-commands. Use a dedicated non-shared worker OS account and retain the SQLite ledger; file ownership
-plus the reviewed role-identity policy is the local authorization boundary.
+This runbook covers the dormant one-shot discovery, scheduler, PR-broker, merge-admission, and
+merge-queue boundaries. AgentLab does not install a timer, provision live policy or identities,
+enable any authority switch, merge a real PR, release, or deploy. Use dedicated non-shared worker,
+PR-broker, merger, incident-controller, and eval-attestor OS accounts and retain the SQLite ledger;
+file ownership plus reviewed policy digests form the local authorization boundary.
 
 ## Reviewed inputs
 
-Explicit manual work may use `agentlab.local-factory-worker.v3`; autonomous scheduling requires v4.
-Both have the v1 database, artifact/worktree, Git/flock, systemd, Bubblewrap, provider, gate, and
-cost-policy pins plus normalized absolute role-policy coordinates. V4 additionally requires
-`schedulePolicyPath`, `dailyQuotaPolicyPath`, and `expectedDailyQuotaPolicyDigest`. The scheduled
-broker must use its matching v4 config and authorize its exact repository in the quota policy.
-Config and policy files must be owner-only regular files. V1 and legacy v2 remain
-diagnostic/recovery inputs and cannot invoke new model work without the identity policy.
+Explicit manual work may use `agentlab.local-factory-worker.v3`; autonomous scheduling requires v4,
+and the queue-backed merge path requires matching worker and broker v5 configs. All retain the
+database, artifact/worktree, Git/flock, systemd, Bubblewrap, provider, gate, cost, and normalized
+role-policy pins. V4 adds schedule and daily-quota coordinates. V5 adds repository ID, merge-policy
+path/digest, and the compiled factory-policy v3 digest. Config and policy files must be owner-only
+regular files. V1 and legacy v2 remain diagnostic/recovery inputs and cannot invoke new model work
+without the identity policy.
 
 The exact policy content must match the independent attestor and evaluator copies. Replace example
 UIDs and key ID through reviewed provisioning; root and a shared worker/attestor UID are invalid:
@@ -155,8 +155,8 @@ literal `autoMerge:false`/`release:false` limits.
    agentlab factory canary-reserve --config /absolute/canary-admission.json --task 00000000-0000-4000-8000-000000000000
    ```
 
-4. Inspect both switches and their append-only histories, then enable only scheduler authority with
-   compare-and-set:
+4. Inspect all three switches and their append-only histories, then enable only scheduler authority
+   with compare-and-set:
 
    ```text
    agentlab factory authority-status --config /absolute/authority.json
@@ -269,6 +269,82 @@ stays blocked rather than running model work.
    ceilings remain authoritative. Exit 2 requires operator attention. It cannot run a model, merge,
    release, deploy, install a timer, or change authority.
 
+## Autonomous R1 merge queue
+
+This is the only automatic merge cohort: exact scheduled R1 canary work whose immutable task
+contract was compiled with factory policy v3 and `approvals.merge.mode=automatic`. R0, R2–R4, manual
+triggers, direct merge, and release remain forbidden. The owner-reviewed
+`agentlab.autonomous-merge-policy.v1` pins the repository; distinct PR-broker and merger UIDs; exact
+schedule, daily-quota, and role-policy digests; exact `verify` and `factory-sandbox` check producer
+IDs; independent-review floor; observation/authorization/deadline limits; candidate/day ceilings;
+and literal `deliveryMode=merge-queue`, `directMerge=false`, and `release=false`.
+
+Provision the credentialless admission config under the worker UID and the merger config/private key
+under a distinct merger UID. The merger GitHub App must be installed only on the governed
+repository; its short-lived token requests the fixed contents-write/pull-requests-write profile.
+Configure the protected branch to require the pinned checks and GitHub merge queue. Do not reuse the
+PR-broker App, worker account, eval-attestor account, or incident-controller account.
+
+Before enabling anything, validate both boundaries without issuing authority or mutating GitHub:
+
+```text
+agentlab factory merge-admission-preflight --config /etc/agentlab/merge-admission.json
+agentlab factory merger-preflight --config /etc/agentlab/merger/config.json
+```
+
+Human activation requires three independent compare-and-set switches. Enable merge broker last, only
+after scheduler and PR broker, and preserve each JSON result:
+
+```text
+agentlab factory merge-authority --config /etc/agentlab/authority.json --expected disabled --to enabled --reason "Approved scheduled R1 merge-queue canary." --confirm-enable-autonomous-merge
+```
+
+The daily admission tick derives the latest exact-head observation and reservation from canonical
+local evidence. It has no GitHub credential. Manual diagnosis may use `merge-admit`, but production
+daily operation uses only the bounded tick:
+
+```text
+agentlab factory merge-admission-tick --config /etc/agentlab/merge-admission.json --merge-policy sha256:... --policy sha256:... --schedule-policy sha256:... --daily-quota sha256:... --role-policy sha256:...
+agentlab factory merger-tick --config /etc/agentlab/merger/config.json --merge-policy sha256:... --policy sha256:... --schedule-policy sha256:... --daily-quota sha256:... --role-policy sha256:...
+```
+
+Admission requires a live canary reservation, complete usage and patch evidence, the exact latest
+clear PR observation, precisely the policy-bound successful checks, the independent-review floor,
+and all three authority switches. It issues one short-lived single-use authorization and transitions
+`pr-open → merge-ready`. The merger persists intent before ready-for-review and enqueue mutations,
+passes the authorized head as GitHub `expectedHeadOid`, and never calls direct merge. It reconciles
+ambiguous results and advances only after exact queue-backed merged readback:
+
+```text
+ready → ready-intent-recorded → ready-for-review → enqueue-intent-recorded → enqueued
+  → merged → merge-evidence-recorded → completed
+```
+
+Any pre-merge coordinate drift becomes `stale` or `quarantined`. Preserve SQLite and evidence; never
+delete or edit a journal, reuse an authorization, force-push the branch, or manually direct merge
+it. `pending` is a normal merger-tick result while GitHub's queue owns progress.
+
+The daily merge limit reserves capacity when the immutable merge run is registered, atomically
+before remote writes. It counts registrations and observed merges for the UTC day plus unresolved
+carryover, once per run and across policy versions. Retries do not allocate another slot. Exhaustion
+reports `merge-daily-capacity-exhausted` and stops new admission, but still permits reconciliation
+of existing queued work. A pre-enqueue terminal failure consumes its registration-day allowance; an
+uncertain enqueue retains capacity across days, even if quarantined. Preserve its journal for
+incident handling; neither midnight nor changing policy clears that uncertainty. There is no
+operator counter-reset command.
+
+An explicit `merger-tick` still reconciles queued work when an authority switch is disabled. The
+service checks switches before every new remote mutation; disabling them does not cancel entries
+already owned by GitHub's queue. Inspect those entries during containment and remove them through
+the repository's operator controls if needed. The daily chain stops at containment, so recovery
+ticks after an incident must be invoked separately to preserve observed results and evidence.
+
+Queue reconciliation can also outlive the task contract. Expiry prohibits new actions, but the
+control plane accepts the read-only `merge-queued → merged` bookkeeping transition when a
+broker-authenticated merge record matches the queued event's exact authorization. A restart after
+evidence publication resumes from that journal checkpoint; it does not enqueue again. Keep the
+conversation active until reconciliation finishes.
+
 ## Render the dormant daily cycle
 
 After all identities, configs, policies, costs, governance, and preflights are ready, a provisioning
@@ -277,7 +353,7 @@ contains no command or credential:
 
 ```json
 {
-  "schemaVersion": "agentlab.daily-cycle-manifest.v4",
+  "schemaVersion": "agentlab.daily-cycle-manifest.v5",
   "id": "agentlab/daily-software-factory",
   "version": "1.0.0",
   "agentlabExecutable": {
@@ -288,17 +364,21 @@ contains no command or credential:
   "worker": { "userId": 1001, "configPath": "/etc/agentlab/worker.json" },
   "broker": { "userId": 1003, "configPath": "/etc/agentlab/broker.json" },
   "incident": { "userId": 1004, "configPath": "/etc/agentlab/incident.json" },
+  "merger": { "userId": 1005, "configPath": "/etc/agentlab/merger/config.json" },
   "schedulePolicyPath": "/etc/agentlab/schedule.json",
   "dailyQuotaPolicyPath": "/etc/agentlab/daily-quota.json",
   "operationsHealthPolicyPath": "/etc/agentlab/operations-health-policy.json",
+  "mergePolicyPath": "/etc/agentlab/autonomous-merge-policy.json",
   "roleIdentityPolicyPath": "/etc/agentlab/role-identities.json",
   "expectedSchedulePolicyDigest": "sha256:...",
   "expectedDailyQuotaPolicyDigest": "sha256:...",
   "expectedOperationsHealthPolicyDigest": "sha256:...",
+  "expectedMergePolicyDigest": "sha256:...",
   "expectedRoleIdentityPolicyDigest": "sha256:...",
   "expectedFactoryPolicyBundleDigest": "sha256:...",
   "maintenanceDiscoveryConfigPath": "/etc/agentlab/maintenance-discovery.json",
   "canaryAdmissionConfigPath": "/etc/agentlab/canary-admission.json",
+  "mergeAdmissionConfigPath": "/etc/agentlab/merge-admission.json",
   "expectedMaintenanceDiscoveryPolicyDigest": "sha256:...",
   "expectedPreparationGrantDigest": "sha256:...",
   "expectedCanaryCohortDigest": "sha256:...",
@@ -306,7 +386,9 @@ contains no command or credential:
   "maximumRepairRounds": 2,
   "workerCommandTimeoutSeconds": 7500,
   "brokerCommandTimeoutSeconds": 900,
-  "incidentCommandTimeoutSeconds": 120
+  "incidentCommandTimeoutSeconds": 120,
+  "mergeAdmissionCommandTimeoutSeconds": 300,
+  "mergerCommandTimeoutSeconds": 900
 }
 ```
 
@@ -317,32 +399,32 @@ must exceed its complete aggregate wall-clock ceiling by at least 30 seconds. Re
 agentlab factory orchestration-render --config /absolute/orchestration.json
 ```
 
-The v4 JSON bundle pins the manifest, discovery/grant/cohort/candidate, aggregate quota, operations
-health and existing policies, the AgentLab executable, every unit, and the bundle itself. Its UTC
-`Persistent=false` timer runs incident containment → discovery → canary admission → scheduler →
-draft → bounded observe/repair/update rounds. Only a healthy containment result continues. Separate
-numeric-UID services, fixed argv, bounded timeouts, `OnSuccess=` stop-on-failure links, a final
-exact-head observation, and an incident target preserve separation. Legacy manifests remain readable
-for audit but cannot render an executable autonomous cycle. Every service verifies
+The v5 JSON bundle pins the manifest, discovery/grant/cohort/candidate, quota/health/merge policies,
+the AgentLab executable, every unit, and the bundle itself. Its UTC `Persistent=false` timer runs
+incident containment → discovery → canary admission → scheduler → draft → bounded
+observe/repair/update rounds → final exact-head observation → credentialless merge admission →
+isolated merger. Only exit zero continues. Separate numeric-UID services, fixed argv, bounded
+timeouts, `OnSuccess=` links, and an incident target preserve separation. Legacy manifests remain
+readable for audit but cannot render an executable autonomous cycle. Every service verifies
 `executableVerification.checksumContent` with fixed `/usr/bin/sha256sum` argv before AgentLab.
 Rendering never writes a unit/checksum, calls `systemctl`, changes authority, or touches the ledger.
 
 Owner provisioning is deliberately outside AgentLab. Materialize the exact checksum content at
 `executableVerification.checksumFilePath` and the exact unit contents under `/etc/systemd/system`.
 Before activation, independently re-hash the executable and every artifact, ensure the worker,
-broker, and incident accounts own only their respective private configs or credentials, and ensure
-no runtime UID owns the AgentLab executable or can write it through group/other permissions. Keep
-the fixed checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege shared
-ledger/artifact access, and enable the worker's user manager/linger required by its transient
+broker, merger, and incident accounts own only their respective private configs or credentials, and
+ensure no runtime UID owns the AgentLab executable or can write it through group/other permissions.
+Keep the fixed checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege
+shared ledger/artifact access, and enable the worker's user manager/linger required by its transient
 scopes. Runtime configs for distinct UIDs require role-owned copies of the schedule and identity
 policies with identical reviewed digests; they cannot share one owner-only file. Run
 `/usr/bin/sha256sum --status --check` on the materialized checksum and `systemd-analyze verify` over
 the complete unit bundle. Only after every role preflight, governance, monitored incident response,
-and the two human-controlled authority switches are ready should an operator enable
+and the three human-controlled authority switches are ready should an operator enable
 `agentlab-factory-daily.timer`.
 
 Monitor failed stage units and `agentlab-factory-incident.target`. The target is a durable systemd
-signal, not an automatic authority mutation and not a retry latch. On any signal, disable both
+signal, not an automatic authority mutation and not a retry latch. On any signal, disable all three
 switches with the commands below, preserve evidence, investigate, then stop the target and reset
 failed units only after review. Upstream semantics are documented for
 [`OnSuccess=`/`OnFailure=`](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html#OnSuccess=),
@@ -698,27 +780,27 @@ agentlab factory incident-containment --config /etc/agentlab/incident/containmen
 
 The command does not accept a report. It recomputes health internally, verifies both command-line
 pins against config, and has no enable operation. Healthy exits 0 without writing. Degraded exits 2
-without writing so a v4 daily chain stops before work. Critical exits 3: if authority was enabled,
-SQLite schema 28 appends the broker disable, scheduler disable, and canonical containment evidence
-inside one compare-and-disable transaction; if both were already off, it reports
-`already-contained`. Any race or partial insert rolls back. Preserve the one-line result and SQLite
-ledger. Re-enable only through the human commands below after investigation. AgentLab does not
-install or invoke this command outside a separately provisioned v4 cycle.
+without writing so a v5 daily chain stops before work. Critical exits 3: SQLite schema 31 disables
+any enabled merge-broker, PR-broker, and scheduler switches in that order and appends canonical
+containment evidence inside one compare-and-disable transaction; if all three were already off, it
+reports `already-contained`. Any race or partial insert rolls back. Preserve the one-line result and
+SQLite ledger. Re-enable only through the human commands below after investigation. AgentLab does
+not install or invoke this command outside a separately provisioned v5 cycle.
 
 ## Authority and incident stop
 
-The scheduler ends at local `pr-proposed`; it has no GitHub credential. Draft creation remains a
-separate broker preflight and switch. Manual draft creation still requires literal confirmation;
-scheduled canary draft creation and repaired-branch publication require the exact reservation and
-scheduler handoff instead. Do not put broker enablement, merge, release, or deployment into a worker
-or broker timer. Keep the credentialless repair consumer and credential-bearing broker in separate
-processes and accounts.
+The worker still ends at local `pr-proposed`; it has no GitHub credential. Draft publication,
+credentialless merge admission, and queue-only merger are separate processes and switches. Manual
+draft creation still requires literal confirmation; scheduled canary publication and merge require
+the exact reservation and scheduler lineage. Never put authority enablement, direct merge, release,
+or deployment into a timer.
 
 To stop new or resumed scheduled and broker work:
 
 ```text
-agentlab factory scheduler-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-scheduler
+agentlab factory merge-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-autonomous-merge
 agentlab factory broker-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-draft-broker
+agentlab factory scheduler-authority --config /absolute/authority.json --expected enabled --to disabled --reason "Incident stop." --confirm-disable-scheduler
 ```
 
 Disabling does not erase evidence or fabricate completion. Preserve the database, artifact root,
@@ -727,19 +809,20 @@ existing recovery path; re-enable only after the policy/config digest and host s
 
 ## Known operational gaps
 
-No OS accounts, installed timer, live rate card/config/cohort/quota/health policy, reviewed case
-bank or installed eval harness, cross-host/global quota coordinator, installed dashboard/alert
-delivery, secretless hosted-provider eval gateway, owner-provisioned activation, merge,
-telemetry-driven canary, rollback controller, or incident coordination is shipped. A separate
-offline sandboxed eval producer with content-addressed evidence now exists. Durable read-only
-maintenance discovery, bounded consumption of a human non-release cohort, host-local repository/day
-and organization/day quota enforcement, reservation-bound scheduled execution/draft dispatch,
-slot-bound PR observation/repair, brokered repaired-branch publication, bounded read-only external
-pull-request inventory, credentialless isolated external review evidence, feedback-only external
-review publication, deterministic external repair admission, credentialless one-attempt external
-repair execution, credentialless strict post-repair qualification, a separately credentialed
-contributor-safe replacement-draft publisher, a content-addressed separated-service renderer, and a
-query-only content-addressed operations-health report plus credentialless disable-only incident
-containment exist but are not provisioned or activated. See
-[Local factory evaluation operations](factory-evaluation-operations.md). Those remaining controls
-are required before calling the factory self-maintaining.
+No OS accounts or GitHub Apps, installed timer, live rate card/config/cohort/quota/health/merge
+policy, reviewed case bank or installed eval harness, cross-host/global quota coordinator, installed
+dashboard/alert delivery, secretless hosted-provider eval gateway, owner-provisioned activation,
+release/deployment controller, telemetry-driven canary, rollback controller, or incident
+coordination is shipped. A separate offline sandboxed eval producer with content-addressed evidence
+now exists. Durable read-only maintenance discovery, bounded consumption of a human non-release
+cohort, host-local repository/day and organization/day quota enforcement, reservation-bound
+scheduled execution/draft dispatch, slot-bound PR observation/repair, brokered repaired-branch
+publication, bounded read-only external pull-request inventory, credentialless isolated external
+review evidence, feedback-only external review publication, deterministic external repair admission,
+credentialless one-attempt external repair execution, credentialless strict post-repair
+qualification, a separately credentialed contributor-safe replacement-draft publisher, a
+credentialless exact-head merge admission plane, a separate recovery-first merge-queue broker, a
+content-addressed separated-service renderer, and a query-only content-addressed operations-health
+report plus credentialless disable-only incident containment exist but are not provisioned or
+activated. See [Local factory evaluation operations](factory-evaluation-operations.md). Those
+remaining controls are required before calling the factory self-maintaining.

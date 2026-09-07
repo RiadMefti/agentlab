@@ -83,39 +83,41 @@ future broker and worker processes can load the same rate card without sharing c
 loader strictly parses `agentlab.cost-policy.v1` before runtime construction. Config v3 additionally
 loads the same separately protected schedule and role-identity policies as the worker. Config v4 is
 required for scheduled canary dispatch and also loads and pins the reviewed daily aggregate quota
-policy. A matching check name from another App does not count. Config, policies, and key reject
-symlinks, hard links, non-owner permissions, unstable metadata, non-canonical paths, and oversized
-input. Each key read returns fresh mutable bytes that the signer erases after one signature.
+policy. Config v5 adds the exact repository and autonomous-merge policy coordinates used by the
+credentialless admission and distinct merger. A matching check name from another App does not count.
+Config, policies, and key reject symlinks, hard links, non-owner permissions, unstable metadata,
+non-canonical paths, and oversized input. Each key read returns fresh mutable bytes that the signer
+erases after one signature.
 
 Human enablement is a fourth exact runtime package entry, `@agentlab/runtime/factory-authority`. Its
 strict owner-only `agentlab.local-factory-authority.v1` config contains only a durable database path
-and a pinned operator identifier. The composition can inspect both switches and atomically
-compare-and-set `scheduler` or `pr-broker` through distinct commands and confirmations, recording a
-canonical append-only human control event for either switch. It exposes no scheduler execution, task
-execution, process runner, provider, GitHub, tmux, terminal, broker, or interactive runtime
-capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the expected-state check and
-append one transaction. OS file ownership is the local authorization boundary; the configured
-operator identifier is audit metadata, not independent proof of a person, so production use requires
-a dedicated non-shared operating-system account.
+and a pinned operator identifier. The composition can inspect all three switches and atomically
+compare-and-set `scheduler`, `pr-broker`, or `merge-broker` through distinct commands and
+confirmations, recording a canonical append-only human control event for each switch. It exposes no
+scheduler execution, task execution, process runner, provider, GitHub, tmux, terminal, broker, or
+interactive runtime capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the
+expected-state check and append one transaction. OS file ownership is the local authorization
+boundary; the configured operator identifier is audit metadata, not independent proof of a person,
+so production use requires a dedicated non-shared operating-system account.
 
 The product CLI exposes separate authority inspection, broker and worker preflight, manual and
-scheduled worker commands, and independent scheduler/broker authority compare-and-set commands. Each
-loads only its exact runtime, emits one deterministically ordered non-secret JSON record after clean
-shutdown, and exits with 0 for success/ready, 2 for a policy-blocked preflight, or 1 for an
-operational failure. Authority mutation requires the exact expected and desired opposite states, a
-bounded reason, and the matching literal enable/disable confirmation. The explicit
-`broker-open-draft` command additionally requires a task UUID, the operator's expected policy
-digest, and the literal `--confirm-draft`. It never calls the write port unless broker preflight is
-clean and the digest matches. The service then rechecks the exact task, policy, evidence, complete
-usage, base revision, remote governance, and kill switch around its durable idempotent dispatch. The
-broker command port deliberately has no authority-switch command, and the authority port has no
-remote-write command, so broker and human enablement duties remain separate. Scheduler authority has
-its own exact CLI path, but that runtime cannot execute work. All switches remain default-off. An
-empty rate card adds `cost-policy-unconfigured` to preflight and independently denies draft
-mutation, so readiness is not merely advisory. The safe manual ceremony is: inspect; require broker
-preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the exact draft
-command; then compare-and-set disable even when the draft attempt fails. The broker's immediate
-preflight and inner rechecks remain authoritative throughout.
+scheduled worker commands, and independent scheduler/PR-broker/merge-broker authority
+compare-and-set commands. Each loads only its exact runtime, emits one deterministically ordered
+non-secret JSON record after clean shutdown, and exits with 0 for success/ready, 2 for a
+policy-blocked preflight, or 1 for an operational failure. Authority mutation requires the exact
+expected and desired opposite states, a bounded reason, and the matching literal enable/disable
+confirmation. The explicit `broker-open-draft` command additionally requires a task UUID, the
+operator's expected policy digest, and the literal `--confirm-draft`. It never calls the write port
+unless broker preflight is clean and the digest matches. The service then rechecks the exact task,
+policy, evidence, complete usage, base revision, remote governance, and kill switch around its
+durable idempotent dispatch. The broker command port deliberately has no authority-switch command,
+and the authority port has no remote-write command, so broker and human enablement duties remain
+separate. Scheduler authority has its own exact CLI path, but that runtime cannot execute work. All
+switches remain default-off. An empty rate card adds `cost-policy-unconfigured` to preflight and
+independently denies draft mutation, so readiness is not merely advisory. The safe manual ceremony
+is: inspect; require broker preflight to report only `pr-broker-disabled`; enable with
+compare-and-set; issue the exact draft command; then compare-and-set disable even when the draft
+attempt fails. The broker's immediate preflight and inner rechecks remain authoritative throughout.
 
 The distinct `broker-open-canary-draft` command replaces the per-task confirmation only for a
 scheduled task with an exact `brokered-draft-pr` reservation. It requires broker config v4 plus the
@@ -667,17 +669,18 @@ or perform a remote write. The authorization-bound `worker-repair-pr` command us
 for one fresh post-PR attempt, repeats the gate/review floor, and stops at a new local proposal. A
 separate broker composition, owner-only key source, readiness command, and explicit draft-only
 command also exist. The isolated human authority composition and non-interactive CLI can change only
-the scheduler or broker switch through distinct methods; the normal TUI cannot invoke factory
-authority, worker, or broker commands. Current branch protection requires exact `verify` and
-`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
-and deletion. It still has zero required approvals, does not require approval of the latest push,
-and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
-blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v4 can provision reviewed cost,
-schedule, daily aggregate quota, and role policies for canary dispatch; actual rates, authority
-config, and broker-key provisioning remain activation prerequisites. An incomplete usage record
-already denies PR creation, and each explicit write command refuses a blocked preflight or
-unexpected policy digest. Governed intake is implemented but no live intake configuration or task
+the scheduler, PR-broker, or merge-broker switch through distinct compare-and-set methods; the
+normal TUI cannot invoke factory authority, worker, or broker commands. Current branch protection
+requires exact `verify` and `factory-sandbox` checks, dismisses stale reviews, enforces
+administrators, and forbids force-push and deletion. It still has zero required approvals, does not
+require approval of the latest push, and has neither a CODEOWNERS policy nor required code-owner
+review. Preflight therefore reports blocked for those controls and `cost-policy-unconfigured`. The
+cost-accounting mechanism exists, but the repository ships no live config or provider/model rates.
+Config v5 can additionally pin the autonomous-merge policy and compiled factory-policy v3 digest
+from worker through PR broker, credentialless admission, and the separate merger; actual rates,
+authority config, and broker/merger-key provisioning remain activation prerequisites. An incomplete
+usage record already denies PR creation, and each explicit write command refuses a blocked preflight
+or unexpected policy digest. Governed intake is implemented but no live intake configuration or task
 has been provisioned. No live agent task or PR has been created by this code. Bounded PR-head
 observation and durable feedback evidence plus deterministic repair admission and fresh
 credentialless repair execution are implemented. Brokered repaired-branch update, crash
@@ -703,20 +706,27 @@ drafts. None of the external-PR stages is part of the daily chain or provisioned
 skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness, fixture,
 candidate, job, or account. Host-local repository/day and organization/day quotas are implemented in
 the shared SQLite control plane; cross-host/global coordination, a secretless hosted-provider eval
-gateway, owner-provisioned activation, telemetry-driven canary comparison, merge, release, rollback,
-alert delivery, and incident coordination remain later stages. A read-only daily-cycle compiler now
-requires one v4 owner-only manifest and verifies reviewed policy digests, including daily aggregate
-quotas and operations health, plus the AgentLab executable digest, distinct worker, broker,
-incident-controller, and attestor UIDs, repair ceilings, and timeouts. It emits a content-addressed
-system-level systemd bundle whose non-persistent UTC timer chains fixed-argv one-shot services
-across separate UIDs, begins with disable-only containment, stops on any nonzero result, signals an
-incident target, and finally re-observes the last published head. Every stage first runs fixed
-`/usr/bin/sha256sum` argv against the generated exact executable check record, so binary drift stops
-before AgentLab runs. The renderer cannot write or install artifacts, call the service manager,
-change authority, or touch the ledger. Deterministic assessment, bounded non-release cohort
-authority, durable admission, reservation-bound scheduled execution, draft dispatch, PR maintenance,
-repair consumption, repaired-branch publication, and dormant orchestration rendering exist but
-remain unactivated.
+gateway, owner-provisioned activation, telemetry-driven canary comparison, release, deployment,
+rollback, alert delivery, and incident coordination remain later stages. A credentialless
+merge-admission plane can issue one short-lived authorization only for a scheduled R1 task whose
+immutable contract opted into automatic merge and whose latest exact-head observation proves the
+policy-bound trusted checks and independent-review floor. A separate merger UID and
+selected-repository GitHub App can mark that exact draft ready and enqueue its exact head through
+GitHub's merge queue. It has no direct-merge or release operation, persists intent before each
+remote mutation, reconciles ambiguous outcomes, and records exact merge readback before
+transitioning the task to `merged`.
+
+The read-only daily-cycle compiler now requires one v5 owner-only manifest and verifies reviewed
+policy digests, including daily aggregate quotas, operations health, and autonomous merge, plus the
+AgentLab executable digest; distinct worker, PR-broker, merger, incident-controller, and attestor
+UIDs; repair ceilings; and timeouts. It emits a content-addressed system-level systemd bundle whose
+non-persistent UTC timer chains fixed-argv one-shot services across separate UIDs, begins with
+disable-only containment, stops on any nonzero result, performs a final exact-head observation, then
+runs merge admission and the merger. Every stage first runs fixed `/usr/bin/sha256sum` argv against
+the generated exact executable check record, so binary drift stops before AgentLab runs. The
+renderer cannot write or install artifacts, call the service manager, change authority, or touch the
+ledger. The complete scheduled R1 path through queue-backed merge is implemented but unprovisioned,
+disabled by default, and unactivated; release and deployment remain outside it.
 
 The separate `@agentlab/runtime/factory-operations-health` composition opens that ledger with SQLite
 read-only and `query_only`, pins strict owner-reviewed health and daily-quota policies, and
@@ -729,12 +739,19 @@ containment, or report archive is provisioned.
 
 The separate `@agentlab/runtime/factory-incident-containment` composition retains the query-only
 health source but adds only a disable-only incident repository under an isolated reviewed UID. It
-recomputes health internally. On critical health, SQLite schema 28 compare-and-disables the broker
-then scheduler inside one transaction and appends the canonical report, containment record, and
-control-event digest bindings. It cannot accept an external report and has no enable, provider,
-GitHub, model, merge, release, or deployment port. Daily-cycle v4 runs this command first; degraded
-or critical exit codes stop the chain. The command and rendered units remain dormant and
-unprovisioned.
+recomputes health internally. On critical health, SQLite schema 31 compare-and-disables merge
+broker, PR broker, then scheduler inside one transaction and appends the canonical report,
+containment record, and three control-event digest bindings. It cannot accept an external report and
+has no enable, provider, GitHub, model, release, or deployment port. Daily-cycle v5 runs this
+command first; degraded or critical exit codes stop the chain. The command and rendered units remain
+dormant and unprovisioned.
+
+The merge boundary is exposed only through `@agentlab/runtime/factory-autonomous-merge-admission`
+and `@agentlab/runtime/factory-autonomous-merger`. The first has local policy/evidence authority but
+no remote credential. The second owns only merge-queue reconciliation and an ephemeral dedicated App
+token; it has no provider or worker executor. SQLite schemas 29–31 keep merge authority, run, event,
+authorization, and result material append-only and cross-bound to canonical digests. See
+[ADR 0033](decisions/0033-policy-bound-autonomous-r1-merge-queue.md).
 
 ## Dependency map
 
@@ -753,6 +770,8 @@ eval signer ────────▶ @agentlab/runtime/factory-eval-attestor 
 release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
 canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
 incident controller ▶ @agentlab/runtime/factory-incident-containment ▶ disable-only containment composition
+merge admission ─────▶ @agentlab/runtime/factory-autonomous-merge-admission ▶ credentialless exact-head admission
+merge broker ────────▶ @agentlab/runtime/factory-autonomous-merger ▶ merge-queue-only GitHub composition
 maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
 external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
 external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
@@ -789,14 +808,20 @@ The product-source rules are executable and fail closed:
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
   broker, worker, eval-producer, evaluator, eval-attestor, switch-authority, canary-authority,
-  canary-admission, incident-containment, maintenance-discovery, and orchestration-renderer subpaths
-  are exact; every runtime deep import fails.
+  canary-admission, incident-containment, autonomous-merge-admission, autonomous-merger,
+  maintenance-discovery, and orchestration-renderer subpaths are exact; every runtime deep import
+  fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
   interactive closure cannot reach any factory composition or GitHub authority modules. The human
   authority closure has an explicit application/infrastructure allowlist and cannot reach remote,
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
+- Autonomous merge admission and merger have disjoint exact allowlists. Admission may read canonical
+  task, policy, reservation, PR-lineage, and evidence state but has no GitHub credential or remote
+  adapter. The merger may reach only its merge journal, evidence publisher, fixed GitHub App token
+  source, and merge-queue adapter; it cannot reach providers, workers, direct merge, release, tmux,
+  terminal, or the interactive runtime.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
 - Eval-producer, evaluator, eval-attestor, canary-authority, and canary-admission closures have

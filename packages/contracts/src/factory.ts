@@ -956,7 +956,7 @@ export const factoryPolicyEvaluationRecordSchema = z
   });
 export type FactoryPolicyEvaluationRecord = z.infer<typeof factoryPolicyEvaluationRecordSchema>;
 
-export const factoryControlNameSchema = z.enum(["scheduler", "pr-broker"]);
+export const factoryControlNameSchema = z.enum(["scheduler", "pr-broker", "merge-broker"]);
 export type FactoryControlName = z.infer<typeof factoryControlNameSchema>;
 
 export const factoryControlEventSchema = z

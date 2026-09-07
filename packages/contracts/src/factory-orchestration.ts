@@ -91,6 +91,27 @@ export const factoryDailyCycleManifestSchema = z
       expectedPreparationGrantDigest: sha256DigestSchema,
       expectedCanaryCohortDigest: sha256DigestSchema,
       expectedCanaryCandidateDigest: sha256DigestSchema
+    }),
+    factoryDailyCycleManifestBaseSchema.extend({
+      schemaVersion: z.literal("agentlab.daily-cycle-manifest.v5"),
+      incident: orchestrationRoleSchema,
+      merger: orchestrationRoleSchema,
+      incidentCommandTimeoutSeconds: z.number().int().min(10).max(600),
+      mergeAdmissionCommandTimeoutSeconds: z.number().int().min(10).max(600),
+      mergerCommandTimeoutSeconds: z.number().int().min(60).max(7_200),
+      operationsHealthPolicyPath: unitSafeTextSchema,
+      mergeAdmissionConfigPath: unitSafeTextSchema,
+      mergePolicyPath: unitSafeTextSchema,
+      expectedOperationsHealthPolicyDigest: sha256DigestSchema,
+      expectedMergePolicyDigest: sha256DigestSchema,
+      maintenanceDiscoveryConfigPath: unitSafeTextSchema,
+      canaryAdmissionConfigPath: unitSafeTextSchema,
+      dailyQuotaPolicyPath: unitSafeTextSchema,
+      expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+      expectedMaintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+      expectedPreparationGrantDigest: sha256DigestSchema,
+      expectedCanaryCohortDigest: sha256DigestSchema,
+      expectedCanaryCandidateDigest: sha256DigestSchema
     })
   ])
   .superRefine((manifest, context) => {
@@ -109,7 +130,8 @@ export const factoryDailyCycleManifestSchema = z
       });
     }
     if (
-      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" &&
+      (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+        manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5") &&
       (manifest.incident.userId === manifest.worker.userId ||
         manifest.incident.userId === manifest.broker.userId)
     ) {
@@ -120,16 +142,37 @@ export const factoryDailyCycleManifestSchema = z
       });
     }
     if (
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5" &&
+      [manifest.worker.userId, manifest.broker.userId, manifest.incident.userId].includes(
+        manifest.merger.userId
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["merger", "userId"],
+        message: "Factory merger must use a separate operating-system identity."
+      });
+    }
+    if (
       manifest.schemaVersion !== "agentlab.daily-cycle-manifest.v1" &&
       new Set([
         manifest.worker.configPath,
         manifest.broker.configPath,
         manifest.maintenanceDiscoveryConfigPath,
         manifest.canaryAdmissionConfigPath,
-        ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+        ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+        manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
           ? [manifest.incident.configPath]
+          : []),
+        ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+          ? [manifest.mergeAdmissionConfigPath, manifest.merger.configPath]
           : [])
-      ]).size !== (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ? 5 : 4)
+      ]).size !==
+        (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+          ? 7
+          : manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+            ? 5
+            : 4)
     ) {
       context.addIssue({
         code: "custom",
@@ -169,7 +212,7 @@ const factoryDailyCycleBundleBaseSchema = z
       })
       .strict(),
     timerUnit: z.literal("agentlab-factory-daily.timer"),
-    units: z.array(factoryDailyCycleUnitSchema).min(4).max(68),
+    units: z.array(factoryDailyCycleUnitSchema).min(4).max(70),
     bundleDigest: sha256DigestSchema
   })
   .strict();
@@ -202,6 +245,16 @@ export const factoryDailyCycleBundleSchema = z.discriminatedUnion("schemaVersion
     preparationGrantDigest: sha256DigestSchema,
     canaryCohortDigest: sha256DigestSchema,
     canaryCandidateDigest: sha256DigestSchema
+  }),
+  factoryDailyCycleBundleBaseSchema.extend({
+    schemaVersion: z.literal("agentlab.daily-cycle-bundle.v5"),
+    operationsHealthPolicyDigest: sha256DigestSchema,
+    dailyQuotaPolicyDigest: sha256DigestSchema,
+    maintenanceDiscoveryPolicyDigest: sha256DigestSchema,
+    preparationGrantDigest: sha256DigestSchema,
+    canaryCohortDigest: sha256DigestSchema,
+    canaryCandidateDigest: sha256DigestSchema,
+    mergePolicyDigest: sha256DigestSchema
   })
 ]);
 export type FactoryDailyCycleBundle = z.infer<typeof factoryDailyCycleBundleSchema>;

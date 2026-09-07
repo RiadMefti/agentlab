@@ -6,6 +6,7 @@ import {
   type FactoryApprovalPolicy,
   type FactoryApprovalRecord,
   type FactoryApprovalStage,
+  type FactoryAutonomousMergePolicy,
   type FactoryBudgetUsage,
   type FactoryChangeSet,
   type FactoryCostPolicy,
@@ -75,7 +76,14 @@ export interface FactoryPolicyBundleV2 extends FactoryPolicyBundleBase {
   readonly costPolicy: FactoryCostPolicy;
 }
 
-export type FactoryPolicyBundle = FactoryPolicyBundleV1 | FactoryPolicyBundleV2;
+export interface FactoryPolicyBundleV3 extends FactoryPolicyBundleBase {
+  readonly schemaVersion: "agentlab.factory-policy.v3";
+  readonly costPolicy: FactoryCostPolicy;
+  readonly autonomousMergePolicyDigest: Sha256Digest;
+}
+
+export type FactoryPolicyBundle =
+  FactoryPolicyBundleV1 | FactoryPolicyBundleV2 | FactoryPolicyBundleV3;
 
 export interface FactoryStageRequirements {
   readonly gateIds: readonly string[];
@@ -322,8 +330,47 @@ export const defaultFactoryPolicyBundle: FactoryPolicyBundleV2 = {
   }
 };
 
+/**
+ * Produces the only factory-policy variant that can compile an automatic merge contract. Merely
+ * loading a merge policy does not activate the path: every runtime must pin this resulting bundle
+ * digest and the separately credentialed merger must consume a short-lived authorization.
+ */
+export function createAutonomousR1FactoryPolicyBundle(input: {
+  readonly costPolicy: FactoryCostPolicy;
+  readonly mergePolicy: CanonicalFactoryDocument<FactoryAutonomousMergePolicy>;
+}): FactoryPolicyBundleV3 {
+  const r1 = defaultFactoryPolicyBundle.profiles.R1;
+  return {
+    ...defaultFactoryPolicyBundle,
+    schemaVersion: "agentlab.factory-policy.v3",
+    version: "2.0.0",
+    costPolicy: factoryCostPolicySchema.parse(input.costPolicy),
+    autonomousMergePolicyDigest: input.mergePolicy.digest,
+    profiles: {
+      ...defaultFactoryPolicyBundle.profiles,
+      R1: {
+        ...r1,
+        version: "2.0.0",
+        minimumIndependentReviews: Math.max(
+          r1.minimumIndependentReviews,
+          input.mergePolicy.value.minimumIndependentReviews
+        ),
+        minimumHumanApprovals: {
+          ...r1.minimumHumanApprovals,
+          merge: 0
+        }
+      }
+    }
+  };
+}
+
 export function factoryPolicyBundleMediaType(bundle: FactoryPolicyBundle): string {
-  const version = bundle.schemaVersion === "agentlab.factory-policy.v1" ? 1 : 2;
+  const version =
+    bundle.schemaVersion === "agentlab.factory-policy.v1"
+      ? 1
+      : bundle.schemaVersion === "agentlab.factory-policy.v2"
+        ? 2
+        : 3;
   return `application/vnd.agentlab.factory-policy.v${String(version)}+json`;
 }
 
@@ -419,7 +466,11 @@ export class FactoryPolicyEngine {
     for (const reason of capabilityDenials(input.contract.value, profileForContract)) {
       denials.add(reason);
     }
-    for (const reason of approvalPolicyDenials(input.contract.value, profileForContract)) {
+    for (const reason of approvalPolicyDenials(
+      input.contract.value,
+      profileForContract,
+      this.bundle
+    )) {
       denials.add(reason);
     }
     for (const reason of changeSetDenials(input.contract.value, input.changeSet)) {
@@ -607,7 +658,8 @@ function capabilityDenials(
 
 function approvalPolicyDenials(
   contract: ImmutableTaskContract,
-  profile: FactoryRiskProfile
+  profile: FactoryRiskProfile,
+  bundle: FactoryPolicyBundle
 ): readonly string[] {
   const reasons: string[] = [];
   for (const stage of [
@@ -626,8 +678,19 @@ function approvalPolicyDenials(
         reasons.push(`approval-policy/${stage}-too-weak`);
       }
     }
-    if ((stage === "merge" || stage === "release") && requirement.mode === "automatic") {
+    if (stage === "release" && requirement.mode === "automatic") {
       reasons.push(`approval-policy/${stage}-automatic-forbidden`);
+    }
+    if (
+      stage === "merge" &&
+      requirement.mode === "automatic" &&
+      !(
+        bundle.schemaVersion === "agentlab.factory-policy.v3" &&
+        contract.riskTier === "R1" &&
+        contract.trigger === "scheduled"
+      )
+    ) {
+      reasons.push("approval-policy/merge-automatic-forbidden");
     }
   }
   return reasons;

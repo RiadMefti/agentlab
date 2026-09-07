@@ -2,6 +2,7 @@ import { lstat } from "node:fs/promises";
 
 import {
   factoryDailyCycleManifestSchema,
+  type FactoryAutonomousMergePolicy,
   type FactoryDailyCycleManifest,
   type FactoryDailyQuotaPolicy,
   type FactoryOperationsHealthPolicy,
@@ -10,6 +11,7 @@ import {
 } from "@agentlab/contracts";
 
 import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
+import { loadLocalFactoryAutonomousMergePolicy } from "./local-factory-autonomous-merge-policy.js";
 import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
 import { loadLocalFactoryOperationsHealthPolicy } from "./local-factory-operations-health-policy.js";
 import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
@@ -22,6 +24,7 @@ export type LocalFactoryOrchestrationConfig = FactoryDailyCycleManifest & {
   readonly roleIdentityPolicy: FactoryRoleIdentityPolicy;
   readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
   readonly operationsHealthPolicy?: FactoryOperationsHealthPolicy;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
 };
 
 /** Loads and verifies the reviewed inputs used only to render a dormant daily-cycle bundle. */
@@ -46,16 +49,22 @@ export async function loadLocalFactoryOrchestrationConfig(
     roleIdentityPolicy,
     dailyQuotaPolicy,
     operationsHealthPolicy,
+    autonomousMergePolicy,
     executableDigest
   ] = await Promise.all([
     loadLocalFactorySchedulePolicy(manifest.schedulePolicyPath),
     loadLocalFactoryRoleIdentityPolicy(manifest.roleIdentityPolicyPath),
     manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3" ||
-    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
       ? loadLocalFactoryDailyQuotaPolicy(manifest.dailyQuotaPolicyPath)
       : Promise.resolve(undefined),
-    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
       ? loadLocalFactoryOperationsHealthPolicy(manifest.operationsHealthPolicyPath)
+      : Promise.resolve(undefined),
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+      ? loadLocalFactoryAutonomousMergePolicy(manifest.mergePolicyPath)
       : Promise.resolve(undefined),
     pinnedLocalExecutableDigest(manifest.agentlabExecutable.path, "Pinned AgentLab executable")
   ]);
@@ -69,19 +78,36 @@ export async function loadLocalFactoryOrchestrationConfig(
   }
   if (
     (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3" ||
-      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4") &&
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5") &&
     (dailyQuotaPolicy === undefined ||
       encodeCanonicalDocument(dailyQuotaPolicy).digest !== manifest.expectedDailyQuotaPolicyDigest)
   ) {
     throw new Error("Daily cycle aggregate quota policy changed after review.");
   }
   if (
-    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" &&
+    (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5") &&
     (operationsHealthPolicy === undefined ||
       encodeCanonicalDocument(operationsHealthPolicy).digest !==
         manifest.expectedOperationsHealthPolicyDigest)
   ) {
     throw new Error("Daily cycle operations health policy changed after review.");
+  }
+  if (
+    manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5" &&
+    (autonomousMergePolicy?.digest !== manifest.expectedMergePolicyDigest ||
+      autonomousMergePolicy.value.schedulePolicyDigest !== schedulePolicyDigest ||
+      dailyQuotaPolicy === undefined ||
+      autonomousMergePolicy.value.dailyQuotaPolicyDigest !==
+        encodeCanonicalDocument(dailyQuotaPolicy).digest ||
+      autonomousMergePolicy.value.roleIdentityPolicyDigest !== roleIdentityPolicyDigest ||
+      autonomousMergePolicy.value.mergerUserId !== manifest.merger.userId ||
+      autonomousMergePolicy.value.prBrokerUserId !== manifest.broker.userId)
+  ) {
+    throw new Error(
+      "Daily cycle autonomous merge policy or role coordinates changed after review."
+    );
   }
   if (executableDigest !== manifest.agentlabExecutable.digest) {
     throw new Error("Daily cycle AgentLab executable changed after review.");
@@ -90,8 +116,11 @@ export async function loadLocalFactoryOrchestrationConfig(
   if (
     executableMetadata.uid === BigInt(manifest.worker.userId) ||
     executableMetadata.uid === BigInt(manifest.broker.userId) ||
-    (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" &&
+    ((manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+      manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5") &&
       executableMetadata.uid === BigInt(manifest.incident.userId)) ||
+    (manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5" &&
+      executableMetadata.uid === BigInt(manifest.merger.userId)) ||
     (executableMetadata.mode & 0o022n) !== 0n
   ) {
     throw new Error(
@@ -103,7 +132,10 @@ export async function loadLocalFactoryOrchestrationConfig(
     schedulePolicy,
     roleIdentityPolicy,
     ...(dailyQuotaPolicy === undefined ? {} : { dailyQuotaPolicy }),
-    ...(operationsHealthPolicy === undefined ? {} : { operationsHealthPolicy })
+    ...(operationsHealthPolicy === undefined ? {} : { operationsHealthPolicy }),
+    ...(autonomousMergePolicy === undefined
+      ? {}
+      : { autonomousMergePolicy: autonomousMergePolicy.value })
   };
 }
 
@@ -148,7 +180,8 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
             "Factory canary admission config"
           ),
           ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v3" ||
-          manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+          manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+          manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
             ? {
                 dailyQuotaPolicyPath: privateLocalFilePath(
                   manifest.dailyQuotaPolicyPath,
@@ -156,7 +189,8 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
                 )
               }
             : {}),
-          ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4"
+          ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v4" ||
+          manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
             ? {
                 incident: {
                   ...manifest.incident,
@@ -168,7 +202,26 @@ function normalizeManifestPaths(manifest: FactoryDailyCycleManifest): FactoryDai
                 operationsHealthPolicyPath: privateLocalFilePath(
                   manifest.operationsHealthPolicyPath,
                   "Factory operations health policy"
-                )
+                ),
+                ...(manifest.schemaVersion === "agentlab.daily-cycle-manifest.v5"
+                  ? {
+                      merger: {
+                        ...manifest.merger,
+                        configPath: privateLocalFilePath(
+                          manifest.merger.configPath,
+                          "Factory autonomous merger config"
+                        )
+                      },
+                      mergeAdmissionConfigPath: privateLocalFilePath(
+                        manifest.mergeAdmissionConfigPath,
+                        "Factory autonomous merge admission config"
+                      ),
+                      mergePolicyPath: privateLocalFilePath(
+                        manifest.mergePolicyPath,
+                        "Factory autonomous merge policy"
+                      )
+                    }
+                  : {})
               }
             : {})
         }

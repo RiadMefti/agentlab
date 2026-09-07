@@ -1,6 +1,7 @@
 import type {
   FactoryAuthorityInspection,
   FactoryBrokerAuthorityChange,
+  FactoryMergeBrokerAuthorityChange,
   FactorySchedulerAuthorityChange,
   LocalFactoryAuthorityConfig,
   LocalFactoryAuthorityRuntime
@@ -10,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   runFactoryAuthorityStatus,
   runFactoryBrokerAuthority,
+  runFactoryMergeBrokerAuthority,
   runFactorySchedulerAuthority,
   type FactoryAuthorityRunnerDependencies
 } from "../../apps/tui/src/run-factory-authority.js";
@@ -86,6 +88,37 @@ describe("factory authority CLI runner", () => {
     expect(JSON.parse(writes[0] ?? "")).toEqual(schedulerChange());
   });
 
+  it("uses a distinct compare-and-set command for autonomous merge authority", async () => {
+    const writes: string[] = [];
+    const setMergeBrokerAuthority = vi.fn(() => Promise.resolve(mergeChange()));
+    const dependencies = runnerDependencies(
+      vi.fn(() => Promise.resolve()),
+      writes,
+      undefined,
+      undefined,
+      setMergeBrokerAuthority
+    );
+
+    await expect(
+      runFactoryMergeBrokerAuthority(
+        configPath,
+        false,
+        true,
+        "Approved bounded autonomous merge.",
+        "enable-autonomous-merge",
+        dependencies
+      )
+    ).resolves.toBe(0);
+
+    expect(setMergeBrokerAuthority).toHaveBeenCalledWith({
+      expectedEnabled: false,
+      enabled: true,
+      reason: "Approved bounded autonomous merge.",
+      confirmation: "enable-autonomous-merge"
+    });
+    expect(JSON.parse(writes[0] ?? "")).toEqual(mergeChange());
+  });
+
   it("closes on operation failure and suppresses output when cleanup also fails", async () => {
     const writes: string[] = [];
     const operationFailure = new Error("authority conflict");
@@ -116,7 +149,9 @@ function runnerDependencies(
   setBrokerAuthority: (input: unknown) => Promise<FactoryBrokerAuthorityChange> = () =>
     Promise.resolve(change()),
   setSchedulerAuthority: (input: unknown) => Promise<FactorySchedulerAuthorityChange> = () =>
-    Promise.resolve(schedulerChange())
+    Promise.resolve(schedulerChange()),
+  setMergeBrokerAuthority: (input: unknown) => Promise<FactoryMergeBrokerAuthorityChange> = () =>
+    Promise.resolve(mergeChange())
 ): FactoryAuthorityRunnerDependencies {
   return {
     loadConfig: vi.fn(() => Promise.resolve(config())),
@@ -125,7 +160,8 @@ function runnerDependencies(
         Promise.resolve(inspection()),
         close,
         setBrokerAuthority,
-        setSchedulerAuthority
+        setSchedulerAuthority,
+        setMergeBrokerAuthority
       )
     ),
     write: (message) => writes.push(message)
@@ -138,30 +174,40 @@ function authorityRuntime(
   setBrokerAuthority: (input: unknown) => Promise<FactoryBrokerAuthorityChange> = () =>
     Promise.resolve(change()),
   setSchedulerAuthority: (input: unknown) => Promise<FactorySchedulerAuthorityChange> = () =>
-    Promise.resolve(schedulerChange())
+    Promise.resolve(schedulerChange()),
+  setMergeBrokerAuthority: (input: unknown) => Promise<FactoryMergeBrokerAuthorityChange> = () =>
+    Promise.resolve(mergeChange())
 ): LocalFactoryAuthorityRuntime {
   return {
-    commands: { inspect: () => inspect, setBrokerAuthority, setSchedulerAuthority },
+    commands: {
+      inspect: () => inspect,
+      setBrokerAuthority,
+      setSchedulerAuthority,
+      setMergeBrokerAuthority
+    },
     close
   };
 }
 
 function inspection(): FactoryAuthorityInspection {
   return {
-    schemaVersion: "agentlab.authority-inspection.v2",
+    schemaVersion: "agentlab.authority-inspection.v3",
     schedulerEnabled: false,
     prBrokerEnabled: false,
+    mergeBrokerEnabled: false,
     recentSchedulerEvents: [],
-    recentBrokerEvents: []
+    recentBrokerEvents: [],
+    recentMergeBrokerEvents: []
   };
 }
 
 function schedulerChange(): FactorySchedulerAuthorityChange {
   return {
-    schemaVersion: "agentlab.scheduler-authority-change-result.v1",
+    schemaVersion: "agentlab.scheduler-authority-change-result.v2",
     changed: true,
     schedulerEnabled: true,
     prBrokerEnabled: false,
+    mergeBrokerEnabled: false,
     event: {
       schemaVersion: "agentlab.control-event.v1",
       eventId: "0198f005-4ec4-7000-8000-000000000003",
@@ -182,10 +228,11 @@ function schedulerChange(): FactorySchedulerAuthorityChange {
 
 function change(): FactoryBrokerAuthorityChange {
   return {
-    schemaVersion: "agentlab.authority-change-result.v1",
+    schemaVersion: "agentlab.authority-change-result.v2",
     changed: true,
     schedulerEnabled: false,
     prBrokerEnabled: true,
+    mergeBrokerEnabled: false,
     event: {
       schemaVersion: "agentlab.control-event.v1",
       eventId: "0198f005-4ec4-7000-8000-000000000001",
@@ -201,6 +248,31 @@ function change(): FactoryBrokerAuthorityChange {
       reason: "Approved for one governed canary."
     },
     eventDigest: `sha256:${"a".repeat(64)}`
+  };
+}
+
+function mergeChange(): FactoryMergeBrokerAuthorityChange {
+  return {
+    schemaVersion: "agentlab.merge-broker-authority-change-result.v1",
+    changed: true,
+    schedulerEnabled: false,
+    prBrokerEnabled: false,
+    mergeBrokerEnabled: true,
+    event: {
+      schemaVersion: "agentlab.control-event.v1",
+      eventId: "0198f005-4ec4-7000-8000-000000000004",
+      control: "merge-broker",
+      enabled: true,
+      actor: {
+        kind: "human",
+        role: "requester",
+        id: "maintainer/riad",
+        sessionId: null
+      },
+      occurredAt: "2026-08-31T12:00:00.000Z",
+      reason: "Approved bounded autonomous merge."
+    },
+    eventDigest: `sha256:${"c".repeat(64)}`
   };
 }
 
