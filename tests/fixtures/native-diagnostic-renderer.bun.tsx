@@ -17,4 +17,6 @@ terminal.current?.write("\u001b[?7727l");
 terminal.current?.write("👩🏽‍💻界é".repeat(32_768));
 await setup.flush();
 setup.renderer.destroy();
+// Keep capture observable even when upstream removes its private-mode/capacity warnings.
+process.stderr.write("AGENTLAB_DIAGNOSTIC_SENTINEL\n");
 process.stdout.write("AGENTLAB_FRAME\n");

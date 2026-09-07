@@ -87,8 +87,8 @@ describe("native diagnostics bootstrap", () => {
     expect(stdout).not.toContain("7727");
     expect(stdout).not.toContain("increaseCapacity");
     const diagnostics = readFileSync(log.path, "utf8");
-    expect(diagnostics).toContain("unimplemented mode: 7727");
-    expect(diagnostics).toContain("adjusting page capacity");
+    expect(diagnostics).toContain("AGENTLAB_DIAGNOSTIC_SENTINEL");
+    expect(diagnostics).toBe(stderr);
     expect(statSync(log.path).mode & 0o777).toBe(0o600);
   });
 
