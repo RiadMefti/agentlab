@@ -716,8 +716,17 @@ GitHub's merge queue. It has no direct-merge or release operation, persists inte
 remote mutation, reconciles ambiguous outcomes, and records exact merge readback before
 transitioning the task to `merged`.
 
-The read-only daily-cycle compiler now requires one v5 owner-only manifest and verifies reviewed
-policy digests, including daily aggregate quotas, operations health, and autonomous merge, plus the
+The separated-UID deployment has a confirmed storage handoff blocker. `openSqliteDatabase` and its
+writer lease chmod their files to `0600`; the artifact store chmods directories to `0700`. A second
+UID cannot open these stores, and broadening a disposable database's mode still fails its mandatory
+ownership-only chmod. This is not solved by the documented provisioning step. Existing same-user
+service integration and systemd unit verification do not exercise this cross-UID handoff. Keep the
+daily factory disabled until an authenticated storage-authority boundary replaces direct shared
+access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) records a proposed
+design, not an accepted or implemented replacement.
+
+The read-only daily-cycle compiler accepts v4/v5 owner-only manifests and verifies reviewed policy
+digests, including daily aggregate quotas, operations health, and autonomous merge, plus the
 AgentLab executable digest; distinct worker, PR-broker, merger, incident-controller, and attestor
 UIDs; repair ceilings; and timeouts. It emits a content-addressed system-level systemd bundle whose
 non-persistent UTC timer chains fixed-argv one-shot services across separate UIDs, begins with
@@ -725,8 +734,9 @@ disable-only containment, stops on any nonzero result, performs a final exact-he
 runs merge admission and the merger. Every stage first runs fixed `/usr/bin/sha256sum` argv against
 the generated exact executable check record, so binary drift stops before AgentLab runs. The
 renderer cannot write or install artifacts, call the service manager, change authority, or touch the
-ledger. The complete scheduled R1 path through queue-backed merge is implemented but unprovisioned,
-disabled by default, and unactivated; release and deployment remain outside it.
+ledger. The scheduled R1 service logic through queue-backed merge exists, but its cross-UID storage
+handoff is broken and the deployment is unprovisioned, disabled by default, and unactivated; release
+and deployment remain outside it.
 
 The separate `@agentlab/runtime/factory-operations-health` composition opens that ledger with SQLite
 read-only and `query_only`, pins strict owner-reviewed health and daily-quota policies, and

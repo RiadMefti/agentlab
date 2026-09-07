@@ -388,8 +388,15 @@ the pinned successful check set, a live canary reservation, a short-lived single
 and GitHub's merge queue. The merger adapter has no direct-merge or release operation and records
 intent before remote mutation. Repository governance blocks live write commands. No unit is
 installed or activated, and no live factory task or PR has been created or merged through these
-factory commands. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
-implemented controls, activation blockers, and later phases, and
+factory commands. The separated-UID daily chain is currently **not deployable**: its stages require
+one shared ledger and artifact store, but the storage adapters enforce owner-only access and
+ownership-only permission changes. A live two-UID proof reproduces the failed handoff; unit-file
+verification and same-user integration tests do not prove this deployment works. See
+[the storage-boundary proposal](docs/decisions/0034-single-owner-factory-ledger-boundary.md) for
+evidence and the proposed correction. Do not weaken permissions or collapse role identities to
+activate the current chain. See
+[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
+activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;

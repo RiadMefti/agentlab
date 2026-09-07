@@ -6,6 +6,27 @@ enable any authority switch, merge a real PR, release, or deploy. Use dedicated 
 PR-broker, merger, incident-controller, and eval-attestor OS accounts and retain the SQLite ledger;
 file ownership plus reviewed policy digests form the local authorization boundary.
 
+## Activation blocker: storage handoff
+
+Do not activate the separated-UID daily chain. A live test on 2026-09-07 confirmed that its current
+shared storage cannot pass from one runtime UID to another. The SQLite database and writer lease
+force `0600`; artifact roots/shards force `0700`. Another UID cannot open the database or lease and
+cannot perform the artifact store's chmod. Relaxing the disposable database's mode also fails on the
+mandatory chmod, so group/ACL provisioning alone cannot make this implementation work.
+
+Run `npm run test:factory-role-isolation` on Linux with unprivileged user namespaces, `unshare`,
+`newuidmap`/`newgidmap`, and assigned subordinate UID/GID ranges. It executes the real built
+adapters under two distinct mapped UIDs, creates only disposable test storage, and verifies these
+denials. The test passes when isolation holds; it is **not** a successful factory handoff test. It
+is opt-in and is not included in the hosted `factory-sandbox` job. Missing namespace support fails
+the explicit test command rather than reporting a successful proof.
+
+The proposed correction is a single-owner local ledger service with authenticated, role-limited
+commands and verified evidence handoffs. It is not implemented or approved by the current ADRs; see
+[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
+below remain reference material, not an executable activation recipe. Do not weaken private storage,
+share role credentials, or rotate storage ownership between stages as a workaround.
+
 ## Reviewed inputs
 
 Explicit manual work may use `agentlab.local-factory-worker.v3`; autonomous scheduling requires v4,
@@ -421,14 +442,15 @@ Owner provisioning is deliberately outside AgentLab. Materialize the exact check
 Before activation, independently re-hash the executable and every artifact, ensure the worker,
 broker, merger, and incident accounts own only their respective private configs or credentials, and
 ensure no runtime UID owns the AgentLab executable or can write it through group/other permissions.
-Keep the fixed checksum root-owned and non-writable under `/etc/agentlab`. Arrange least-privilege
-shared ledger/artifact access, and enable the worker's user manager/linger required by its transient
-scopes. Runtime configs for distinct UIDs require role-owned copies of the schedule and identity
-policies with identical reviewed digests; they cannot share one owner-only file. Run
-`/usr/bin/sha256sum --status --check` on the materialized checksum and `systemd-analyze verify` over
-the complete unit bundle. Only after every role preflight, governance, monitored incident response,
-and the three human-controlled authority switches are ready should an operator enable
-`agentlab-factory-daily.timer`.
+Keep the fixed checksum root-owned and non-writable under `/etc/agentlab`. The current storage
+implementation cannot provide the required cross-role ledger/artifact handoff; this step is blocked
+pending the storage-boundary correction above. Once that correction is implemented and verified,
+enable the worker's user manager/linger required by its transient scopes. Runtime configs for
+distinct UIDs require role-owned copies of the schedule and identity policies with identical
+reviewed digests; they cannot share one owner-only file. Run `/usr/bin/sha256sum --status --check`
+on the materialized checksum and `systemd-analyze verify` over the complete unit bundle. Only after
+every role preflight, governance, monitored incident response, and the three human-controlled
+authority switches are ready should an operator enable `agentlab-factory-daily.timer`.
 
 Monitor failed stage units and `agentlab-factory-incident.target`. The target is a durable systemd
 signal, not an automatic authority mutation and not a retry latch. On any signal, disable all three
