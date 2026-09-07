@@ -27,6 +27,62 @@ describe("architecture dependency rules", () => {
     expect(report.violations).toEqual([]);
   }, 30_000);
 
+  it.each(["absent", "stale"] as const)(
+    "uses public workspace source types when build output is %s",
+    async (buildOutput) => {
+      const root = architectureFixture();
+      write(
+        root,
+        "packages/contracts/src/index.ts",
+        [
+          "export interface Inventory {",
+          "  readonly files: Readonly<Record<string, string>>;",
+          "  readonly transform: (value: string) => string;",
+          "}",
+          ""
+        ].join("\n")
+      );
+      mkdirSync(join(root, "node_modules/@agentlab"), { recursive: true });
+      symlinkSync("../../packages/contracts", join(root, "node_modules/@agentlab/contracts"));
+      if (buildOutput === "stale") {
+        write(
+          root,
+          "packages/contracts/dist/index.d.ts",
+          [
+            "export interface Inventory {",
+            "  readonly files: any;",
+            "  readonly transform: Readonly<Record<string, string>>;",
+            "}",
+            ""
+          ].join("\n")
+        );
+      }
+      write(
+        root,
+        "packages/runtime/src/domain/inventory.ts",
+        [
+          'import type { Inventory } from "@agentlab/contracts";',
+          "export function inspect(inventory: Inventory, key: string): void {",
+          "  void inventory.files[key];",
+          "  void inventory.transform[key];",
+          "}",
+          ""
+        ].join("\n")
+      );
+
+      const report = await inspectArchitecture(root);
+
+      expect(report.violations.filter(({ kind }) => kind === "unsupported-import")).toEqual([
+        expect.objectContaining({
+          source: "packages/runtime/src/domain/inventory.ts",
+          message: expect.stringContaining(
+            "inventory.ts:4:8 uses unsupported reflective runtime code-generation access"
+          )
+        })
+      ]);
+    }
+  );
+
   it("allows application and infrastructure adapters to depend inward on domain ports", () => {
     const report = architectureReport([
       source("packages/runtime/src/domain/port.ts"),

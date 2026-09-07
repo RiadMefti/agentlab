@@ -285,6 +285,13 @@ repository; its short-lived token requests the fixed contents-write/pull-request
 Configure the protected branch to require the pinned checks and GitHub merge queue. Do not reuse the
 PR-broker App, worker account, eval-attestor account, or incident-controller account.
 
+GitHub currently makes merge queues available for public organization-owned repositories, or private
+organization-owned repositories on Enterprise Cloud; personal repositories are not eligible. See
+[GitHub's merge-queue requirements](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
+As checked on 2026-09-07, `RiadMefti/agentlab` is personally owned and has no merge queue. Keep its
+automatic merge switch disabled. An ownership transfer or another delivery mode requires a separate
+explicit decision; do not substitute direct merging or bypass branch protection.
+
 Before enabling anything, validate both boundaries without issuing authority or mutating GitHub:
 
 ```text

@@ -302,6 +302,14 @@ export async function inspectArchitecture(projectRoot: string): Promise<Architec
       allowJs: false,
       module: ts.ModuleKind.NodeNext,
       moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      // Inspect current public source types, never absent or stale generated declarations.
+      // These exact mappings come from the registry; project-defined aliases remain forbidden.
+      paths: Object.fromEntries(
+        [...packageEntries].map(([specifier, source]) => [
+          specifier,
+          [resolve(projectRoot, source)]
+        ])
+      ),
       skipLibCheck: true,
       target: ts.ScriptTarget.ES2023
     }
