@@ -41,9 +41,12 @@ const requiredGateIds = [
 type WorkerProviderId = Extract<ProviderId, "codex" | "claude">;
 
 export interface FactoryWorkerPreflight {
-  readonly schemaVersion: "agentlab.worker-preflight.v1";
+  readonly schemaVersion: "agentlab.worker-preflight.v4";
   readonly status: "ready" | "blocked";
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicyDigest: Sha256Digest | null;
   readonly schedulerEnabled: boolean;
   readonly costPolicyConfigured: boolean;
   readonly hostReady: boolean;
@@ -54,6 +57,9 @@ export interface FactoryWorkerPreflight {
 
 export interface FactoryWorkerOperatorDependencies {
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly dailyQuotaPolicyDigest: Sha256Digest | null;
   readonly costPolicyConfigured: boolean;
   readonly configuredProviders: readonly WorkerProviderId[];
   readonly gateIds: readonly string[];
@@ -83,19 +89,31 @@ export class FactoryWorkerOperator {
   }
 
   public async preflight(): Promise<FactoryWorkerPreflight> {
+    const identityConfigured = this.dependencies.roleIdentityPolicyDigest !== null;
     const [authority, host] = await Promise.all([
       this.dependencies.controls.state(),
-      this.dependencies.host.inspect()
+      identityConfigured
+        ? this.dependencies.host.inspect()
+        : Promise.resolve({ status: "blocked" as const, reasonCodes: [] })
     ]);
     const reasonCodes = [
       ...host.reasonCodes,
       ...(this.dependencies.costPolicyConfigured ? [] : ["cost-policy-unconfigured"]),
+      ...(this.dependencies.schedulePolicyDigest === null ? ["schedule-policy-unconfigured"] : []),
+      ...(identityConfigured ? [] : ["role-identity-policy-unconfigured"]),
+      ...(this.dependencies.schedulePolicyDigest !== null &&
+      this.dependencies.dailyQuotaPolicyDigest === null
+        ? ["daily-quota-policy-unconfigured"]
+        : []),
       ...(authority.scheduler ? [] : ["scheduler-disabled"])
     ];
     return {
-      schemaVersion: "agentlab.worker-preflight.v1",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: reasonCodes.length === 0 ? "ready" : "blocked",
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      schedulePolicyDigest: this.dependencies.schedulePolicyDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: this.dependencies.dailyQuotaPolicyDigest,
       schedulerEnabled: authority.scheduler,
       costPolicyConfigured: this.dependencies.costPolicyConfigured,
       hostReady: host.status === "ready",
@@ -118,6 +136,7 @@ export class FactoryWorkerOperator {
     input: unknown
   ): Promise<FactoryPreparationMaterializationResult> {
     this.#requireCostPolicy();
+    this.#requireRoleIdentityPolicy();
     return this.dependencies.materializer.materialize(input);
   }
 
@@ -150,6 +169,7 @@ export class FactoryWorkerOperator {
 
   async #requireOperationalHost(): Promise<void> {
     this.#requireCostPolicy();
+    this.#requireRoleIdentityPolicy();
     const host = await this.dependencies.host.inspect();
     if (host.status !== "ready") {
       throw new Error(`Factory worker host is blocked: ${host.reasonCodes.join(", ")}.`);
@@ -159,6 +179,12 @@ export class FactoryWorkerOperator {
   #requireCostPolicy(): void {
     if (!this.dependencies.costPolicyConfigured) {
       throw new Error("Factory worker cost policy is not configured.");
+    }
+  }
+
+  #requireRoleIdentityPolicy(): void {
+    if (this.dependencies.roleIdentityPolicyDigest === null) {
+      throw new Error("Factory worker role identity policy is not configured.");
     }
   }
 }

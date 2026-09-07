@@ -3,8 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { factoryCostPolicySchema } from "@agentlab/contracts";
 
 import { loadLocalFactoryWorkerConfig } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-worker-config.js";
+import { createAutonomousR1FactoryPolicyBundle } from "../../packages/runtime/src/domain/factory-policy.js";
+import {
+  encodeCanonicalDocument,
+  NodeFactoryDocumentCodec
+} from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
+import { testFactoryAutonomousMergePolicy } from "../helpers/factory-autonomous-merge.js";
+import { testFactoryDailyQuotaPolicy } from "../helpers/factory-daily-quota.js";
+import { testEvalDigest, testFactoryRoleIdentityPolicy } from "../helpers/factory-evaluation.js";
+import { testFactorySchedulePolicy } from "../helpers/factory-schedule.js";
 
 const temporaryRoots: string[] = [];
 
@@ -19,12 +29,203 @@ describe("local factory worker configuration boundary", () => {
     const root = await temporaryRoot();
     const path = join(root, "worker.json");
     const costPolicyPath = join(root, "cost-policy.json");
-    const costPolicy = validCostPolicy();
+    const costPolicy = factoryCostPolicySchema.parse(validCostPolicy());
     const config = validConfig(root, costPolicyPath);
     await writePrivateJson(costPolicyPath, costPolicy);
     await writePrivateJson(path, config);
 
     await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({ ...config, costPolicy });
+  });
+
+  it("loads v2 only with a separate owner-only schedule policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v2" as const,
+      schedulePolicyPath
+    };
+    await writePrivateJson(costPolicyPath, costPolicy);
+    await writePrivateJson(schedulePolicyPath, schedulePolicy);
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy
+    });
+
+    await chmod(schedulePolicyPath, 0o644);
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/owner-only/u);
+  });
+
+  it("loads v3 only with a digest-pinned signer/worker identity policy", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const expectedRoleIdentityPolicyDigest = new NodeFactoryDocumentCodec().roleIdentityPolicy(
+      roleIdentityPolicy
+    ).digest;
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v3" as const,
+      schedulePolicyPath,
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest
+    };
+    await writePrivateJson(costPolicyPath, costPolicy);
+    await writePrivateJson(schedulePolicyPath, schedulePolicy);
+    await writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy);
+    await writePrivateJson(path, config);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      roleIdentityPolicy
+    });
+
+    await chmod(roleIdentityPolicyPath, 0o644);
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/owner-only/u);
+  });
+
+  it("loads v4 only with independently digest-pinned daily quota authority", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const dailyQuotaPolicyPath = join(root, "daily-quota-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const costPolicy = validCostPolicy();
+    const schedulePolicy = testFactorySchedulePolicy();
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy();
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const codec = new NodeFactoryDocumentCodec();
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v4" as const,
+      schedulePolicyPath,
+      dailyQuotaPolicyPath,
+      expectedDailyQuotaPolicyDigest: codec.dailyQuotaPolicy(dailyQuotaPolicy).digest,
+      roleIdentityPolicyPath,
+      expectedRoleIdentityPolicyDigest: codec.roleIdentityPolicy(roleIdentityPolicy).digest
+    };
+    await Promise.all([
+      writePrivateJson(costPolicyPath, costPolicy),
+      writePrivateJson(schedulePolicyPath, schedulePolicy),
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy),
+      writePrivateJson(path, config)
+    ]);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      dailyQuotaPolicy,
+      roleIdentityPolicy
+    });
+    await writePrivateJson(path, {
+      ...config,
+      expectedDailyQuotaPolicyDigest: `sha256:${"f".repeat(64)}`
+    });
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(/quota policy changed/u);
+  });
+
+  it("loads v5 only when every autonomous-merge policy coordinate has one digest", async () => {
+    const root = await temporaryRoot();
+    const path = join(root, "worker.json");
+    const costPolicyPath = join(root, "cost-policy.json");
+    const schedulePolicyPath = join(root, "schedule-policy.json");
+    const dailyQuotaPolicyPath = join(root, "daily-quota-policy.json");
+    const roleIdentityPolicyPath = join(root, "role-identities.json");
+    const mergePolicyPath = join(root, "merge-policy.json");
+    const costPolicy = factoryCostPolicySchema.parse(validCostPolicy());
+    const schedulePolicy = testFactorySchedulePolicy();
+    const dailyQuotaPolicy = testFactoryDailyQuotaPolicy({
+      repositories: [
+        {
+          repositoryId: "riadmefti/agentlab",
+          maximumTasksPerDay: 3,
+          maximumDraftPullRequestsPerDay: 3,
+          budget: testFactorySchedulePolicy().tickBudget
+        }
+      ]
+    });
+    const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
+      keyId: testEvalDigest(901),
+      workerUserId: 1001,
+      attestorUserId: 1002
+    });
+    const codec = new NodeFactoryDocumentCodec();
+    const schedule = codec.schedulePolicy(schedulePolicy);
+    const dailyQuota = codec.dailyQuotaPolicy(dailyQuotaPolicy);
+    const roles = codec.roleIdentityPolicy(roleIdentityPolicy);
+    const mergePolicy = testFactoryAutonomousMergePolicy({
+      schedulePolicyDigest: schedule.digest,
+      dailyQuotaPolicyDigest: dailyQuota.digest,
+      roleIdentityPolicyDigest: roles.digest
+    });
+    const merge = codec.autonomousMergePolicy(mergePolicy);
+    const factoryPolicyBundle = encodeCanonicalDocument(
+      createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: merge })
+    );
+    const config = {
+      ...validConfig(root, costPolicyPath),
+      schemaVersion: "agentlab.local-factory-worker.v5" as const,
+      repositoryId: "riadmefti/agentlab",
+      schedulePolicyPath,
+      dailyQuotaPolicyPath,
+      roleIdentityPolicyPath,
+      mergePolicyPath,
+      expectedFactoryPolicyBundleDigest: factoryPolicyBundle.digest,
+      expectedSchedulePolicyDigest: schedule.digest,
+      expectedDailyQuotaPolicyDigest: dailyQuota.digest,
+      expectedRoleIdentityPolicyDigest: roles.digest,
+      expectedMergePolicyDigest: merge.digest
+    };
+    await Promise.all([
+      writePrivateJson(costPolicyPath, costPolicy),
+      writePrivateJson(schedulePolicyPath, schedulePolicy),
+      writePrivateJson(dailyQuotaPolicyPath, dailyQuotaPolicy),
+      writePrivateJson(roleIdentityPolicyPath, roleIdentityPolicy),
+      writePrivateJson(mergePolicyPath, mergePolicy),
+      writePrivateJson(path, config)
+    ]);
+
+    await expect(loadLocalFactoryWorkerConfig(path)).resolves.toEqual({
+      ...config,
+      costPolicy,
+      schedulePolicy,
+      dailyQuotaPolicy,
+      roleIdentityPolicy,
+      autonomousMergePolicy: mergePolicy
+    });
+
+    await writePrivateJson(path, {
+      ...config,
+      expectedFactoryPolicyBundleDigest: `sha256:${"f".repeat(64)}`
+    });
+    await expect(loadLocalFactoryWorkerConfig(path)).rejects.toThrow(
+      /factory policy bundle policy changed/u
+    );
   });
 
   it("rejects unknown fields, overlapping roots, unsafe runtime roots, and malformed JSON", async () => {

@@ -90,6 +90,96 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
         source: "packages/runtime/src/local-factory-intake.ts",
         default: "./dist/local-factory-intake.js",
         types: "./dist/local-factory-intake.d.ts"
+      },
+      "./factory-evaluator": {
+        source: "packages/runtime/src/local-factory-evaluator.ts",
+        default: "./dist/local-factory-evaluator.js",
+        types: "./dist/local-factory-evaluator.d.ts"
+      },
+      "./factory-eval-attestor": {
+        source: "packages/runtime/src/local-factory-eval-attestor.ts",
+        default: "./dist/local-factory-eval-attestor.js",
+        types: "./dist/local-factory-eval-attestor.d.ts"
+      },
+      "./factory-eval-producer": {
+        source: "packages/runtime/src/local-factory-eval-producer.ts",
+        default: "./dist/local-factory-eval-producer.js",
+        types: "./dist/local-factory-eval-producer.d.ts"
+      },
+      "./factory-canary-authority": {
+        source: "packages/runtime/src/local-factory-canary-authority.ts",
+        default: "./dist/local-factory-canary-authority.js",
+        types: "./dist/local-factory-canary-authority.d.ts"
+      },
+      "./factory-canary-admission": {
+        source: "packages/runtime/src/local-factory-canary-admission.ts",
+        default: "./dist/local-factory-canary-admission.js",
+        types: "./dist/local-factory-canary-admission.d.ts"
+      },
+      "./factory-orchestration": {
+        source: "packages/runtime/src/local-factory-orchestration.ts",
+        default: "./dist/local-factory-orchestration.js",
+        types: "./dist/local-factory-orchestration.d.ts"
+      },
+      "./factory-operations-health": {
+        source: "packages/runtime/src/local-factory-operations-health.ts",
+        default: "./dist/local-factory-operations-health.js",
+        types: "./dist/local-factory-operations-health.d.ts"
+      },
+      "./factory-incident-containment": {
+        source: "packages/runtime/src/local-factory-incident-containment.ts",
+        default: "./dist/local-factory-incident-containment.js",
+        types: "./dist/local-factory-incident-containment.d.ts"
+      },
+      "./factory-autonomous-merge-admission": {
+        source: "packages/runtime/src/local-factory-autonomous-merge-admission.ts",
+        default: "./dist/local-factory-autonomous-merge-admission.js",
+        types: "./dist/local-factory-autonomous-merge-admission.d.ts"
+      },
+      "./factory-autonomous-merger": {
+        source: "packages/runtime/src/local-factory-autonomous-merger.ts",
+        default: "./dist/local-factory-autonomous-merger.js",
+        types: "./dist/local-factory-autonomous-merger.d.ts"
+      },
+      "./factory-maintenance-discovery": {
+        source: "packages/runtime/src/local-factory-maintenance-discovery.ts",
+        default: "./dist/local-factory-maintenance-discovery.js",
+        types: "./dist/local-factory-maintenance-discovery.d.ts"
+      },
+      "./factory-external-pull-request-discovery": {
+        source: "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+        default: "./dist/local-factory-external-pull-request-discovery.js",
+        types: "./dist/local-factory-external-pull-request-discovery.d.ts"
+      },
+      "./factory-external-pull-request-review": {
+        source: "packages/runtime/src/local-factory-external-pull-request-review.ts",
+        default: "./dist/local-factory-external-pull-request-review.js",
+        types: "./dist/local-factory-external-pull-request-review.d.ts"
+      },
+      "./factory-external-pull-request-feedback": {
+        source: "packages/runtime/src/local-factory-external-pull-request-feedback.ts",
+        default: "./dist/local-factory-external-pull-request-feedback.js",
+        types: "./dist/local-factory-external-pull-request-feedback.d.ts"
+      },
+      "./factory-external-pull-request-repair-admission": {
+        source: "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts",
+        default: "./dist/local-factory-external-pull-request-repair-admission.js",
+        types: "./dist/local-factory-external-pull-request-repair-admission.d.ts"
+      },
+      "./factory-external-pull-request-repair-execution": {
+        source: "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts",
+        default: "./dist/local-factory-external-pull-request-repair-execution.js",
+        types: "./dist/local-factory-external-pull-request-repair-execution.d.ts"
+      },
+      "./factory-external-pull-request-repair-qualification": {
+        source: "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
+        default: "./dist/local-factory-external-pull-request-repair-qualification.js",
+        types: "./dist/local-factory-external-pull-request-repair-qualification.d.ts"
+      },
+      "./factory-external-pull-request-replacement-draft": {
+        source: "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
+        default: "./dist/local-factory-external-pull-request-replacement-draft.js",
+        types: "./dist/local-factory-external-pull-request-replacement-draft.d.ts"
       }
     }
   }
@@ -212,6 +302,14 @@ export async function inspectArchitecture(projectRoot: string): Promise<Architec
       allowJs: false,
       module: ts.ModuleKind.NodeNext,
       moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      // Inspect current public source types, never absent or stale generated declarations.
+      // These exact mappings come from the registry; project-defined aliases remain forbidden.
+      paths: Object.fromEntries(
+        [...packageEntries].map(([specifier, source]) => [
+          specifier,
+          [resolve(projectRoot, source)]
+        ])
+      ),
       skipLibCheck: true,
       target: ts.ScriptTarget.ES2023
     }
@@ -364,6 +462,23 @@ function compositionBoundaryViolations(
         path === "packages/runtime/src/local-factory-worker.ts" ||
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
+        isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
+        isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
+        isFactoryExternalPullRequestReviewModule(path) ||
+        isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
+        isFactoryExternalPullRequestRepairExecutionModule(path) ||
+        isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/providers/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -376,6 +491,23 @@ function compositionBoundaryViolations(
         path === "packages/runtime/src/local-factory-worker.ts" ||
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
+        isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
+        isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
+        isFactoryExternalPullRequestReviewModule(path) ||
+        isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
+        isFactoryExternalPullRequestRepairExecutionModule(path) ||
+        isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/")
     },
     {
@@ -386,6 +518,23 @@ function compositionBoundaryViolations(
         path === "packages/runtime/src/local-factory-broker.ts" ||
         isFactoryIntakeModule(path) ||
         isFactoryAuthorityModule(path) ||
+        isFactoryEvaluatorModule(path) ||
+        isFactoryEvalAttestorModule(path) ||
+        isFactoryEvalProducerModule(path) ||
+        isFactoryCanaryAuthorityModule(path) ||
+        isFactoryCanaryAdmissionModule(path) ||
+        isFactoryAutonomousMergeAdmissionModule(path) ||
+        isFactoryAutonomousMergerModule(path) ||
+        isFactoryMaintenanceDiscoveryModule(path) ||
+        isFactoryExternalPullRequestDiscoveryModule(path) ||
+        isFactoryExternalPullRequestReviewModule(path) ||
+        isFactoryExternalPullRequestFeedbackModule(path) ||
+        isFactoryExternalPullRequestRepairAdmissionModule(path) ||
+        isFactoryExternalPullRequestRepairExecutionModule(path) ||
+        isFactoryExternalPullRequestRepairQualificationModule(path) ||
+        isFactoryIncidentContainmentModule(path) ||
+        isFactoryOperationsHealthModule(path) ||
+        isFactoryOrchestrationModule(path) ||
         path.startsWith("packages/runtime/src/infrastructure/github/") ||
         path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
         path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -401,6 +550,96 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-factory-intake.ts",
       description: "intake composition",
       forbidden: intakeCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-evaluator.ts",
+      description: "credentialless evaluator composition",
+      forbidden: evaluatorCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-eval-attestor.ts",
+      description: "isolated eval attestor composition",
+      forbidden: evalAttestorCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-eval-producer.ts",
+      description: "offline eval producer composition",
+      forbidden: evalProducerCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-canary-authority.ts",
+      description: "human canary authority composition",
+      forbidden: canaryAuthorityCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-canary-admission.ts",
+      description: "credentialless canary admission composition",
+      forbidden: canaryAdmissionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-orchestration.ts",
+      description: "read-only orchestration renderer",
+      forbidden: orchestrationCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-operations-health.ts",
+      description: "credentialless read-only operations health composition",
+      forbidden: operationsHealthCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-incident-containment.ts",
+      description: "credentialless disable-only incident composition",
+      forbidden: incidentContainmentCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-autonomous-merge-admission.ts",
+      description: "credentialless autonomous merge admission composition",
+      forbidden: autonomousMergeAdmissionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-autonomous-merger.ts",
+      description: "isolated autonomous merge-queue composition",
+      forbidden: autonomousMergerCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-maintenance-discovery.ts",
+      description: "credentialless maintenance discovery composition",
+      forbidden: maintenanceDiscoveryCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+      description: "read-only external pull-request discovery composition",
+      forbidden: externalPullRequestDiscoveryCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-review.ts",
+      description: "credentialless external pull-request review composition",
+      forbidden: externalPullRequestReviewCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-feedback.ts",
+      description: "feedback-only external pull-request publisher composition",
+      forbidden: externalPullRequestFeedbackCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts",
+      description: "deterministic external pull-request repair admission composition",
+      forbidden: externalPullRequestRepairAdmissionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts",
+      description: "credentialless external pull-request repair execution composition",
+      forbidden: externalPullRequestRepairExecutionCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
+      description: "credentialless external pull-request repair qualification composition",
+      forbidden: externalPullRequestRepairQualificationCommandForbidden
+    },
+    {
+      entry: "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
+      description: "separately credentialed external pull-request replacement-draft broker",
+      forbidden: externalPullRequestReplacementDraftCommandForbidden
     },
     {
       entry: "apps/tui/src/run-factory-broker-preflight.ts",
@@ -436,6 +675,96 @@ function compositionBoundaryViolations(
       entry: "apps/tui/src/run-factory-intake-register.ts",
       description: "intake registration command",
       forbidden: intakeCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-evaluator.ts",
+      description: "credentialless evaluator command",
+      forbidden: evaluatorCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-eval-attestor.ts",
+      description: "isolated eval attestor command",
+      forbidden: evalAttestorCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-eval-producer.ts",
+      description: "offline eval producer command",
+      forbidden: evalProducerCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-canary-authority.ts",
+      description: "human canary authority command",
+      forbidden: canaryAuthorityCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-canary-admission.ts",
+      description: "credentialless canary admission command",
+      forbidden: canaryAdmissionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-orchestration-render.ts",
+      description: "read-only orchestration render command",
+      forbidden: orchestrationCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-operations-health.ts",
+      description: "credentialless read-only operations health command",
+      forbidden: operationsHealthCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-incident-containment.ts",
+      description: "credentialless disable-only incident command",
+      forbidden: incidentContainmentCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-autonomous-merge-admission.ts",
+      description: "credentialless autonomous merge admission command",
+      forbidden: autonomousMergeAdmissionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-autonomous-merger.ts",
+      description: "isolated autonomous merge-queue command",
+      forbidden: autonomousMergerCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-maintenance-discovery.ts",
+      description: "credentialless maintenance discovery command",
+      forbidden: maintenanceDiscoveryCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-discovery.ts",
+      description: "read-only external pull-request discovery command",
+      forbidden: externalPullRequestDiscoveryCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-review.ts",
+      description: "credentialless external pull-request review command",
+      forbidden: externalPullRequestReviewCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-feedback.ts",
+      description: "feedback-only external pull-request publisher command",
+      forbidden: externalPullRequestFeedbackCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-repair-admission.ts",
+      description: "deterministic external pull-request repair admission command",
+      forbidden: externalPullRequestRepairAdmissionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-repair-execution.ts",
+      description: "credentialless external pull-request repair execution command",
+      forbidden: externalPullRequestRepairExecutionCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-repair-qualification.ts",
+      description: "credentialless external pull-request repair qualification command",
+      forbidden: externalPullRequestRepairQualificationCommandForbidden
+    },
+    {
+      entry: "apps/tui/src/run-factory-external-pull-request-replacement-draft.ts",
+      description: "external pull-request replacement-draft broker command",
+      forbidden: externalPullRequestReplacementDraftCommandForbidden
     }
   ] as const;
   const violations: ArchitectureViolation[] = [];
@@ -479,6 +808,16 @@ function brokerCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-worker.ts" ||
     isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryExternalPullRequestFeedbackModule(path) ||
+    isFactoryExternalPullRequestRepairAdmissionModule(path) ||
+    isFactoryExternalPullRequestRepairExecutionModule(path) ||
+    isFactoryExternalPullRequestRepairQualificationModule(path) ||
+    isFactoryOperationsHealthModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/providers/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/")
@@ -491,6 +830,16 @@ function workerCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-factory-broker.ts" ||
     isFactoryIntakeModule(path) ||
     isFactoryAuthorityModule(path) ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryExternalPullRequestFeedbackModule(path) ||
+    isFactoryExternalPullRequestRepairAdmissionModule(path) ||
+    isFactoryExternalPullRequestRepairExecutionModule(path) ||
+    isFactoryExternalPullRequestRepairQualificationModule(path) ||
+    isFactoryOperationsHealthModule(path) ||
     path.startsWith("packages/runtime/src/infrastructure/github/") ||
     path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
     path.startsWith("packages/runtime/src/infrastructure/tmux/") ||
@@ -546,6 +895,7 @@ const factoryIntakeInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-intake-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
   "packages/runtime/src/infrastructure/filesystem/local-factory-intake-submission.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
@@ -575,7 +925,12 @@ function intakeCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
-    isFactoryAuthorityModule(path)
+    isFactoryAuthorityModule(path) ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -593,7 +948,12 @@ function authorityCommandForbidden(path: string): boolean {
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
-    path === "packages/runtime/src/local-factory-intake.ts"
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
   ) {
     return true;
   }
@@ -603,6 +963,1484 @@ function authorityCommandForbidden(path: string): boolean {
   if (path.startsWith("packages/runtime/src/infrastructure/")) {
     return !factoryAuthorityInfrastructureModules.has(path);
   }
+  return false;
+}
+
+const factoryEvaluatorApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
+  "packages/runtime/src/application/factory-evaluation-service.ts",
+  "packages/runtime/src/application/local-factory-evaluator-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryEvaluatorInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-signed-eval-attestation.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryEvaluatorModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-evaluator.ts" ||
+    path === "packages/runtime/src/application/factory-eval-attestation-service.ts" ||
+    path === "packages/runtime/src/application/factory-evaluation-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-evaluator-coordinator.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/local-factory-evaluator-config.ts"
+  );
+}
+
+function evaluatorCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryEvaluatorApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryEvaluatorInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryEvalAttestorApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-attestor-service.ts",
+  "packages/runtime/src/application/local-factory-eval-attestor-coordinator.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryEvalAttestorInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-run.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts"
+]);
+
+function isFactoryEvalAttestorModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
+    path === "packages/runtime/src/application/factory-eval-attestor-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-eval-attestor-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-attestor-config.ts" ||
+    path === "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"
+  );
+}
+
+function evalAttestorCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryEvalAttestorApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryEvalAttestorInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryEvalProducerApplicationModules = new Set([
+  "packages/runtime/src/application/factory-eval-production-service.ts",
+  "packages/runtime/src/application/local-factory-eval-producer-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryEvalProducerInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-producer-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-eval-production-job.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-factory-eval-executable-resolver.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-production-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/bubblewrap-factory-eval-sandbox.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/local-factory-eval-harness-executor.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-eval-process-recovery.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts"
+]);
+
+function isFactoryEvalProducerModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-eval-producer.ts" ||
+    path === "packages/runtime/src/application/factory-eval-production-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-eval-producer-coordinator.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-harness.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-production-integrity.ts" ||
+    path === "packages/runtime/src/domain/factory-eval-production-repository.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-producer-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-eval-production-job.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/pinned-factory-eval-executable-resolver.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-production-repository.ts" ||
+    path === "packages/runtime/src/infrastructure/process/bubblewrap-factory-eval-sandbox.ts" ||
+    path === "packages/runtime/src/infrastructure/process/local-factory-eval-harness-executor.ts" ||
+    path === "packages/runtime/src/infrastructure/process/systemd-factory-eval-process-recovery.ts"
+  );
+}
+
+function evalProducerCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryEvalProducerApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryEvalProducerInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryCanaryAuthorityApplicationModules = new Set([
+  "packages/runtime/src/application/factory-canary-authority-service.ts",
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
+  "packages/runtime/src/application/local-factory-canary-authority-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryCanaryAuthorityInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-canary-authority-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-canary-request.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryCanaryAuthorityModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-canary-authority.ts" ||
+    path === "packages/runtime/src/application/factory-canary-authority-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-canary-authority-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-canary-authority-config.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/local-factory-canary-request.ts"
+  );
+}
+
+function canaryAuthorityCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    (isFactoryEvaluatorModule(path) &&
+      path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAdmissionModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryCanaryAuthorityApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryCanaryAuthorityInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryCanaryAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-canary-admission-service.ts",
+  "packages/runtime/src/application/factory-canary-admission-consumer-service.ts",
+  "packages/runtime/src/application/factory-eval-attestation-service.ts",
+  "packages/runtime/src/application/local-factory-canary-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryCanaryAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/crypto/factory-dsse-primitives.ts",
+  "packages/runtime/src/infrastructure/crypto/node-factory-dsse-verifier.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-eval-attestation-key-source.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-reservation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryCanaryAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-canary-admission.ts" ||
+    path === "packages/runtime/src/application/factory-canary-admission-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-canary-admission-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-canary-admission-config.ts"
+  );
+}
+
+function canaryAdmissionCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    (isFactoryEvaluatorModule(path) &&
+      path !== "packages/runtime/src/application/factory-eval-attestation-service.ts") ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryCanaryAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryCanaryAdmissionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryOrchestrationDomainModules = new Set([
+  "packages/runtime/src/domain/factory-daily-cycle-plan.ts",
+  "packages/runtime/src/domain/factory-documents.ts"
+]);
+
+const factoryOrchestrationInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-daily-cycle-renderer.ts"
+]);
+
+function isFactoryOrchestrationModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-orchestration.ts" ||
+    path === "packages/runtime/src/domain/factory-daily-cycle-plan.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-orchestration-config.ts" ||
+    path === "packages/runtime/src/infrastructure/process/systemd-factory-daily-cycle-renderer.ts"
+  );
+}
+
+function orchestrationCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    isFactoryIntakeModule(path) ||
+    isFactoryAuthorityModule(path) ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryAutonomousMergeAdmissionModule(path) ||
+    isFactoryAutonomousMergerModule(path)
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryOrchestrationDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) return true;
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryOrchestrationInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryOperationsHealthDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-daily-quota-integrity.ts",
+  "packages/runtime/src/domain/factory-daily-quota-repository.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-operations-health-source.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-task-state.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts"
+]);
+
+const factoryOperationsHealthApplicationModules = new Set([
+  "packages/runtime/src/application/factory-operations-health-service.ts",
+  "packages/runtime/src/application/local-factory-operations-health-coordinator.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryOperationsHealthInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts"
+]);
+
+function isFactoryOperationsHealthModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-operations-health.ts" ||
+    path === "packages/runtime/src/application/factory-operations-health-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-operations-health-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts"
+  );
+}
+
+function operationsHealthCommandForbidden(path: string): boolean {
+  if (
+    path.startsWith("packages/runtime/src/local-") &&
+    path !== "packages/runtime/src/local-factory-operations-health.ts"
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryOperationsHealthDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryOperationsHealthApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryOperationsHealthInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryIncidentContainmentDomainModules = new Set([
+  ...factoryOperationsHealthDomainModules,
+  "packages/runtime/src/domain/factory-incident-containment-repository.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryIncidentContainmentApplicationModules = new Set([
+  "packages/runtime/src/application/factory-incident-containment-service.ts",
+  "packages/runtime/src/application/factory-operations-health-service.ts",
+  "packages/runtime/src/application/local-factory-incident-containment-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryIncidentContainmentInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-incident-containment-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-incident-containment-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryIncidentContainmentModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-incident-containment.ts" ||
+    path === "packages/runtime/src/application/factory-incident-containment-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-incident-containment-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-incident-containment-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-incident-containment-repository.ts"
+  );
+}
+
+function incidentContainmentCommandForbidden(path: string): boolean {
+  if (
+    path.startsWith("packages/runtime/src/local-") &&
+    path !== "packages/runtime/src/local-factory-incident-containment.ts"
+  ) {
+    return true;
+  }
+  if (
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryIncidentContainmentDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryIncidentContainmentApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryIncidentContainmentInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryAutonomousMergeAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts",
+  "packages/runtime/src/application/factory-control-plane.ts",
+  "packages/runtime/src/application/factory-evidence-ingress.ts",
+  "packages/runtime/src/application/factory-evidence-publisher.ts",
+  "packages/runtime/src/application/factory-pull-request-canary-authority.ts",
+  "packages/runtime/src/application/factory-pull-request-lineage.ts",
+  "packages/runtime/src/application/factory-pull-request-repair-evidence.ts",
+  "packages/runtime/src/application/local-factory-autonomous-merge-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryAutonomousMergeAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-reservation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-daily-quota-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-update-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryAutonomousMergeAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-autonomous-merge-admission.ts" ||
+    path === "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts" ||
+    path ===
+      "packages/runtime/src/application/local-factory-autonomous-merge-admission-coordinator.ts"
+  );
+}
+
+function autonomousMergeAdmissionCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-autonomous-merge-admission.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryAutonomousMergeAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryAutonomousMergeAdmissionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryAutonomousMergerApplicationModules = new Set([
+  "packages/runtime/src/application/factory-autonomous-merge-service.ts",
+  "packages/runtime/src/application/factory-control-plane.ts",
+  "packages/runtime/src/application/factory-evidence-ingress.ts",
+  "packages/runtime/src/application/factory-evidence-publisher.ts",
+  "packages/runtime/src/application/local-factory-autonomous-merger-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryAutonomousMergerInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts",
+  "packages/runtime/src/infrastructure/github/github-graphql-client.ts",
+  "packages/runtime/src/infrastructure/github/github-merger-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-autonomous-merge-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryAutonomousMergerModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-autonomous-merger.ts" ||
+    path === "packages/runtime/src/application/factory-autonomous-merge-service.ts" ||
+    path === "packages/runtime/src/application/local-factory-autonomous-merger-coordinator.ts" ||
+    path === "packages/runtime/src/domain/factory-autonomous-merge-broker.ts" ||
+    path === "packages/runtime/src/domain/factory-autonomous-merge-repository.ts" ||
+    path === "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-autonomous-merge-repository.ts"
+  );
+}
+
+function autonomousMergerCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-autonomous-merger.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryAutonomousMergerApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryAutonomousMergerInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryMaintenanceDiscoveryApplicationModules = new Set([
+  "packages/runtime/src/application/factory-maintenance-discovery-intake.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-prompt-renderer.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-run-recorder.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-service.ts",
+  "packages/runtime/src/application/factory-maintenance-discovery-skill.ts",
+  "packages/runtime/src/application/factory-preparation-intake-service.ts",
+  "packages/runtime/src/application/factory-skill-package-publisher.ts",
+  "packages/runtime/src/application/local-factory-maintenance-discovery-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryMaintenanceDiscoveryInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-maintenance-evidence-inventory.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-repository-revision.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-autonomous-merge-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-daily-quota-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-worker-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-intake-deduplicator.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-maintenance-discovery-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/local-factory-worker-host-inspector.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts",
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts",
+  "packages/runtime/src/infrastructure/recovery/local-factory-workspace-recovery.ts"
+]);
+
+function isFactoryMaintenanceDiscoveryModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-maintenance-discovery-") ||
+    path ===
+      "packages/runtime/src/application/local-factory-maintenance-discovery-coordinator.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-maintenance-discovery-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-maintenance-discovery-repository.ts"
+  );
+}
+
+function maintenanceDiscoveryCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryAutonomousMergeAdmissionModule(path) ||
+    isFactoryAutonomousMergerModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryMaintenanceDiscoveryApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryMaintenanceDiscoveryInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestDiscoveryDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-discovery-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-discovery-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-source.ts",
+  "packages/runtime/src/domain/factory-schedule-time.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/repository-path-policy.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestDiscoveryApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-discovery-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-discovery-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestDiscoveryInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-discovery-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-external-pull-request-source.ts",
+  "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
+  "packages/runtime/src/infrastructure/github/github-read-only-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-owned-pull-request-index.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryExternalPullRequestDiscoveryModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-external-pull-request-discovery-") ||
+    path.startsWith("packages/runtime/src/domain/factory-external-pull-request-discovery-") ||
+    path === "packages/runtime/src/domain/factory-external-pull-request-policy.ts" ||
+    path === "packages/runtime/src/domain/factory-external-pull-request-source.ts" ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-discovery-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-"
+    ) ||
+    path === "packages/runtime/src/infrastructure/github/github-external-pull-request-source.ts" ||
+    path === "packages/runtime/src/infrastructure/github/github-read-only-installation-client.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-owned-pull-request-index.ts"
+  );
+}
+
+function externalPullRequestDiscoveryCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestDiscoveryDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestDiscoveryApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestDiscoveryInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestReviewDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/command.ts",
+  "packages/runtime/src/domain/factory-agent-executor.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-authority-limits.ts",
+  "packages/runtime/src/domain/factory-budget-meter.ts",
+  "packages/runtime/src/domain/factory-cost-accounting.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-review-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-review-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-review-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-review-workspace.ts",
+  "packages/runtime/src/domain/factory-process-isolation.ts",
+  "packages/runtime/src/domain/factory-gate.ts",
+  "packages/runtime/src/domain/factory-role-identity.ts",
+  "packages/runtime/src/domain/factory-skill.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/factory-workspace.ts",
+  "packages/runtime/src/domain/factory-workspace-recovery.ts",
+  "packages/runtime/src/domain/runtime-resource.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestReviewApplicationModules = new Set([
+  "packages/runtime/src/application/configured-factory-skill-source.ts",
+  "packages/runtime/src/application/factory-external-pull-request-review-prompt.ts",
+  "packages/runtime/src/application/factory-external-pull-request-review-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-review-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestReviewInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-review-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-review-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-review-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts",
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts",
+  "packages/runtime/src/infrastructure/recovery/local-factory-workspace-recovery.ts"
+]);
+
+function isFactoryExternalPullRequestReviewModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-external-pull-request-review-") ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-review-coordinator.ts" ||
+    path.startsWith("packages/runtime/src/domain/factory-external-pull-request-review-") ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-review-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-review-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-review-"
+    )
+  );
+}
+
+function externalPullRequestReviewCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestReviewDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestReviewApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestReviewInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestFeedbackDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-publisher.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-repository.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestFeedbackApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-feedback-body.ts",
+  "packages/runtime/src/application/factory-external-pull-request-feedback-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-feedback-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestFeedbackInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-feedback-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-external-pull-request-feedback-publisher.ts",
+  "packages/runtime/src/infrastructure/github/github-feedback-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-feedback-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryExternalPullRequestFeedbackModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
+    path.startsWith("packages/runtime/src/application/factory-external-pull-request-feedback-") ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-feedback-coordinator.ts" ||
+    path.startsWith("packages/runtime/src/domain/factory-external-pull-request-feedback-") ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-feedback-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-feedback-"
+    ) ||
+    path ===
+      "packages/runtime/src/infrastructure/github/github-external-pull-request-feedback-publisher.ts" ||
+    path === "packages/runtime/src/infrastructure/github/github-feedback-installation-client.ts"
+  );
+}
+
+function externalPullRequestFeedbackCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryExternalPullRequestReviewModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestFeedbackDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestFeedbackApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestFeedbackInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestRepairAdmissionDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-repository.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestRepairAdmissionApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-repair-admission-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-repair-admission-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestRepairAdmissionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-admission-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-admission-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
+]);
+
+function isFactoryExternalPullRequestRepairAdmissionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
+    path.startsWith(
+      "packages/runtime/src/application/factory-external-pull-request-repair-admission-"
+    ) ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-repair-admission-coordinator.ts" ||
+    path.startsWith(
+      "packages/runtime/src/domain/factory-external-pull-request-repair-admission-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-admission-"
+    ) ||
+    path.startsWith(
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-admission-"
+    )
+  );
+}
+
+function externalPullRequestRepairAdmissionCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryExternalPullRequestReviewModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/process/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestRepairAdmissionDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestRepairAdmissionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestRepairAdmissionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestRepairExecutionDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/command.ts",
+  "packages/runtime/src/domain/factory-agent-executor.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-authority-limits.ts",
+  "packages/runtime/src/domain/factory-budget-meter.ts",
+  "packages/runtime/src/domain/factory-cost-accounting.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-feedback-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-admission-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-execution-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-execution-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-execution-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-workspace.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-review-workspace.ts",
+  "packages/runtime/src/domain/factory-process-isolation.ts",
+  "packages/runtime/src/domain/factory-role-identity.ts",
+  "packages/runtime/src/domain/factory-skill.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/factory-workspace.ts",
+  "packages/runtime/src/domain/factory-workspace-recovery.ts",
+  "packages/runtime/src/domain/repository-path-policy.ts",
+  "packages/runtime/src/domain/runtime-resource.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestRepairExecutionApplicationModules = new Set([
+  "packages/runtime/src/application/configured-factory-skill-source.ts",
+  "packages/runtime/src/application/factory-external-pull-request-repair-execution-service.ts",
+  "packages/runtime/src/application/factory-external-pull-request-repair-prompt.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-repair-execution-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestRepairExecutionInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-repair-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-review-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-execution-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-execution-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts",
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts",
+  "packages/runtime/src/infrastructure/recovery/local-factory-workspace-recovery.ts"
+]);
+
+function isFactoryExternalPullRequestRepairExecutionModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts" ||
+    path.startsWith(
+      "packages/runtime/src/application/factory-external-pull-request-repair-execution-"
+    ) ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-repair-execution-coordinator.ts" ||
+    path.startsWith(
+      "packages/runtime/src/domain/factory-external-pull-request-repair-execution-"
+    ) ||
+    path === "packages/runtime/src/domain/factory-external-pull-request-repair-workspace.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-repair-workspace.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-execution-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-execution-repository.ts"
+  );
+}
+
+function externalPullRequestRepairExecutionCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestRepairExecutionDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestRepairExecutionApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestRepairExecutionInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestRepairQualificationDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/command.ts",
+  "packages/runtime/src/domain/factory-agent-executor.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-authority-limits.ts",
+  "packages/runtime/src/domain/factory-budget-meter.ts",
+  "packages/runtime/src/domain/factory-cost-accounting.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-qualification-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-qualification-policy.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-qualification-repository.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-repair-qualification-workspace.ts",
+  "packages/runtime/src/domain/factory-gate.ts",
+  "packages/runtime/src/domain/factory-process-isolation.ts",
+  "packages/runtime/src/domain/factory-role-identity.ts",
+  "packages/runtime/src/domain/factory-skill.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/factory-workspace.ts",
+  "packages/runtime/src/domain/factory-workspace-recovery.ts",
+  "packages/runtime/src/domain/runtime-resource.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+
+const factoryExternalPullRequestRepairQualificationApplicationModules = new Set([
+  "packages/runtime/src/application/configured-factory-skill-source.ts",
+  "packages/runtime/src/application/factory-external-pull-request-repair-qualification-prompt.ts",
+  "packages/runtime/src/application/factory-external-pull-request-repair-qualification-service.ts",
+  "packages/runtime/src/application/factory-external-pull-request-review-prompt.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-repair-qualification-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+
+const factoryExternalPullRequestRepairQualificationInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-git-command.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-repair-qualification-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/git-factory-workspace.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-cost-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-qualification-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-preparation-policy-inputs.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-qualification-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/bubblewrap-factory-gate-sandbox.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/local-factory-gate-executor.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts",
+  "packages/runtime/src/infrastructure/process/systemd-factory-process-isolator.ts",
+  "packages/runtime/src/infrastructure/process/systemd-user-manager.ts",
+  "packages/runtime/src/infrastructure/providers/claude-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/codex-factory-agent.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-adapter.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-environment.ts",
+  "packages/runtime/src/infrastructure/providers/factory-agent-output.ts",
+  "packages/runtime/src/infrastructure/providers/local-factory-agent-executor.ts",
+  "packages/runtime/src/infrastructure/providers/pinned-factory-agent-provider-resolver.ts",
+  "packages/runtime/src/infrastructure/recovery/local-factory-workspace-recovery.ts"
+]);
+
+function isFactoryExternalPullRequestRepairQualificationModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts" ||
+    path.startsWith(
+      "packages/runtime/src/application/factory-external-pull-request-repair-qualification-"
+    ) ||
+    path ===
+      "packages/runtime/src/application/local-factory-external-pull-request-repair-qualification-coordinator.ts" ||
+    path.startsWith(
+      "packages/runtime/src/domain/factory-external-pull-request-repair-qualification-"
+    ) ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/git-external-pull-request-repair-qualification-workspace.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-qualification-config.ts" ||
+    path ===
+      "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-repair-qualification-repository.ts"
+  );
+}
+
+function externalPullRequestRepairQualificationCommandForbidden(path: string): boolean {
+  if (
+    path === "packages/runtime/src/local-runtime.ts" ||
+    path === "packages/runtime/src/local-factory-broker.ts" ||
+    path === "packages/runtime/src/local-factory-worker.ts" ||
+    path === "packages/runtime/src/local-factory-authority.ts" ||
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts" ||
+    isFactoryEvaluatorModule(path) ||
+    isFactoryEvalAttestorModule(path) ||
+    isFactoryEvalProducerModule(path) ||
+    isFactoryCanaryAuthorityModule(path) ||
+    isFactoryCanaryAdmissionModule(path) ||
+    isFactoryMaintenanceDiscoveryModule(path) ||
+    isFactoryExternalPullRequestDiscoveryModule(path) ||
+    isFactoryOrchestrationModule(path) ||
+    path.startsWith("packages/runtime/src/infrastructure/github/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  ) {
+    return true;
+  }
+  if (path.startsWith("packages/runtime/src/domain/")) {
+    return !factoryExternalPullRequestRepairQualificationDomainModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/application/")) {
+    return !factoryExternalPullRequestRepairQualificationApplicationModules.has(path);
+  }
+  if (path.startsWith("packages/runtime/src/infrastructure/")) {
+    return !factoryExternalPullRequestRepairQualificationInfrastructureModules.has(path);
+  }
+  return false;
+}
+
+const factoryExternalPullRequestReplacementDraftDomainModules = new Set([
+  "packages/runtime/src/domain/async-operation-owner.ts",
+  "packages/runtime/src/domain/factory-artifact-store.ts",
+  "packages/runtime/src/domain/factory-documents.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-broker.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-integrity.ts",
+  "packages/runtime/src/domain/factory-external-pull-request-replacement-draft-repository.ts",
+  "packages/runtime/src/domain/factory-pull-request-broker.ts",
+  "packages/runtime/src/domain/factory-task-repository.ts",
+  "packages/runtime/src/domain/factory-timestamp.ts",
+  "packages/runtime/src/domain/runtime-resource.ts",
+  "packages/runtime/src/domain/writer-lease.ts"
+]);
+const factoryExternalPullRequestReplacementDraftApplicationModules = new Set([
+  "packages/runtime/src/application/factory-external-pull-request-replacement-draft-service.ts",
+  "packages/runtime/src/application/local-factory-external-pull-request-replacement-draft-coordinator.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-resource-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts"
+]);
+const factoryExternalPullRequestReplacementDraftInfrastructureModules = new Set([
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/filesystem/factory-workspace-paths.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-replacement-draft-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/github/file-github-app-private-key-source.ts",
+  "packages/runtime/src/infrastructure/github/git-broker-workspace.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-api.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-client.ts",
+  "packages/runtime/src/infrastructure/github/github-app-installation-token-source.ts",
+  "packages/runtime/src/infrastructure/github/github-app-jwt.ts",
+  "packages/runtime/src/infrastructure/github/github-external-pull-request-replacement-draft-broker.ts",
+  "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
+  "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+  "packages/runtime/src/infrastructure/github/github-trusted-status-checks.ts",
+  "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-replacement-draft-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/process/command-runner.ts",
+  "packages/runtime/src/infrastructure/process/managed-child-process.ts",
+  "packages/runtime/src/infrastructure/process/process-tree.ts"
+]);
+
+function externalPullRequestReplacementDraftCommandForbidden(path: string): boolean {
+  if (
+    (path.startsWith("packages/runtime/src/local-") &&
+      path !== "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts") ||
+    path.startsWith("packages/runtime/src/infrastructure/providers/") ||
+    path.startsWith("packages/runtime/src/infrastructure/terminal/") ||
+    path.startsWith("packages/runtime/src/infrastructure/tmux/")
+  )
+    return true;
+  if (path.startsWith("packages/runtime/src/domain/"))
+    return !factoryExternalPullRequestReplacementDraftDomainModules.has(path);
+  if (path.startsWith("packages/runtime/src/application/"))
+    return !factoryExternalPullRequestReplacementDraftApplicationModules.has(path);
+  if (path.startsWith("packages/runtime/src/infrastructure/"))
+    return !factoryExternalPullRequestReplacementDraftInfrastructureModules.has(path);
   return false;
 }
 
@@ -617,7 +2455,25 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||
     path === "packages/runtime/src/local-factory-authority.ts" ||
-    path === "packages/runtime/src/local-factory-intake.ts"
+    path === "packages/runtime/src/local-factory-intake.ts" ||
+    path === "packages/runtime/src/local-factory-evaluator.ts" ||
+    path === "packages/runtime/src/local-factory-eval-attestor.ts" ||
+    path === "packages/runtime/src/local-factory-eval-producer.ts" ||
+    path === "packages/runtime/src/local-factory-canary-authority.ts" ||
+    path === "packages/runtime/src/local-factory-canary-admission.ts" ||
+    path === "packages/runtime/src/local-factory-orchestration.ts" ||
+    path === "packages/runtime/src/local-factory-operations-health.ts" ||
+    path === "packages/runtime/src/local-factory-incident-containment.ts" ||
+    path === "packages/runtime/src/local-factory-autonomous-merge-admission.ts" ||
+    path === "packages/runtime/src/local-factory-autonomous-merger.ts" ||
+    path === "packages/runtime/src/local-factory-maintenance-discovery.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-discovery.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-review.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-feedback.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts" ||
+    path === "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts"
   ) {
     return "runtime-composition";
   }

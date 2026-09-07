@@ -15,6 +15,7 @@ const taskId = "0198f005-4ec4-7000-8000-000000000001";
 const correlationId = "0198f005-4ec4-7000-8000-000000000002";
 const policyBundleDigest = `sha256:${"a".repeat(64)}` as const;
 const contractDigest = `sha256:${"b".repeat(64)}` as const;
+const roleIdentityPolicyDigest = `sha256:${"c".repeat(64)}` as const;
 
 describe("factory worker task CLI runner", () => {
   it("runs an explicitly confirmed task while autonomous scheduling remains disabled", async () => {
@@ -37,14 +38,17 @@ describe("factory worker task CLI runner", () => {
     });
     expect(fixture.close).toHaveBeenCalledOnce();
     expect(JSON.parse(fixture.output.join(""))).toEqual({
-      schemaVersion: "agentlab.worker-run-command-result.v1",
+      schemaVersion: "agentlab.worker-run-command-result.v3",
       status: "ready-for-broker",
       taskId,
       policyBundleDigest,
+      roleIdentityPolicyDigest,
       reasonCodes: [],
       run: {
-        schemaVersion: "agentlab.worker-task-run.v1",
+        schemaVersion: "agentlab.worker-task-run.v3",
         correlationId,
+        roleIdentityPolicyDigest,
+        canaryReservationDigest: null,
         preparationState: "prepared",
         taskState: "pr-proposed",
         contractDigest
@@ -77,6 +81,27 @@ describe("factory worker task CLI runner", () => {
       status: "blocked",
       reasonCodes: ["bubblewrap-unavailable", "policy-bundle-digest-mismatch"],
       run: null
+    });
+  });
+
+  it("blocks manual execution when preflight cannot prove the worker identity policy", async () => {
+    const fixture = runnerDependencies({
+      preflight: { ...preflight(), roleIdentityPolicyDigest: null }
+    });
+
+    await expect(
+      runFactoryWorkerTask(
+        "/private/agentlab/worker.json",
+        taskId,
+        policyBundleDigest,
+        "run-task",
+        fixture.dependencies
+      )
+    ).resolves.toBe(2);
+    expect(fixture.runTask).not.toHaveBeenCalled();
+    expect(JSON.parse(fixture.output.join(""))).toMatchObject({
+      roleIdentityPolicyDigest: null,
+      reasonCodes: ["role-identity-policy-unconfigured"]
     });
   });
 
@@ -165,7 +190,9 @@ function runnerDependencies(
       recoverExecution: noResult,
       executePullRequestRepair: noResult,
       recoverPullRequestRepair: noResult,
-      runTask
+      runCanaryPullRequestRepairTick: noResult,
+      runTask,
+      runScheduledTick: noResult
     },
     close
   };
@@ -180,25 +207,34 @@ function runnerDependencies(
 
 function preflight(): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v1",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status: "blocked",
     policyBundleDigest,
+    schedulePolicyDigest: null,
+    roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: null,
     schedulerEnabled: false,
     costPolicyConfigured: true,
     hostReady: true,
     configuredProviders: ["codex"],
     gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-    reasonCodes: ["scheduler-disabled"]
+    reasonCodes: [
+      "daily-quota-policy-unconfigured",
+      "schedule-policy-unconfigured",
+      "scheduler-disabled"
+    ]
   };
 }
 
 function taskReport(): FactoryWorkerTaskRunReport {
   return {
-    schemaVersion: "agentlab.worker-task-run.v1",
+    schemaVersion: "agentlab.worker-task-run.v3",
     status: "ready-for-broker",
     taskId,
     correlationId,
     policyBundleDigest,
+    roleIdentityPolicyDigest,
+    canaryReservationDigest: null,
     preparationState: "prepared",
     taskState: "pr-proposed",
     contractDigest,

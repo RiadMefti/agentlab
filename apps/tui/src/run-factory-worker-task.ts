@@ -43,7 +43,13 @@ export async function runFactoryWorkerTask(
   try {
     preflight = await runtime.commands.preflight();
     reasonCodes = [
-      ...preflight.reasonCodes.filter((reasonCode) => reasonCode !== "scheduler-disabled"),
+      ...preflight.reasonCodes.filter(
+        (reasonCode) =>
+          reasonCode !== "scheduler-disabled" &&
+          reasonCode !== "schedule-policy-unconfigured" &&
+          reasonCode !== "daily-quota-policy-unconfigured"
+      ),
+      ...(preflight.roleIdentityPolicyDigest === null ? ["role-identity-policy-unconfigured"] : []),
       ...(preflight.policyBundleDigest === expectedPolicyBundleDigest
         ? []
         : ["policy-bundle-digest-mismatch"])
@@ -94,6 +100,8 @@ function assertReportIdentity(
     report.taskId !== taskId ||
     report.correlationId !== correlationId ||
     report.policyBundleDigest !== preflight.policyBundleDigest ||
+    report.roleIdentityPolicyDigest !== preflight.roleIdentityPolicyDigest ||
+    report.canaryReservationDigest !== null ||
     (report.taskState === null) !== (report.contractDigest === null)
   ) {
     throw new Error("Factory worker result does not match the confirmed command or preflight.");
@@ -107,10 +115,11 @@ function serializeResult(
   reasonCodes: readonly string[]
 ): string {
   return JSON.stringify({
-    schemaVersion: "agentlab.worker-run-command-result.v1",
+    schemaVersion: "agentlab.worker-run-command-result.v3",
     status: report?.status ?? "blocked",
     taskId,
     policyBundleDigest: preflight.policyBundleDigest,
+    roleIdentityPolicyDigest: preflight.roleIdentityPolicyDigest,
     reasonCodes: [...new Set(reasonCodes)].sort(),
     run:
       report === null
@@ -118,6 +127,8 @@ function serializeResult(
         : {
             schemaVersion: report.schemaVersion,
             correlationId: report.correlationId,
+            roleIdentityPolicyDigest: report.roleIdentityPolicyDigest,
+            canaryReservationDigest: report.canaryReservationDigest,
             preparationState: report.preparationState,
             taskState: report.taskState,
             contractDigest: report.contractDigest

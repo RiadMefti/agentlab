@@ -167,6 +167,20 @@ describe("SqliteFactoryExecutionRepository", () => {
     const legacy = new DatabaseSync(fixture.databasePath);
     try {
       legacy.exec(`
+        DROP TRIGGER factory_schedule_events_daily_quota_finish_guard;
+        DROP TRIGGER factory_schedule_events_daily_quota_claim_guard;
+        DROP TABLE factory_daily_quota_reservations;
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
+        DROP TABLE factory_canary_task_reservations;
+        DROP TABLE factory_eval_attestations;
+        DROP TABLE factory_canary_cohorts;
+        DROP TABLE factory_canary_approvals;
+        DROP TABLE factory_eval_assessments;
+        DROP TABLE factory_eval_runs;
+        DROP TABLE factory_schedule_events;
+        DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
         DROP TABLE factory_pull_request_repair_events;
@@ -175,6 +189,37 @@ describe("SqliteFactoryExecutionRepository", () => {
         DROP TABLE factory_pull_request_dispatches;
         DROP TABLE factory_execution_events;
         DROP TABLE factory_execution_runs;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_replacement_draft_records;
+        DROP TABLE factory_external_pr_replacement_draft_events;
+        DROP TABLE factory_external_pr_replacement_draft_runs;
+        DROP TABLE factory_external_pr_repair_qualification_bundles;
+        DROP TABLE factory_external_pr_repair_qualification_events;
+        DROP TABLE factory_external_pr_repair_qualification_runs;
+        DROP TABLE factory_external_pr_repair_execution_bundles;
+        DROP TABLE factory_external_pr_repair_execution_events;
+        DROP TABLE factory_external_pr_repair_execution_runs;
+        DROP TABLE factory_external_pr_repair_authorizations;
+        DROP TABLE factory_external_pr_repair_decisions;
+        DROP TABLE factory_external_pr_feedback_records;
+        DROP TABLE factory_external_pr_feedback_events;
+        DROP TABLE factory_incident_containments;
+        DROP TABLE factory_autonomous_merge_records;
+        DROP TABLE factory_autonomous_merge_events;
+        DROP TABLE factory_autonomous_merge_runs;
+        DROP TABLE factory_merge_control_events;
+        DROP TRIGGER factory_control_events_identity_guard;
+        DROP TABLE factory_external_pr_feedback_runs;
+        DROP TABLE factory_external_pr_review_bundles;
+        DROP TABLE factory_external_pr_review_events;
+        DROP TABLE factory_external_pr_review_runs;
+        DROP TABLE factory_external_pr_discovery_candidates;
+        DROP TABLE factory_external_pr_discovery_snapshots;
+        DROP TABLE factory_external_pr_discovery_events;
+        DROP TABLE factory_external_pr_discovery_runs;
         PRAGMA user_version = 6;
       `);
     } finally {

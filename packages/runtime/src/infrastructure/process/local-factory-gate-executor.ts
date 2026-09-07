@@ -8,6 +8,7 @@ import type {
   FactoryGateExecutor,
   FactoryGateSandbox
 } from "../../domain/factory-gate.js";
+import { FactoryGateProcessCleanupUnconfirmedError } from "../../domain/factory-gate.js";
 import type { FactoryProcessIsolator } from "../../domain/factory-process-isolation.js";
 import { commandFailureDetails, type CommandRunner } from "./command-runner.js";
 
@@ -97,7 +98,10 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
     } catch (error: unknown) {
       const details = commandFailureDetails(error);
       if (details === null) {
-        throw new Error("Factory gate process cleanup could not be confirmed.", { cause: error });
+        throw new FactoryGateProcessCleanupUnconfirmedError(
+          "Factory gate process cleanup could not be confirmed.",
+          error
+        );
       }
       const finishedAt = this.#timestamp();
       return {

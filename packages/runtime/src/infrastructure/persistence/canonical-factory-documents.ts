@@ -2,9 +2,73 @@ import { createHash } from "node:crypto";
 
 import {
   evidenceBundleSchema,
+  factoryAutonomousMergeAuthorizationSchema,
+  factoryAutonomousMergeEventSchema,
+  factoryAutonomousMergePolicySchema,
+  factoryAutonomousMergeRecordSchema,
+  factoryAutonomousMergeRunSchema,
   factoryAgentRunRequestSchema,
   factoryAgentRunRecordSchema,
+  factoryCanaryApprovalSchema,
+  factoryCanaryCohortSchema,
+  factoryCanaryTaskReservationSchema,
+  factoryDailyQuotaPolicySchema,
+  factoryDailyQuotaReservationSchema,
+  factoryConfigurationCandidateSchema,
   factoryControlEventSchema,
+  factoryEvalAssessmentSchema,
+  factoryEvalAttestationRecordSchema,
+  factoryEvalAttestationStatementSchema,
+  factoryEvalCaseBankSchema,
+  factoryEvalGraderDescriptorSchema,
+  factoryEvalGraderEvidenceSchema,
+  factoryEvalGraderRequestSchema,
+  factoryEvalInvocationFailureEvidenceSchema,
+  factoryEvalHarnessDescriptorSchema,
+  factoryEvalProductionEventSchema,
+  factoryEvalProductionJobSchema,
+  factoryEvalSampleSchema,
+  factoryEvalSubjectEvidenceSchema,
+  factoryEvalSubjectRequestSchema,
+  factoryExternalPullRequestCandidateSchema,
+  factoryExternalPullRequestFeedbackEventSchema,
+  factoryExternalPullRequestFeedbackPolicySchema,
+  factoryExternalPullRequestFeedbackRecordSchema,
+  factoryExternalPullRequestFeedbackRunSchema,
+  factoryExternalPullRequestRepairAdmissionPolicySchema,
+  factoryExternalPullRequestRepairAuthorizationSchema,
+  factoryExternalPullRequestRepairBundleSchema,
+  factoryExternalPullRequestRepairDecisionSchema,
+  factoryExternalPullRequestRepairExecutionEventSchema,
+  factoryExternalPullRequestRepairExecutionPolicySchema,
+  factoryExternalPullRequestRepairExecutionRunSchema,
+  factoryExternalPullRequestRepairerRecordSchema,
+  factoryExternalPullRequestRepairerRequestSchema,
+  factoryExternalPullRequestRepairGateProfileSchema,
+  factoryExternalPullRequestRepairQualificationBundleSchema,
+  factoryExternalPullRequestRepairQualificationEventSchema,
+  factoryExternalPullRequestRepairQualificationPolicySchema,
+  factoryExternalPullRequestRepairQualificationRunSchema,
+  factoryExternalPullRequestReplacementDraftEventSchema,
+  factoryExternalPullRequestReplacementDraftPolicySchema,
+  factoryExternalPullRequestReplacementDraftProposalSchema,
+  factoryExternalPullRequestReplacementDraftRecordSchema,
+  factoryExternalPullRequestReplacementDraftRunSchema,
+  factoryExternalPullRequestDiscoveryEventSchema,
+  factoryExternalPullRequestDiscoveryPolicySchema,
+  factoryExternalPullRequestDiscoveryRunSchema,
+  factoryExternalPullRequestDiscoverySnapshotSchema,
+  factoryExternalPullRequestReviewBundleSchema,
+  factoryExternalPullRequestReviewEventSchema,
+  factoryExternalPullRequestReviewPolicySchema,
+  factoryExternalPullRequestReviewResultSchema,
+  factoryExternalPullRequestReviewerRecordSchema,
+  factoryExternalPullRequestReviewerRequestSchema,
+  factoryExternalPullRequestReviewRunSchema,
+  factoryEvalRunSchema,
+  factoryEvalSuiteSchema,
+  factoryDsseEnvelopeSchema,
+  factorySignedEvalAttestationSchema,
   factoryExecutionEventSchema,
   factoryExecutionRunSchema,
   factoryGateObservationSchema,
@@ -32,9 +96,23 @@ import {
   factoryQualificationSchema,
   factoryReviewResultSchema,
   factoryResourceIsolationRecordSchema,
+  factoryRoleIdentityPolicySchema,
+  factoryScheduleEventSchema,
+  factorySchedulePolicySchema,
+  factoryScheduleRunSchema,
   factorySkillPackageSchema,
   factoryTaskUsageRecordSchema,
   factoryIntakeRequestSchema,
+  factoryIncidentContainmentSchema,
+  factoryMaintenanceDiscoveryEventSchema,
+  factoryMaintenanceDiscoveryOutputSchema,
+  factoryMaintenanceDiscoveryPolicySchema,
+  factoryMaintenanceDiscoveryRunRecordSchema,
+  factoryMaintenanceDiscoveryRunRequestSchema,
+  factoryMaintenanceDiscoveryRunSchema,
+  factoryMaintenanceFindingSchema,
+  factoryOperationsHealthPolicySchema,
+  factoryOperationsHealthReportSchema,
   factorySpecificationSchema,
   immutableTaskContractSchema,
   taskEventSchema
@@ -46,8 +124,242 @@ import type {
 } from "../../domain/factory-documents.js";
 
 export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
+  public autonomousMergePolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergePolicySchema.parse(input));
+  }
+
+  public autonomousMergeAuthorization(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeAuthorizationSchema.parse(input));
+  }
+
+  public autonomousMergeRun(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeRunSchema.parse(input));
+  }
+
+  public autonomousMergeEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeEventSchema.parse(input));
+  }
+
+  public autonomousMergeRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryAutonomousMergeRecordSchema.parse(input));
+  }
+
+  public incidentContainment(input: unknown) {
+    return encodeCanonicalDocument(factoryIncidentContainmentSchema.parse(input));
+  }
+
+  public operationsHealthPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryOperationsHealthPolicySchema.parse(input));
+  }
+
+  public operationsHealthReport(input: unknown) {
+    return encodeCanonicalDocument(factoryOperationsHealthReportSchema.parse(input));
+  }
+
+  public dailyQuotaPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryDailyQuotaPolicySchema.parse(input));
+  }
+
+  public dailyQuotaReservation(input: unknown) {
+    return encodeCanonicalDocument(factoryDailyQuotaReservationSchema.parse(input));
+  }
+
+  public externalPullRequestReplacementDraftPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestReplacementDraftPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestReplacementDraftRun(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestReplacementDraftRunSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestReplacementDraftProposal(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestReplacementDraftProposalSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestReplacementDraftEvent(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestReplacementDraftEventSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestReplacementDraftRecord(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestReplacementDraftRecordSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairGateProfile(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairGateProfileSchema.parse(input));
+  }
+
+  public externalPullRequestRepairQualificationPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationRun(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationRunSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationEvent(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationEventSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairQualificationBundle(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairQualificationBundleSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairExecutionPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairExecutionPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairExecutionRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairExecutionRunSchema.parse(input));
+  }
+
+  public externalPullRequestRepairExecutionEvent(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairExecutionEventSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairerRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairerRequestSchema.parse(input));
+  }
+
+  public externalPullRequestRepairerRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairerRecordSchema.parse(input));
+  }
+
+  public externalPullRequestRepairBundle(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairBundleSchema.parse(input));
+  }
+
+  public externalPullRequestRepairAdmissionPolicy(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairAdmissionPolicySchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairAuthorization(input: unknown) {
+    return encodeCanonicalDocument(
+      factoryExternalPullRequestRepairAuthorizationSchema.parse(input)
+    );
+  }
+
+  public externalPullRequestRepairDecision(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestRepairDecisionSchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackPolicySchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackRunSchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackEventSchema.parse(input));
+  }
+
+  public externalPullRequestFeedbackRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestFeedbackRecordSchema.parse(input));
+  }
+
+  public externalPullRequestReviewPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewPolicySchema.parse(input));
+  }
+
+  public externalPullRequestReviewRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewRunSchema.parse(input));
+  }
+
+  public externalPullRequestReviewEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewEventSchema.parse(input));
+  }
+
+  public externalPullRequestReviewerRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewerRequestSchema.parse(input));
+  }
+
+  public externalPullRequestReviewerRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewerRecordSchema.parse(input));
+  }
+
+  public externalPullRequestReviewResult(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewResultSchema.parse(input));
+  }
+
+  public externalPullRequestReviewBundle(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestReviewBundleSchema.parse(input));
+  }
+
+  public externalPullRequestDiscoveryPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryPolicySchema.parse(input));
+  }
+
+  public externalPullRequestDiscoveryRun(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryRunSchema.parse(input));
+  }
+
+  public externalPullRequestDiscoveryEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoveryEventSchema.parse(input));
+  }
+
+  public externalPullRequestDiscoverySnapshot(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestDiscoverySnapshotSchema.parse(input));
+  }
+
+  public externalPullRequestCandidate(input: unknown) {
+    return encodeCanonicalDocument(factoryExternalPullRequestCandidateSchema.parse(input));
+  }
+
   public intakeRequest(input: unknown) {
     return encodeCanonicalDocument(factoryIntakeRequestSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryPolicySchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRun(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryEventSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRunRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunRequestSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryRunRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryRunRecordSchema.parse(input));
+  }
+
+  public maintenanceDiscoveryOutput(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceDiscoveryOutputSchema.parse(input));
+  }
+
+  public maintenanceFinding(input: unknown) {
+    return encodeCanonicalDocument(factoryMaintenanceFindingSchema.parse(input));
   }
 
   public qualification(input: unknown) {
@@ -98,6 +410,94 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
     return encodeCanonicalDocument(factoryControlEventSchema.parse(input));
   }
 
+  public configurationCandidate(input: unknown) {
+    return encodeCanonicalDocument(factoryConfigurationCandidateSchema.parse(input));
+  }
+
+  public evalSuite(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSuiteSchema.parse(input));
+  }
+
+  public evalCaseBank(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalCaseBankSchema.parse(input));
+  }
+
+  public evalHarnessDescriptor(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalHarnessDescriptorSchema.parse(input));
+  }
+
+  public evalGraderDescriptor(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderDescriptorSchema.parse(input));
+  }
+
+  public evalProductionJob(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalProductionJobSchema.parse(input));
+  }
+
+  public evalProductionEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalProductionEventSchema.parse(input));
+  }
+
+  public evalSubjectRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSubjectRequestSchema.parse(input));
+  }
+
+  public evalSubjectEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSubjectEvidenceSchema.parse(input));
+  }
+
+  public evalGraderRequest(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderRequestSchema.parse(input));
+  }
+
+  public evalGraderEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalGraderEvidenceSchema.parse(input));
+  }
+
+  public evalInvocationFailureEvidence(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalInvocationFailureEvidenceSchema.parse(input));
+  }
+
+  public evalSample(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalSampleSchema.parse(input));
+  }
+
+  public evalRun(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalRunSchema.parse(input));
+  }
+
+  public evalAssessment(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAssessmentSchema.parse(input));
+  }
+
+  public evalAttestationStatement(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAttestationStatementSchema.parse(input));
+  }
+
+  public dsseEnvelope(input: unknown) {
+    return encodeCanonicalDocument(factoryDsseEnvelopeSchema.parse(input));
+  }
+
+  public signedEvalAttestation(input: unknown) {
+    return encodeCanonicalDocument(factorySignedEvalAttestationSchema.parse(input));
+  }
+
+  public evalAttestationRecord(input: unknown) {
+    return encodeCanonicalDocument(factoryEvalAttestationRecordSchema.parse(input));
+  }
+
+  public canaryApproval(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryApprovalSchema.parse(input));
+  }
+
+  public canaryCohort(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryCohortSchema.parse(input));
+  }
+
+  public canaryTaskReservation(input: unknown) {
+    return encodeCanonicalDocument(factoryCanaryTaskReservationSchema.parse(input));
+  }
+
   public executionRun(input: unknown) {
     return encodeCanonicalDocument(factoryExecutionRunSchema.parse(input));
   }
@@ -132,6 +532,22 @@ export class NodeFactoryDocumentCodec implements FactoryDocumentCodec {
 
   public resourceIsolation(input: unknown) {
     return encodeCanonicalDocument(factoryResourceIsolationRecordSchema.parse(input));
+  }
+
+  public roleIdentityPolicy(input: unknown) {
+    return encodeCanonicalDocument(factoryRoleIdentityPolicySchema.parse(input));
+  }
+
+  public schedulePolicy(input: unknown) {
+    return encodeCanonicalDocument(factorySchedulePolicySchema.parse(input));
+  }
+
+  public scheduleRun(input: unknown) {
+    return encodeCanonicalDocument(factoryScheduleRunSchema.parse(input));
+  }
+
+  public scheduleEvent(input: unknown) {
+    return encodeCanonicalDocument(factoryScheduleEventSchema.parse(input));
   }
 
   public patchProposal(input: unknown) {

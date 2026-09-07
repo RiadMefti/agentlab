@@ -23,6 +23,78 @@
     "./factory-intake": {
       "types": "./dist/local-factory-intake.d.ts",
       "default": "./dist/local-factory-intake.js"
+    },
+    "./factory-evaluator": {
+      "types": "./dist/local-factory-evaluator.d.ts",
+      "default": "./dist/local-factory-evaluator.js"
+    },
+    "./factory-eval-attestor": {
+      "types": "./dist/local-factory-eval-attestor.d.ts",
+      "default": "./dist/local-factory-eval-attestor.js"
+    },
+    "./factory-eval-producer": {
+      "types": "./dist/local-factory-eval-producer.d.ts",
+      "default": "./dist/local-factory-eval-producer.js"
+    },
+    "./factory-canary-authority": {
+      "types": "./dist/local-factory-canary-authority.d.ts",
+      "default": "./dist/local-factory-canary-authority.js"
+    },
+    "./factory-canary-admission": {
+      "types": "./dist/local-factory-canary-admission.d.ts",
+      "default": "./dist/local-factory-canary-admission.js"
+    },
+    "./factory-orchestration": {
+      "types": "./dist/local-factory-orchestration.d.ts",
+      "default": "./dist/local-factory-orchestration.js"
+    },
+    "./factory-operations-health": {
+      "types": "./dist/local-factory-operations-health.d.ts",
+      "default": "./dist/local-factory-operations-health.js"
+    },
+    "./factory-incident-containment": {
+      "types": "./dist/local-factory-incident-containment.d.ts",
+      "default": "./dist/local-factory-incident-containment.js"
+    },
+    "./factory-autonomous-merge-admission": {
+      "types": "./dist/local-factory-autonomous-merge-admission.d.ts",
+      "default": "./dist/local-factory-autonomous-merge-admission.js"
+    },
+    "./factory-autonomous-merger": {
+      "types": "./dist/local-factory-autonomous-merger.d.ts",
+      "default": "./dist/local-factory-autonomous-merger.js"
+    },
+    "./factory-maintenance-discovery": {
+      "types": "./dist/local-factory-maintenance-discovery.d.ts",
+      "default": "./dist/local-factory-maintenance-discovery.js"
+    },
+    "./factory-external-pull-request-discovery": {
+      "types": "./dist/local-factory-external-pull-request-discovery.d.ts",
+      "default": "./dist/local-factory-external-pull-request-discovery.js"
+    },
+    "./factory-external-pull-request-review": {
+      "types": "./dist/local-factory-external-pull-request-review.d.ts",
+      "default": "./dist/local-factory-external-pull-request-review.js"
+    },
+    "./factory-external-pull-request-feedback": {
+      "types": "./dist/local-factory-external-pull-request-feedback.d.ts",
+      "default": "./dist/local-factory-external-pull-request-feedback.js"
+    },
+    "./factory-external-pull-request-repair-admission": {
+      "types": "./dist/local-factory-external-pull-request-repair-admission.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-admission.js"
+    },
+    "./factory-external-pull-request-repair-execution": {
+      "types": "./dist/local-factory-external-pull-request-repair-execution.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-execution.js"
+    },
+    "./factory-external-pull-request-repair-qualification": {
+      "types": "./dist/local-factory-external-pull-request-repair-qualification.d.ts",
+      "default": "./dist/local-factory-external-pull-request-repair-qualification.js"
+    },
+    "./factory-external-pull-request-replacement-draft": {
+      "types": "./dist/local-factory-external-pull-request-replacement-draft.d.ts",
+      "default": "./dist/local-factory-external-pull-request-replacement-draft.js"
     }
   },
   "files": [
@@ -33,8 +105,8 @@
     "typecheck": "tsc --build --pretty false"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.247",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.251",
     "@agentlab/contracts": "0.2.9",
-    "zod": "^4.1.13"
+    "zod": "^4.5.2"
   }
 }

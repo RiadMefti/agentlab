@@ -12,6 +12,8 @@ import {
 
 const configPath = "/private/agentlab/worker.json";
 const policyBundleDigest = `sha256:${"c".repeat(64)}` as const;
+const schedulePolicyDigest = `sha256:${"e".repeat(64)}` as const;
+const roleIdentityPolicyDigest = `sha256:${"f".repeat(64)}` as const;
 
 describe("factory worker preflight CLI runner", () => {
   it("rejects a non-canonical config path before loading worker configuration", async () => {
@@ -49,9 +51,12 @@ describe("factory worker preflight CLI runner", () => {
 
     expect(events).toEqual(["closed", "written"]);
     expect(JSON.parse(writes[0] ?? "")).toEqual({
-      schemaVersion: "agentlab.worker-preflight.v1",
+      schemaVersion: "agentlab.worker-preflight.v4",
       status: "ready",
       policyBundleDigest,
+      schedulePolicyDigest,
+      roleIdentityPolicyDigest,
+      dailyQuotaPolicyDigest: `sha256:${"d".repeat(64)}`,
       schedulerEnabled: true,
       costPolicyConfigured: true,
       hostReady: true,
@@ -146,7 +151,9 @@ function workerRuntime(
       recoverExecution: noResult,
       executePullRequestRepair: noResult,
       recoverPullRequestRepair: noResult,
-      runTask: noResult
+      runCanaryPullRequestRepairTick: noResult,
+      runTask: noResult,
+      runScheduledTick: noResult
     },
     close
   };
@@ -161,9 +168,12 @@ function report(
   configuredProviders: readonly ("codex" | "claude")[]
 ): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v1",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status,
     policyBundleDigest,
+    schedulePolicyDigest,
+    roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: `sha256:${"d".repeat(64)}`,
     schedulerEnabled,
     costPolicyConfigured,
     hostReady,

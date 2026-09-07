@@ -26,8 +26,12 @@ export class FactoryBudgetMeter {
   }
 
   public addAgent(output: FactoryAgentExecutionOutput): void {
-    this.#usage = sumUsage(this.#usage, output.usage);
-    this.#complete &&= output.usageComplete;
+    this.addUsage(output.usage, output.usageComplete);
+  }
+
+  public addUsage(usage: FactoryBudgetUsage, complete: boolean): void {
+    this.#usage = sumUsage(this.#usage, factoryBudgetUsageSchema.parse(usage));
+    this.#complete &&= complete;
   }
 
   public addGate(output: FactoryGateExecutionOutput): void {

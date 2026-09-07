@@ -1,4 +1,5 @@
 import {
+  factoryTimestampSchema,
   sha256DigestSchema,
   type FactoryPreparationState,
   type FactoryTaskState,
@@ -6,6 +7,12 @@ import {
 } from "@agentlab/contracts";
 import { z } from "zod";
 
+import {
+  assertFactoryScheduledTaskReservation,
+  isFactoryCanaryReservationExecutableAt
+} from "../domain/factory-canary-reservation-integrity.js";
+import type { FactoryCanaryReservationRepository } from "../domain/factory-canary-reservation-repository.js";
+import type { FactoryDocumentCodec } from "../domain/factory-documents.js";
 import type { FactoryExecutionRepository } from "../domain/factory-execution-repository.js";
 import type {
   FactoryPreparationRepository,
@@ -26,7 +33,8 @@ const taskRunCommandSchema = z
   .object({
     taskId: z.uuid(),
     correlationId: z.uuid(),
-    expectedPolicyBundleDigest: sha256DigestSchema
+    expectedPolicyBundleDigest: sha256DigestSchema,
+    canaryReservationDigest: sha256DigestSchema.optional()
   })
   .strict();
 
@@ -61,18 +69,25 @@ type FactoryWorkerTaskOperations = Pick<
 
 export interface FactoryWorkerTaskRunnerDependencies {
   readonly policyBundleDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest | null;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
   readonly preparations: Pick<FactoryPreparationRepository, "findById">;
+  readonly reservations: Pick<FactoryCanaryReservationRepository, "findByReservationDigest">;
   readonly tasks: Pick<FactoryTaskRepository, "findById">;
   readonly executions: Pick<FactoryExecutionRepository, "findByTaskId">;
+  readonly documents: Pick<FactoryDocumentCodec, "canaryTaskReservation">;
   readonly worker: FactoryWorkerTaskOperations;
+  readonly now: () => string;
 }
 
 export interface FactoryWorkerTaskRunReport {
-  readonly schemaVersion: "agentlab.worker-task-run.v1";
+  readonly schemaVersion: "agentlab.worker-task-run.v3";
   readonly status: "ready-for-broker" | "already-advanced" | "stopped";
   readonly taskId: string;
   readonly correlationId: string;
   readonly policyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest | null;
+  readonly canaryReservationDigest: Sha256Digest | null;
   readonly preparationState: FactoryPreparationState;
   readonly taskState: FactoryTaskState | null;
   readonly contractDigest: Sha256Digest | null;
@@ -91,7 +106,9 @@ export class FactoryWorkerTaskRunner {
 
     let preparation = await this.#requirePreparation(command.taskId);
     this.#assertPreparationIdentity(preparation, command.taskId);
+    const canaryReservationDigest = await this.#requireTaskAuthority(preparation, command);
     if (isFactoryPreparationRunningState(preparation.state)) {
+      await this.#requireTaskAuthority(preparation, command);
       preparation = await this.dependencies.worker.recoverPreparation(journalCommand(command));
       this.#assertPreparationIdentity(preparation, command.taskId);
     }
@@ -102,21 +119,26 @@ export class FactoryWorkerTaskRunner {
       this.#assertTaskIdentity(task, preparation);
       const recovered = await this.#recoverExecutionIfNeeded(task, command);
       if (recovered !== null) {
-        return this.#taskReport(preparation, recovered, command.correlationId, "stopped", [
-          "execution-recovered",
-          recovered.lastEvent.reasonCode
-        ]);
+        return this.#taskReport(
+          preparation,
+          recovered,
+          command,
+          canaryReservationDigest,
+          "stopped",
+          ["execution-recovered", recovered.lastEvent.reasonCode]
+        );
       }
-      const settled = this.#settledTaskReport(preparation, task, command.correlationId);
+      const settled = this.#settledTaskReport(preparation, task, command, canaryReservationDigest);
       if (settled !== null) return settled;
     }
 
     if (task === null) {
       preparation = await this.#finishPreparation(preparation, command);
       if (preparation.state !== "planned" && preparation.state !== "prepared") {
-        return this.#preparationStoppedReport(preparation, command.correlationId);
+        return this.#preparationStoppedReport(preparation, command, canaryReservationDigest);
       }
       if (preparation.state === "planned") {
+        await this.#requireTaskAuthority(preparation, command);
         const materialized = await this.dependencies.worker.materializePreparation(
           journalCommand(command)
         );
@@ -138,16 +160,21 @@ export class FactoryWorkerTaskRunner {
       }
     }
 
-    const settled = this.#settledTaskReport(preparation, task, command.correlationId);
+    const settled = this.#settledTaskReport(preparation, task, command, canaryReservationDigest);
     if (settled !== null) return settled;
     if (task.state === "planned") {
+      await this.#requireTaskAuthority(preparation, command);
       const admission = await this.dependencies.worker.admitExecution({ taskId: command.taskId });
       this.#assertTaskIdentity(admission.task, preparation);
       if (admission.status !== "queued") {
-        return this.#taskReport(preparation, admission.task, command.correlationId, "stopped", [
-          `execution-admission-${admission.status}`,
-          ...(admission.decision?.reasonCodes ?? [])
-        ]);
+        return this.#taskReport(
+          preparation,
+          admission.task,
+          command,
+          canaryReservationDigest,
+          "stopped",
+          [`execution-admission-${admission.status}`, ...(admission.decision?.reasonCodes ?? [])]
+        );
       }
       if (admission.task.state !== "queued") {
         throw new Error("Factory execution admission reported queued without a queued task.");
@@ -158,6 +185,7 @@ export class FactoryWorkerTaskRunner {
       throw new Error(`Factory worker cannot execute task state ${task.state}.`);
     }
 
+    await this.#requireTaskAuthority(preparation, command);
     const execution = await this.dependencies.worker.execute({
       taskId: command.taskId,
       correlationId: command.correlationId
@@ -173,15 +201,20 @@ export class FactoryWorkerTaskRunner {
       return this.#taskReport(
         preparation,
         execution.task,
-        command.correlationId,
+        command,
+        canaryReservationDigest,
         "ready-for-broker",
         []
       );
     }
-    return this.#taskReport(preparation, execution.task, command.correlationId, "stopped", [
-      `execution-${execution.status}`,
-      execution.task.lastEvent.reasonCode
-    ]);
+    return this.#taskReport(
+      preparation,
+      execution.task,
+      command,
+      canaryReservationDigest,
+      "stopped",
+      [`execution-${execution.status}`, execution.task.lastEvent.reasonCode]
+    );
   }
 
   async #finishPreparation(
@@ -194,6 +227,7 @@ export class FactoryWorkerTaskRunner {
       if (!isFactoryPreparationActiveState(preparation.state) || preparation.state === "planned") {
         return preparation;
       }
+      await this.#requireTaskAuthority(preparation, command);
       preparation = isFactoryPreparationRunningState(preparation.state)
         ? await this.dependencies.worker.recoverPreparation(journalCommand(command))
         : await this.dependencies.worker.advancePreparation(journalCommand(command));
@@ -233,6 +267,7 @@ export class FactoryWorkerTaskRunner {
       }
       return null;
     }
+    await this.#requireTaskAuthority(await this.#requirePreparation(command.taskId), command);
     const recovered = await this.dependencies.worker.recoverExecution({
       taskId: command.taskId,
       correlationId: command.correlationId
@@ -253,19 +288,32 @@ export class FactoryWorkerTaskRunner {
   #settledTaskReport(
     preparation: FactoryPreparationSnapshot,
     task: FactoryTaskSnapshot,
-    correlationId: string
+    command: z.infer<typeof taskRunCommandSchema>,
+    canaryReservationDigest: Sha256Digest | null
   ): FactoryWorkerTaskRunReport | null {
     if (task.state === "planned" || task.state === "queued") return null;
     if (task.state === "pr-proposed") {
-      return this.#taskReport(preparation, task, correlationId, "ready-for-broker", []);
+      return this.#taskReport(
+        preparation,
+        task,
+        command,
+        canaryReservationDigest,
+        "ready-for-broker",
+        []
+      );
     }
     if (postProposalStates.has(task.state)) {
-      return this.#taskReport(preparation, task, correlationId, "already-advanced", [
-        `task-already-${task.state}`
-      ]);
+      return this.#taskReport(
+        preparation,
+        task,
+        command,
+        canaryReservationDigest,
+        "already-advanced",
+        [`task-already-${task.state}`]
+      );
     }
     if (isTerminalFactoryTaskState(task.state) || task.state === "awaiting-execution-approval") {
-      return this.#taskReport(preparation, task, correlationId, "stopped", [
+      return this.#taskReport(preparation, task, command, canaryReservationDigest, "stopped", [
         `task-${task.state}`,
         task.lastEvent.reasonCode
       ]);
@@ -275,14 +323,17 @@ export class FactoryWorkerTaskRunner {
 
   #preparationStoppedReport(
     preparation: FactoryPreparationSnapshot,
-    correlationId: string
+    command: z.infer<typeof taskRunCommandSchema>,
+    canaryReservationDigest: Sha256Digest | null
   ): FactoryWorkerTaskRunReport {
     return {
-      schemaVersion: "agentlab.worker-task-run.v1",
+      schemaVersion: "agentlab.worker-task-run.v3",
       status: "stopped",
       taskId: preparation.request.taskId,
-      correlationId,
+      correlationId: command.correlationId,
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      canaryReservationDigest,
       preparationState: preparation.state,
       taskState: null,
       contractDigest: null,
@@ -296,16 +347,19 @@ export class FactoryWorkerTaskRunner {
   #taskReport(
     preparation: FactoryPreparationSnapshot,
     task: FactoryTaskSnapshot,
-    correlationId: string,
+    command: z.infer<typeof taskRunCommandSchema>,
+    canaryReservationDigest: Sha256Digest | null,
     status: FactoryWorkerTaskRunReport["status"],
     reasonCodes: readonly string[]
   ): FactoryWorkerTaskRunReport {
     return {
-      schemaVersion: "agentlab.worker-task-run.v1",
+      schemaVersion: "agentlab.worker-task-run.v3",
       status,
       taskId: task.contract.taskId,
-      correlationId,
+      correlationId: command.correlationId,
       policyBundleDigest: this.dependencies.policyBundleDigest,
+      roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest,
+      canaryReservationDigest,
       preparationState: preparation.state,
       taskState: task.state,
       contractDigest: task.contractDigest,
@@ -317,6 +371,46 @@ export class FactoryWorkerTaskRunner {
     const preparation = await this.dependencies.preparations.findById(taskId);
     if (preparation === null) throw new Error(`Factory preparation ${taskId} does not exist.`);
     return preparation;
+  }
+
+  async #requireTaskAuthority(
+    preparation: FactoryPreparationSnapshot,
+    command: z.infer<typeof taskRunCommandSchema>
+  ): Promise<Sha256Digest | null> {
+    if (preparation.request.trigger !== "scheduled") {
+      if (command.canaryReservationDigest !== undefined) {
+        throw new Error("Manual factory work cannot consume autonomous canary authority.");
+      }
+      return null;
+    }
+    if (
+      command.canaryReservationDigest === undefined ||
+      this.dependencies.schedulePolicyDigest === null ||
+      this.dependencies.roleIdentityPolicyDigest === null
+    ) {
+      throw new Error("Scheduled factory work requires exact canary reservation authority.");
+    }
+    const snapshot = await this.dependencies.reservations.findByReservationDigest(
+      command.canaryReservationDigest
+    );
+    if (snapshot === null) {
+      throw new Error("Scheduled factory work is missing its canary reservation.");
+    }
+    const reservation = assertFactoryScheduledTaskReservation(
+      snapshot,
+      preparation,
+      {
+        schedulePolicyDigest: this.dependencies.schedulePolicyDigest,
+        policyBundleDigest: this.dependencies.policyBundleDigest,
+        roleIdentityPolicyDigest: this.dependencies.roleIdentityPolicyDigest
+      },
+      this.dependencies.documents
+    );
+    const now = factoryTimestampSchema.parse(this.dependencies.now());
+    if (!isFactoryCanaryReservationExecutableAt(reservation.value, now)) {
+      throw new Error("Scheduled factory canary reservation is not currently executable.");
+    }
+    return reservation.digest;
   }
 
   #assertPreparationIdentity(preparation: FactoryPreparationSnapshot, taskId: string): void {

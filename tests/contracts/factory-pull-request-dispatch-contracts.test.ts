@@ -83,6 +83,29 @@ describe("pull-request dispatch contracts", () => {
     ).toBe(false);
   });
 
+  it("requires all canary coordinates on a v2 scheduled dispatch", () => {
+    const canaryRun = {
+      ...run,
+      schemaVersion: "agentlab.pull-request-dispatch.v2" as const,
+      canaryReservationDigest: testDigest("8"),
+      schedulePolicyDigest: testDigest("9"),
+      roleIdentityPolicyDigest: testDigest("a")
+    };
+    expect(factoryPullRequestDispatchRunSchema.parse(canaryRun)).toEqual(canaryRun);
+    expect(
+      factoryPullRequestDispatchRunSchema.safeParse({
+        ...canaryRun,
+        canaryReservationDigest: undefined
+      }).success
+    ).toBe(false);
+    expect(
+      factoryPullRequestDispatchRunSchema.safeParse({
+        ...run,
+        canaryReservationDigest: testDigest("8")
+      }).success
+    ).toBe(false);
+  });
+
   it("accepts only a linked exact draft record at the remote-observed checkpoint", () => {
     const event = {
       ...commonEvent,

@@ -4,12 +4,22 @@ import {
   loadLocalFactoryBrokerConfig,
   type FactoryBrokerCommandPort,
   type FactoryBrokerPreflight,
+  type FactoryCanaryBrokerTickReport,
+  type FactoryCanaryPullRequestMaintenanceTickReport,
+  type FactoryCanaryPullRequestUpdateTickReport,
   type GitHubAppPrivateKeySource,
   type LocalFactoryBrokerConfig,
   type LocalFactoryBrokerOptions,
   type LocalFactoryBrokerRuntime
 } from "@agentlab/runtime/factory-broker";
-import type { FactoryCostPolicy } from "@agentlab/contracts";
+import type {
+  FactoryAutonomousMergePolicy,
+  FactoryCostPolicy,
+  FactoryDailyQuotaPolicy,
+  FactoryRoleIdentityPolicy,
+  FactorySchedulePolicy,
+  Sha256Digest
+} from "@agentlab/contracts";
 // @ts-expect-error Broker authority must not be exported by the interactive runtime entry point.
 import { createLocalFactoryBroker as forbiddenInteractiveBroker } from "@agentlab/runtime";
 // @ts-expect-error Human authority mutation must not be exported by the credential-bearing broker.
@@ -53,6 +63,47 @@ type ExpectedConfig = ExpectedConfigFields &
         costPolicyPath: string;
         costPolicy: FactoryCostPolicy;
       }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v3";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        roleIdentityPolicyPath: string;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+      }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v4";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        dailyQuotaPolicyPath: string;
+        expectedDailyQuotaPolicyDigest: Sha256Digest;
+        roleIdentityPolicyPath: string;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        dailyQuotaPolicy: FactoryDailyQuotaPolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+      }
+    | {
+        schemaVersion: "agentlab.local-factory-broker.v5";
+        costPolicyPath: string;
+        schedulePolicyPath: string;
+        dailyQuotaPolicyPath: string;
+        roleIdentityPolicyPath: string;
+        mergePolicyPath: string;
+        expectedFactoryPolicyBundleDigest: Sha256Digest;
+        expectedSchedulePolicyDigest: Sha256Digest;
+        expectedDailyQuotaPolicyDigest: Sha256Digest;
+        expectedRoleIdentityPolicyDigest: Sha256Digest;
+        expectedMergePolicyDigest: Sha256Digest;
+        costPolicy: FactoryCostPolicy;
+        schedulePolicy: FactorySchedulePolicy;
+        dailyQuotaPolicy: FactoryDailyQuotaPolicy;
+        roleIdentityPolicy: FactoryRoleIdentityPolicy;
+        autonomousMergePolicy: FactoryAutonomousMergePolicy;
+      }
   );
 
 interface ExpectedOptions {
@@ -64,6 +115,13 @@ interface ExpectedOptions {
   readonly brokerId: string;
   readonly gitExecutable: string;
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly githubApp: {
     readonly clientId: string;
     readonly installationId: number;
@@ -102,15 +160,108 @@ interface ExpectedPreflight {
   readonly reasonCodes: readonly string[];
 }
 
+interface ExpectedCanaryBrokerTickReport {
+  readonly schemaVersion: "agentlab.canary-broker-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly repositoryId: string;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly dispatchAttempts: number;
+  readonly draftsCompleted: number;
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly reservationDigest: Sha256Digest;
+    readonly source: "undispatched" | "recoverable";
+    readonly status: "completed" | "expired" | "blocked" | "denied" | "needs-human";
+    readonly reasonCodes: readonly string[];
+    readonly pullRequestNumber: number | null;
+  }[];
+}
+
+interface ExpectedCanaryPullRequestMaintenanceTickReport {
+  readonly schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly repositoryId: string;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly maintenanceSlot: string;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly maintenanceAttempts: number;
+  readonly observationsCreated: number;
+  readonly repairAuthorizationsCreated: number;
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly reservationDigest: Sha256Digest;
+    readonly source: "unobserved" | "observed-actionable";
+    readonly status:
+      "clear" | "pending" | "repair-authorized" | "unsafe" | "expired" | "blocked" | "denied";
+    readonly reasonCodes: readonly string[];
+    readonly observationDigest: Sha256Digest | null;
+    readonly repairAuthorizationDigest: Sha256Digest | null;
+  }[];
+}
+
+interface ExpectedCanaryPullRequestUpdateTickReport {
+  readonly schemaVersion: "agentlab.canary-pull-request-update-tick-result.v1";
+  readonly status: "idle" | "completed" | "attention-required" | "blocked";
+  readonly repositoryId: string;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly factoryPolicyBundleDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+  readonly observedAt: string;
+  readonly candidatesInspected: number;
+  readonly recoveryAttempts: number;
+  readonly updateAttempts: number;
+  readonly updatesCompleted: number;
+  readonly remoteUpdates: number;
+  readonly hasMore: boolean;
+  readonly reasonCodes: readonly string[];
+  readonly tasks: readonly {
+    readonly taskId: string;
+    readonly repositoryId: string;
+    readonly authorizationDigest: Sha256Digest;
+    readonly repairRunDigest: Sha256Digest;
+    readonly source: "authorized" | "recoverable";
+    readonly status: "updated" | "recovered" | "expired" | "blocked" | "denied" | "needs-human";
+    readonly reasonCodes: readonly string[];
+    readonly pullRequestNumber: number | null;
+    readonly priorHeadRevision: string | null;
+    readonly headRevision: string | null;
+    readonly remoteUpdated: boolean;
+  }[];
+}
+
 export type FactoryBrokerPublicApiAssertions = [
   Assert<Equal<LocalFactoryBrokerConfig, ExpectedConfig>>,
   Assert<Equal<LocalFactoryBrokerOptions, ExpectedOptions>>,
   Assert<Equal<FactoryBrokerPreflight, ExpectedPreflight>>,
+  Assert<Equal<FactoryCanaryBrokerTickReport, ExpectedCanaryBrokerTickReport>>,
+  Assert<
+    Equal<
+      FactoryCanaryPullRequestMaintenanceTickReport,
+      ExpectedCanaryPullRequestMaintenanceTickReport
+    >
+  >,
+  Assert<
+    Equal<FactoryCanaryPullRequestUpdateTickReport, ExpectedCanaryPullRequestUpdateTickReport>
+  >,
   Assert<
     Equal<
       keyof FactoryBrokerCommandPort,
       | "preflight"
       | "openDraft"
+      | "reconcileCanaryDrafts"
+      | "maintainCanaryPullRequests"
+      | "updateCanaryPullRequests"
       | "updatePullRequest"
       | "observePullRequest"
       | "admitPullRequestRepair"

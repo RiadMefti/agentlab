@@ -4,8 +4,16 @@ import type { FactoryExecutionAdmissionOutcome } from "./factory-execution-admis
 import type { FactoryExecutionRecoveryOutcome } from "./factory-execution-recovery-service.js";
 import type { FactoryExecutionOutcome } from "./factory-execution-service.js";
 import type { FactoryPreparationMaterializationResult } from "./factory-preparation-materializer.js";
+import type {
+  FactoryCanaryPullRequestRepairService,
+  FactoryCanaryPullRequestRepairTickReport
+} from "./factory-canary-pull-request-repair-service.js";
 import type { FactoryPullRequestRepairExecutionOutcome } from "./factory-pull-request-repair-execution-service.js";
 import type { FactoryPullRequestRepairRecoveryOutcome } from "./factory-pull-request-repair-recovery-service.js";
+import type {
+  FactorySchedulerService,
+  FactorySchedulerTickReport
+} from "./factory-scheduler-service.js";
 import type { FactoryWorkerOperator, FactoryWorkerPreflight } from "./factory-worker-operator.js";
 import type {
   FactoryWorkerTaskRunner,
@@ -27,7 +35,9 @@ export interface FactoryWorkerCommandPort {
   recoverExecution(input: unknown): Promise<FactoryExecutionRecoveryOutcome>;
   executePullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairExecutionOutcome>;
   recoverPullRequestRepair(input: unknown): Promise<FactoryPullRequestRepairRecoveryOutcome>;
+  runCanaryPullRequestRepairTick(input: unknown): Promise<FactoryCanaryPullRequestRepairTickReport>;
   runTask(input: unknown): Promise<FactoryWorkerTaskRunReport>;
+  runScheduledTick(input: unknown): Promise<FactorySchedulerTickReport>;
 }
 
 export interface LocalFactoryWorkerRuntime {
@@ -38,6 +48,8 @@ export interface LocalFactoryWorkerRuntime {
 export interface LocalFactoryWorkerCoordinatorDependencies {
   readonly operator: FactoryWorkerOperator;
   readonly taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
+  readonly scheduler: Pick<FactorySchedulerService, "tick"> | null;
+  readonly canaryPullRequestRepairs: Pick<FactoryCanaryPullRequestRepairService, "tick"> | null;
   readonly tasks: RuntimeTaskOwner;
   readonly resources: Pick<RuntimeResourceOwner, "closeAll">;
   readonly repositories: RuntimeRepositoryOwner;
@@ -50,6 +62,8 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
   public readonly commands: FactoryWorkerCommandPort;
   readonly #operator: FactoryWorkerOperator;
   readonly #taskRunner: Pick<FactoryWorkerTaskRunner, "run">;
+  readonly #scheduler: Pick<FactorySchedulerService, "tick"> | null;
+  readonly #canaryPullRequestRepairs: Pick<FactoryCanaryPullRequestRepairService, "tick"> | null;
   readonly #tasks: RuntimeTaskOwner;
   readonly #resources: Pick<RuntimeResourceOwner, "closeAll">;
   readonly #repositories: RuntimeRepositoryOwner;
@@ -66,6 +80,8 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
   public constructor(dependencies: LocalFactoryWorkerCoordinatorDependencies) {
     this.#operator = dependencies.operator;
     this.#taskRunner = dependencies.taskRunner;
+    this.#scheduler = dependencies.scheduler;
+    this.#canaryPullRequestRepairs = dependencies.canaryPullRequestRepairs;
     this.#tasks = dependencies.tasks;
     this.#resources = dependencies.resources;
     this.#repositories = dependencies.repositories;
@@ -88,7 +104,23 @@ export class LocalFactoryWorkerCoordinator implements LocalFactoryWorkerRuntime 
         this.#run(() => this.#operator.executePullRequestRepair(input)),
       recoverPullRequestRepair: (input) =>
         this.#run(() => this.#operator.recoverPullRequestRepair(input)),
-      runTask: (input) => this.#run(() => this.#taskRunner.run(input))
+      runCanaryPullRequestRepairTick: (input) =>
+        this.#run(() => {
+          if (this.#canaryPullRequestRepairs === null) {
+            return Promise.reject(
+              new Error("Factory canary PR repair consumer policy is not configured.")
+            );
+          }
+          return this.#canaryPullRequestRepairs.tick(input);
+        }),
+      runTask: (input) => this.#run(() => this.#taskRunner.run(input)),
+      runScheduledTick: (input) =>
+        this.#run(() => {
+          if (this.#scheduler === null) {
+            return Promise.reject(new Error("Factory scheduler policy is not configured."));
+          }
+          return this.#scheduler.tick(input);
+        })
     };
   }
 

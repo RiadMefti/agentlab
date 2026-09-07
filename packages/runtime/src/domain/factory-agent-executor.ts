@@ -5,6 +5,9 @@ import type {
   FactoryProcessIsolation,
   FactoryPreparationPhase,
   FactoryPreparationRunRequest,
+  FactoryMaintenanceDiscoveryRunRequest,
+  FactoryExternalPullRequestReviewerRequest,
+  FactoryExternalPullRequestRepairerRequest,
   FactoryResourceLimits,
   ProviderId,
   Sha256Digest
@@ -15,7 +18,10 @@ import type { FactoryWorkspace } from "./factory-workspace.js";
 export const factoryProcessCleanupUnconfirmedErrorCode = "process-cleanup-failed";
 
 export interface FactoryAgentExecutionInput {
-  readonly request: FactoryAgentRunRequest;
+  readonly request:
+    | FactoryAgentRunRequest
+    | FactoryExternalPullRequestReviewerRequest
+    | FactoryExternalPullRequestRepairerRequest;
   readonly policyBundleDigest: Sha256Digest;
   readonly executable: string;
   readonly providerVersion: string;
@@ -29,6 +35,13 @@ export interface FactoryPreparationAgentExecutionInput extends Omit<
   "request"
 > {
   readonly request: FactoryPreparationRunRequest;
+}
+
+export interface FactoryMaintenanceDiscoveryAgentExecutionInput extends Omit<
+  FactoryAgentExecutionInput,
+  "request"
+> {
+  readonly request: FactoryMaintenanceDiscoveryRunRequest;
 }
 
 export interface FactoryAgentExecutionPreflight {
@@ -58,6 +71,7 @@ export interface FactoryAgentExecutorCapability {
   readonly provider: ProviderId;
   readonly roles: readonly ("implementer" | "repairer" | "reviewer")[];
   readonly preparationPhases: readonly FactoryPreparationPhase[];
+  readonly maintenanceDiscovery: boolean;
   readonly maximumToolFilesystemAccess: "read-only" | "workspace-write";
   readonly toolNetwork: "off";
   readonly acceptsCommandAllowlist: boolean;
@@ -74,6 +88,14 @@ export interface FactoryPreparationAgentExecutor {
   capabilities(): readonly FactoryAgentExecutorCapability[];
   preflight(input: FactoryAgentExecutionPreflight): void;
   execute(input: FactoryPreparationAgentExecutionInput): Promise<FactoryAgentExecutionOutput>;
+}
+
+export interface FactoryMaintenanceDiscoveryAgentExecutor {
+  capabilities(): readonly FactoryAgentExecutorCapability[];
+  preflight(input: FactoryAgentExecutionPreflight): void;
+  execute(
+    input: FactoryMaintenanceDiscoveryAgentExecutionInput
+  ): Promise<FactoryAgentExecutionOutput>;
 }
 
 export interface ResolvedFactoryAgentProvider {

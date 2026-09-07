@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
+import { SqliteFactoryCanaryPullRequestRepairQueue } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import {
@@ -38,6 +39,7 @@ afterEach(() => {
 describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
   it("persists one immutable authorization-bound repair chain", async () => {
     const fixture = await repositoryFixture();
+    const queue = new SqliteFactoryCanaryPullRequestRepairQueue(fixture.databasePath);
     try {
       await expect(
         fixture.repairs.register(fixture.run, fixture.registered)
@@ -58,9 +60,30 @@ describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
       ).resolves.toMatchObject({ state: "workspace-active", sequence: 2 });
       await expect(fixture.repairs.listByTaskId(TEST_FACTORY_TASK_ID)).resolves.toHaveLength(1);
       await expect(fixture.repairs.listRecoverable(10)).resolves.toHaveLength(1);
+      await expect(
+        queue.listPending({
+          observedAt: "2026-08-30T13:02:00.000Z",
+          schedulePolicyDigest: testDigest("1"),
+          factoryPolicyBundleDigest: testDigest("2"),
+          roleIdentityPolicyDigest: testDigest("3"),
+          limit: 10
+        })
+      ).resolves.toMatchObject({
+        truncated: false,
+        items: [
+          {
+            source: "recoverable",
+            taskId: TEST_FACTORY_TASK_ID,
+            authorizationDigest: AUTHORIZATION_DIGEST,
+            repairRunDigest: fixture.run.digest,
+            repairState: "workspace-active"
+          }
+        ]
+      });
       await expect(fixture.repairs.listEvents(RUN_ID)).resolves.toHaveLength(2);
       await expect(fixture.repairs.append(attempt)).resolves.toBeNull();
     } finally {
+      queue.close();
       fixture.repairs.close();
     }
   });
@@ -103,10 +126,57 @@ describe("SqliteFactoryPullRequestRepairExecutionRepository", () => {
         database.prepare("DELETE FROM factory_pull_request_repair_events").run()
       ).toThrow(/append-only/u);
       database.exec(`
+        DROP TRIGGER factory_schedule_events_daily_quota_finish_guard;
+        DROP TRIGGER factory_schedule_events_daily_quota_claim_guard;
+        DROP TABLE factory_daily_quota_reservations;
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
+        DROP INDEX factory_pull_request_dispatches_canary_idx;
+        ALTER TABLE factory_pull_request_dispatches DROP COLUMN canary_reservation_digest;
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
+        DROP TABLE factory_canary_task_reservations;
+        DROP TABLE factory_eval_attestations;
+        DROP TABLE factory_canary_cohorts;
+        DROP TABLE factory_canary_approvals;
+        DROP TABLE factory_eval_assessments;
+        DROP TABLE factory_eval_runs;
+        DROP TABLE factory_schedule_events;
+        DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
         DROP TABLE factory_pull_request_repair_events;
         DROP TABLE factory_pull_request_repair_runs;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_replacement_draft_records;
+        DROP TABLE factory_external_pr_replacement_draft_events;
+        DROP TABLE factory_external_pr_replacement_draft_runs;
+        DROP TABLE factory_external_pr_repair_qualification_bundles;
+        DROP TABLE factory_external_pr_repair_qualification_events;
+        DROP TABLE factory_external_pr_repair_qualification_runs;
+        DROP TABLE factory_external_pr_repair_execution_bundles;
+        DROP TABLE factory_external_pr_repair_execution_events;
+        DROP TABLE factory_external_pr_repair_execution_runs;
+        DROP TABLE factory_external_pr_repair_authorizations;
+        DROP TABLE factory_external_pr_repair_decisions;
+        DROP TABLE factory_external_pr_feedback_records;
+        DROP TABLE factory_external_pr_feedback_events;
+        DROP TABLE factory_incident_containments;
+        DROP TABLE factory_autonomous_merge_records;
+        DROP TABLE factory_autonomous_merge_events;
+        DROP TABLE factory_autonomous_merge_runs;
+        DROP TABLE factory_merge_control_events;
+        DROP TRIGGER factory_control_events_identity_guard;
+        DROP TABLE factory_external_pr_feedback_runs;
+        DROP TABLE factory_external_pr_review_bundles;
+        DROP TABLE factory_external_pr_review_events;
+        DROP TABLE factory_external_pr_review_runs;
+        DROP TABLE factory_external_pr_discovery_candidates;
+        DROP TABLE factory_external_pr_discovery_snapshots;
+        DROP TABLE factory_external_pr_discovery_events;
+        DROP TABLE factory_external_pr_discovery_runs;
         PRAGMA user_version = 8;
       `);
     } finally {

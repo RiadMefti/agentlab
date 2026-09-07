@@ -94,6 +94,85 @@ describe("FactoryBrokerOperator", () => {
     expect(fixture.openDraft).toHaveBeenCalledWith(draftCommand);
   });
 
+  it("delegates autonomous draft reconciliation only through the canary broker service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      expectedSchedulePolicyDigest: `sha256:${"1".repeat(64)}`,
+      expectedRoleIdentityPolicyDigest: `sha256:${"2".repeat(64)}`,
+      expectedFactoryPolicyBundleDigest: policyBundleDigest
+    };
+
+    await expect(fixture.operator.reconcileCanaryDrafts(command)).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-broker-tick-result.v1",
+      status: "idle"
+    });
+    expect(fixture.canaryTick).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+  });
+
+  it("rejects autonomous draft reconciliation when config v3 did not compose it", () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const operator = new FactoryBrokerOperator({ ...fixture.dependencies, canaryBroker: null });
+
+    expect(() => operator.reconcileCanaryDrafts({})).toThrow(/config v3/u);
+    expect(fixture.canaryTick).not.toHaveBeenCalled();
+  });
+
+  it("delegates autonomous PR maintenance only through the canary maintenance service", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      expectedSchedulePolicyDigest: `sha256:${"1".repeat(64)}`,
+      expectedRoleIdentityPolicyDigest: `sha256:${"2".repeat(64)}`,
+      expectedFactoryPolicyBundleDigest: policyBundleDigest
+    };
+
+    await expect(fixture.operator.maintainCanaryPullRequests(command)).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1",
+      status: "idle"
+    });
+    expect(fixture.maintenanceTick).toHaveBeenCalledWith(command);
+    expect(fixture.openDraft).not.toHaveBeenCalled();
+    expect(fixture.observe).not.toHaveBeenCalled();
+  });
+
+  it("rejects autonomous PR maintenance when config v3 did not compose it", () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const operator = new FactoryBrokerOperator({
+      ...fixture.dependencies,
+      canaryPullRequestMaintenance: null
+    });
+
+    expect(() => operator.maintainCanaryPullRequests({})).toThrow(/config v3/u);
+    expect(fixture.maintenanceTick).not.toHaveBeenCalled();
+  });
+
+  it("delegates autonomous repaired-branch publication only through the update consumer", async () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const command = {
+      expectedSchedulePolicyDigest: `sha256:${"1".repeat(64)}`,
+      expectedRoleIdentityPolicyDigest: `sha256:${"2".repeat(64)}`,
+      expectedFactoryPolicyBundleDigest: policyBundleDigest
+    };
+
+    await expect(fixture.operator.updateCanaryPullRequests(command)).resolves.toMatchObject({
+      schemaVersion: "agentlab.canary-pull-request-update-tick-result.v1",
+      status: "idle"
+    });
+    expect(fixture.updateTick).toHaveBeenCalledWith(command);
+    expect(fixture.updatePullRequest).not.toHaveBeenCalled();
+  });
+
+  it("rejects autonomous repaired-branch publication when config v3 did not compose it", () => {
+    const fixture = operatorFixture(strongGovernance, true);
+    const operator = new FactoryBrokerOperator({
+      ...fixture.dependencies,
+      canaryPullRequestUpdates: null
+    });
+
+    expect(() => operator.updateCanaryPullRequests({})).toThrow(/config v3/u);
+    expect(fixture.updateTick).not.toHaveBeenCalled();
+  });
+
   it("delegates PR observation only through the facts-only observation service", async () => {
     const fixture = operatorFixture(strongGovernance, true);
     const command = { taskId: "0198f005-4ec4-7000-8000-000000000001" };
@@ -185,6 +264,55 @@ function operatorFixture(
     reasonCodes: ["test-update-denial"],
     decision: null
   });
+  const canaryTick = vi.fn().mockResolvedValue({
+    schemaVersion: "agentlab.canary-broker-tick-result.v1" as const,
+    status: "idle" as const,
+    repositoryId: "riadmefti/agentlab",
+    schedulePolicyDigest: `sha256:${"1".repeat(64)}` as const,
+    factoryPolicyBundleDigest: policyBundleDigest,
+    roleIdentityPolicyDigest: `sha256:${"2".repeat(64)}` as const,
+    observedAt: "2026-08-31T12:00:00.000Z",
+    candidatesInspected: 0,
+    dispatchAttempts: 0,
+    draftsCompleted: 0,
+    hasMore: false,
+    reasonCodes: [],
+    tasks: []
+  });
+  const maintenanceTick = vi.fn().mockResolvedValue({
+    schemaVersion: "agentlab.canary-pull-request-maintenance-tick-result.v1" as const,
+    status: "idle" as const,
+    repositoryId: "riadmefti/agentlab",
+    schedulePolicyDigest: `sha256:${"1".repeat(64)}` as const,
+    factoryPolicyBundleDigest: policyBundleDigest,
+    roleIdentityPolicyDigest: `sha256:${"2".repeat(64)}` as const,
+    maintenanceSlot: "2026-08-31T12:00:00.000Z",
+    observedAt: "2026-08-31T13:00:00.000Z",
+    candidatesInspected: 0,
+    maintenanceAttempts: 0,
+    observationsCreated: 0,
+    repairAuthorizationsCreated: 0,
+    hasMore: false,
+    reasonCodes: [],
+    tasks: []
+  });
+  const updateTick = vi.fn().mockResolvedValue({
+    schemaVersion: "agentlab.canary-pull-request-update-tick-result.v1" as const,
+    status: "idle" as const,
+    repositoryId: "riadmefti/agentlab",
+    schedulePolicyDigest: `sha256:${"1".repeat(64)}` as const,
+    factoryPolicyBundleDigest: policyBundleDigest,
+    roleIdentityPolicyDigest: `sha256:${"2".repeat(64)}` as const,
+    observedAt: "2026-08-31T13:00:00.000Z",
+    candidatesInspected: 0,
+    recoveryAttempts: 0,
+    updateAttempts: 0,
+    updatesCompleted: 0,
+    remoteUpdates: 0,
+    hasMore: false,
+    reasonCodes: [],
+    tasks: []
+  });
   const dependencies: FactoryBrokerOperatorDependencies = {
     repositoryId: "riadmefti/agentlab",
     policyBundleDigest,
@@ -194,15 +322,22 @@ function operatorFixture(
     pullRequests: { openDraft },
     pullRequestObservations: { observe },
     pullRequestRepairAdmissions: { admit: admitRepair },
-    pullRequestUpdates: { update: updatePullRequest }
+    pullRequestUpdates: { update: updatePullRequest },
+    canaryBroker: { tick: canaryTick },
+    canaryPullRequestMaintenance: { tick: maintenanceTick },
+    canaryPullRequestUpdates: { tick: updateTick }
   };
   return {
     operator: new FactoryBrokerOperator(dependencies),
+    dependencies,
     inspect,
     state,
     openDraft,
     observe,
     admitRepair,
-    updatePullRequest
+    updatePullRequest,
+    canaryTick,
+    maintenanceTick,
+    updateTick
   };
 }

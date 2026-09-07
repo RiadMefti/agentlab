@@ -5,6 +5,8 @@ import {
   factoryPatchProposalSchema,
   factoryReviewDecisionSchema,
   factoryReviewResultSchema,
+  type FactoryAutonomousMergeAuthorization,
+  type FactoryAutonomousMergeRecord,
   type FactoryAgentRunRequest,
   type FactoryPatchProposal,
   type FactoryProcessIsolation,
@@ -29,6 +31,7 @@ import type {
 } from "../domain/factory-documents.js";
 import type { FactoryGateExecutionOutput } from "../domain/factory-gate.js";
 import type { FactoryPullRequestAssessment } from "../domain/factory-pull-request-observation.js";
+import type { FactoryCanaryPullRequestMaintenanceCoordinates } from "../domain/factory-canary-pull-request-maintenance.js";
 import type { ResolvedFactorySkill } from "../domain/factory-skill.js";
 import type {
   FactoryTaskSnapshot,
@@ -55,6 +58,7 @@ export interface FactoryEvidencePublisherCredentials {
   readonly executionObserver: FactoryEvidenceCredential;
   readonly gateObserver: FactoryEvidenceCredential;
   readonly prBroker: FactoryEvidenceCredential;
+  readonly merger: FactoryEvidenceCredential;
 }
 
 export interface FactoryEvidencePublisherDependencies {
@@ -473,6 +477,7 @@ export class FactoryEvidencePublisher {
     readonly proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>;
     readonly record: FactoryPullRequestRecord;
     readonly authorizingPolicyItem: EvidenceItem;
+    readonly canaryReservationDigest: Sha256Digest | null;
   }): Promise<StoredEvidenceBundle> {
     if (
       input.authorizingPolicyItem.kind !== "policy" ||
@@ -512,7 +517,15 @@ export class FactoryEvidencePublisher {
           { name: "pull-request-number", value: String(input.record.number) },
           { name: "head-revision", value: input.record.headRevision },
           { name: "proposal-digest", value: input.proposal.digest },
-          { name: "proposal-artifact", value: proposalArtifact.digest }
+          { name: "proposal-artifact", value: proposalArtifact.digest },
+          ...(input.canaryReservationDigest === null
+            ? []
+            : [
+                {
+                  name: "canary-reservation-digest",
+                  value: input.canaryReservationDigest
+                }
+              ])
         ]
       })
     ]);
@@ -522,6 +535,7 @@ export class FactoryEvidencePublisher {
     readonly task: FactoryTaskSnapshot;
     readonly observation: CanonicalFactoryDocument<FactoryPullRequestObservation>;
     readonly assessment: FactoryPullRequestAssessment;
+    readonly maintenance?: FactoryCanaryPullRequestMaintenanceCoordinates;
   }): Promise<StoredEvidenceBundle> {
     const artifact = await this.#documentArtifact(
       input.observation,
@@ -557,7 +571,24 @@ export class FactoryEvidencePublisher {
           {
             name: "pull-request-record-digest",
             value: input.observation.value.pullRequestRecordDigest
-          }
+          },
+          ...(input.maintenance === undefined
+            ? []
+            : [
+                { name: "maintenance-slot", value: input.maintenance.scheduledFor },
+                {
+                  name: "canary-reservation-digest",
+                  value: input.maintenance.reservationDigest
+                },
+                {
+                  name: "schedule-policy-digest",
+                  value: input.maintenance.schedulePolicyDigest
+                },
+                {
+                  name: "role-identity-policy-digest",
+                  value: input.maintenance.roleIdentityPolicyDigest
+                }
+              ])
         ]
       })
     ]);
@@ -670,6 +701,111 @@ export class FactoryEvidencePublisher {
             name: "contract-repair-attempt",
             value: String(input.authorization.value.contractRepairAttempt)
           }
+        ]
+      })
+    ]);
+  }
+
+  public async autonomousMergeAuthorization(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly authorization: CanonicalFactoryDocument<FactoryAutonomousMergeAuthorization>;
+    readonly policyItem: EvidenceItem;
+  }): Promise<StoredEvidenceBundle> {
+    if (
+      input.authorization.value.taskId !== input.task.contract.taskId ||
+      input.authorization.value.contractDigest !== input.task.contractDigest ||
+      input.authorization.value.policyBundleDigest !==
+        input.task.contract.gateProfile.policyDigest ||
+      input.policyItem.kind !== "policy" ||
+      input.policyItem.result !== "pass" ||
+      input.policyItem.artifact.digest !== input.authorization.value.policyEvaluationDigest ||
+      input.policyItem.subjectDigest !== input.authorization.value.proposalDigest ||
+      input.policyItem.producer.kind !== "control-plane" ||
+      input.policyItem.producer.role !== "policy-engine"
+    ) {
+      throw new Error("Autonomous merge authorization lacks its exact passing policy decision.");
+    }
+    const artifact = await this.#documentArtifact(
+      input.authorization,
+      "application/vnd.agentlab.autonomous-merge-authorization.v1+json"
+    );
+    return this.#append(this.#credential("controlPlane"), input.task, [
+      evidenceItemSchema.parse({ ...input.policyItem, id: this.dependencies.createId() }),
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "merge",
+        result: "pass",
+        subjectDigest: input.authorization.digest,
+        artifact,
+        producer: controlPlanePolicyActor,
+        createdAt: input.authorization.value.issuedAt,
+        claims: [
+          { name: "merge-policy-digest", value: input.authorization.value.mergePolicyDigest },
+          { name: "observation-digest", value: input.authorization.value.observationDigest },
+          {
+            name: "observation-evidence-bundle-digest",
+            value: input.authorization.value.observationEvidenceBundleDigest
+          },
+          {
+            name: "policy-evaluation-digest",
+            value: input.authorization.value.policyEvaluationDigest
+          },
+          {
+            name: "pull-request-record-digest",
+            value: input.authorization.value.pullRequestRecordDigest
+          },
+          { name: "head-revision", value: input.authorization.value.expectedHeadRevision },
+          { name: "delivery-mode", value: input.authorization.value.deliveryMode }
+        ]
+      })
+    ]);
+  }
+
+  public async autonomousMergeRecord(input: {
+    readonly task: FactoryTaskSnapshot;
+    readonly authorization: CanonicalFactoryDocument<FactoryAutonomousMergeAuthorization>;
+    readonly record: CanonicalFactoryDocument<FactoryAutonomousMergeRecord>;
+  }): Promise<StoredEvidenceBundle> {
+    if (
+      input.authorization.value.taskId !== input.task.contract.taskId ||
+      input.authorization.value.contractDigest !== input.task.contractDigest ||
+      input.record.value.taskId !== input.task.contract.taskId ||
+      input.record.value.contractDigest !== input.task.contractDigest ||
+      input.record.value.authorizationDigest !== input.authorization.digest ||
+      input.record.value.repositoryId !== input.authorization.value.repositoryId ||
+      input.record.value.pullRequestNumber !== input.authorization.value.pullRequestNumber ||
+      input.record.value.pullRequestUrl !== input.authorization.value.pullRequestUrl ||
+      input.record.value.expectedHeadRevision !== input.authorization.value.expectedHeadRevision
+    ) {
+      throw new Error("Autonomous merge record does not match its single-use authorization.");
+    }
+    const artifact = await this.#documentArtifact(
+      input.record,
+      "application/vnd.agentlab.autonomous-merge-record.v1+json"
+    );
+    return this.#append(this.#credential("merger"), input.task, [
+      evidenceItemSchema.parse({
+        id: this.dependencies.createId(),
+        kind: "merge",
+        result: "pass",
+        subjectDigest: input.authorization.digest,
+        artifact,
+        producer: {
+          kind: "broker",
+          role: "merger",
+          id: input.record.value.mergerId,
+          sessionId: null
+        },
+        createdAt: input.record.value.recordedAt,
+        claims: [
+          { name: "authorization-digest", value: input.authorization.digest },
+          {
+            name: "pull-request-number",
+            value: String(input.record.value.pullRequestNumber)
+          },
+          { name: "expected-head-revision", value: input.record.value.expectedHeadRevision },
+          { name: "merged-revision", value: input.record.value.mergedRevision },
+          { name: "merge-queue-entry-id", value: input.record.value.mergeQueueEntryId }
         ]
       })
     ]);

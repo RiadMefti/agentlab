@@ -42,9 +42,10 @@ export async function runFactoryIntakeRegister(
   if (!isSha256Digest(expectedPolicyBundleDigest)) {
     throw new Error("Factory intake expected policy digest is invalid.");
   }
-  if (confirmation !== "register-request") {
+  if (confirmation !== "register-request" && confirmation !== "register-scheduled-request") {
     throw new Error("Factory intake requires explicit registration confirmation.");
   }
+  const trigger = confirmation === "register-scheduled-request" ? "scheduled" : "manual";
   const [config, submission] = await Promise.all([
     dependencies.loadConfig(configPath),
     dependencies.loadSubmission(requestPath)
@@ -67,6 +68,7 @@ export async function runFactoryIntakeRegister(
       const result = await runtime.commands.register({
         submission,
         expectedPolicyBundleDigest,
+        trigger,
         confirmation
       });
       output = successfulResult(result);

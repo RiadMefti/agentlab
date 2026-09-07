@@ -1,9 +1,15 @@
 import {
   factoryAgentRunRequestSchema,
+  factoryExternalPullRequestReviewerRequestSchema,
+  factoryExternalPullRequestRepairerRequestSchema,
   factoryPreparationRunRequestSchema,
+  factoryMaintenanceDiscoveryRunRequestSchema,
   type FactoryAgentRunRequest,
+  type FactoryExternalPullRequestReviewerRequest,
+  type FactoryExternalPullRequestRepairerRequest,
   type FactoryBudgetUsage,
   type FactoryPreparationRunRequest,
+  type FactoryMaintenanceDiscoveryRunRequest,
   type ProviderId
 } from "@agentlab/contracts";
 
@@ -50,11 +56,39 @@ export interface FactoryAgentAdapterOutput extends Omit<
   readonly reportedCostMicrousd: number | null;
 }
 
-export type FactoryProviderRunRequest = FactoryAgentRunRequest | FactoryPreparationRunRequest;
+export type FactoryProviderRunRequest =
+  | FactoryAgentRunRequest
+  | FactoryExternalPullRequestReviewerRequest
+  | FactoryExternalPullRequestRepairerRequest
+  | FactoryPreparationRunRequest
+  | FactoryMaintenanceDiscoveryRunRequest;
 
 export function parseFactoryProviderRunRequest(input: unknown): FactoryProviderRunRequest {
   const execution = factoryAgentRunRequestSchema.safeParse(input);
-  return execution.success ? execution.data : factoryPreparationRunRequestSchema.parse(input);
+  if (execution.success) return execution.data;
+  const externalReview = factoryExternalPullRequestReviewerRequestSchema.safeParse(input);
+  if (externalReview.success) return externalReview.data;
+  const externalRepair = factoryExternalPullRequestRepairerRequestSchema.safeParse(input);
+  if (externalRepair.success) return externalRepair.data;
+  const preparation = factoryPreparationRunRequestSchema.safeParse(input);
+  return preparation.success
+    ? preparation.data
+    : factoryMaintenanceDiscoveryRunRequestSchema.parse(input);
+}
+
+export function isFactoryMaintenanceDiscoveryRunRequest(
+  request: FactoryProviderRunRequest
+): request is FactoryMaintenanceDiscoveryRunRequest {
+  return request.schemaVersion === "agentlab.maintenance-discovery-run-request.v1";
+}
+
+export function isFactoryReadOnlyRunRequest(request: FactoryProviderRunRequest): boolean {
+  return (
+    isFactoryPreparationRunRequest(request) ||
+    isFactoryMaintenanceDiscoveryRunRequest(request) ||
+    request.schemaVersion === "agentlab.external-pull-request-reviewer-request.v1" ||
+    request.role === "reviewer"
+  );
 }
 
 export function isFactoryPreparationRunRequest(

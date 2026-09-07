@@ -154,6 +154,7 @@ export type FactoryRiskTier = z.infer<typeof factoryRiskTierSchema>;
 
 export const factoryActorRoleSchema = z.enum([
   "requester",
+  "maintenance-scout",
   "qualifier",
   "specifier",
   "planner",
@@ -337,6 +338,7 @@ export const factoryProcessIsolationSchema = z
 export type FactoryProcessIsolation = z.infer<typeof factoryProcessIsolationSchema>;
 
 export const evidenceKindSchema = z.enum([
+  "discovery",
   "request",
   "qualification",
   "specification",
@@ -954,7 +956,7 @@ export const factoryPolicyEvaluationRecordSchema = z
   });
 export type FactoryPolicyEvaluationRecord = z.infer<typeof factoryPolicyEvaluationRecordSchema>;
 
-export const factoryControlNameSchema = z.enum(["scheduler", "pr-broker"]);
+export const factoryControlNameSchema = z.enum(["scheduler", "pr-broker", "merge-broker"]);
 export type FactoryControlName = z.infer<typeof factoryControlNameSchema>;
 
 export const factoryControlEventSchema = z

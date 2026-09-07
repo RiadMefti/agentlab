@@ -39,6 +39,237 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-maintenance-discovery-preflight") {
+    const { runFactoryMaintenanceDiscoveryPreflight } =
+      await import("./run-factory-maintenance-discovery.js");
+    process.exitCode = await runFactoryMaintenanceDiscoveryPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-discovery-preflight") {
+    const { runFactoryExternalPullRequestDiscoveryPreflight } =
+      await import("./run-factory-external-pull-request-discovery.js");
+    process.exitCode = await runFactoryExternalPullRequestDiscoveryPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-discovery-tick") {
+    const { runFactoryExternalPullRequestDiscoveryTick } =
+      await import("./run-factory-external-pull-request-discovery.js");
+    process.exitCode = await runFactoryExternalPullRequestDiscoveryTick(
+      action.configPath,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedSchedulePolicyDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-review-preflight") {
+    const { runFactoryExternalPullRequestReviewPreflight } =
+      await import("./run-factory-external-pull-request-review.js");
+    process.exitCode = await runFactoryExternalPullRequestReviewPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-review-tick") {
+    const { runFactoryExternalPullRequestReviewTick } =
+      await import("./run-factory-external-pull-request-review.js");
+    process.exitCode = await runFactoryExternalPullRequestReviewTick(
+      action.configPath,
+      action.expectedReviewPolicyDigest,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedCostPolicyDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-feedback-preflight") {
+    const { runFactoryExternalPullRequestFeedbackPreflight } =
+      await import("./run-factory-external-pull-request-feedback.js");
+    process.exitCode = await runFactoryExternalPullRequestFeedbackPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-feedback-tick") {
+    const { runFactoryExternalPullRequestFeedbackTick } =
+      await import("./run-factory-external-pull-request-feedback.js");
+    process.exitCode = await runFactoryExternalPullRequestFeedbackTick(
+      action.configPath,
+      action.expectedFeedbackPolicyDigest,
+      action.expectedReviewPolicyDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-admission-preflight") {
+    const { runFactoryExternalPullRequestRepairAdmissionPreflight } =
+      await import("./run-factory-external-pull-request-repair-admission.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairAdmissionPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-admission-tick") {
+    const { runFactoryExternalPullRequestRepairAdmissionTick } =
+      await import("./run-factory-external-pull-request-repair-admission.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairAdmissionTick(action.configPath, {
+      expectedAdmissionPolicyDigest: action.expectedAdmissionPolicyDigest,
+      expectedReviewPolicyDigest: action.expectedReviewPolicyDigest,
+      expectedFeedbackPolicyDigest: action.expectedFeedbackPolicyDigest,
+      expectedRepairExecutionPolicyDigest: action.expectedRepairExecutionPolicyDigest,
+      expectedCostPolicyDigest: action.expectedCostPolicyDigest,
+      expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest,
+      expectedGateProfileDigest: action.expectedGateProfileDigest
+    });
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-execution-preflight") {
+    const { runFactoryExternalPullRequestRepairExecutionPreflight } =
+      await import("./run-factory-external-pull-request-repair-execution.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairExecutionPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-execution-tick") {
+    const { runFactoryExternalPullRequestRepairExecutionTick } =
+      await import("./run-factory-external-pull-request-repair-execution.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairExecutionTick(action.configPath, {
+      expectedRepairExecutionPolicyDigest: action.expectedRepairExecutionPolicyDigest,
+      expectedAdmissionPolicyDigest: action.expectedAdmissionPolicyDigest,
+      expectedReviewPolicyDigest: action.expectedReviewPolicyDigest,
+      expectedFeedbackPolicyDigest: action.expectedFeedbackPolicyDigest,
+      expectedCostPolicyDigest: action.expectedCostPolicyDigest,
+      expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest,
+      expectedGateProfileDigest: action.expectedGateProfileDigest
+    });
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-qualification-preflight") {
+    const { runFactoryExternalPullRequestRepairQualificationPreflight } =
+      await import("./run-factory-external-pull-request-repair-qualification.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairQualificationPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-repair-qualification-tick") {
+    const { runFactoryExternalPullRequestRepairQualificationTick } =
+      await import("./run-factory-external-pull-request-repair-qualification.js");
+    process.exitCode = await runFactoryExternalPullRequestRepairQualificationTick(
+      action.configPath,
+      {
+        expectedQualificationPolicyDigest: action.expectedQualificationPolicyDigest,
+        expectedRepairExecutionPolicyDigest: action.expectedRepairExecutionPolicyDigest,
+        expectedCostPolicyDigest: action.expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest: action.expectedGateProfileDigest
+      }
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-replacement-draft-preflight") {
+    const { runFactoryExternalPullRequestReplacementDraftPreflight } =
+      await import("./run-factory-external-pull-request-replacement-draft.js");
+    process.exitCode = await runFactoryExternalPullRequestReplacementDraftPreflight(
+      action.configPath
+    );
+    return;
+  }
+  if (action.kind === "factory-external-pull-request-replacement-draft-tick") {
+    const { runFactoryExternalPullRequestReplacementDraftTick } =
+      await import("./run-factory-external-pull-request-replacement-draft.js");
+    process.exitCode = await runFactoryExternalPullRequestReplacementDraftTick(action.configPath, {
+      expectedPublicationPolicyDigest: action.expectedPublicationPolicyDigest,
+      expectedQualificationPolicyDigest: action.expectedQualificationPolicyDigest,
+      expectedRoleIdentityPolicyDigest: action.expectedRoleIdentityPolicyDigest
+    });
+    return;
+  }
+  if (action.kind === "factory-maintenance-discovery-tick") {
+    const { runFactoryMaintenanceDiscoveryTick } =
+      await import("./run-factory-maintenance-discovery.js");
+    process.exitCode = await runFactoryMaintenanceDiscoveryTick(
+      action.configPath,
+      action.expectedDiscoveryPolicyDigest,
+      action.expectedSchedulePolicyDigest,
+      action.expectedFactoryPolicyBundleDigest,
+      action.expectedPreparationGrantDigest,
+      action.expectedRoleIdentityPolicyDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-assess") {
+    const { runFactoryEvalAssess } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalAssess(
+      action.configPath,
+      action.runPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-producer-preflight") {
+    const { runFactoryEvalProducerPreflight } = await import("./run-factory-eval-producer.js");
+    process.exitCode = await runFactoryEvalProducerPreflight(
+      action.configPath,
+      action.jobPath,
+      action.expectedJobDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-produce") {
+    const { runFactoryEvalProduce } = await import("./run-factory-eval-producer.js");
+    process.exitCode = await runFactoryEvalProduce(
+      action.configPath,
+      action.jobPath,
+      action.expectedJobDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-sign") {
+    const { runFactoryEvalSign } = await import("./run-factory-eval-attestor.js");
+    process.exitCode = await runFactoryEvalSign(
+      action.configPath,
+      action.runPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-attest") {
+    const { runFactoryEvalAttest } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalAttest(
+      action.configPath,
+      action.assessmentDigest,
+      action.attestationPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-eval-inspect") {
+    const { runFactoryEvalInspect } = await import("./run-factory-evaluator.js");
+    process.exitCode = await runFactoryEvalInspect(action.configPath, action.assessmentDigest);
+    return;
+  }
+  if (action.kind === "factory-canary-authorize") {
+    const { runFactoryCanaryAuthorize } = await import("./run-factory-canary-authority.js");
+    process.exitCode = await runFactoryCanaryAuthorize(
+      action.configPath,
+      action.attestationDigest,
+      action.requestPath,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-canary-reserve") {
+    const { runFactoryCanaryReserve } = await import("./run-factory-canary-admission.js");
+    process.exitCode = await runFactoryCanaryReserve(action.configPath, action.taskId);
+    return;
+  }
+  if (action.kind === "factory-canary-admission-tick") {
+    const { runFactoryCanaryAdmissionTick } = await import("./run-factory-canary-admission.js");
+    process.exitCode = await runFactoryCanaryAdmissionTick(
+      action.configPath,
+      action.expectedCohortDigest,
+      action.expectedCandidateDigest,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-broker-preflight") {
     const { runFactoryBrokerPreflight } = await import("./run-factory-broker-preflight.js");
     process.exitCode = await runFactoryBrokerPreflight(action.configPath);
@@ -47,6 +278,21 @@ async function main(): Promise<void> {
   if (action.kind === "factory-worker-preflight") {
     const { runFactoryWorkerPreflight } = await import("./run-factory-worker-preflight.js");
     process.exitCode = await runFactoryWorkerPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-orchestration-render") {
+    const { runFactoryOrchestrationRender } = await import("./run-factory-orchestration-render.js");
+    process.exitCode = await runFactoryOrchestrationRender(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-scheduler-tick") {
+    const { runFactorySchedulerTick } = await import("./run-factory-scheduler-tick.js");
+    process.exitCode = await runFactorySchedulerTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedDailyQuotaPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
     return;
   }
   if (action.kind === "factory-worker-run") {
@@ -70,14 +316,90 @@ async function main(): Promise<void> {
     );
     return;
   }
+  if (action.kind === "factory-worker-pr-repair-tick") {
+    const { runFactoryWorkerPullRequestRepairTick } =
+      await import("./run-factory-worker-pr-repair-tick.js");
+    process.exitCode = await runFactoryWorkerPullRequestRepairTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
   if (action.kind === "factory-authority-status") {
     const { runFactoryAuthorityStatus } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryAuthorityStatus(action.configPath);
     return;
   }
+  if (action.kind === "factory-operations-health") {
+    const { runFactoryOperationsHealth } = await import("./run-factory-operations-health.js");
+    process.exitCode = await runFactoryOperationsHealth(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-incident-containment") {
+    const { runFactoryIncidentContainment } = await import("./run-factory-incident-containment.js");
+    process.exitCode = await runFactoryIncidentContainment(
+      action.configPath,
+      action.expectedHealthPolicyDigest,
+      action.expectedDailyQuotaPolicyDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-autonomous-merge-admission-preflight") {
+    const { runFactoryAutonomousMergeAdmissionPreflight } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmissionPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merge-admit") {
+    const { runFactoryAutonomousMergeAdmission } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmission(action);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merge-admission-tick") {
+    const { runFactoryAutonomousMergeAdmissionTick } =
+      await import("./run-factory-autonomous-merge-admission.js");
+    process.exitCode = await runFactoryAutonomousMergeAdmissionTick(action);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merger-preflight") {
+    const { runFactoryAutonomousMergerPreflight } =
+      await import("./run-factory-autonomous-merger.js");
+    process.exitCode = await runFactoryAutonomousMergerPreflight(action.configPath);
+    return;
+  }
+  if (action.kind === "factory-autonomous-merger-tick") {
+    const { runFactoryAutonomousMergerTick } = await import("./run-factory-autonomous-merger.js");
+    process.exitCode = await runFactoryAutonomousMergerTick(action);
+    return;
+  }
   if (action.kind === "factory-broker-authority") {
     const { runFactoryBrokerAuthority } = await import("./run-factory-authority.js");
     process.exitCode = await runFactoryBrokerAuthority(
+      action.configPath,
+      action.expectedEnabled,
+      action.enabled,
+      action.reason,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-scheduler-authority") {
+    const { runFactorySchedulerAuthority } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactorySchedulerAuthority(
+      action.configPath,
+      action.expectedEnabled,
+      action.enabled,
+      action.reason,
+      action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-merge-broker-authority") {
+    const { runFactoryMergeBrokerAuthority } = await import("./run-factory-authority.js");
+    process.exitCode = await runFactoryMergeBrokerAuthority(
       action.configPath,
       action.expectedEnabled,
       action.enabled,
@@ -93,6 +415,50 @@ async function main(): Promise<void> {
       action.taskId,
       action.expectedPolicyBundleDigest,
       action.confirmation
+    );
+    return;
+  }
+  if (action.kind === "factory-broker-open-canary-draft") {
+    const { runFactoryBrokerOpenCanaryDraft } = await import("./run-factory-broker-open-draft.js");
+    process.exitCode = await runFactoryBrokerOpenCanaryDraft(
+      action.configPath,
+      action.taskId,
+      action.reservationDigest,
+      action.schedulePolicyDigest,
+      action.roleIdentityPolicyDigest,
+      action.expectedPolicyBundleDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-broker-canary-tick") {
+    const { runFactoryBrokerCanaryTick } = await import("./run-factory-broker-canary-tick.js");
+    process.exitCode = await runFactoryBrokerCanaryTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-broker-pr-maintenance-tick") {
+    const { runFactoryBrokerPullRequestMaintenanceTick } =
+      await import("./run-factory-broker-pr-maintenance-tick.js");
+    process.exitCode = await runFactoryBrokerPullRequestMaintenanceTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
+    );
+    return;
+  }
+  if (action.kind === "factory-broker-pr-update-tick") {
+    const { runFactoryBrokerPullRequestUpdateTick } =
+      await import("./run-factory-broker-pr-update-tick.js");
+    process.exitCode = await runFactoryBrokerPullRequestUpdateTick(
+      action.configPath,
+      action.expectedSchedulePolicyDigest,
+      action.expectedRoleIdentityPolicyDigest,
+      action.expectedFactoryPolicyBundleDigest
     );
     return;
   }

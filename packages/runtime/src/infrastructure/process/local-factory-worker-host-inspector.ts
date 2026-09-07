@@ -41,6 +41,7 @@ export interface LocalFactoryWorkerHostInspectorOptions {
   readonly configuredProviders: readonly WorkerProviderId[];
   readonly providers: FactoryAgentProviderResolver;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
+  readonly expectedWorkerUserId?: number;
 }
 
 /** Probes only owner-pinned local tools with fixed argv and a credentialless environment. */
@@ -56,6 +57,7 @@ export class LocalFactoryWorkerHostInspector implements FactoryWorkerHostInspect
   readonly #systemdControlExecutable: string;
   readonly #systemdEnvironment: Readonly<Record<string, string>>;
   readonly #systemdManagerVersion: string;
+  readonly #expectedWorkerUserId: number | undefined;
 
   public constructor(
     private readonly runner: CommandRunner,
@@ -110,6 +112,7 @@ export class LocalFactoryWorkerHostInspector implements FactoryWorkerHostInspect
       options.hostEnvironment ?? process.env
     );
     this.#systemdManagerVersion = systemdManagerVersion(options.systemdVersion);
+    this.#expectedWorkerUserId = options.expectedWorkerUserId;
     if (options.runtimeRoots.length > 8) {
       throw new Error("Factory worker host inspection accepts at most eight runtime roots.");
     }
@@ -123,6 +126,7 @@ export class LocalFactoryWorkerHostInspector implements FactoryWorkerHostInspect
   }
 
   public async inspect(): Promise<FactoryWorkerHostInspection> {
+    const expectedWorkerUserId = this.#expectedWorkerUserId;
     const checks: Promise<string | null>[] = [
       reasonOnFailure("working-directory-unavailable", () =>
         assertCanonicalDirectory(this.#workingDirectory)
@@ -137,6 +141,13 @@ export class LocalFactoryWorkerHostInspector implements FactoryWorkerHostInspect
         reasonOnFailure(probe.reasonCode, () => this.#probe(probe))
       ),
       reasonOnFailure("systemd-user-manager-identity-unverified", () => this.#probeUserManager()),
+      ...(expectedWorkerUserId === undefined
+        ? []
+        : [
+            reasonOnFailure("worker-process-identity-mismatch", () =>
+              assertProcessUserId(expectedWorkerUserId)
+            )
+          ]),
       ...this.#runtimeRoots.map((path, index) =>
         reasonOnFailure(`runtime-root-${String(index)}-unavailable`, () =>
           assertCanonicalDirectory(path)
@@ -199,6 +210,16 @@ export class LocalFactoryWorkerHostInspector implements FactoryWorkerHostInspect
       throw new Error("Factory worker systemd user manager has another version identity.");
     }
   }
+}
+
+function assertProcessUserId(expectedUserId: number): Promise<void> {
+  const currentUserId = process.getuid?.();
+  if (currentUserId === undefined || currentUserId < 1 || currentUserId !== expectedUserId) {
+    return Promise.reject(
+      new Error("Factory worker process identity does not match its reviewed policy.")
+    );
+  }
+  return Promise.resolve();
 }
 
 interface FixedProbe {

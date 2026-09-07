@@ -50,7 +50,13 @@ export async function runFactoryWorkerRepairPullRequest(
   try {
     preflight = await runtime.commands.preflight();
     reasonCodes = [
-      ...preflight.reasonCodes.filter((reasonCode) => reasonCode !== "scheduler-disabled"),
+      ...preflight.reasonCodes.filter(
+        (reasonCode) =>
+          reasonCode !== "scheduler-disabled" &&
+          reasonCode !== "schedule-policy-unconfigured" &&
+          reasonCode !== "daily-quota-policy-unconfigured"
+      ),
+      ...(preflight.roleIdentityPolicyDigest === null ? ["role-identity-policy-unconfigured"] : []),
       ...(preflight.policyBundleDigest === expectedPolicyBundleDigest
         ? []
         : ["policy-bundle-digest-mismatch"])
@@ -73,10 +79,11 @@ export async function runFactoryWorkerRepairPullRequest(
   await runtime.close();
   dependencies.write(
     `${JSON.stringify({
-      schemaVersion: "agentlab.worker-repair-command-result.v1",
+      schemaVersion: "agentlab.worker-repair-command-result.v2",
       status: result?.status ?? "blocked",
       taskId,
       policyBundleDigest: preflight.policyBundleDigest,
+      roleIdentityPolicyDigest: preflight.roleIdentityPolicyDigest,
       authorizationDigest,
       reasonCodes: [...new Set(reasonCodes)].sort(),
       result:

@@ -18,6 +18,7 @@ const authorizationDigest = `sha256:${"b".repeat(64)}` as const;
 const contractDigest = `sha256:${"c".repeat(64)}` as const;
 const repairRunDigest = `sha256:${"d".repeat(64)}` as const;
 const patchProposalDigest = `sha256:${"e".repeat(64)}` as const;
+const roleIdentityPolicyDigest = `sha256:${"f".repeat(64)}` as const;
 
 describe("factory worker PR repair CLI runner", () => {
   it("consumes one exact authorization and emits only a bounded broker handoff", async () => {
@@ -41,10 +42,11 @@ describe("factory worker PR repair CLI runner", () => {
     });
     expect(fixture.events).toEqual(["close", "write"]);
     expect(JSON.parse(fixture.output.join(""))).toEqual({
-      schemaVersion: "agentlab.worker-repair-command-result.v1",
+      schemaVersion: "agentlab.worker-repair-command-result.v2",
       status: "pr-proposed",
       taskId,
       policyBundleDigest,
+      roleIdentityPolicyDigest,
       authorizationDigest,
       reasonCodes: [],
       result: {
@@ -87,6 +89,28 @@ describe("factory worker PR repair CLI runner", () => {
       status: "blocked",
       reasonCodes: ["bubblewrap-unavailable", "policy-bundle-digest-mismatch"],
       result: null
+    });
+  });
+
+  it("blocks repair when preflight cannot prove the worker identity policy", async () => {
+    const fixture = runnerDependencies({
+      preflight: { ...preflight(), roleIdentityPolicyDigest: null }
+    });
+
+    await expect(
+      runFactoryWorkerRepairPullRequest(
+        "/private/agentlab/worker.json",
+        taskId,
+        authorizationDigest,
+        policyBundleDigest,
+        "repair-pr",
+        fixture.dependencies
+      )
+    ).resolves.toBe(2);
+    expect(fixture.executeRepair).not.toHaveBeenCalled();
+    expect(JSON.parse(fixture.output.join(""))).toMatchObject({
+      roleIdentityPolicyDigest: null,
+      reasonCodes: ["role-identity-policy-unconfigured"]
     });
   });
 
@@ -169,7 +193,9 @@ function runnerDependencies(
       recoverExecution: noResult,
       executePullRequestRepair: executeRepair,
       recoverPullRequestRepair: noResult,
-      runTask: noResult
+      runCanaryPullRequestRepairTick: noResult,
+      runTask: noResult,
+      runScheduledTick: noResult
     },
     close
   };
@@ -197,15 +223,22 @@ function runnerDependencies(
 
 function preflight(): FactoryWorkerPreflight {
   return {
-    schemaVersion: "agentlab.worker-preflight.v1",
+    schemaVersion: "agentlab.worker-preflight.v4",
     status: "blocked",
     policyBundleDigest,
+    schedulePolicyDigest: null,
+    roleIdentityPolicyDigest,
+    dailyQuotaPolicyDigest: null,
     schedulerEnabled: false,
     costPolicyConfigured: true,
     hostReady: true,
     configuredProviders: ["codex"],
     gateIds: ["architecture", "build", "format", "lint", "secret-scan", "test", "typecheck"],
-    reasonCodes: ["scheduler-disabled"]
+    reasonCodes: [
+      "daily-quota-policy-unconfigured",
+      "schedule-policy-unconfigured",
+      "scheduler-disabled"
+    ]
   };
 }
 

@@ -35,6 +35,7 @@ export interface FactoryPreparationRepository {
     conversationId: string,
     limit: number
   ): Promise<readonly FactoryPreparationSnapshot[]>;
+  listScheduled(limit: number): Promise<readonly FactoryPreparationSnapshot[]>;
   listEvents(taskId: string): Promise<readonly FactoryPreparationEvent[]>;
   append(
     event: CanonicalFactoryDocument<FactoryPreparationEvent>

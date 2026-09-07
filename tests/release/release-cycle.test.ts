@@ -700,6 +700,23 @@ describe("dependency update policy", () => {
 });
 
 describe("release workflow trust boundaries", () => {
+  it("runs required CI checks on merge-queue candidates with read-only repository permissions", async () => {
+    const ci = await readFile(join(projectRoot, ".github", "workflows", "ci.yml"), "utf8");
+    const events = ci.slice(ci.indexOf("on:\n"), ci.indexOf("\npermissions:"));
+    expect(events).toContain("  pull_request:");
+    expect(events).toContain("  merge_group:\n    types: [checks_requested]");
+    expect(events).not.toMatch(/paths(?:-ignore)?:/u);
+    expect(ci).toContain("permissions:\n  contents: read");
+    for (const [start, end] of [
+      ["  verify:", "  factory_sandbox:"],
+      ["  factory_sandbox:", "  package_macos:"]
+    ] as const) {
+      const job = ci.slice(ci.indexOf(start), ci.indexOf(end));
+      expect(job).toContain("persist-credentials: false");
+      expect(job).not.toMatch(/^\s+if:/mu);
+    }
+  });
+
   it("builds workspace export targets before every source and packaging entrypoint", async () => {
     const rootPackage = parsePackageMetadata(
       await readFile(join(projectRoot, "package.json"), "utf8")

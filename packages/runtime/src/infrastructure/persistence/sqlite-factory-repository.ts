@@ -5,6 +5,8 @@ import {
   factoryControlNameSchema,
   type FactoryControlEvent,
   type FactoryControlName,
+  factoryTaskStateSchema,
+  type FactoryTaskState,
   type ImmutableTaskContract,
   type Sha256Digest,
   type TaskEvent
@@ -224,6 +226,44 @@ export class SqliteFactoryRepository
     return Promise.resolve(snapshots);
   }
 
+  public listByState(
+    state: FactoryTaskState,
+    limit: number
+  ): Promise<readonly FactoryTaskSnapshot[]> {
+    const parsedState = factoryTaskStateSchema.parse(state);
+    assertListLimit(limit);
+    const rows = this.#database
+      .prepare(
+        `SELECT ${CONTRACT_COLUMNS.split("\n")
+          .map((column) => column.trim())
+          .filter((column) => column.length > 0)
+          .map((column) => `c.${column.replace(/,$/u, "")}`)
+          .join(", ")}
+         FROM factory_task_contracts AS c
+         JOIN factory_task_events AS e ON e.task_id = c.task_id
+         WHERE e.sequence = (
+           SELECT MAX(latest.sequence)
+           FROM factory_task_events AS latest
+           WHERE latest.task_id = c.task_id
+         )
+           AND e.to_state = ?
+         ORDER BY e.occurred_at ASC, c.task_id ASC
+         LIMIT ?`
+      )
+      .all(parsedState, limit) as unknown as ContractRow[];
+    const snapshots: FactoryTaskSnapshot[] = [];
+    for (const row of rows) {
+      const contract = this.#contractFromRow(row);
+      const events = this.#readEventDocuments(contract.value.taskId);
+      const last = events.at(-1);
+      if (last === undefined) {
+        throw new Error(`Factory task ${contract.value.taskId} has no initial event.`);
+      }
+      snapshots.push(snapshotFrom(contract.value, contract.digest, last.value, last.digest));
+    }
+    return Promise.resolve(snapshots);
+  }
+
   public listEvents(taskId: string): Promise<readonly TaskEvent[]> {
     return Promise.resolve(this.#readEventDocuments(taskId).map(({ value }) => value));
   }
@@ -332,9 +372,10 @@ export class SqliteFactoryRepository
   }
 
   #insertControlEvent(event: CanonicalFactoryDocument<FactoryControlEvent>): void {
+    const table = this.#controlTable(event.value.control);
     this.#database
       .prepare(
-        `INSERT INTO factory_control_events (
+        `INSERT INTO ${table} (
           event_id,
           event_digest,
           control_name,
@@ -360,11 +401,12 @@ export class SqliteFactoryRepository
     limit: number
   ): Promise<readonly FactoryControlEvent[]> {
     const parsedControl = factoryControlNameSchema.parse(control);
+    const table = this.#controlTable(parsedControl);
     assertListLimit(limit);
     const rows = this.#database
       .prepare(
         `SELECT ${CONTROL_COLUMNS}
-         FROM factory_control_events
+         FROM ${table}
          WHERE control_name = ?
          ORDER BY sequence DESC
          LIMIT ?`
@@ -581,10 +623,11 @@ export class SqliteFactoryRepository
   }
 
   #latestControlValue(control: FactoryControlName): boolean {
+    const table = this.#controlTable(control);
     const row = this.#database
       .prepare(
         `SELECT ${CONTROL_COLUMNS}
-         FROM factory_control_events
+         FROM ${table}
          WHERE control_name = ?
          ORDER BY sequence DESC
          LIMIT 1`
@@ -596,8 +639,13 @@ export class SqliteFactoryRepository
   #authorityState(): FactoryAuthorityState {
     return {
       scheduler: this.#latestControlValue("scheduler"),
-      prBroker: this.#latestControlValue("pr-broker")
+      prBroker: this.#latestControlValue("pr-broker"),
+      mergeBroker: this.#latestControlValue("merge-broker")
     };
+  }
+
+  #controlTable(control: FactoryControlName): string {
+    return control === "merge-broker" ? "factory_merge_control_events" : "factory_control_events";
   }
 
   #controlFromRow(row: ControlRow): CanonicalFactoryDocument<FactoryControlEvent> {

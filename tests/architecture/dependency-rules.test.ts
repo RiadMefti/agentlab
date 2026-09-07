@@ -25,7 +25,63 @@ describe("architecture dependency rules", () => {
     const report = await inspectArchitecture(projectRoot);
 
     expect(report.violations).toEqual([]);
-  });
+  }, 30_000);
+
+  it.each(["absent", "stale"] as const)(
+    "uses public workspace source types when build output is %s",
+    async (buildOutput) => {
+      const root = architectureFixture();
+      write(
+        root,
+        "packages/contracts/src/index.ts",
+        [
+          "export interface Inventory {",
+          "  readonly files: Readonly<Record<string, string>>;",
+          "  readonly transform: (value: string) => string;",
+          "}",
+          ""
+        ].join("\n")
+      );
+      mkdirSync(join(root, "node_modules/@agentlab"), { recursive: true });
+      symlinkSync("../../packages/contracts", join(root, "node_modules/@agentlab/contracts"));
+      if (buildOutput === "stale") {
+        write(
+          root,
+          "packages/contracts/dist/index.d.ts",
+          [
+            "export interface Inventory {",
+            "  readonly files: any;",
+            "  readonly transform: Readonly<Record<string, string>>;",
+            "}",
+            ""
+          ].join("\n")
+        );
+      }
+      write(
+        root,
+        "packages/runtime/src/domain/inventory.ts",
+        [
+          'import type { Inventory } from "@agentlab/contracts";',
+          "export function inspect(inventory: Inventory, key: string): void {",
+          "  void inventory.files[key];",
+          "  void inventory.transform[key];",
+          "}",
+          ""
+        ].join("\n")
+      );
+
+      const report = await inspectArchitecture(root);
+
+      expect(report.violations.filter(({ kind }) => kind === "unsupported-import")).toEqual([
+        expect.objectContaining({
+          source: "packages/runtime/src/domain/inventory.ts",
+          message: expect.stringContaining(
+            "inventory.ts:4:8 uses unsupported reflective runtime code-generation access"
+          )
+        })
+      ]);
+    }
+  );
 
   it("allows application and infrastructure adapters to depend inward on domain ports", () => {
     const report = architectureReport([
@@ -83,15 +139,366 @@ describe("architecture dependency rules", () => {
           "@agentlab/runtime/factory-authority",
           "packages/runtime/src/local-factory-authority.ts"
         ),
-        local("@agentlab/runtime/factory-intake", "packages/runtime/src/local-factory-intake.ts")
+        local("@agentlab/runtime/factory-intake", "packages/runtime/src/local-factory-intake.ts"),
+        local(
+          "@agentlab/runtime/factory-evaluator",
+          "packages/runtime/src/local-factory-evaluator.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-eval-attestor",
+          "packages/runtime/src/local-factory-eval-attestor.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-canary-authority",
+          "packages/runtime/src/local-factory-canary-authority.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-canary-admission",
+          "packages/runtime/src/local-factory-canary-admission.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-orchestration",
+          "packages/runtime/src/local-factory-orchestration.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-operations-health",
+          "packages/runtime/src/local-factory-operations-health.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-incident-containment",
+          "packages/runtime/src/local-factory-incident-containment.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-autonomous-merge-admission",
+          "packages/runtime/src/local-factory-autonomous-merge-admission.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-autonomous-merger",
+          "packages/runtime/src/local-factory-autonomous-merger.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-maintenance-discovery",
+          "packages/runtime/src/local-factory-maintenance-discovery.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-eval-producer",
+          "packages/runtime/src/local-factory-eval-producer.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-discovery",
+          "packages/runtime/src/local-factory-external-pull-request-discovery.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-review",
+          "packages/runtime/src/local-factory-external-pull-request-review.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-feedback",
+          "packages/runtime/src/local-factory-external-pull-request-feedback.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-repair-admission",
+          "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-repair-execution",
+          "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-repair-qualification",
+          "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"
+        ),
+        local(
+          "@agentlab/runtime/factory-external-pull-request-replacement-draft",
+          "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts"
+        )
       ]),
       source("packages/runtime/src/local-factory-broker.ts"),
       source("packages/runtime/src/local-factory-worker.ts"),
       source("packages/runtime/src/local-factory-authority.ts"),
-      source("packages/runtime/src/local-factory-intake.ts")
+      source("packages/runtime/src/local-factory-intake.ts"),
+      source("packages/runtime/src/local-factory-evaluator.ts"),
+      source("packages/runtime/src/local-factory-eval-attestor.ts"),
+      source("packages/runtime/src/local-factory-canary-authority.ts"),
+      source("packages/runtime/src/local-factory-canary-admission.ts"),
+      source("packages/runtime/src/local-factory-orchestration.ts"),
+      source("packages/runtime/src/local-factory-operations-health.ts"),
+      source("packages/runtime/src/local-factory-incident-containment.ts"),
+      source("packages/runtime/src/local-factory-autonomous-merge-admission.ts"),
+      source("packages/runtime/src/local-factory-autonomous-merger.ts"),
+      source("packages/runtime/src/local-factory-maintenance-discovery.ts"),
+      source("packages/runtime/src/local-factory-eval-producer.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-discovery.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-review.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-feedback.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-repair-admission.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-repair-execution.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts"),
+      source("packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts")
     ]);
 
     expect(report.violations).toEqual([]);
+  });
+
+  it("keeps evaluator and human canary closures free of provider, remote, and cross-authority paths", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-evaluator.ts", [
+        local(
+          "./application/factory-evaluation-service.js",
+          "packages/runtime/src/application/factory-evaluation-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-evaluation-service.ts", [
+        local(
+          "../infrastructure/github/github-rest-client.js",
+          "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-canary-authority.ts", [
+        local(
+          "./application/factory-canary-authority-service.js",
+          "packages/runtime/src/application/factory-canary-authority-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-canary-authority-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("apps/tui/src/run-factory-evaluator.ts", [
+        local("@agentlab/runtime/factory-broker", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(3);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+        "packages/runtime/src/infrastructure/providers/model.ts",
+        "packages/runtime/src/local-factory-broker.ts"
+      ])
+    );
+  });
+
+  it("keeps external PR review provider-capable but credentialless and remote-write-free", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-review.ts", [
+        local(
+          "./application/factory-external-pull-request-review-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-review-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-external-pull-request-review-service.ts", [
+        local(
+          "../infrastructure/github/github-rest-client.js",
+          "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+        ),
+        local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps external PR feedback free of providers, branch writes, merge, and release authority", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-feedback.ts", [
+        local(
+          "./application/factory-external-pull-request-feedback-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-feedback-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-external-pull-request-feedback-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        ),
+        local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/providers/model.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps external repair admission deterministic and free of models or remote credentials", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-repair-admission.ts", [
+        local(
+          "./application/factory-external-pull-request-repair-admission-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-repair-admission-service.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/application/factory-external-pull-request-repair-admission-service.ts",
+        [
+          local(
+            "../infrastructure/providers/model.js",
+            "packages/runtime/src/infrastructure/providers/model.ts"
+          ),
+          local(
+            "../infrastructure/github/github-rest-client.js",
+            "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+          ),
+          local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+        ]
+      ),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+      "packages/runtime/src/infrastructure/providers/model.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps external repair execution provider-capable but credentialless and remote-write-free", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-repair-execution.ts", [
+        local(
+          "./application/factory-external-pull-request-repair-execution-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-repair-execution-service.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/application/factory-external-pull-request-repair-execution-service.ts",
+        [
+          local(
+            "../infrastructure/github/github-rest-client.js",
+            "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+          ),
+          local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+        ]
+      ),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps external repair qualification provider-capable but credentialless and remote-write-free", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts", [
+        local(
+          "./application/factory-external-pull-request-repair-qualification-service.js",
+          "packages/runtime/src/application/factory-external-pull-request-repair-qualification-service.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/application/factory-external-pull-request-repair-qualification-service.ts",
+        [
+          local(
+            "../infrastructure/github/github-rest-client.js",
+            "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+          ),
+          local("../local-factory-broker.js", "packages/runtime/src/local-factory-broker.ts")
+        ]
+      ),
+      source("packages/runtime/src/infrastructure/github/github-rest-client.ts"),
+      source("packages/runtime/src/local-factory-broker.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations.map(({ target }) => target)).toEqual([
+      "packages/runtime/src/infrastructure/github/github-rest-client.ts",
+      "packages/runtime/src/local-factory-broker.ts"
+    ]);
+  });
+
+  it("keeps offline eval production separate from providers, signing, and authority", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-eval-producer.ts", [
+        local(
+          "./application/factory-eval-production-service.js",
+          "packages/runtime/src/application/factory-eval-production-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-eval-production-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("apps/tui/src/run-factory-eval-producer.ts", [
+        local(
+          "@agentlab/runtime/factory-eval-attestor",
+          "packages/runtime/src/local-factory-eval-attestor.ts"
+        )
+      ]),
+      source("packages/runtime/src/local-factory-eval-attestor.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(2);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/providers/model.ts",
+        "packages/runtime/src/local-factory-eval-attestor.ts"
+      ])
+    );
+  });
+
+  it("keeps eval signing and verification in disjoint executable capability closures", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-eval-attestor.ts", [
+        local(
+          "./infrastructure/persistence/sqlite-factory-evaluation-repository.js",
+          "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts"
+        )
+      ]),
+      source(
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts"
+      ),
+      source("packages/runtime/src/local-factory-evaluator.ts", [
+        local(
+          "./infrastructure/crypto/node-factory-dsse-signer.js",
+          "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts"),
+      source("apps/tui/src/run-factory-eval-attestor.ts", [
+        local(
+          "@agentlab/runtime/factory-evaluator",
+          "packages/runtime/src/local-factory-evaluator.ts"
+        )
+      ])
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(3);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
+        "packages/runtime/src/infrastructure/crypto/node-factory-dsse-signer.ts",
+        "packages/runtime/src/local-factory-evaluator.ts"
+      ])
+    );
   });
 
   it("prevents the human authority boundary from acquiring execution or remote capabilities", () => {
@@ -202,6 +609,84 @@ describe("architecture dependency rules", () => {
     );
   });
 
+  it("keeps incident containment credentialless and free of any enable-capable repository", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-incident-containment.ts", [
+        local(
+          "./application/factory-incident-containment-service.js",
+          "packages/runtime/src/application/factory-incident-containment-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-incident-containment-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        ),
+        local(
+          "../infrastructure/persistence/sqlite-factory-repository.js",
+          "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/providers/model.ts"),
+      source("packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"),
+      source("apps/tui/src/run-factory-incident-containment.ts", [
+        local(
+          "@agentlab/runtime/factory-incident-containment",
+          "packages/runtime/src/local-factory-incident-containment.ts"
+        )
+      ])
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(4);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/providers/model.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+      ])
+    );
+  });
+
+  it("keeps autonomous merge admission credentialless and the merger providerless", () => {
+    const report = architectureReport([
+      source("packages/runtime/src/local-factory-autonomous-merge-admission.ts", [
+        local(
+          "./application/factory-autonomous-merge-admission-service.js",
+          "packages/runtime/src/application/factory-autonomous-merge-admission-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-autonomous-merge-admission-service.ts", [
+        local(
+          "../infrastructure/github/github-autonomous-merger.js",
+          "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts"
+        )
+      ]),
+      source("packages/runtime/src/local-factory-autonomous-merger.ts", [
+        local(
+          "./application/factory-autonomous-merge-service.js",
+          "packages/runtime/src/application/factory-autonomous-merge-service.ts"
+        )
+      ]),
+      source("packages/runtime/src/application/factory-autonomous-merge-service.ts", [
+        local(
+          "../infrastructure/providers/model.js",
+          "packages/runtime/src/infrastructure/providers/model.ts"
+        )
+      ]),
+      source("packages/runtime/src/infrastructure/github/github-autonomous-merger.ts"),
+      source("packages/runtime/src/infrastructure/providers/model.ts")
+    ]);
+
+    const violations = report.violations.filter(({ kind }) => kind === "composition-boundary");
+    expect(violations).toHaveLength(2);
+    expect(violations.map(({ target }) => target)).toEqual(
+      expect.arrayContaining([
+        "packages/runtime/src/infrastructure/github/github-autonomous-merger.ts",
+        "packages/runtime/src/infrastructure/providers/model.ts"
+      ])
+    );
+  });
+
   it("detects cycles and unresolved local imports", () => {
     const report = architectureReport([
       source("packages/contracts/src/left.ts", [
@@ -232,7 +717,7 @@ describe("architecture dependency rules", () => {
     expect(report.violations).toEqual([
       expect.objectContaining({ kind: "unknown-workspace", source: "packages/rogue" })
     ]);
-  });
+  }, 30_000);
 
   it("extracts static import types and rejects dependency forms that evade the graph", async () => {
     const root = architectureFixture();
@@ -645,6 +1130,78 @@ function architectureFixture(): string {
       "./factory-intake": {
         default: "./dist/local-factory-intake.js",
         types: "./dist/local-factory-intake.d.ts"
+      },
+      "./factory-evaluator": {
+        default: "./dist/local-factory-evaluator.js",
+        types: "./dist/local-factory-evaluator.d.ts"
+      },
+      "./factory-eval-attestor": {
+        default: "./dist/local-factory-eval-attestor.js",
+        types: "./dist/local-factory-eval-attestor.d.ts"
+      },
+      "./factory-canary-authority": {
+        default: "./dist/local-factory-canary-authority.js",
+        types: "./dist/local-factory-canary-authority.d.ts"
+      },
+      "./factory-canary-admission": {
+        default: "./dist/local-factory-canary-admission.js",
+        types: "./dist/local-factory-canary-admission.d.ts"
+      },
+      "./factory-orchestration": {
+        default: "./dist/local-factory-orchestration.js",
+        types: "./dist/local-factory-orchestration.d.ts"
+      },
+      "./factory-operations-health": {
+        default: "./dist/local-factory-operations-health.js",
+        types: "./dist/local-factory-operations-health.d.ts"
+      },
+      "./factory-incident-containment": {
+        default: "./dist/local-factory-incident-containment.js",
+        types: "./dist/local-factory-incident-containment.d.ts"
+      },
+      "./factory-autonomous-merge-admission": {
+        default: "./dist/local-factory-autonomous-merge-admission.js",
+        types: "./dist/local-factory-autonomous-merge-admission.d.ts"
+      },
+      "./factory-autonomous-merger": {
+        default: "./dist/local-factory-autonomous-merger.js",
+        types: "./dist/local-factory-autonomous-merger.d.ts"
+      },
+      "./factory-maintenance-discovery": {
+        default: "./dist/local-factory-maintenance-discovery.js",
+        types: "./dist/local-factory-maintenance-discovery.d.ts"
+      },
+      "./factory-eval-producer": {
+        default: "./dist/local-factory-eval-producer.js",
+        types: "./dist/local-factory-eval-producer.d.ts"
+      },
+      "./factory-external-pull-request-discovery": {
+        default: "./dist/local-factory-external-pull-request-discovery.js",
+        types: "./dist/local-factory-external-pull-request-discovery.d.ts"
+      },
+      "./factory-external-pull-request-review": {
+        default: "./dist/local-factory-external-pull-request-review.js",
+        types: "./dist/local-factory-external-pull-request-review.d.ts"
+      },
+      "./factory-external-pull-request-feedback": {
+        default: "./dist/local-factory-external-pull-request-feedback.js",
+        types: "./dist/local-factory-external-pull-request-feedback.d.ts"
+      },
+      "./factory-external-pull-request-repair-admission": {
+        default: "./dist/local-factory-external-pull-request-repair-admission.js",
+        types: "./dist/local-factory-external-pull-request-repair-admission.d.ts"
+      },
+      "./factory-external-pull-request-repair-execution": {
+        default: "./dist/local-factory-external-pull-request-repair-execution.js",
+        types: "./dist/local-factory-external-pull-request-repair-execution.d.ts"
+      },
+      "./factory-external-pull-request-repair-qualification": {
+        default: "./dist/local-factory-external-pull-request-repair-qualification.js",
+        types: "./dist/local-factory-external-pull-request-repair-qualification.d.ts"
+      },
+      "./factory-external-pull-request-replacement-draft": {
+        default: "./dist/local-factory-external-pull-request-replacement-draft.js",
+        types: "./dist/local-factory-external-pull-request-replacement-draft.d.ts"
       }
     }
   });
@@ -654,6 +1211,48 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-worker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-intake.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-evaluator.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-eval-attestor.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-canary-authority.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-canary-admission.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-orchestration.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-operations-health.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-incident-containment.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-autonomous-merge-admission.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-autonomous-merger.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-maintenance-discovery.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-eval-producer.ts", "export {};\n");
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-discovery.ts",
+    "export {};\n"
+  );
+  write(root, "packages/runtime/src/local-factory-external-pull-request-review.ts", "export {};\n");
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-feedback.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-repair-admission.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-repair-execution.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-repair-qualification.ts",
+    "export {};\n"
+  );
+  write(
+    root,
+    "packages/runtime/src/local-factory-external-pull-request-replacement-draft.ts",
+    "export {};\n"
+  );
   return root;
 }
 

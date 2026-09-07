@@ -77,7 +77,11 @@ export type {
 export type {
   FactoryAuthorityInspection,
   FactoryBrokerAuthorityCommand,
-  FactoryBrokerAuthorityChange
+  FactoryBrokerAuthorityChange,
+  FactoryMergeBrokerAuthorityCommand,
+  FactoryMergeBrokerAuthorityChange,
+  FactorySchedulerAuthorityCommand,
+  FactorySchedulerAuthorityChange
 } from "./application/factory-authority-operator.js";
 export {
   loadLocalFactoryAuthorityConfig,

@@ -145,7 +145,7 @@ export function testTaskEvent(input: {
 
 export function testControlEvent(input: {
   readonly eventId: string;
-  readonly control: "scheduler" | "pr-broker";
+  readonly control: "scheduler" | "pr-broker" | "merge-broker";
   readonly enabled: boolean;
 }): FactoryControlEvent {
   return {

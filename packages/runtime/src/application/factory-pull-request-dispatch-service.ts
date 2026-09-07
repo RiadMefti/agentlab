@@ -4,7 +4,8 @@ import {
   type EvidenceItem,
   type FactoryPolicyDecision,
   type FactoryPullRequestProposal,
-  type FactoryPullRequestRecord
+  type FactoryPullRequestRecord,
+  type Sha256Digest
 } from "@agentlab/contracts";
 import { z } from "zod";
 
@@ -39,6 +40,10 @@ import {
   FactoryPullRequestDispatchJournalSession,
   type FactoryPullRequestDispatchJournalDependencies
 } from "./factory-pull-request-dispatch-journal.js";
+import type {
+  FactoryPullRequestCanaryAuthority,
+  FactoryPullRequestCanaryCoordinates
+} from "./factory-pull-request-canary-authority.js";
 import {
   factoryRepositoryGovernanceDenials,
   requireExactPolicyItem
@@ -63,6 +68,7 @@ export interface FactoryPullRequestDispatchServiceDependencies {
   readonly artifacts: FactoryArtifactStore;
   readonly documents: FactoryDocumentCodec;
   readonly remote: FactoryDraftPullRequestBroker;
+  readonly canaryAuthority: Pick<FactoryPullRequestCanaryAuthority, "require">;
   readonly now: () => string;
   readonly createId: () => string;
 }
@@ -103,15 +109,18 @@ export class FactoryPullRequestDispatchService {
   public async start(
     task: FactoryTaskSnapshot,
     proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>,
-    correlationId: string
+    correlationId: string,
+    canary: FactoryPullRequestCanaryCoordinates | null
   ): Promise<FactoryPullRequestOutcome> {
+    await this.#assertCanaryAuthority(task, canary ?? undefined);
     const authorization = await this.#authorizingPolicy(task, proposal.value);
     const denied = await this.#disabledOutcome(authorization.decision);
     if (denied !== null) return denied;
     const journal = await FactoryPullRequestDispatchJournalSession.start(
       this.#journalDependencies(),
       proposal,
-      z.uuid().parse(correlationId)
+      z.uuid().parse(correlationId),
+      canary
     );
     return this.resume(task, journal.snapshot);
   }
@@ -128,6 +137,7 @@ export class FactoryPullRequestDispatchService {
     ) {
       throw new Error("Durable PR dispatch does not match its task or configured broker identity.");
     }
+    await this.#assertCanaryAuthority(task, canaryCoordinates(snapshot));
     const proposal = this.dependencies.documents.pullRequestProposal(snapshot.run.proposal);
     if (proposal.digest !== snapshot.run.proposalDigest) {
       throw new Error("Durable PR dispatch proposal failed canonical digest validation.");
@@ -167,11 +177,13 @@ export class FactoryPullRequestDispatchService {
     }
 
     if (journal.snapshot.state === "ready") {
+      await this.#assertCanaryAuthority(task, canaryCoordinates(journal.snapshot));
       const denied = await this.#disabledOutcome(decision);
       if (denied !== null) return denied;
       await journal.startDispatch();
     }
     if (journal.snapshot.state === "dispatch-active") {
+      await this.#assertCanaryAuthority(task, canaryCoordinates(journal.snapshot));
       const denied = await this.#disabledOutcome(decision);
       if (denied !== null) return denied;
       const remote = await this.dependencies.remote.inspect(proposal.value.repositoryId);
@@ -200,15 +212,23 @@ export class FactoryPullRequestDispatchService {
       await journal.observeRemote(record, opened.created);
     }
     if (journal.snapshot.state === "remote-open") {
+      await this.#assertCanaryAuthority(task, canaryCoordinates(journal.snapshot));
       const denied = await this.#disabledOutcome(decision);
       if (denied !== null) return denied;
       const record = requiredDispatchRecord(journal.snapshot);
       await this.dependencies.remote.verifyDraft({ proposal: proposal.value, record });
-      const evidence = await this.#recordPullRequestEvidence(task, proposal, record, policyItem);
+      const evidence = await this.#recordPullRequestEvidence(
+        task,
+        proposal,
+        record,
+        policyItem,
+        canaryCoordinates(journal.snapshot)?.reservationDigest ?? null
+      );
       await journal.recordEvidence(evidence.digest);
     }
     if (journal.snapshot.state === "evidence-recorded") {
       task = await this.#requireTask(task.contract.taskId);
+      await this.#assertCanaryAuthority(task, canaryCoordinates(journal.snapshot));
       if (task.state === "pr-proposed") {
         const denied = await this.#disabledOutcome(decision);
         if (denied !== null) return denied;
@@ -275,24 +295,31 @@ export class FactoryPullRequestDispatchService {
     task: FactoryTaskSnapshot,
     proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>,
     record: FactoryPullRequestRecord,
-    policyItem: EvidenceItem
+    policyItem: EvidenceItem,
+    canaryReservationDigest: Sha256Digest | null
   ): Promise<StoredEvidenceBundle> {
     const existing = await this.dependencies.evidence.listEvidence(task.contract.taskId);
     for (const evidence of [...existing].reverse()) {
-      if (await this.#isExactPullRequestEvidence(evidence, proposal, record)) return evidence;
+      if (
+        await this.#isExactPullRequestEvidence(evidence, proposal, record, canaryReservationDigest)
+      ) {
+        return evidence;
+      }
     }
     return this.#publisher.pullRequest({
       task,
       proposal,
       record,
-      authorizingPolicyItem: policyItem
+      authorizingPolicyItem: policyItem,
+      canaryReservationDigest
     });
   }
 
   async #isExactPullRequestEvidence(
     evidence: StoredEvidenceBundle,
     proposal: CanonicalFactoryDocument<FactoryPullRequestProposal>,
-    record: FactoryPullRequestRecord
+    record: FactoryPullRequestRecord,
+    canaryReservationDigest: Sha256Digest | null
   ): Promise<boolean> {
     const hasPolicy = evidence.bundle.items.some(
       (item) =>
@@ -315,6 +342,14 @@ export class FactoryPullRequestDispatchService {
         candidate.producer.id === this.#identity.brokerId
     );
     if (!hasPolicy || item === undefined) return false;
+    const canaryClaims = item.claims.filter(({ name }) => name === "canary-reservation-digest");
+    if (
+      canaryReservationDigest === null
+        ? canaryClaims.length !== 0
+        : canaryClaims.length !== 1 || canaryClaims[0]?.value !== canaryReservationDigest
+    ) {
+      return false;
+    }
     const json = await this.dependencies.artifacts.readText(
       item.artifact.digest,
       Math.max(1, item.artifact.sizeBytes + 1)
@@ -353,6 +388,16 @@ export class FactoryPullRequestDispatchService {
         };
   }
 
+  async #assertCanaryAuthority(
+    task: FactoryTaskSnapshot,
+    coordinates: FactoryPullRequestCanaryCoordinates | undefined
+  ): Promise<void> {
+    const digest = await this.dependencies.canaryAuthority.require(task, coordinates);
+    if (digest !== (coordinates?.reservationDigest ?? null)) {
+      throw new Error("PR dispatch canary authority returned different durable coordinates.");
+    }
+  }
+
   #journalDependencies(): FactoryPullRequestDispatchJournalDependencies {
     return {
       dispatches: this.dependencies.dispatches,
@@ -368,6 +413,19 @@ export class FactoryPullRequestDispatchService {
     if (task === null) throw new Error(`Factory task ${taskId} does not exist.`);
     return task;
   }
+}
+
+function canaryCoordinates(
+  snapshot: FactoryPullRequestDispatchSnapshot
+): FactoryPullRequestCanaryCoordinates | undefined {
+  const run = snapshot.run;
+  return run.schemaVersion === "agentlab.pull-request-dispatch.v2"
+    ? {
+        reservationDigest: run.canaryReservationDigest,
+        schedulePolicyDigest: run.schedulePolicyDigest,
+        roleIdentityPolicyDigest: run.roleIdentityPolicyDigest
+      }
+    : undefined;
 }
 
 function validateBrokerRecord(

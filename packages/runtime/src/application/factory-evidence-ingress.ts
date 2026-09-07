@@ -26,7 +26,7 @@ const appendInputSchema = z
   .strict();
 
 export type FactoryEvidenceChannel =
-  "control-plane" | "execution-observer" | "gate-observer" | "pr-broker";
+  "control-plane" | "execution-observer" | "gate-observer" | "pr-broker" | "merge-broker";
 
 const factoryEvidenceCredentialBrand: unique symbol = Symbol("factory-evidence-credential");
 
@@ -65,12 +65,12 @@ export class FactoryEvidenceIngress {
       if (this.#bindings.has(binding.credential)) {
         throw new Error("Factory evidence credentials must be unique object capabilities.");
       }
-      if (binding.channel === "pr-broker") {
+      if (binding.channel === "pr-broker" || binding.channel === "merge-broker") {
         if (binding.producerId === undefined || !validProducerId(binding.producerId)) {
-          throw new Error("A PR-broker evidence binding requires an exact producer ID.");
+          throw new Error("A remote-write evidence binding requires an exact producer ID.");
         }
       } else if (binding.producerId !== undefined) {
-        throw new Error("Only a PR-broker evidence binding may declare a producer ID.");
+        throw new Error("Only a remote-write evidence binding may declare a producer ID.");
       }
       this.#bindings.set(binding.credential, { ...binding });
     }
@@ -296,7 +296,9 @@ function assertChannelMayPublish(binding: FactoryEvidenceBinding, item: Evidence
         ? executionObserverItem(item)
         : binding.channel === "gate-observer"
           ? gateObserverItem(item)
-          : brokerItem(item, binding.producerId ?? "");
+          : binding.channel === "pr-broker"
+            ? brokerItem(item, binding.producerId ?? "")
+            : mergerItem(item, binding.producerId ?? "");
   if (!allowed) {
     throw new ConflictError(
       `Evidence channel ${binding.channel} cannot assert ${item.kind} as ${item.producer.kind}/${item.producer.role}/${item.producer.id}.`
@@ -307,6 +309,7 @@ function assertChannelMayPublish(binding: FactoryEvidenceBinding, item: Evidence
 function controlPlaneItem(item: EvidenceItem): boolean {
   if (item.kind === "policy") return policyActor(item);
   if (item.kind === "execution") return policyActor(item);
+  if (item.kind === "merge") return policyActor(item);
   return (
     (item.kind === "skill" ||
       item.kind === "patch" ||
@@ -361,6 +364,15 @@ function brokerItem(item: EvidenceItem, producerId: string): boolean {
     item.kind === "pull-request" &&
     item.producer.kind === "broker" &&
     item.producer.role === "pr-broker" &&
+    item.producer.id === producerId
+  );
+}
+
+function mergerItem(item: EvidenceItem, producerId: string): boolean {
+  return (
+    item.kind === "merge" &&
+    item.producer.kind === "broker" &&
+    item.producer.role === "merger" &&
     item.producer.id === producerId
   );
 }

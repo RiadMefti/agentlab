@@ -15,10 +15,209 @@ export type CliAction =
       readonly configPath: string;
       readonly requestPath: string;
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
-      readonly confirmation: "register-request";
+      readonly confirmation: "register-request" | "register-scheduled-request";
     }
   | { readonly kind: "factory-broker-preflight"; readonly configPath: string }
   | { readonly kind: "factory-worker-preflight"; readonly configPath: string }
+  | { readonly kind: "factory-orchestration-render"; readonly configPath: string }
+  | { readonly kind: "factory-operations-health"; readonly configPath: string }
+  | {
+      readonly kind: "factory-incident-containment";
+      readonly configPath: string;
+      readonly expectedHealthPolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+    }
+  | { readonly kind: "factory-autonomous-merge-admission-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-autonomous-merge-admit";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly observationDigest: `sha256:${string}`;
+      readonly canaryReservationDigest: `sha256:${string}`;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-autonomous-merge-admission-tick";
+      readonly configPath: string;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | { readonly kind: "factory-autonomous-merger-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-autonomous-merger-tick";
+      readonly configPath: string;
+      readonly expectedMergePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | { readonly kind: "factory-maintenance-discovery-preflight"; readonly configPath: string }
+  | {
+      readonly kind: "factory-external-pull-request-discovery-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-discovery-tick";
+      readonly configPath: string;
+      readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-review-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-review-tick";
+      readonly configPath: string;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+      readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-feedback-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-feedback-tick";
+      readonly configPath: string;
+      readonly expectedFeedbackPolicyDigest: `sha256:${string}`;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-admission-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-admission-tick";
+      readonly configPath: string;
+      readonly expectedAdmissionPolicyDigest: `sha256:${string}`;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+      readonly expectedFeedbackPolicyDigest: `sha256:${string}`;
+      readonly expectedRepairExecutionPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedGateProfileDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-execution-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-execution-tick";
+      readonly configPath: string;
+      readonly expectedRepairExecutionPolicyDigest: `sha256:${string}`;
+      readonly expectedAdmissionPolicyDigest: `sha256:${string}`;
+      readonly expectedReviewPolicyDigest: `sha256:${string}`;
+      readonly expectedFeedbackPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedGateProfileDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-qualification-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-repair-qualification-tick";
+      readonly configPath: string;
+      readonly expectedQualificationPolicyDigest: `sha256:${string}`;
+      readonly expectedRepairExecutionPolicyDigest: `sha256:${string}`;
+      readonly expectedCostPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedGateProfileDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-replacement-draft-preflight";
+      readonly configPath: string;
+    }
+  | {
+      readonly kind: "factory-external-pull-request-replacement-draft-tick";
+      readonly configPath: string;
+      readonly expectedPublicationPolicyDigest: `sha256:${string}`;
+      readonly expectedQualificationPolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-maintenance-discovery-tick";
+      readonly configPath: string;
+      readonly expectedDiscoveryPolicyDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+      readonly expectedPreparationGrantDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-eval-assess";
+      readonly configPath: string;
+      readonly runPath: string;
+      readonly confirmation: "assess-eval";
+    }
+  | {
+      readonly kind: "factory-eval-producer-preflight";
+      readonly configPath: string;
+      readonly jobPath: string;
+      readonly expectedJobDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-eval-produce";
+      readonly configPath: string;
+      readonly jobPath: string;
+      readonly expectedJobDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-eval-sign";
+      readonly configPath: string;
+      readonly runPath: string;
+      readonly confirmation: "sign-eval";
+    }
+  | {
+      readonly kind: "factory-eval-attest";
+      readonly configPath: string;
+      readonly assessmentDigest: `sha256:${string}`;
+      readonly attestationPath: string;
+      readonly confirmation: "attest-eval";
+    }
+  | {
+      readonly kind: "factory-eval-inspect";
+      readonly configPath: string;
+      readonly assessmentDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-canary-authorize";
+      readonly configPath: string;
+      readonly attestationDigest: `sha256:${string}`;
+      readonly requestPath: string;
+      readonly confirmation: "authorize-canary";
+    }
+  | {
+      readonly kind: "factory-canary-reserve";
+      readonly configPath: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly kind: "factory-canary-admission-tick";
+      readonly configPath: string;
+      readonly expectedCohortDigest: `sha256:${string}`;
+      readonly expectedCandidateDigest: `sha256:${string}`;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-scheduler-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
   | {
       readonly kind: "factory-worker-run";
       readonly configPath: string;
@@ -34,6 +233,13 @@ export type CliAction =
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
       readonly confirmation: "repair-pr";
     }
+  | {
+      readonly kind: "factory-worker-pr-repair-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
   | { readonly kind: "factory-authority-status"; readonly configPath: string }
   | {
       readonly kind: "factory-broker-authority";
@@ -44,11 +250,57 @@ export type CliAction =
       readonly confirmation: "enable-draft-broker" | "disable-draft-broker";
     }
   | {
+      readonly kind: "factory-scheduler-authority";
+      readonly configPath: string;
+      readonly expectedEnabled: boolean;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly confirmation: "enable-scheduler" | "disable-scheduler";
+    }
+  | {
+      readonly kind: "factory-merge-broker-authority";
+      readonly configPath: string;
+      readonly expectedEnabled: boolean;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly confirmation: "enable-autonomous-merge" | "disable-autonomous-merge";
+    }
+  | {
       readonly kind: "factory-broker-open-draft";
       readonly configPath: string;
       readonly taskId: string;
       readonly expectedPolicyBundleDigest: `sha256:${string}`;
       readonly confirmation: "confirm-draft";
+    }
+  | {
+      readonly kind: "factory-broker-open-canary-draft";
+      readonly configPath: string;
+      readonly taskId: string;
+      readonly reservationDigest: `sha256:${string}`;
+      readonly schedulePolicyDigest: `sha256:${string}`;
+      readonly roleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedPolicyBundleDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-broker-canary-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-broker-pr-maintenance-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+    }
+  | {
+      readonly kind: "factory-broker-pr-update-tick";
+      readonly configPath: string;
+      readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+      readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+      readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
     }
   | {
       readonly kind: "factory-broker-observe-pr";
@@ -80,6 +332,720 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const value = input[0];
     if (value === "--help" || value === "-h") return { kind: "help" };
     if (value === "--version" || value === "-v") return { kind: "version" };
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "orchestration-render" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-orchestration-render", configPath };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "operations-health" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-operations-health", configPath };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "incident-containment" &&
+    input[2] === "--config" &&
+    input[4] === "--health-policy" &&
+    input[6] === "--daily-quota"
+  ) {
+    const configPath = input[3];
+    const expectedHealthPolicyDigest = input[5];
+    const expectedDailyQuotaPolicyDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedHealthPolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest)
+    ) {
+      return {
+        kind: "factory-incident-containment",
+        configPath,
+        expectedHealthPolicyDigest,
+        expectedDailyQuotaPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-discovery-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-discovery-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-discovery-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--discovery-policy" &&
+    input[6] === "--schedule-policy"
+  ) {
+    const configPath = input[3];
+    const expectedDiscoveryPolicyDigest = input[5];
+    const expectedSchedulePolicyDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedDiscoveryPolicyDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-discovery-tick",
+        configPath,
+        expectedDiscoveryPolicyDigest,
+        expectedSchedulePolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-admission-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-repair-admission-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 18 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-admission-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--admission-policy" &&
+    input[6] === "--review-policy" &&
+    input[8] === "--feedback-policy" &&
+    input[10] === "--repair-execution-policy" &&
+    input[12] === "--cost-policy" &&
+    input[14] === "--role-policy" &&
+    input[16] === "--gate-profile"
+  ) {
+    const configPath = input[3];
+    const expectedAdmissionPolicyDigest = input[5];
+    const expectedReviewPolicyDigest = input[7];
+    const expectedFeedbackPolicyDigest = input[9];
+    const expectedRepairExecutionPolicyDigest = input[11];
+    const expectedCostPolicyDigest = input[13];
+    const expectedRoleIdentityPolicyDigest = input[15];
+    const expectedGateProfileDigest = input[17];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedAdmissionPolicyDigest) &&
+      isSha256Digest(expectedReviewPolicyDigest) &&
+      isSha256Digest(expectedFeedbackPolicyDigest) &&
+      isSha256Digest(expectedRepairExecutionPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedGateProfileDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-repair-admission-tick",
+        configPath,
+        expectedAdmissionPolicyDigest,
+        expectedReviewPolicyDigest,
+        expectedFeedbackPolicyDigest,
+        expectedRepairExecutionPolicyDigest,
+        expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-execution-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-repair-execution-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-qualification-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-repair-qualification-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 18 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-execution-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--repair-execution-policy" &&
+    input[6] === "--admission-policy" &&
+    input[8] === "--review-policy" &&
+    input[10] === "--feedback-policy" &&
+    input[12] === "--cost-policy" &&
+    input[14] === "--role-policy" &&
+    input[16] === "--gate-profile"
+  ) {
+    const configPath = input[3];
+    const expectedRepairExecutionPolicyDigest = input[5];
+    const expectedAdmissionPolicyDigest = input[7];
+    const expectedReviewPolicyDigest = input[9];
+    const expectedFeedbackPolicyDigest = input[11];
+    const expectedCostPolicyDigest = input[13];
+    const expectedRoleIdentityPolicyDigest = input[15];
+    const expectedGateProfileDigest = input[17];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedRepairExecutionPolicyDigest) &&
+      isSha256Digest(expectedAdmissionPolicyDigest) &&
+      isSha256Digest(expectedReviewPolicyDigest) &&
+      isSha256Digest(expectedFeedbackPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedGateProfileDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-repair-execution-tick",
+        configPath,
+        expectedRepairExecutionPolicyDigest,
+        expectedAdmissionPolicyDigest,
+        expectedReviewPolicyDigest,
+        expectedFeedbackPolicyDigest,
+        expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest
+      };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-repair-qualification-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--qualification-policy" &&
+    input[6] === "--repair-execution-policy" &&
+    input[8] === "--cost-policy" &&
+    input[10] === "--role-policy" &&
+    input[12] === "--gate-profile"
+  ) {
+    const configPath = input[3];
+    const expectedQualificationPolicyDigest = input[5];
+    const expectedRepairExecutionPolicyDigest = input[7];
+    const expectedCostPolicyDigest = input[9];
+    const expectedRoleIdentityPolicyDigest = input[11];
+    const expectedGateProfileDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedQualificationPolicyDigest) &&
+      isSha256Digest(expectedRepairExecutionPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedGateProfileDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-repair-qualification-tick",
+        configPath,
+        expectedQualificationPolicyDigest,
+        expectedRepairExecutionPolicyDigest,
+        expectedCostPolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedGateProfileDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-replacement-draft-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath))
+      return { kind: "factory-external-pull-request-replacement-draft-preflight", configPath };
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-replacement-draft-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--publication-policy" &&
+    input[6] === "--qualification-policy" &&
+    input[8] === "--role-policy"
+  ) {
+    const configPath = input[3];
+    const expectedPublicationPolicyDigest = input[5];
+    const expectedQualificationPolicyDigest = input[7];
+    const expectedRoleIdentityPolicyDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedPublicationPolicyDigest) &&
+      isSha256Digest(expectedQualificationPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-replacement-draft-tick",
+        configPath,
+        expectedPublicationPolicyDigest,
+        expectedQualificationPolicyDigest,
+        expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-review-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-review-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-review-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--review-policy" &&
+    input[6] === "--discovery-policy" &&
+    input[8] === "--cost-policy"
+  ) {
+    const configPath = input[3];
+    const expectedReviewPolicyDigest = input[5];
+    const expectedDiscoveryPolicyDigest = input[7];
+    const expectedCostPolicyDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedReviewPolicyDigest) &&
+      isSha256Digest(expectedDiscoveryPolicyDigest) &&
+      isSha256Digest(expectedCostPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-review-tick",
+        configPath,
+        expectedReviewPolicyDigest,
+        expectedDiscoveryPolicyDigest,
+        expectedCostPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-feedback-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-external-pull-request-feedback-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    input[1] === "external-pr-feedback-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--feedback-policy" &&
+    input[6] === "--review-policy"
+  ) {
+    const configPath = input[3];
+    const expectedFeedbackPolicyDigest = input[5];
+    const expectedReviewPolicyDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedFeedbackPolicyDigest) &&
+      isSha256Digest(expectedReviewPolicyDigest)
+    ) {
+      return {
+        kind: "factory-external-pull-request-feedback-tick",
+        configPath,
+        expectedFeedbackPolicyDigest,
+        expectedReviewPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "maintenance-discovery-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-maintenance-discovery-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "maintenance-discovery-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--discovery-policy" &&
+    input[6] === "--schedule-policy" &&
+    input[8] === "--policy" &&
+    input[10] === "--preparation-grant" &&
+    input[12] === "--role-policy"
+  ) {
+    const configPath = input[3];
+    const expectedDiscoveryPolicyDigest = input[5];
+    const expectedSchedulePolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    const expectedPreparationGrantDigest = input[11];
+    const expectedRoleIdentityPolicyDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedDiscoveryPolicyDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+      isSha256Digest(expectedPreparationGrantDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-maintenance-discovery-tick",
+        configPath,
+        expectedDiscoveryPolicyDigest,
+        expectedSchedulePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedPreparationGrantDigest,
+        expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 8 &&
+    input[0] === "factory" &&
+    (input[1] === "eval-producer-preflight" || input[1] === "eval-produce") &&
+    input[2] === "--config" &&
+    input[4] === "--job" &&
+    input[6] === "--job-digest"
+  ) {
+    const configPath = input[3];
+    const jobPath = input[5];
+    const expectedJobDigest = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isNormalizedAbsolutePath(jobPath) &&
+      isSha256Digest(expectedJobDigest)
+    ) {
+      return {
+        kind:
+          input[1] === "eval-producer-preflight"
+            ? "factory-eval-producer-preflight"
+            : "factory-eval-produce",
+        configPath,
+        jobPath,
+        expectedJobDigest
+      };
+    }
+  }
+  if (
+    input.length === 7 &&
+    input[0] === "factory" &&
+    input[1] === "eval-sign" &&
+    input[2] === "--config" &&
+    input[4] === "--run" &&
+    input[6] === "--confirm-sign"
+  ) {
+    const configPath = input[3];
+    const runPath = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
+      return { kind: "factory-eval-sign", configPath, runPath, confirmation: "sign-eval" };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "canary-admission-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--cohort" &&
+    input[6] === "--candidate" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--role-policy" &&
+    input[12] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedCohortDigest = input[5];
+    const expectedCandidateDigest = input[7];
+    const expectedSchedulePolicyDigest = input[9];
+    const expectedRoleIdentityPolicyDigest = input[11];
+    const expectedFactoryPolicyBundleDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedCohortDigest) &&
+      isSha256Digest(expectedCandidateDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-canary-admission-tick",
+        configPath,
+        expectedCohortDigest,
+        expectedCandidateDigest,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
+  }
+  if (
+    input.length === 6 &&
+    input[0] === "factory" &&
+    input[1] === "canary-reserve" &&
+    input[2] === "--config" &&
+    input[4] === "--task"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isFactoryTaskId(taskId)) {
+      return { kind: "factory-canary-reserve", configPath, taskId };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "broker-canary-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--role-policy" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedRoleIdentityPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-canary-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "broker-pr-maintenance-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--role-policy" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedRoleIdentityPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-pr-maintenance-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "broker-pr-update-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--role-policy" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedRoleIdentityPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-pr-update-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "broker-open-canary-draft" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--reservation" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--role-policy" &&
+    input[12] === "--policy"
+  ) {
+    const configPath = input[3];
+    const taskId = input[5];
+    const reservationDigest = input[7];
+    const schedulePolicyDigest = input[9];
+    const roleIdentityPolicyDigest = input[11];
+    const expectedPolicyBundleDigest = input[13];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(reservationDigest) &&
+      isSha256Digest(schedulePolicyDigest) &&
+      isSha256Digest(roleIdentityPolicyDigest) &&
+      isSha256Digest(expectedPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-broker-open-canary-draft",
+        configPath,
+        taskId,
+        reservationDigest,
+        schedulePolicyDigest,
+        roleIdentityPolicyDigest,
+        expectedPolicyBundleDigest
+      };
+    }
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "eval-attest" &&
+    input[2] === "--config" &&
+    input[4] === "--assessment" &&
+    input[6] === "--attestation" &&
+    input[8] === "--confirm-attest"
+  ) {
+    const configPath = input[3];
+    const assessmentDigest = input[5];
+    const attestationPath = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(assessmentDigest) &&
+      isNormalizedAbsolutePath(attestationPath)
+    ) {
+      return {
+        kind: "factory-eval-attest",
+        configPath,
+        assessmentDigest,
+        attestationPath,
+        confirmation: "attest-eval"
+      };
+    }
+  }
+  if (
+    input.length === 7 &&
+    input[0] === "factory" &&
+    input[1] === "eval-assess" &&
+    input[2] === "--config" &&
+    input[4] === "--run" &&
+    input[6] === "--confirm-assess"
+  ) {
+    const configPath = input[3];
+    const runPath = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isNormalizedAbsolutePath(runPath)) {
+      return { kind: "factory-eval-assess", configPath, runPath, confirmation: "assess-eval" };
+    }
+  }
+  if (
+    input.length === 6 &&
+    input[0] === "factory" &&
+    input[1] === "eval-inspect" &&
+    input[2] === "--config" &&
+    input[4] === "--assessment"
+  ) {
+    const configPath = input[3];
+    const assessmentDigest = input[5];
+    if (isNormalizedAbsolutePath(configPath) && isSha256Digest(assessmentDigest)) {
+      return { kind: "factory-eval-inspect", configPath, assessmentDigest };
+    }
+  }
+  if (
+    input.length === 9 &&
+    input[0] === "factory" &&
+    input[1] === "canary-authorize" &&
+    input[2] === "--config" &&
+    input[4] === "--attestation" &&
+    input[6] === "--request" &&
+    input[8] === "--confirm-authorize-canary"
+  ) {
+    const configPath = input[3];
+    const attestationDigest = input[5];
+    const requestPath = input[7];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(attestationDigest) &&
+      isNormalizedAbsolutePath(requestPath)
+    ) {
+      return {
+        kind: "factory-canary-authorize",
+        configPath,
+        attestationDigest,
+        requestPath,
+        confirmation: "authorize-canary"
+      };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "scheduler-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--daily-quota" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedDailyQuotaPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-scheduler-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
+        expectedFactoryPolicyBundleDigest
+      };
+    }
   }
   if (
     input.length === 11 &&
@@ -114,6 +1080,38 @@ export function parseCliArguments(input: readonly string[]): CliAction {
   if (
     input.length === 11 &&
     input[0] === "factory" &&
+    input[1] === "merge-authority" &&
+    input[2] === "--config" &&
+    input[4] === "--expected" &&
+    input[6] === "--to" &&
+    input[8] === "--reason"
+  ) {
+    const configPath = input[3];
+    const expectedEnabled = authorityState(input[5]);
+    const enabled = authorityState(input[7]);
+    const reason = input[9];
+    const confirmation = mergeAuthorityConfirmation(input[10], enabled);
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      expectedEnabled !== null &&
+      enabled !== null &&
+      expectedEnabled !== enabled &&
+      isFactoryAuthorityReason(reason) &&
+      confirmation !== null
+    ) {
+      return {
+        kind: "factory-merge-broker-authority",
+        configPath,
+        expectedEnabled,
+        enabled,
+        reason,
+        confirmation
+      };
+    }
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
     input[1] === "worker-repair-pr" &&
     input[2] === "--config" &&
     input[4] === "--task" &&
@@ -138,6 +1136,34 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         authorizationDigest,
         expectedPolicyBundleDigest,
         confirmation: "repair-pr"
+      };
+    }
+  }
+  if (
+    input.length === 10 &&
+    input[0] === "factory" &&
+    input[1] === "worker-pr-repair-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--schedule-policy" &&
+    input[6] === "--role-policy" &&
+    input[8] === "--policy"
+  ) {
+    const configPath = input[3];
+    const expectedSchedulePolicyDigest = input[5];
+    const expectedRoleIdentityPolicyDigest = input[7];
+    const expectedFactoryPolicyBundleDigest = input[9];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest)
+    ) {
+      return {
+        kind: "factory-worker-pr-repair-tick",
+        configPath,
+        expectedSchedulePolicyDigest,
+        expectedRoleIdentityPolicyDigest,
+        expectedFactoryPolicyBundleDigest
       };
     }
   }
@@ -241,7 +1267,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     input[2] === "--config" &&
     input[4] === "--request" &&
     input[6] === "--policy" &&
-    input[8] === "--confirm-register"
+    (input[8] === "--confirm-register" || input[8] === "--confirm-register-scheduled")
   ) {
     const configPath = input[3];
     const requestPath = input[5];
@@ -256,7 +1282,10 @@ export function parseCliArguments(input: readonly string[]): CliAction {
         configPath,
         requestPath,
         expectedPolicyBundleDigest,
-        confirmation: "register-request"
+        confirmation:
+          input[8] === "--confirm-register-scheduled"
+            ? "register-scheduled-request"
+            : "register-request"
       };
     }
   }
@@ -269,6 +1298,137 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     const configPath = input[3];
     if (isNormalizedAbsolutePath(configPath)) {
       return { kind: "factory-broker-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admission-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-autonomous-merge-admission-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 20 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admit" &&
+    input[2] === "--config" &&
+    input[4] === "--task" &&
+    input[6] === "--observation" &&
+    input[8] === "--reservation" &&
+    input[10] === "--merge-policy" &&
+    input[12] === "--policy" &&
+    input[14] === "--schedule-policy" &&
+    input[16] === "--daily-quota" &&
+    input[18] === "--role-policy"
+  ) {
+    const [configPath, taskId] = [input[3], input[5]];
+    const observationDigest = input[7];
+    const canaryReservationDigest = input[9];
+    const expectedMergePolicyDigest = input[11];
+    const expectedFactoryPolicyBundleDigest = input[13];
+    const expectedSchedulePolicyDigest = input[15];
+    const expectedDailyQuotaPolicyDigest = input[17];
+    const expectedRoleIdentityPolicyDigest = input[19];
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      isFactoryTaskId(taskId) &&
+      isSha256Digest(observationDigest) &&
+      isSha256Digest(canaryReservationDigest) &&
+      isSha256Digest(expectedMergePolicyDigest) &&
+      isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+      isSha256Digest(expectedSchedulePolicyDigest) &&
+      isSha256Digest(expectedDailyQuotaPolicyDigest) &&
+      isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ) {
+      return {
+        kind: "factory-autonomous-merge-admit",
+        configPath,
+        taskId,
+        observationDigest,
+        canaryReservationDigest,
+        expectedMergePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
+        expectedRoleIdentityPolicyDigest
+      };
+    }
+  }
+  if (
+    input.length === 4 &&
+    input[0] === "factory" &&
+    input[1] === "merger-preflight" &&
+    input[2] === "--config"
+  ) {
+    const configPath = input[3];
+    if (isNormalizedAbsolutePath(configPath)) {
+      return { kind: "factory-autonomous-merger-preflight", configPath };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "merge-admission-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--merge-policy" &&
+    input[6] === "--policy" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--daily-quota" &&
+    input[12] === "--role-policy"
+  ) {
+    const parsed = mergeTickCoordinates(input);
+    if (parsed !== null) {
+      return { kind: "factory-autonomous-merge-admission-tick", ...parsed };
+    }
+  }
+  if (
+    input.length === 14 &&
+    input[0] === "factory" &&
+    input[1] === "merger-tick" &&
+    input[2] === "--config" &&
+    input[4] === "--merge-policy" &&
+    input[6] === "--policy" &&
+    input[8] === "--schedule-policy" &&
+    input[10] === "--daily-quota" &&
+    input[12] === "--role-policy"
+  ) {
+    const parsed = mergeTickCoordinates(input);
+    if (parsed !== null) return { kind: "factory-autonomous-merger-tick", ...parsed };
+  }
+  if (
+    input.length === 11 &&
+    input[0] === "factory" &&
+    input[1] === "scheduler-authority" &&
+    input[2] === "--config" &&
+    input[4] === "--expected" &&
+    input[6] === "--to" &&
+    input[8] === "--reason"
+  ) {
+    const configPath = input[3];
+    const expectedEnabled = authorityState(input[5]);
+    const enabled = authorityState(input[7]);
+    const reason = input[9];
+    const confirmation = schedulerAuthorityConfirmation(input[10], enabled);
+    if (
+      isNormalizedAbsolutePath(configPath) &&
+      expectedEnabled !== null &&
+      enabled !== null &&
+      expectedEnabled !== enabled &&
+      isFactoryAuthorityReason(reason) &&
+      confirmation !== null
+    ) {
+      return {
+        kind: "factory-scheduler-authority",
+        configPath,
+        expectedEnabled,
+        enabled,
+        reason,
+        confirmation
+      };
     }
   }
   if (
@@ -352,7 +1512,7 @@ export function parseCliArguments(input: readonly string[]): CliAction {
     }
   }
   throw new Error(
-    "Usage: agentlab [factory intake-preflight|intake-register ...|broker-preflight|worker-preflight|worker-run ...|worker-repair-pr ...|authority-status|broker-authority ...|broker-open-draft ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
+    "Usage: agentlab [factory intake-preflight|intake-register ...|maintenance-discovery-preflight|maintenance-discovery-tick ...|external-pr-discovery-preflight|external-pr-discovery-tick ...|external-pr-review-preflight|external-pr-review-tick ...|external-pr-feedback-preflight|external-pr-feedback-tick ...|external-pr-repair-admission-preflight|external-pr-repair-admission-tick ...|external-pr-repair-execution-preflight|external-pr-repair-execution-tick ...|external-pr-repair-qualification-preflight|external-pr-repair-qualification-tick ...|external-pr-replacement-draft-preflight|external-pr-replacement-draft-tick ...|eval-producer-preflight ...|eval-produce ...|eval-sign ...|eval-assess ...|eval-attest ...|eval-inspect ...|canary-authorize ...|canary-reserve ...|canary-admission-tick ...|broker-preflight|worker-preflight|orchestration-render|operations-health|incident-containment|worker-run ...|worker-repair-pr ...|worker-pr-repair-tick ...|scheduler-tick ...|authority-status|scheduler-authority ...|broker-authority ...|merge-authority ...|merge-admission-preflight|merge-admit ...|merge-admission-tick ...|merger-preflight|merger-tick ...|broker-open-draft ...|broker-open-canary-draft ...|broker-canary-tick ...|broker-pr-maintenance-tick ...|broker-pr-update-tick ...|broker-update-draft ...|broker-observe-pr ...|broker-authorize-repair ...]"
   );
 }
 
@@ -360,6 +1520,37 @@ function authorityState(value: string | undefined): boolean | null {
   if (value === "enabled") return true;
   if (value === "disabled") return false;
   return null;
+}
+
+function mergeTickCoordinates(input: readonly string[]): {
+  readonly configPath: string;
+  readonly expectedMergePolicyDigest: `sha256:${string}`;
+  readonly expectedFactoryPolicyBundleDigest: `sha256:${string}`;
+  readonly expectedSchedulePolicyDigest: `sha256:${string}`;
+  readonly expectedDailyQuotaPolicyDigest: `sha256:${string}`;
+  readonly expectedRoleIdentityPolicyDigest: `sha256:${string}`;
+} | null {
+  const configPath = input[3];
+  const expectedMergePolicyDigest = input[5];
+  const expectedFactoryPolicyBundleDigest = input[7];
+  const expectedSchedulePolicyDigest = input[9];
+  const expectedDailyQuotaPolicyDigest = input[11];
+  const expectedRoleIdentityPolicyDigest = input[13];
+  return isNormalizedAbsolutePath(configPath) &&
+    isSha256Digest(expectedMergePolicyDigest) &&
+    isSha256Digest(expectedFactoryPolicyBundleDigest) &&
+    isSha256Digest(expectedSchedulePolicyDigest) &&
+    isSha256Digest(expectedDailyQuotaPolicyDigest) &&
+    isSha256Digest(expectedRoleIdentityPolicyDigest)
+    ? {
+        configPath,
+        expectedMergePolicyDigest,
+        expectedFactoryPolicyBundleDigest,
+        expectedSchedulePolicyDigest,
+        expectedDailyQuotaPolicyDigest,
+        expectedRoleIdentityPolicyDigest
+      }
+    : null;
 }
 
 function authorityConfirmation(
@@ -371,6 +1562,28 @@ function authorityConfirmation(
   }
   if (enabled === false && value === "--confirm-disable-draft-broker") {
     return "disable-draft-broker";
+  }
+  return null;
+}
+
+function schedulerAuthorityConfirmation(
+  value: string | undefined,
+  enabled: boolean | null
+): "enable-scheduler" | "disable-scheduler" | null {
+  if (enabled === true && value === "--confirm-enable-scheduler") return "enable-scheduler";
+  if (enabled === false && value === "--confirm-disable-scheduler") return "disable-scheduler";
+  return null;
+}
+
+function mergeAuthorityConfirmation(
+  value: string | undefined,
+  enabled: boolean | null
+): "enable-autonomous-merge" | "disable-autonomous-merge" | null {
+  if (enabled === true && value === "--confirm-enable-autonomous-merge") {
+    return "enable-autonomous-merge";
+  }
+  if (enabled === false && value === "--confirm-disable-autonomous-merge") {
+    return "disable-autonomous-merge";
   }
   return null;
 }
@@ -389,24 +1602,108 @@ export const helpText = `agentlab
 Open the local terminal UI, then choose or add a project folder.
 
 Factory authority:
+  agentlab factory external-pr-discovery-preflight --config <absolute-path>
+      Verify the exact repository and read-only GitHub App boundary without recording inventory.
+  agentlab factory external-pr-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256>
+      Record one bounded immutable inventory of external open PR heads; never review, repair, or write GitHub.
+  agentlab factory external-pr-review-preflight --config <absolute-path>
+      Verify pinned local objects, providers, cost rules, read-only skills, and worker identity without running a model.
+  agentlab factory external-pr-review-tick --config <absolute-path> --review-policy <sha256> --discovery-policy <sha256> --cost-policy <sha256>
+      Produce bounded independent local review evidence; never fetch, comment, repair, approve, or write GitHub.
+  agentlab factory external-pr-feedback-preflight --config <absolute-path>
+      Verify the exact feedback-only GitHub App, repository, publisher identity, and broker switch without writing.
+  agentlab factory external-pr-feedback-tick --config <absolute-path> --feedback-policy <sha256> --review-policy <sha256>
+      Publish completed evidence as deterministic COMMENT reviews; never approve, repair, push, merge, or release.
+
+  agentlab factory external-pr-repair-admission-preflight --config <absolute-path>
+      Verify reviewed repair limits and the scheduler switch without running a model or contacting GitHub.
+
+  agentlab factory external-pr-repair-admission-tick --config <absolute-path> --admission-policy <sha256> --review-policy <sha256> --feedback-policy <sha256> --repair-execution-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
+      Record bounded replacement-draft repair authority from exact completed feedback; never execute, write remotely, merge, or release.
+  agentlab factory external-pr-repair-execution-preflight --config <absolute-path>
+      Verify the credentialless repair worker, exact policies, provider, skills, and scheduler without running a model.
+  agentlab factory external-pr-repair-execution-tick --config <absolute-path> --repair-execution-policy <sha256> --admission-policy <sha256> --review-policy <sha256> --feedback-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
+      Consume one admitted finding set in an isolated exact-head worktree and emit only a local patch bundle; never push, merge, deploy, or release.
+  agentlab factory external-pr-repair-qualification-preflight --config <absolute-path>
+      Verify exact gate executables, read-only reviewers, policy pins, and worker identity without executing them.
+  agentlab factory external-pr-repair-qualification-tick --config <absolute-path> --qualification-policy <sha256> --repair-execution-policy <sha256> --cost-policy <sha256> --role-policy <sha256> --gate-profile <sha256>
+      Run the seven strict gates and independent review over an exact repaired patch; never publish, push, merge, deploy, or release.
+  agentlab factory external-pr-replacement-draft-preflight --config <absolute-path>
+      Verify the distinct broker identity, exact policy pins, and both authority switches without writing GitHub.
+  agentlab factory external-pr-replacement-draft-tick --config <absolute-path> --publication-policy <sha256> --qualification-policy <sha256> --role-policy <sha256>
+      Publish qualified repairs to a new base-repository branch and draft PR; never touch contributor branches, force-push, approve, merge, deploy, or release.
+  agentlab factory maintenance-discovery-preflight --config <absolute-path>
+      Verify the credentialless scout, exact repository, scheduler authority, provider, policy, and skills without running a model.
+  agentlab factory maintenance-discovery-tick --config <absolute-path> --discovery-policy <sha256> --schedule-policy <sha256> --policy <sha256> --preparation-grant <sha256> --role-policy <sha256>
+      Discover one bounded daily set of evidenced R1 maintenance candidates and register only policy-admitted scheduled intake.
   agentlab factory intake-preflight --config <absolute-path>
       Verify local repository, conversation, policy, authority, cost, and skill-package readiness.
-  agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register
-      Register one owner-authored feature or bug report under the exact reviewed policy.
+  agentlab factory intake-register --config <absolute-path> --request <absolute-path> --policy <sha256> --confirm-register[-scheduled]
+      Register one owner-authored feature or bug report for explicit or autonomous execution.
+  agentlab factory eval-producer-preflight --config <absolute-path> --job <absolute-path> --job-digest <sha256>
+      Verify the exact offline case bank, fixtures, harnesses, grader, executable hashes, budgets, and sandbox contract without executing a trial.
+  agentlab factory eval-produce --config <absolute-path> --job <absolute-path> --job-digest <sha256>
+      Produce or recover one complete matched content-addressed eval run; never assess, sign, authorize, schedule, or write remotely.
+  agentlab factory eval-assess --config <absolute-path> --run <absolute-path> --confirm-assess
+      Record complete matched trials and compute a deterministic promotion assessment; no model or remote access.
+  agentlab factory eval-sign --config <absolute-path> --run <absolute-path> --confirm-sign
+      Sign one fresh eval run in an isolated key-bearing process with no database or remote access.
+  agentlab factory eval-attest --config <absolute-path> --assessment <sha256> --attestation <absolute-path> --confirm-attest
+      Verify one DSSE artifact against a pinned public key and exact immutable assessment, then record it.
+  agentlab factory eval-inspect --config <absolute-path> --assessment <sha256>
+      Inspect compact metrics and policy reasons for one immutable assessment.
+  agentlab factory canary-authorize --config <absolute-path> --attestation <sha256> --request <absolute-path> --confirm-authorize-canary
+      Issue one human-reviewed, expiring R0/R1 cohort that structurally forbids merge and release.
+  agentlab factory canary-reserve --config <absolute-path> --task <uuid>
+      Re-verify the pinned attested cohort and reserve one exact scheduled task ceiling; execute nothing.
+  agentlab factory canary-admission-tick --config <absolute-path> --cohort <sha256> --candidate <sha256> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Reserve one bounded page of scheduled tasks inside existing human-approved attested cohort authority.
   agentlab factory authority-status --config <absolute-path>
-      Inspect local scheduler and draft-PR authority plus recent broker authority events.
+      Inspect local scheduler and draft-PR authority plus both immutable event histories.
+  agentlab factory scheduler-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-scheduler
+      Compare-and-set only the local autonomous scheduler switch; never executes work or contacts GitHub.
   agentlab factory broker-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-draft-broker
       Compare-and-set only the local draft-PR switch; never enables scheduling or contacts GitHub.
+  agentlab factory merge-authority --config <absolute-path> --expected <enabled|disabled> --to <enabled|disabled> --reason <text> --confirm-<enable|disable>-autonomous-merge
+      Compare-and-set only the local autonomous-merge switch; never executes work or contacts GitHub.
+  agentlab factory merge-admission-preflight --config <absolute-path>
+      Verify the credentialless exact-policy admission boundary without issuing merge authority.
+  agentlab factory merge-admit --config <absolute-path> --task <uuid> --observation <sha256> --reservation <sha256> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Issue one short-lived exact-head authorization; never loads credentials or writes GitHub.
+  agentlab factory merge-admission-tick --config <absolute-path> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Admit one bounded page of clear scheduled PR heads without loading remote credentials.
+  agentlab factory merger-preflight --config <absolute-path>
+      Verify the isolated merge-queue broker boundary without changing GitHub.
+  agentlab factory merger-tick --config <absolute-path> --merge-policy <sha256> --policy <sha256> --schedule-policy <sha256> --daily-quota <sha256> --role-policy <sha256>
+      Reconcile one bounded recovery-first page through GitHub's merge queue; release remains forbidden.
   agentlab factory broker-preflight --config <absolute-path>
       Read configuration and report broker/governance readiness without changing GitHub.
   agentlab factory worker-preflight --config <absolute-path>
       Report credentialless worker, toolchain, storage, cost, and scheduler readiness.
+  agentlab factory orchestration-render --config <absolute-path>
+      Emit a content-addressed daily systemd bundle; never install, enable, or start it.
+  agentlab factory operations-health --config <absolute-path>
+
+  agentlab factory incident-containment --config <absolute-path> --health-policy <sha256> --daily-quota <sha256>
+      Emit one content-addressed query-only ledger health report; exits 0 healthy, 2 degraded, or 3 critical.
+  agentlab factory scheduler-tick --config <absolute-path> --schedule-policy <sha256> --daily-quota <sha256> --policy <sha256>
+      Run one bounded UTC slot from exact current canary reservations; stop before remote writes.
   agentlab factory worker-run --config <absolute-path> --task <uuid> --policy <sha256> --confirm-run
       Resume one governed task through preparation, execution, gates, and review; stop before remote writes.
   agentlab factory worker-repair-pr --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-repair
       Consume one exact authorization in a fresh credentialless repair worker; repeat all gates and independent review.
+  agentlab factory worker-pr-repair-tick --config <absolute-path> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Recover interrupted repairs, then consume one bounded page of exact canary repair authority.
   agentlab factory broker-open-draft --config <absolute-path> --task <uuid> --policy <sha256> --confirm-draft
       Open or reconcile only the exact governed draft after a clean broker preflight.
+  agentlab factory broker-open-canary-draft --config <absolute-path> --task <uuid> --reservation <sha256> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Open or reconcile one scheduled draft only from exact evaluated brokered-PR authority.
+  agentlab factory broker-canary-tick --config <absolute-path> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Reconcile one bounded page of exact completed scheduler handoffs into durable draft dispatches.
+  agentlab factory broker-pr-maintenance-tick --config <absolute-path> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Observe one bounded page of exact canary PR heads and authorize deterministic repairs.
+  agentlab factory broker-pr-update-tick --config <absolute-path> --schedule-policy <sha256> --role-policy <sha256> --policy <sha256>
+      Recover interrupted updates, then publish one bounded page of completed canary repairs.
   agentlab factory broker-update-draft --config <absolute-path> --task <uuid> --authorization <sha256> --policy <sha256> --confirm-update
       Advance one repaired draft branch without force-push, then record its authenticated new head.
   agentlab factory broker-observe-pr --config <absolute-path> --task <uuid> --policy <sha256> --confirm-observe

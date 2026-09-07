@@ -4,6 +4,10 @@ import {
   type FactoryAuthorityInspection,
   type FactoryBrokerAuthorityChange,
   type FactoryBrokerAuthorityCommand,
+  type FactoryMergeBrokerAuthorityChange,
+  type FactoryMergeBrokerAuthorityCommand,
+  type FactorySchedulerAuthorityChange,
+  type FactorySchedulerAuthorityCommand,
   type LocalFactoryAuthorityConfig,
   type LocalFactoryAuthorityRuntime
 } from "@agentlab/runtime/factory-authority";
@@ -60,21 +64,80 @@ export async function runFactoryBrokerAuthority(
   return 0;
 }
 
+/** Performs one explicit compare-and-set of autonomous scheduling authority, then closes first. */
+export async function runFactorySchedulerAuthority(
+  configPath: string,
+  expectedEnabled: boolean,
+  enabled: boolean,
+  reason: string,
+  confirmation: FactorySchedulerAuthorityCommand["confirmation"],
+  dependencies: FactoryAuthorityRunnerDependencies = defaultDependencies
+): Promise<number> {
+  const config = await dependencies.loadConfig(configPath);
+  const runtime = dependencies.createRuntime(config);
+  const command: FactorySchedulerAuthorityCommand = {
+    expectedEnabled,
+    enabled,
+    reason,
+    confirmation
+  };
+  const change = await runtime.commands
+    .setSchedulerAuthority(command)
+    .catch((error: unknown) => closeAfterFailure(runtime, error));
+  await runtime.close();
+  dependencies.write(`${serializeChange(change)}\n`);
+  return 0;
+}
+
+/** Performs one explicit compare-and-set of autonomous merge authority, then closes first. */
+export async function runFactoryMergeBrokerAuthority(
+  configPath: string,
+  expectedEnabled: boolean,
+  enabled: boolean,
+  reason: string,
+  confirmation: FactoryMergeBrokerAuthorityCommand["confirmation"],
+  dependencies: FactoryAuthorityRunnerDependencies = defaultDependencies
+): Promise<number> {
+  const config = await dependencies.loadConfig(configPath);
+  const runtime = dependencies.createRuntime(config);
+  const command: FactoryMergeBrokerAuthorityCommand = {
+    expectedEnabled,
+    enabled,
+    reason,
+    confirmation
+  };
+  const change = await runtime.commands
+    .setMergeBrokerAuthority(command)
+    .catch((error: unknown) => closeAfterFailure(runtime, error));
+  await runtime.close();
+  dependencies.write(`${serializeChange(change)}\n`);
+  return 0;
+}
+
 function serializeInspection(inspection: FactoryAuthorityInspection): string {
   return JSON.stringify({
     schemaVersion: inspection.schemaVersion,
     schedulerEnabled: inspection.schedulerEnabled,
     prBrokerEnabled: inspection.prBrokerEnabled,
-    recentBrokerEvents: inspection.recentBrokerEvents
+    mergeBrokerEnabled: inspection.mergeBrokerEnabled,
+    recentSchedulerEvents: inspection.recentSchedulerEvents,
+    recentBrokerEvents: inspection.recentBrokerEvents,
+    recentMergeBrokerEvents: inspection.recentMergeBrokerEvents
   });
 }
 
-function serializeChange(change: FactoryBrokerAuthorityChange): string {
+function serializeChange(
+  change:
+    | FactoryBrokerAuthorityChange
+    | FactorySchedulerAuthorityChange
+    | FactoryMergeBrokerAuthorityChange
+): string {
   return JSON.stringify({
     schemaVersion: change.schemaVersion,
     changed: change.changed,
     schedulerEnabled: change.schedulerEnabled,
     prBrokerEnabled: change.prBrokerEnabled,
+    mergeBrokerEnabled: change.mergeBrokerEnabled,
     event: change.event,
     eventDigest: change.eventDigest
   });

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { GitHubTokenSource } from "./github-rest-client.js";
-import type { GitHubAppInstallationApi } from "./github-app-installation-client.js";
+import type { GitHubAppInstallationApi } from "./github-app-installation-api.js";
 import { issueGitHubAppJwt, type GitHubAppJwtSigner } from "./github-app-jwt.js";
 
 const repositoryPattern = /^[a-z0-9](?:[a-z0-9-]{0,38})\/[a-z0-9._-]{1,100}$/u;
@@ -36,10 +36,12 @@ export interface GitHubAppInstallationTokenSourceOptions {
   readonly repositoryNumericId: number;
   readonly signer: GitHubAppJwtSigner;
   readonly api: GitHubAppInstallationApi;
+  readonly permissionProfile?:
+    "pull-request-broker" | "pull-request-reader" | "pull-request-feedback" | "autonomous-merger";
   readonly now?: () => number;
 }
 
-/** Mints and caches only short-lived, exact-repository credentials for the PR broker. */
+/** Mints and caches a short-lived exact-repository credential for one fixed permission profile. */
 export class GitHubAppInstallationTokenSource implements GitHubTokenSource {
   readonly #clientId: string;
   readonly #installationId: number;
@@ -47,6 +49,8 @@ export class GitHubAppInstallationTokenSource implements GitHubTokenSource {
   readonly #repositoryNumericId: number;
   readonly #signer: GitHubAppJwtSigner;
   readonly #api: GitHubAppInstallationApi;
+  readonly #permissionProfile:
+    "pull-request-broker" | "pull-request-reader" | "pull-request-feedback" | "autonomous-merger";
   readonly #now: () => number;
   #cached: CachedInstallationToken | null = null;
   #minting: Promise<string> | null = null;
@@ -70,6 +74,7 @@ export class GitHubAppInstallationTokenSource implements GitHubTokenSource {
     this.#repositoryNumericId = options.repositoryNumericId;
     this.#signer = options.signer;
     this.#api = options.api;
+    this.#permissionProfile = options.permissionProfile ?? "pull-request-broker";
     this.#now = options.now ?? Date.now;
   }
 
@@ -120,13 +125,13 @@ export class GitHubAppInstallationTokenSource implements GitHubTokenSource {
         jwt
       })
     );
-    assertExactBrokerPermissions(response.permissions);
+    assertExactPermissions(response.permissions, this.#permissionProfile);
     const repository = response.repositories[0];
     if (
       repository?.id !== this.#repositoryNumericId ||
       repository.full_name.toLowerCase() !== this.#repositoryId
     ) {
-      throw new Error("GitHub installation token is not scoped to the exact broker repository.");
+      throw new Error("GitHub installation token is not scoped to the exact factory repository.");
     }
     const observedAt = this.#timestamp();
     const expiresAt = Date.parse(response.expires_at);
@@ -158,20 +163,28 @@ function positiveIdentifier(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-function assertExactBrokerPermissions(
-  permissions: Readonly<Record<string, "read" | "write">>
+function assertExactPermissions(
+  permissions: Readonly<Record<string, "read" | "write">>,
+  profile:
+    "pull-request-broker" | "pull-request-reader" | "pull-request-feedback" | "autonomous-merger"
 ): void {
   const keys = Object.keys(permissions).sort();
-  const allowed = ["checks", "contents", "metadata", "pull_requests"];
+  const expected =
+    profile === "pull-request-broker"
+      ? { checks: "read", contents: "write", pull_requests: "write" }
+      : profile === "pull-request-reader"
+        ? { checks: "read", contents: "read", pull_requests: "read" }
+        : profile === "pull-request-feedback"
+          ? { pull_requests: "write" }
+          : { contents: "write", pull_requests: "write" };
+  const allowed = [...Object.keys(expected), "metadata"];
   if (
-    permissions.checks !== "read" ||
-    permissions.contents !== "write" ||
-    permissions.pull_requests !== "write" ||
+    Object.entries(expected).some(([key, value]) => permissions[key] !== value) ||
     (permissions.metadata !== undefined && permissions.metadata !== "read") ||
     keys.some((key) => !allowed.includes(key))
   ) {
     throw new Error(
-      "GitHub installation token permissions do not match the exact PR broker boundary."
+      `GitHub installation token permissions do not match the exact ${profile} boundary.`
     );
   }
 }

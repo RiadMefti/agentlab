@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const latestSchemaVersion = 10;
+export const FACTORY_DATABASE_SCHEMA_VERSION = 31;
+
+export const latestSchemaVersion = 31;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -1969,6 +1971,4718 @@ export function migrate(database: DatabaseSync): void {
       END;
 
       PRAGMA user_version = 10;
+      COMMIT;
+    `);
+  }
+
+  if (version < 11) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_schedule_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_id TEXT NOT NULL CHECK (length(schedule_policy_id) BETWEEN 1 AND 128),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        factory_policy_bundle_digest TEXT NOT NULL CHECK (
+          length(factory_policy_bundle_digest) = 71 AND
+          substr(factory_policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 1048576 AND json_valid(run_json)
+        ),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at),
+        UNIQUE(schedule_policy_id, scheduled_for)
+      ) STRICT;
+      CREATE INDEX factory_schedule_runs_slot_idx
+        ON factory_schedule_runs(scheduled_for, schedule_policy_id);
+
+      CREATE TABLE factory_schedule_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_schedule_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 1000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'task-claimed', 'task-finished', 'task-skipped', 'completed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'task-active', 'completed')
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN ('ready', 'task-active', 'completed')),
+        task_id TEXT CHECK (task_id IS NULL OR length(task_id) = 36),
+        task_correlation_id TEXT CHECK (
+          task_correlation_id IS NULL OR length(task_correlation_id) = 36
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 2097152 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_schedule_events_run_idx
+        ON factory_schedule_events(run_id, sequence);
+      CREATE UNIQUE INDEX factory_schedule_events_task_selection_idx
+        ON factory_schedule_events(run_id, task_id)
+        WHERE kind IN ('task-claimed', 'task-skipped');
+
+      CREATE TRIGGER factory_schedule_runs_no_update
+      BEFORE UPDATE ON factory_schedule_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule runs are immutable');
+      END;
+      CREATE TRIGGER factory_schedule_runs_no_delete
+      BEFORE DELETE ON factory_schedule_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule runs are immutable');
+      END;
+      CREATE TRIGGER factory_schedule_runs_identity_guard
+      BEFORE INSERT ON factory_schedule_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.schedulePolicy.id') IS NOT NEW.schedule_policy_id OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.factoryPolicyBundleDigest') IS NOT NEW.factory_policy_bundle_digest OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_schedule_events_no_update
+      BEFORE UPDATE ON factory_schedule_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule events are append-only');
+      END;
+      CREATE TRIGGER factory_schedule_events_no_delete
+      BEFORE DELETE ON factory_schedule_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule events are append-only');
+      END;
+      CREATE TRIGGER factory_schedule_events_identity_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.taskCorrelationId') IS NOT NEW.task_correlation_id OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event identity mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_sequence_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_schedule_events WHERE run_id = NEW.run_id
+      ), 1)
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event sequence mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_chain_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event chain mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_transition_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'task-claimed' AND NEW.from_state = 'ready' AND NEW.to_state = 'task-active') OR
+        (NEW.kind = 'task-finished' AND NEW.from_state = 'task-active' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'task-skipped' AND NEW.from_state = 'ready' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'ready' AND NEW.to_state = 'completed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory schedule transition');
+      END;
+      CREATE TRIGGER factory_schedule_events_fields_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'completed') AND
+          NEW.task_id IS NULL AND NEW.task_correlation_id IS NULL) OR
+        (NEW.kind IN ('task-claimed', 'task-finished') AND
+          NEW.task_id IS NOT NULL AND NEW.task_correlation_id IS NOT NULL) OR
+        (NEW.kind = 'task-skipped' AND
+          NEW.task_id IS NOT NULL AND NEW.task_correlation_id IS NULL)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event fields mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_task_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind IN ('task-claimed', 'task-skipped') AND (
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT authority_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract((
+          SELECT request_json FROM factory_preparations WHERE task_id = NEW.task_id
+        ), '$.trigger') IS NOT 'scheduled' OR
+        json_extract((
+          SELECT authority_json FROM factory_preparations WHERE task_id = NEW.task_id
+        ), '$.policyBundleDigest') IS NOT (
+          SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule task identity mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ) OR
+        NEW.task_correlation_id IS NOT (
+          SELECT task_correlation_id FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ) OR
+        (SELECT kind FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1) IS NOT 'task-claimed'
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule task finish mismatch');
+      END;
+      CREATE TRIGGER factory_schedule_events_timestamp_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_schedule_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 11;
+      COMMIT;
+    `);
+  }
+
+  if (version < 12) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        suite_digest TEXT NOT NULL CHECK (
+          length(suite_digest) = 71 AND substr(suite_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_candidate_digest TEXT NOT NULL CHECK (
+          length(baseline_candidate_digest) = 71 AND
+          substr(baseline_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        CHECK (started_at <= completed_at)
+      ) STRICT;
+
+      CREATE TABLE factory_eval_assessments (
+        assessment_id TEXT PRIMARY KEY CHECK (length(assessment_id) = 36),
+        assessment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(assessment_digest) = 71 AND substr(assessment_digest, 1, 7) = 'sha256:'
+        ),
+        run_id TEXT NOT NULL UNIQUE REFERENCES factory_eval_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (decision IN ('pass', 'deny')),
+        assessed_at TEXT NOT NULL,
+        assessment_json TEXT NOT NULL CHECK (
+          length(assessment_json) BETWEEN 2 AND 1048576 AND json_valid(assessment_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_eval_assessments_challenger_idx
+        ON factory_eval_assessments(
+          json_extract(assessment_json, '$.challengerCandidateDigest'), assessed_at
+        );
+
+      CREATE TABLE factory_canary_approvals (
+        approval_id TEXT PRIMARY KEY CHECK (length(approval_id) = 36),
+        approval_digest TEXT NOT NULL UNIQUE CHECK (
+          length(approval_digest) = 71 AND substr(approval_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        actor_id TEXT NOT NULL CHECK (length(actor_id) BETWEEN 1 AND 128),
+        occurred_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        approval_json TEXT NOT NULL CHECK (
+          length(approval_json) BETWEEN 2 AND 1048576 AND json_valid(approval_json)
+        ),
+        CHECK (occurred_at < expires_at)
+      ) STRICT;
+
+      CREATE TABLE factory_canary_cohorts (
+        cohort_id TEXT PRIMARY KEY CHECK (length(cohort_id) = 36),
+        cohort_digest TEXT NOT NULL UNIQUE CHECK (
+          length(cohort_digest) = 71 AND substr(cohort_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        approval_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_canary_approvals(approval_digest),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        cohort_json TEXT NOT NULL CHECK (
+          length(cohort_json) BETWEEN 2 AND 1048576 AND json_valid(cohort_json)
+        ),
+        CHECK (issued_at < expires_at)
+      ) STRICT;
+
+      CREATE TRIGGER factory_eval_runs_no_update
+      BEFORE UPDATE ON factory_eval_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval runs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_runs_no_delete
+      BEFORE DELETE ON factory_eval_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval runs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_runs_identity_guard
+      BEFORE INSERT ON factory_eval_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.suiteDigest') IS NOT NEW.suite_digest OR
+        json_extract(NEW.run_json, '$.baselineCandidateDigest') IS NOT NEW.baseline_candidate_digest OR
+        json_extract(NEW.run_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.run_json, '$.startedAt') IS NOT NEW.started_at OR
+        json_extract(NEW.run_json, '$.completedAt') IS NOT NEW.completed_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_eval_assessments_no_update
+      BEFORE UPDATE ON factory_eval_assessments
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessments are immutable');
+      END;
+      CREATE TRIGGER factory_eval_assessments_no_delete
+      BEFORE DELETE ON factory_eval_assessments
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessments are immutable');
+      END;
+      CREATE TRIGGER factory_eval_assessments_identity_guard
+      BEFORE INSERT ON factory_eval_assessments
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.assessmentId') IS NOT NEW.assessment_id OR
+        json_extract(NEW.assessment_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.assessment_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.assessment_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.assessment_json, '$.assessedAt') IS NOT NEW.assessed_at OR
+        json_extract(NEW.assessment_json, '$.suiteDigest') IS NOT (
+          SELECT suite_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.baselineCandidateDigest') IS NOT (
+          SELECT baseline_candidate_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.assessment_json, '$.challengerCandidateDigest') IS NOT (
+          SELECT challenger_candidate_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval assessment identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_approvals_no_update
+      BEFORE UPDATE ON factory_canary_approvals
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approvals are immutable');
+      END;
+      CREATE TRIGGER factory_canary_approvals_no_delete
+      BEFORE DELETE ON factory_canary_approvals
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approvals are immutable');
+      END;
+      CREATE TRIGGER factory_canary_approvals_identity_guard
+      BEFORE INSERT ON factory_canary_approvals
+      WHEN
+        (SELECT decision FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest) IS NOT 'pass' OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT json_extract(assessment_json, '$.challengerCandidateDigest')
+          FROM factory_eval_assessments WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        json_extract(NEW.approval_json, '$.approvalId') IS NOT NEW.approval_id OR
+        json_extract(NEW.approval_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.approval_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.approval_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.approval_json, '$.actor.id') IS NOT NEW.actor_id OR
+        json_extract(NEW.approval_json, '$.actor.kind') IS NOT 'human' OR
+        json_extract(NEW.approval_json, '$.actor.role') IS NOT 'release-controller' OR
+        json_extract(NEW.approval_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.approval_json, '$.expiresAt') IS NOT NEW.expires_at
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approval identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_cohorts_no_update
+      BEFORE UPDATE ON factory_canary_cohorts
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohorts are immutable');
+      END;
+      CREATE TRIGGER factory_canary_cohorts_no_delete
+      BEFORE DELETE ON factory_canary_cohorts
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohorts are immutable');
+      END;
+      CREATE TRIGGER factory_canary_cohorts_identity_guard
+      BEFORE INSERT ON factory_canary_cohorts
+      WHEN
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.issued_at IS NOT (
+          SELECT occurred_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.expires_at IS NOT (
+          SELECT expires_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        json_extract(NEW.cohort_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.cohort_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.cohort_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.cohort_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.cohort_json, '$.challengerCandidateDigest') IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.cohort_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.cohort_json, '$.issuedAt') IS NOT NEW.issued_at OR
+        json_extract(NEW.cohort_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.cohort_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.cohort_json, '$.release') IS NOT 0
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort identity mismatch');
+      END;
+
+      PRAGMA user_version = 12;
+      COMMIT;
+    `);
+  }
+
+  if (version < 13) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_attestations (
+        attestation_id TEXT PRIMARY KEY CHECK (length(attestation_id) = 36),
+        attestation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(attestation_digest) = 71 AND substr(attestation_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL UNIQUE
+          REFERENCES factory_eval_assessments(assessment_digest),
+        run_id TEXT NOT NULL UNIQUE REFERENCES factory_eval_runs(run_id),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        signed_attestation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(signed_attestation_digest) = 71 AND
+          substr(signed_attestation_digest, 1, 7) = 'sha256:'
+        ),
+        statement_digest TEXT NOT NULL UNIQUE CHECK (
+          length(statement_digest) = 71 AND substr(statement_digest, 1, 7) = 'sha256:'
+        ),
+        envelope_digest TEXT NOT NULL UNIQUE CHECK (
+          length(envelope_digest) = 71 AND substr(envelope_digest, 1, 7) = 'sha256:'
+        ),
+        key_id TEXT NOT NULL CHECK (
+          length(key_id) = 71 AND substr(key_id, 1, 7) = 'sha256:'
+        ),
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        verified_at TEXT NOT NULL,
+        attestation_json TEXT NOT NULL CHECK (
+          length(attestation_json) BETWEEN 2 AND 2097152 AND json_valid(attestation_json)
+        ),
+        CHECK (issued_at <= verified_at AND verified_at < expires_at)
+      ) STRICT;
+
+      CREATE TRIGGER factory_eval_attestations_no_update
+      BEFORE UPDATE ON factory_eval_attestations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestations are immutable');
+      END;
+      CREATE TRIGGER factory_eval_attestations_no_delete
+      BEFORE DELETE ON factory_eval_attestations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestations are immutable');
+      END;
+      CREATE TRIGGER factory_eval_attestations_identity_guard
+      BEFORE INSERT ON factory_eval_attestations
+      WHEN
+        NEW.run_id IS NOT (
+          SELECT run_id FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.attestation_json, '$.attestationId') IS NOT NEW.attestation_id OR
+        json_extract(NEW.attestation_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.attestation_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.attestation_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestationDigest')
+          IS NOT NEW.signed_attestation_digest OR
+        json_extract(NEW.attestation_json, '$.statementDigest') IS NOT NEW.statement_digest OR
+        json_extract(NEW.attestation_json, '$.envelopeDigest') IS NOT NEW.envelope_digest OR
+        json_extract(NEW.attestation_json, '$.keyId') IS NOT NEW.key_id OR
+        json_extract(NEW.attestation_json, '$.verifiedAt') IS NOT NEW.verified_at OR
+        json_extract(NEW.attestation_json, '$.verifier.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.attestation_json, '$.verifier.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.attestation_json, '$.verifier.id') IS NOT 'agentlab-eval-attestation' OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statementDigest')
+          IS NOT NEW.statement_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelopeDigest')
+          IS NOT NEW.envelope_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.runId')
+          IS NOT NEW.run_id OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.runDigest')
+          IS NOT NEW.run_digest OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.issuedAt')
+          IS NOT NEW.issued_at OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.statement.predicate.expiresAt')
+          IS NOT NEW.expires_at OR
+        json_extract(
+          NEW.attestation_json,
+          '$.signedAttestation.statement.subject[0].digest.sha256'
+        ) IS NOT substr(NEW.run_digest, 8) OR
+        json_array_length(
+          json_extract(NEW.attestation_json, '$.signedAttestation.statement.subject')
+        ) IS NOT 1 OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelope.payloadType')
+          IS NOT 'application/vnd.in-toto+json' OR
+        json_extract(NEW.attestation_json, '$.signedAttestation.envelope.signatures[0].keyid')
+          IS NOT NEW.key_id OR
+        json_array_length(
+          json_extract(NEW.attestation_json, '$.signedAttestation.envelope.signatures')
+        ) IS NOT 1
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval attestation identity mismatch');
+      END;
+
+      PRAGMA user_version = 13;
+      COMMIT;
+    `);
+  }
+
+  if (version < 14) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE factory_canary_approvals ADD COLUMN attestation_digest TEXT
+        REFERENCES factory_eval_attestations(attestation_digest);
+      ALTER TABLE factory_canary_approvals ADD COLUMN role_identity_policy_digest TEXT CHECK (
+        role_identity_policy_digest IS NULL OR
+        (length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:')
+      );
+      ALTER TABLE factory_canary_cohorts ADD COLUMN attestation_digest TEXT
+        REFERENCES factory_eval_attestations(attestation_digest);
+      ALTER TABLE factory_canary_cohorts ADD COLUMN role_identity_policy_digest TEXT CHECK (
+        role_identity_policy_digest IS NULL OR
+        (length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:')
+      );
+
+      CREATE UNIQUE INDEX factory_canary_approvals_attestation_idx
+        ON factory_canary_approvals(attestation_digest)
+        WHERE attestation_digest IS NOT NULL;
+      CREATE UNIQUE INDEX factory_canary_cohorts_attestation_idx
+        ON factory_canary_cohorts(attestation_digest)
+        WHERE attestation_digest IS NOT NULL;
+
+      DROP TRIGGER IF EXISTS factory_canary_approvals_identity_guard;
+      CREATE TRIGGER factory_canary_approvals_identity_guard
+      BEFORE INSERT ON factory_canary_approvals
+      WHEN
+        json_extract(NEW.approval_json, '$.schemaVersion') IS NULL OR
+        json_extract(NEW.approval_json, '$.schemaVersion') NOT IN (
+          'agentlab.canary-approval.v1', 'agentlab.canary-approval.v2'
+        ) OR
+        (SELECT decision FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest) IS NOT 'pass' OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT json_extract(assessment_json, '$.challengerCandidateDigest')
+          FROM factory_eval_assessments WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        json_extract(NEW.approval_json, '$.approvalId') IS NOT NEW.approval_id OR
+        json_extract(NEW.approval_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.approval_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.approval_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.approval_json, '$.actor.id') IS NOT NEW.actor_id OR
+        json_extract(NEW.approval_json, '$.actor.kind') IS NOT 'human' OR
+        json_extract(NEW.approval_json, '$.actor.role') IS NOT 'release-controller' OR
+        json_extract(NEW.approval_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.approval_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        (
+          json_extract(NEW.approval_json, '$.schemaVersion') = 'agentlab.canary-approval.v1' AND
+          (NEW.attestation_digest IS NOT NULL OR NEW.role_identity_policy_digest IS NOT NULL)
+        ) OR
+        (
+          json_extract(NEW.approval_json, '$.schemaVersion') = 'agentlab.canary-approval.v2' AND
+          (
+            NEW.attestation_digest IS NULL OR
+            NEW.role_identity_policy_digest IS NULL OR
+            json_extract(NEW.approval_json, '$.attestationDigest')
+              IS NOT NEW.attestation_digest OR
+            json_extract(NEW.approval_json, '$.roleIdentityPolicyDigest')
+              IS NOT NEW.role_identity_policy_digest OR
+            NEW.assessment_digest IS NOT (
+              SELECT assessment_digest FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.role_identity_policy_digest IS NOT (
+              SELECT json_extract(
+                attestation_json,
+                '$.signedAttestation.statement.predicate.roleIdentityPolicyDigest'
+              )
+              FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.occurred_at < (
+              SELECT issued_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.occurred_at >= (
+              SELECT expires_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            ) OR
+            NEW.expires_at > (
+              SELECT expires_at FROM factory_eval_attestations
+              WHERE attestation_digest = NEW.attestation_digest
+            )
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary approval identity mismatch');
+      END;
+
+      DROP TRIGGER IF EXISTS factory_canary_cohorts_identity_guard;
+      CREATE TRIGGER factory_canary_cohorts_identity_guard
+      BEFORE INSERT ON factory_canary_cohorts
+      WHEN
+        json_extract(NEW.cohort_json, '$.schemaVersion') IS NULL OR
+        json_extract(NEW.cohort_json, '$.schemaVersion') NOT IN (
+          'agentlab.canary-cohort.v1', 'agentlab.canary-cohort.v2'
+        ) OR
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_eval_assessments
+          WHERE assessment_digest = NEW.assessment_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.issued_at IS NOT (
+          SELECT occurred_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        NEW.expires_at IS NOT (
+          SELECT expires_at FROM factory_canary_approvals
+          WHERE approval_digest = NEW.approval_digest
+        ) OR
+        json_extract(NEW.cohort_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.cohort_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.cohort_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.cohort_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.cohort_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.cohort_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.cohort_json, '$.issuedAt') IS NOT NEW.issued_at OR
+        json_extract(NEW.cohort_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.cohort_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.cohort_json, '$.release') IS NOT 0 OR
+        (
+          json_extract(NEW.cohort_json, '$.schemaVersion') = 'agentlab.canary-cohort.v1' AND
+          (
+            NEW.attestation_digest IS NOT NULL OR
+            NEW.role_identity_policy_digest IS NOT NULL OR
+            (SELECT json_extract(approval_json, '$.schemaVersion')
+              FROM factory_canary_approvals WHERE approval_digest = NEW.approval_digest)
+              IS NOT 'agentlab.canary-approval.v1'
+          )
+        ) OR
+        (
+          json_extract(NEW.cohort_json, '$.schemaVersion') = 'agentlab.canary-cohort.v2' AND
+          (
+            NEW.attestation_digest IS NULL OR
+            NEW.role_identity_policy_digest IS NULL OR
+            NEW.attestation_digest IS NOT (
+              SELECT attestation_digest FROM factory_canary_approvals
+              WHERE approval_digest = NEW.approval_digest
+            ) OR
+            NEW.role_identity_policy_digest IS NOT (
+              SELECT role_identity_policy_digest FROM factory_canary_approvals
+              WHERE approval_digest = NEW.approval_digest
+            ) OR
+            json_extract(NEW.cohort_json, '$.attestationDigest')
+              IS NOT NEW.attestation_digest OR
+            json_extract(NEW.cohort_json, '$.roleIdentityPolicyDigest')
+              IS NOT NEW.role_identity_policy_digest OR
+            (SELECT json_extract(approval_json, '$.schemaVersion')
+              FROM factory_canary_approvals WHERE approval_digest = NEW.approval_digest)
+              IS NOT 'agentlab.canary-approval.v2'
+          )
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort identity mismatch');
+      END;
+
+      PRAGMA user_version = 14;
+      COMMIT;
+    `);
+  }
+
+  if (version < 15) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_canary_task_reservations (
+        reservation_id TEXT PRIMARY KEY CHECK (length(reservation_id) = 36),
+        reservation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(reservation_digest) = 71 AND substr(reservation_digest, 1, 7) = 'sha256:'
+        ),
+        cohort_id TEXT NOT NULL CHECK (length(cohort_id) = 36),
+        cohort_digest TEXT NOT NULL REFERENCES factory_canary_cohorts(cohort_digest),
+        approval_digest TEXT NOT NULL CHECK (
+          length(approval_digest) = 71 AND substr(approval_digest, 1, 7) = 'sha256:'
+        ),
+        assessment_digest TEXT NOT NULL CHECK (
+          length(assessment_digest) = 71 AND substr(assessment_digest, 1, 7) = 'sha256:'
+        ),
+        attestation_digest TEXT NOT NULL REFERENCES factory_eval_attestations(attestation_digest),
+        role_identity_policy_digest TEXT NOT NULL CHECK (
+          length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        policy_bundle_digest TEXT NOT NULL CHECK (
+          length(policy_bundle_digest) = 71 AND substr(policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        stage TEXT NOT NULL CHECK (
+          stage IN ('read-only-shadow', 'local-proposal', 'brokered-draft-pr')
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        task_id TEXT NOT NULL UNIQUE REFERENCES factory_preparations(task_id),
+        request_digest TEXT NOT NULL CHECK (
+          length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:'
+        ),
+        preparation_authority_digest TEXT NOT NULL CHECK (
+          length(preparation_authority_digest) = 71 AND
+          substr(preparation_authority_digest, 1, 7) = 'sha256:'
+        ),
+        maximum_risk_tier TEXT NOT NULL CHECK (maximum_risk_tier IN ('R0', 'R1')),
+        wall_clock_seconds INTEGER NOT NULL CHECK (wall_clock_seconds BETWEEN 1 AND 86400),
+        max_agent_turns INTEGER NOT NULL CHECK (max_agent_turns BETWEEN 1 AND 2000),
+        max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls BETWEEN 1 AND 20000),
+        max_input_tokens INTEGER NOT NULL CHECK (max_input_tokens BETWEEN 1 AND 100000000),
+        max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens BETWEEN 1 AND 10000000),
+        max_cost_microusd INTEGER NOT NULL CHECK (max_cost_microusd BETWEEN 0 AND 10000000000),
+        max_processes INTEGER NOT NULL CHECK (max_processes BETWEEN 1 AND 512),
+        max_output_bytes INTEGER NOT NULL CHECK (max_output_bytes BETWEEN 1 AND 1073741824),
+        max_workers INTEGER NOT NULL CHECK (max_workers BETWEEN 1 AND 32),
+        max_repair_attempts INTEGER NOT NULL CHECK (max_repair_attempts BETWEEN 0 AND 20),
+        max_changed_files INTEGER NOT NULL CHECK (max_changed_files BETWEEN 0 AND 10000),
+        max_changed_lines INTEGER NOT NULL CHECK (max_changed_lines BETWEEN 0 AND 1000000),
+        reserved_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        reservation_json TEXT NOT NULL CHECK (
+          length(reservation_json) BETWEEN 2 AND 2097152 AND json_valid(reservation_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_canary_task_reservations_cohort_idx
+        ON factory_canary_task_reservations(cohort_digest, reserved_at, reservation_id);
+
+      CREATE TRIGGER factory_canary_task_reservations_no_update
+      BEFORE UPDATE ON factory_canary_task_reservations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservations are immutable');
+      END;
+      CREATE TRIGGER factory_canary_task_reservations_no_delete
+      BEFORE DELETE ON factory_canary_task_reservations
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservations are immutable');
+      END;
+      CREATE TRIGGER factory_canary_task_reservations_identity_guard
+      BEFORE INSERT ON factory_canary_task_reservations
+      WHEN
+        json_extract(NEW.reservation_json, '$.schemaVersion')
+          IS NOT 'agentlab.canary-task-reservation.v1' OR
+        json_extract(NEW.reservation_json, '$.reservationId') IS NOT NEW.reservation_id OR
+        json_extract(NEW.reservation_json, '$.cohortId') IS NOT NEW.cohort_id OR
+        json_extract(NEW.reservation_json, '$.cohortDigest') IS NOT NEW.cohort_digest OR
+        json_extract(NEW.reservation_json, '$.approvalDigest') IS NOT NEW.approval_digest OR
+        json_extract(NEW.reservation_json, '$.assessmentDigest') IS NOT NEW.assessment_digest OR
+        json_extract(NEW.reservation_json, '$.attestationDigest') IS NOT NEW.attestation_digest OR
+        json_extract(NEW.reservation_json, '$.roleIdentityPolicyDigest')
+          IS NOT NEW.role_identity_policy_digest OR
+        json_extract(NEW.reservation_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.reservation_json, '$.schedulePolicyDigest')
+          IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.reservation_json, '$.policyBundleDigest')
+          IS NOT NEW.policy_bundle_digest OR
+        json_extract(NEW.reservation_json, '$.stage') IS NOT NEW.stage OR
+        json_extract(NEW.reservation_json, '$.repository.id') IS NOT NEW.repository_id OR
+        json_extract(NEW.reservation_json, '$.repository.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.reservation_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.reservation_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.reservation_json, '$.preparationAuthorityDigest')
+          IS NOT NEW.preparation_authority_digest OR
+        json_extract(NEW.reservation_json, '$.maximumRiskTier') IS NOT NEW.maximum_risk_tier OR
+        json_extract(NEW.reservation_json, '$.budget.wallClockSeconds')
+          IS NOT NEW.wall_clock_seconds OR
+        json_extract(NEW.reservation_json, '$.budget.maxAgentTurns') IS NOT NEW.max_agent_turns OR
+        json_extract(NEW.reservation_json, '$.budget.maxToolCalls') IS NOT NEW.max_tool_calls OR
+        json_extract(NEW.reservation_json, '$.budget.maxInputTokens') IS NOT NEW.max_input_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputTokens')
+          IS NOT NEW.max_output_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxCostMicrousd')
+          IS NOT NEW.max_cost_microusd OR
+        json_extract(NEW.reservation_json, '$.budget.maxProcesses') IS NOT NEW.max_processes OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputBytes') IS NOT NEW.max_output_bytes OR
+        json_extract(NEW.reservation_json, '$.budget.maxWorkers') IS NOT NEW.max_workers OR
+        json_extract(NEW.reservation_json, '$.budget.maxRepairAttempts')
+          IS NOT NEW.max_repair_attempts OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedFiles')
+          IS NOT NEW.max_changed_files OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedLines')
+          IS NOT NEW.max_changed_lines OR
+        json_extract(NEW.reservation_json, '$.reservedAt') IS NOT NEW.reserved_at OR
+        json_extract(NEW.reservation_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.reservation_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.reservation_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.reservation_json, '$.actor.id') IS NOT 'agentlab-canary-admission' OR
+        json_type(NEW.reservation_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.reservation_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.reservation_json, '$.release') IS NOT 0 OR
+        NEW.cohort_id IS NOT (
+          SELECT cohort_id FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.approval_digest IS NOT (
+          SELECT approval_digest FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.assessment_digest IS NOT (
+          SELECT assessment_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.attestation_digest IS NOT (
+          SELECT attestation_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.role_identity_policy_digest IS NOT (
+          SELECT role_identity_policy_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.challenger_candidate_digest IS NOT (
+          SELECT challenger_candidate_digest FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.stage IS NOT (
+          SELECT stage FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        (SELECT json_extract(cohort_json, '$.schemaVersion') FROM factory_canary_cohorts
+          WHERE cohort_digest = NEW.cohort_digest) IS NOT 'agentlab.canary-cohort.v2' OR
+        NEW.request_digest IS NOT (
+          SELECT request_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.preparation_authority_digest IS NOT (
+          SELECT authority_digest FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT repository_id FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.base_revision IS NOT (
+          SELECT base_revision FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT json_extract(request_json, '$.trigger') FROM factory_preparations
+          WHERE task_id = NEW.task_id) IS NOT 'scheduled' OR
+        NEW.policy_bundle_digest IS NOT (
+          SELECT json_extract(authority_json, '$.policyBundleDigest') FROM factory_preparations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.schedule_policy_digest IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.schedulePolicyDigest')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.policy_bundle_digest IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.policyBundleDigest')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.repositoryId')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.base_revision IS NOT (
+          SELECT json_extract(run_json, '$.challengerCandidate.baseRevision')
+          FROM factory_eval_runs WHERE run_digest = (
+            SELECT run_digest FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          )
+        ) OR
+        NEW.maximum_risk_tier IS NOT (
+          SELECT json_extract(authority_json, '$.maximumRiskTier') FROM factory_preparations
+          WHERE task_id = NEW.task_id
+        ) OR
+        ((SELECT json_extract(cohort_json, '$.maximumRiskTier')
+          FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest) = 'R0' AND
+          NEW.maximum_risk_tier IS NOT 'R0') OR
+        NEW.wall_clock_seconds IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.wallClockSeconds')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_agent_turns IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxAgentTurns')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_tool_calls IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxToolCalls')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_input_tokens IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxInputTokens')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_output_tokens IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxOutputTokens')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_cost_microusd IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxCostMicrousd')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_processes IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxProcesses')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_output_bytes IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxOutputBytes')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_workers IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxWorkers')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_repair_attempts IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxRepairAttempts')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_changed_files IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxChangedFiles')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.max_changed_lines IS NOT (
+          SELECT json_extract(authority_json, '$.budgetCeiling.maxChangedLines')
+          FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.reserved_at < (
+          SELECT issued_at FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.reserved_at < (
+          SELECT issued_at FROM factory_preparations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.reserved_at >= NEW.expires_at OR
+        unixepoch(NEW.reserved_at) + NEW.wall_clock_seconds > unixepoch(NEW.expires_at) OR
+        NEW.expires_at > (
+          SELECT expires_at FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+        ) OR
+        NEW.expires_at > (
+          SELECT expires_at FROM factory_preparations WHERE task_id = NEW.task_id
+        )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary task reservation identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_canary_task_reservations_capacity_guard
+      BEFORE INSERT ON factory_canary_task_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest) >= (
+            SELECT json_extract(cohort_json, '$.maximumTasks') FROM factory_canary_cohorts
+            WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.wall_clock_seconds > (
+            SELECT json_extract(cohort_json, '$.budget.wallClockSeconds')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_agent_turns > (
+            SELECT json_extract(cohort_json, '$.budget.maxAgentTurns')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_tool_calls > (
+            SELECT json_extract(cohort_json, '$.budget.maxToolCalls')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_input_tokens > (
+            SELECT json_extract(cohort_json, '$.budget.maxInputTokens')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_output_tokens > (
+            SELECT json_extract(cohort_json, '$.budget.maxOutputTokens')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_cost_microusd > (
+            SELECT json_extract(cohort_json, '$.budget.maxCostMicrousd')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_processes > (
+            SELECT json_extract(cohort_json, '$.budget.maxProcesses')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_output_bytes > (
+            SELECT json_extract(cohort_json, '$.budget.maxOutputBytes')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_workers > (
+            SELECT json_extract(cohort_json, '$.budget.maxWorkers')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_repair_attempts > (
+            SELECT json_extract(cohort_json, '$.budget.maxRepairAttempts')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_changed_files > (
+            SELECT json_extract(cohort_json, '$.budget.maxChangedFiles')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          ) OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_canary_task_reservations
+          WHERE cohort_digest = NEW.cohort_digest), 0) + NEW.max_changed_lines > (
+            SELECT json_extract(cohort_json, '$.budget.maxChangedLines')
+            FROM factory_canary_cohorts WHERE cohort_digest = NEW.cohort_digest
+          )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory canary cohort reservation capacity exceeded');
+      END;
+
+      PRAGMA user_version = 15;
+      COMMIT;
+    `);
+  }
+
+  if (version < 16) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TRIGGER factory_schedule_events_canary_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND (
+        json_extract(NEW.event_json, '$.schemaVersion')
+          IS NOT 'agentlab.schedule-event.v2' OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.canaryReservationDigest'
+          )
+        ) OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT preparation_authority_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        (SELECT stage FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS 'read-only-shadow' OR
+        json_extract(NEW.event_json, '$.reservation.wallClockSeconds') IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxAgentTurns') IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxToolCalls') IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxInputTokens') IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputTokens') IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxCostMicrousd') IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxProcesses') IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputBytes') IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxWorkers') IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxRepairAttempts') IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedFiles') IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedLines') IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.occurred_at < (
+          SELECT reserved_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        unixepoch(NEW.occurred_at) + (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) > unixepoch((
+          SELECT expires_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ))
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule canary claim mismatch');
+      END;
+
+      CREATE TRIGGER factory_schedule_events_canary_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        json_extract(NEW.event_json, '$.schemaVersion')
+          IS NOT 'agentlab.schedule-event.v2' OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.canaryReservationDigest') OR
+        NEW.occurred_at > (
+          SELECT expires_at FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.canaryReservationDigest'
+          )
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory schedule canary finish mismatch');
+      END;
+
+      PRAGMA user_version = 16;
+      COMMIT;
+    `);
+  }
+
+  if (version < 17) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE factory_pull_request_dispatches
+        ADD COLUMN canary_reservation_digest TEXT
+        REFERENCES factory_canary_task_reservations(reservation_digest)
+        CHECK (
+          canary_reservation_digest IS NULL OR
+          (length(canary_reservation_digest) = 71 AND
+            substr(canary_reservation_digest, 1, 7) = 'sha256:')
+        );
+      CREATE INDEX factory_pull_request_dispatches_canary_idx
+        ON factory_pull_request_dispatches(canary_reservation_digest)
+        WHERE canary_reservation_digest IS NOT NULL;
+
+      CREATE TRIGGER factory_pull_request_dispatches_canary_guard
+      BEFORE INSERT ON factory_pull_request_dispatches
+      WHEN (
+        json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.trigger') = 'scheduled' AND (
+          json_extract(NEW.dispatch_json, '$.schemaVersion')
+            IS NOT 'agentlab.pull-request-dispatch.v2' OR
+          NEW.canary_reservation_digest IS NULL OR
+          json_extract(NEW.dispatch_json, '$.canaryReservationDigest')
+            IS NOT NEW.canary_reservation_digest OR
+          json_extract(NEW.dispatch_json, '$.schedulePolicyDigest') IS NOT (
+            SELECT schedule_policy_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          json_extract(NEW.dispatch_json, '$.roleIdentityPolicyDigest') IS NOT (
+            SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.task_id IS NOT (
+            SELECT task_id FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.repository_id IS NOT (
+            SELECT repository_id FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.base_revision IS NOT (
+            SELECT base_revision FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          (SELECT risk_tier FROM factory_task_contracts WHERE task_id = NEW.task_id) IS NOT 'R1' OR
+          (SELECT maximum_risk_tier FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT 'R1' OR
+          (SELECT stage FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest)
+              IS NOT 'brokered-draft-pr' OR
+          (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+              SELECT json_extract(contract_json, '$.gateProfile.policyDigest')
+              FROM factory_task_contracts WHERE task_id = NEW.task_id
+          ) OR
+          NEW.created_at < (
+            SELECT reserved_at FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NEW.created_at >= (
+            SELECT expires_at FROM factory_canary_task_reservations
+            WHERE reservation_digest = NEW.canary_reservation_digest
+          ) OR
+          NOT EXISTS (
+            SELECT 1
+            FROM factory_schedule_events AS finished
+            JOIN factory_schedule_runs AS run ON run.run_id = finished.run_id
+            JOIN factory_canary_task_reservations AS reservation
+              ON reservation.reservation_digest = NEW.canary_reservation_digest
+            WHERE finished.task_id = NEW.task_id
+              AND finished.kind = 'task-finished'
+              AND json_extract(finished.event_json, '$.schemaVersion')
+                = 'agentlab.schedule-event.v2'
+              AND json_extract(finished.event_json, '$.canaryReservationDigest')
+                = NEW.canary_reservation_digest
+              AND json_extract(finished.event_json, '$.result') = 'ready-for-broker'
+              AND json_extract(finished.event_json, '$.preparationState') = 'prepared'
+              AND json_extract(finished.event_json, '$.taskState') = 'pr-proposed'
+              AND json_extract(finished.event_json, '$.contractDigest') = NEW.contract_digest
+              AND run.schedule_policy_digest = reservation.schedule_policy_digest
+              AND run.factory_policy_bundle_digest = reservation.policy_bundle_digest
+              AND json_extract(run.run_json, '$.roleIdentityPolicyDigest')
+                = reservation.role_identity_policy_digest
+              AND (
+                SELECT terminal.to_state FROM factory_schedule_events AS terminal
+                WHERE terminal.run_id = run.run_id
+                ORDER BY terminal.sequence DESC LIMIT 1
+              ) = 'completed'
+          )
+        )
+      ) OR (
+        json_extract((
+          SELECT contract_json FROM factory_task_contracts WHERE task_id = NEW.task_id
+        ), '$.trigger') IS NOT 'scheduled' AND (
+          json_extract(NEW.dispatch_json, '$.schemaVersion')
+            IS NOT 'agentlab.pull-request-dispatch.v1' OR
+          NEW.canary_reservation_digest IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.canaryReservationDigest') IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.schedulePolicyDigest') IS NOT NULL OR
+          json_type(NEW.dispatch_json, '$.roleIdentityPolicyDigest') IS NOT NULL
+        )
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory pull-request dispatch canary authority mismatch');
+      END;
+
+      PRAGMA user_version = 17;
+      COMMIT;
+    `);
+  }
+
+  if (version < 18) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_maintenance_discovery_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_policy_id TEXT NOT NULL CHECK (
+          length(discovery_policy_id) BETWEEN 1 AND 128
+        ),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND
+          substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND
+          substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        factory_policy_bundle_digest TEXT NOT NULL CHECK (
+          length(factory_policy_bundle_digest) = 71 AND
+          substr(factory_policy_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        preparation_grant_digest TEXT NOT NULL CHECK (
+          length(preparation_grant_digest) = 71 AND
+          substr(preparation_grant_digest, 1, 7) = 'sha256:'
+        ),
+        role_identity_policy_digest TEXT NOT NULL CHECK (
+          length(role_identity_policy_digest) = 71 AND
+          substr(role_identity_policy_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        base_revision TEXT NOT NULL CHECK (length(base_revision) IN (40, 64)),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 8388608 AND json_valid(run_json)
+        ),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at),
+        UNIQUE(discovery_policy_id, scheduled_for)
+      ) STRICT;
+      CREATE INDEX factory_maintenance_discovery_runs_slot_idx
+        ON factory_maintenance_discovery_runs(scheduled_for, discovery_policy_id);
+
+      CREATE TABLE factory_maintenance_discovery_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_maintenance_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 1000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'agent-started', 'agent-finished', 'agent-failed',
+          'finding-admitted', 'finding-skipped', 'completed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'agent-active', 'admitting')
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'agent-active', 'admitting', 'completed', 'failed')
+        ),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        finding_key TEXT CHECK (finding_key IS NULL OR length(finding_key) BETWEEN 1 AND 128),
+        finding_digest TEXT CHECK (
+          finding_digest IS NULL OR
+          (length(finding_digest) = 71 AND substr(finding_digest, 1, 7) = 'sha256:')
+        ),
+        task_id TEXT CHECK (task_id IS NULL OR length(task_id) = 36),
+        run_record_digest TEXT CHECK (
+          run_record_digest IS NULL OR
+          (length(run_record_digest) = 71 AND substr(run_record_digest, 1, 7) = 'sha256:')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 4194304 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_maintenance_discovery_events_run_idx
+        ON factory_maintenance_discovery_events(run_id, sequence);
+      CREATE UNIQUE INDEX factory_maintenance_discovery_finding_idx
+        ON factory_maintenance_discovery_events(run_id, finding_key)
+        WHERE kind IN ('finding-admitted', 'finding-skipped');
+
+      CREATE TRIGGER factory_maintenance_discovery_runs_no_update
+      BEFORE UPDATE ON factory_maintenance_discovery_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery runs are immutable');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_runs_no_delete
+      BEFORE DELETE ON factory_maintenance_discovery_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery runs are immutable');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_runs_identity_guard
+      BEFORE INSERT ON factory_maintenance_discovery_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicy.id') IS NOT NEW.discovery_policy_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.factoryPolicyBundleDigest')
+          IS NOT NEW.factory_policy_bundle_digest OR
+        json_extract(NEW.run_json, '$.preparationGrantDigest')
+          IS NOT NEW.preparation_grant_digest OR
+        json_extract(NEW.run_json, '$.roleIdentityPolicyDigest')
+          IS NOT NEW.role_identity_policy_digest OR
+        json_extract(NEW.run_json, '$.repository.id') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.repository.baseRevision') IS NOT NEW.base_revision OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery run identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_maintenance_discovery_events_no_update
+      BEFORE UPDATE ON factory_maintenance_discovery_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery events are append-only');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_no_delete
+      BEFORE DELETE ON factory_maintenance_discovery_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery events are append-only');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_identity_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.findingKey') IS NOT NEW.finding_key OR
+        json_extract(NEW.event_json, '$.findingDigest') IS NOT NEW.finding_digest OR
+        json_extract(NEW.event_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.event_json, '$.runRecordDigest') IS NOT NEW.run_record_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event identity mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_chain_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event chain mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_transition_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'agent-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'agent-active') OR
+        (NEW.kind = 'agent-finished' AND NEW.from_state = 'agent-active' AND NEW.to_state = 'admitting') OR
+        (NEW.kind = 'agent-failed' AND NEW.from_state = 'agent-active' AND NEW.to_state = 'failed') OR
+        (NEW.kind IN ('finding-admitted', 'finding-skipped') AND
+          NEW.from_state = 'admitting' AND NEW.to_state = 'admitting') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'admitting' AND NEW.to_state = 'completed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory maintenance discovery transition');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_fields_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'completed') AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NULL) OR
+        (NEW.kind = 'agent-started' AND NEW.execution_id IS NOT NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NULL) OR
+        (NEW.kind IN ('agent-finished', 'agent-failed') AND NEW.execution_id IS NOT NULL AND
+          NEW.finding_key IS NULL AND NEW.finding_digest IS NULL AND NEW.task_id IS NULL AND
+          NEW.run_record_digest IS NOT NULL) OR
+        (NEW.kind = 'finding-admitted' AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NOT NULL AND NEW.finding_digest IS NOT NULL AND
+          NEW.task_id IS NOT NULL AND NEW.run_record_digest IS NULL) OR
+        (NEW.kind = 'finding-skipped' AND NEW.execution_id IS NULL AND
+          NEW.finding_key IS NOT NULL AND NEW.finding_digest IS NOT NULL AND
+          NEW.task_id IS NULL AND NEW.run_record_digest IS NULL)
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event fields mismatch');
+      END;
+      CREATE TRIGGER factory_maintenance_discovery_events_time_guard
+      BEFORE INSERT ON factory_maintenance_discovery_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_maintenance_discovery_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_maintenance_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory maintenance discovery event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 18;
+      COMMIT;
+    `);
+  }
+
+  if (version < 19) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_eval_production_jobs (
+        job_id TEXT PRIMARY KEY CHECK (length(job_id) = 36),
+        job_digest TEXT NOT NULL UNIQUE CHECK (
+          length(job_digest) = 71 AND substr(job_digest, 1, 7) = 'sha256:'
+        ),
+        runner_id TEXT NOT NULL CHECK (length(runner_id) BETWEEN 1 AND 128),
+        suite_digest TEXT NOT NULL CHECK (
+          length(suite_digest) = 71 AND substr(suite_digest, 1, 7) = 'sha256:'
+        ),
+        case_bank_digest TEXT NOT NULL CHECK (
+          length(case_bank_digest) = 71 AND substr(case_bank_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_candidate_digest TEXT NOT NULL CHECK (
+          length(baseline_candidate_digest) = 71 AND
+          substr(baseline_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        baseline_harness_digest TEXT NOT NULL CHECK (
+          length(baseline_harness_digest) = 71 AND
+          substr(baseline_harness_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_candidate_digest TEXT NOT NULL CHECK (
+          length(challenger_candidate_digest) = 71 AND
+          substr(challenger_candidate_digest, 1, 7) = 'sha256:'
+        ),
+        challenger_harness_digest TEXT NOT NULL CHECK (
+          length(challenger_harness_digest) = 71 AND
+          substr(challenger_harness_digest, 1, 7) = 'sha256:'
+        ),
+        grader_digest TEXT NOT NULL CHECK (
+          length(grader_digest) = 71 AND substr(grader_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        job_json TEXT NOT NULL CHECK (
+          length(job_json) BETWEEN 2 AND 16777216 AND json_valid(job_json)
+        ),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_eval_production_jobs_created_idx
+        ON factory_eval_production_jobs(created_at, job_id);
+
+      CREATE TABLE factory_eval_production_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        job_id TEXT NOT NULL REFERENCES factory_eval_production_jobs(job_id),
+        job_digest TEXT NOT NULL CHECK (
+          length(job_digest) = 71 AND substr(job_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 100000),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'subject-started', 'subject-finished', 'grader-started',
+          'sample-recorded', 'completed', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'subject-active', 'grader-active', 'completed', 'failed'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'subject-active', 'grader-active', 'completed', 'failed')
+        ),
+        case_id TEXT CHECK (case_id IS NULL OR length(case_id) BETWEEN 1 AND 128),
+        trial INTEGER CHECK (trial IS NULL OR trial BETWEEN 1 AND 20),
+        candidate_role TEXT CHECK (
+          candidate_role IS NULL OR candidate_role IN ('baseline', 'challenger')
+        ),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        evidence_digest TEXT CHECK (
+          evidence_digest IS NULL OR
+          (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')
+        ),
+        sample_digest TEXT CHECK (
+          sample_digest IS NULL OR
+          (length(sample_digest) = 71 AND substr(sample_digest, 1, 7) = 'sha256:')
+        ),
+        eval_run_digest TEXT CHECK (
+          eval_run_digest IS NULL OR
+          (length(eval_run_digest) = 71 AND substr(eval_run_digest, 1, 7) = 'sha256:')
+        ),
+        eval_run_artifact_json TEXT CHECK (
+          eval_run_artifact_json IS NULL OR json_valid(eval_run_artifact_json)
+        ),
+        usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 8388608 AND json_valid(event_json)
+        ),
+        UNIQUE(job_id, sequence)
+      ) STRICT;
+      CREATE INDEX factory_eval_production_events_job_idx
+        ON factory_eval_production_events(job_id, sequence);
+
+      CREATE TRIGGER factory_eval_production_jobs_no_update
+      BEFORE UPDATE ON factory_eval_production_jobs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production jobs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_production_jobs_no_delete
+      BEFORE DELETE ON factory_eval_production_jobs
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production jobs are immutable');
+      END;
+      CREATE TRIGGER factory_eval_production_jobs_identity_guard
+      BEFORE INSERT ON factory_eval_production_jobs
+      WHEN
+        json_extract(NEW.job_json, '$.jobId') IS NOT NEW.job_id OR
+        json_extract(NEW.job_json, '$.runnerId') IS NOT NEW.runner_id OR
+        json_extract(NEW.job_json, '$.suiteDigest') IS NOT NEW.suite_digest OR
+        json_extract(NEW.job_json, '$.caseBankDigest') IS NOT NEW.case_bank_digest OR
+        json_extract(NEW.job_json, '$.baselineCandidateDigest')
+          IS NOT NEW.baseline_candidate_digest OR
+        json_extract(NEW.job_json, '$.baselineHarnessDigest')
+          IS NOT NEW.baseline_harness_digest OR
+        json_extract(NEW.job_json, '$.challengerCandidateDigest')
+          IS NOT NEW.challenger_candidate_digest OR
+        json_extract(NEW.job_json, '$.challengerHarnessDigest')
+          IS NOT NEW.challenger_harness_digest OR
+        json_extract(NEW.job_json, '$.graderDigest') IS NOT NEW.grader_digest OR
+        json_extract(NEW.job_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.job_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.job_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production job identity mismatch');
+      END;
+
+      CREATE TRIGGER factory_eval_production_events_no_update
+      BEFORE UPDATE ON factory_eval_production_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production events are append-only');
+      END;
+      CREATE TRIGGER factory_eval_production_events_no_delete
+      BEFORE DELETE ON factory_eval_production_events
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production events are append-only');
+      END;
+      CREATE TRIGGER factory_eval_production_events_identity_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        NEW.job_digest IS NOT (
+          SELECT job_digest FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.jobId') IS NOT NEW.job_id OR
+        json_extract(NEW.event_json, '$.jobDigest') IS NOT NEW.job_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest')
+          IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.caseId') IS NOT NEW.case_id OR
+        json_extract(NEW.event_json, '$.trial') IS NOT NEW.trial OR
+        json_extract(NEW.event_json, '$.candidateRole') IS NOT NEW.candidate_role OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.sampleDigest') IS NOT NEW.sample_digest OR
+        json_extract(NEW.event_json, '$.evalRunDigest') IS NOT NEW.eval_run_digest OR
+        json_extract(NEW.event_json, '$.evalRunArtifact')
+          IS NOT json(NEW.eval_run_artifact_json) OR
+        json_extract(NEW.event_json, '$.usage') IS NOT json(NEW.usage_json) OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT 'agentlab-eval-producer' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'gate-runner' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.job_id
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event identity mismatch');
+      END;
+      CREATE TRIGGER factory_eval_production_events_chain_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id
+        ), 1) OR
+        (NEW.sequence = 1 AND
+          (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event chain mismatch');
+      END;
+      CREATE TRIGGER factory_eval_production_events_transition_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'subject-started' AND NEW.from_state IN ('ready', 'subject-active') AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'subject-finished' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'grader-started' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'grader-active') OR
+        (NEW.kind = 'sample-recorded' AND NEW.from_state = 'grader-active' AND
+          NEW.to_state = 'subject-active') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'subject-active' AND
+          NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'subject-active', 'grader-active') AND
+          NEW.to_state = 'failed')
+      )
+      BEGIN
+        SELECT RAISE(ABORT, 'illegal factory eval production transition');
+      END;
+      CREATE TRIGGER factory_eval_production_events_time_guard
+      BEFORE INSERT ON factory_eval_production_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_eval_production_jobs WHERE job_id = NEW.job_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_eval_production_events
+          WHERE job_id = NEW.job_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN
+        SELECT RAISE(ABORT, 'factory eval production event timestamp mismatch');
+      END;
+
+      PRAGMA user_version = 19;
+      COMMIT;
+    `);
+  }
+
+  if (version < 20) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_discovery_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        observer_id TEXT NOT NULL CHECK (length(observer_id) BETWEEN 1 AND 128),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND
+          substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        schedule_policy_digest TEXT NOT NULL CHECK (
+          length(schedule_policy_digest) = 71 AND
+          substr(schedule_policy_digest, 1, 7) = 'sha256:'
+        ),
+        scheduled_for TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 4194304 AND json_valid(run_json)
+        ),
+        UNIQUE(repository_id, schedule_policy_digest, scheduled_for),
+        CHECK (scheduled_for <= created_at AND created_at <= deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_discovery_runs_created_idx
+        ON factory_external_pr_discovery_runs(created_at, run_id);
+
+      CREATE TABLE factory_external_pr_discovery_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 8),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'inventory-started', 'recovered', 'snapshot-recorded',
+          'completed', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN ('ready', 'fetching', 'recorded', 'completed', 'failed')
+        ),
+        to_state TEXT NOT NULL CHECK (
+          to_state IN ('ready', 'fetching', 'recorded', 'completed', 'failed')
+        ),
+        snapshot_digest TEXT CHECK (
+          snapshot_digest IS NULL OR
+          (length(snapshot_digest) = 71 AND substr(snapshot_digest, 1, 7) = 'sha256:')
+        ),
+        snapshot_artifact_digest TEXT CHECK (
+          snapshot_artifact_digest IS NULL OR
+          (length(snapshot_artifact_digest) = 71 AND
+            substr(snapshot_artifact_digest, 1, 7) = 'sha256:')
+        ),
+        snapshot_artifact_size INTEGER CHECK (
+          snapshot_artifact_size IS NULL OR snapshot_artifact_size BETWEEN 1 AND 16777216
+        ),
+        agent_review_candidates INTEGER CHECK (
+          agent_review_candidates IS NULL OR agent_review_candidates BETWEEN 0 AND 25
+        ),
+        human_review_required INTEGER CHECK (
+          human_review_required IS NULL OR human_review_required BETWEEN 0 AND 25
+        ),
+        deferred INTEGER CHECK (deferred IS NULL OR deferred BETWEEN 0 AND 25),
+        factory_owned INTEGER CHECK (factory_owned IS NULL OR factory_owned BETWEEN 0 AND 25),
+        has_more INTEGER CHECK (has_more IS NULL OR has_more IN (0, 1)),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_discovery_snapshots (
+        run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_discovery_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        snapshot_digest TEXT NOT NULL UNIQUE CHECK (
+          length(snapshot_digest) = 71 AND substr(snapshot_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        observer_id TEXT NOT NULL CHECK (length(observer_id) BETWEEN 1 AND 128),
+        scheduled_for TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        has_more INTEGER NOT NULL CHECK (has_more IN (0, 1)),
+        snapshot_json TEXT NOT NULL CHECK (
+          length(snapshot_json) BETWEEN 2 AND 16777216 AND json_valid(snapshot_json)
+        )
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_discovery_candidates (
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_discovery_runs(run_id),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        head_revision TEXT NOT NULL CHECK (length(head_revision) IN (40, 64)),
+        disposition TEXT NOT NULL CHECK (disposition IN (
+          'agent-review-candidate', 'human-review-required', 'deferred', 'factory-owned'
+        )),
+        candidate_digest TEXT NOT NULL CHECK (
+          length(candidate_digest) = 71 AND substr(candidate_digest, 1, 7) = 'sha256:'
+        ),
+        candidate_json TEXT NOT NULL CHECK (
+          length(candidate_json) BETWEEN 2 AND 1048576 AND json_valid(candidate_json)
+        ),
+        PRIMARY KEY(run_id, pull_request_number)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_candidates_disposition_idx
+        ON factory_external_pr_discovery_candidates(
+          repository_id, disposition, pull_request_number
+        );
+
+      CREATE TRIGGER factory_external_pr_discovery_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.observerId') IS NOT NEW.observer_id OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.schedulePolicyDigest') IS NOT NEW.schedule_policy_digest OR
+        json_extract(NEW.run_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_events_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.snapshotDigest') IS NOT NEW.snapshot_digest OR
+        json_extract(NEW.event_json, '$.snapshotArtifact.digest') IS NOT NEW.snapshot_artifact_digest OR
+        json_extract(NEW.event_json, '$.snapshotArtifact.sizeBytes') IS NOT NEW.snapshot_artifact_size OR
+        json_extract(NEW.event_json, '$.agentReviewCandidates') IS NOT NEW.agent_review_candidates OR
+        json_extract(NEW.event_json, '$.humanReviewRequired') IS NOT NEW.human_review_required OR
+        json_extract(NEW.event_json, '$.deferred') IS NOT NEW.deferred OR
+        json_extract(NEW.event_json, '$.factoryOwned') IS NOT NEW.factory_owned OR
+        json_extract(NEW.event_json, '$.hasMore') IS NOT NEW.has_more OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'maintenance-scout' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT observer_id FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'inventory-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'fetching') OR
+        (NEW.kind = 'recovered' AND NEW.from_state = 'fetching' AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'snapshot-recorded' AND NEW.from_state = 'fetching' AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state = 'fetching' AND NEW.to_state = 'failed')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR discovery transition'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'inventory-started', 'recovered', 'failed') AND
+          NEW.snapshot_digest IS NULL AND NEW.snapshot_artifact_digest IS NULL AND
+          NEW.snapshot_artifact_size IS NULL AND NEW.agent_review_candidates IS NULL AND
+          NEW.human_review_required IS NULL AND NEW.deferred IS NULL AND
+          NEW.factory_owned IS NULL AND NEW.has_more IS NULL) OR
+        (NEW.kind = 'snapshot-recorded' AND NEW.snapshot_digest IS NOT NULL AND
+          NEW.snapshot_artifact_digest IS NEW.snapshot_digest AND
+          NEW.snapshot_artifact_size IS NOT NULL AND NEW.agent_review_candidates IS NULL AND
+          NEW.human_review_required IS NULL AND NEW.deferred IS NULL AND
+          NEW.factory_owned IS NULL AND NEW.has_more IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.snapshot_digest IS NULL AND
+          NEW.snapshot_artifact_digest IS NULL AND NEW.snapshot_artifact_size IS NULL AND
+          NEW.agent_review_candidates IS NOT NULL AND NEW.human_review_required IS NOT NULL AND
+          NEW.deferred IS NOT NULL AND NEW.factory_owned IS NOT NULL AND NEW.has_more IS NOT NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_discovery_events_time_guard
+      BEFORE INSERT ON factory_external_pr_discovery_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_discovery_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_snapshots
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshots are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_snapshots
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshots are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_snapshots_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_snapshots
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_discovery_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.snapshot_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.snapshot_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.snapshot_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.snapshot_json, '$.observerId') IS NOT NEW.observer_id OR
+        json_extract(NEW.snapshot_json, '$.scheduledFor') IS NOT NEW.scheduled_for OR
+        json_extract(NEW.snapshot_json, '$.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.snapshot_json, '$.hasMore') IS NOT NEW.has_more
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery snapshot identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_discovery_candidates_no_update
+      BEFORE UPDATE ON factory_external_pr_discovery_candidates
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidates are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_candidates_no_delete
+      BEFORE DELETE ON factory_external_pr_discovery_candidates
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidates are immutable'); END;
+      CREATE TRIGGER factory_external_pr_discovery_candidates_identity_guard
+      BEFORE INSERT ON factory_external_pr_discovery_candidates
+      WHEN
+        json_extract(NEW.candidate_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.candidate_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.candidate_json, '$.head.revision') IS NOT NEW.head_revision OR
+        json_extract(NEW.candidate_json, '$.disposition') IS NOT NEW.disposition
+      BEGIN SELECT RAISE(ABORT, 'factory external PR discovery candidate identity mismatch'); END;
+
+      PRAGMA user_version = 20;
+      COMMIT;
+    `);
+  }
+
+  if (version < 21) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_review_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        candidate_digest TEXT NOT NULL CHECK (
+          length(candidate_digest) = 71 AND substr(candidate_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_run_id TEXT NOT NULL CHECK (length(discovery_run_id) = 36),
+        discovery_run_digest TEXT NOT NULL CHECK (
+          length(discovery_run_digest) = 71 AND substr(discovery_run_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_snapshot_digest TEXT NOT NULL CHECK (
+          length(discovery_snapshot_digest) = 71 AND substr(discovery_snapshot_digest, 1, 7) = 'sha256:'
+        ),
+        discovery_policy_digest TEXT NOT NULL CHECK (
+          length(discovery_policy_digest) = 71 AND substr(discovery_policy_digest, 1, 7) = 'sha256:'
+        ),
+        review_policy_digest TEXT NOT NULL CHECK (
+          length(review_policy_digest) = 71 AND substr(review_policy_digest, 1, 7) = 'sha256:'
+        ),
+        cost_policy_digest TEXT NOT NULL CHECK (
+          length(cost_policy_digest) = 71 AND substr(cost_policy_digest, 1, 7) = 'sha256:'
+        ),
+        workspace_id TEXT NOT NULL CHECK (length(workspace_id) = 36),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 16777216 AND json_valid(run_json)
+        ),
+        UNIQUE(candidate_digest, review_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_review_runs_policy_idx
+        ON factory_external_pr_review_runs(repository_id, review_policy_digest, created_at, run_id);
+
+      CREATE TABLE factory_external_pr_review_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_review_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 64),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'workspace-started', 'workspace-prepared', 'reviewer-started',
+          'reviewer-finished', 'recovered', 'bundle-recorded', 'completed', 'failed', 'quarantined'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'reviewing', 'reviewer-active', 'recorded',
+            'completed', 'failed', 'quarantined'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'reviewing', 'reviewer-active', 'recorded',
+          'completed', 'failed', 'quarantined'
+        )),
+        patch_digest TEXT CHECK (
+          patch_digest IS NULL OR
+          (length(patch_digest) = 71 AND substr(patch_digest, 1, 7) = 'sha256:')
+        ),
+        patch_artifact_json TEXT CHECK (
+          patch_artifact_json IS NULL OR json_valid(patch_artifact_json)
+        ),
+        reviewer_id TEXT CHECK (reviewer_id IS NULL OR length(reviewer_id) BETWEEN 1 AND 128),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_record_digest TEXT CHECK (
+          reviewer_record_digest IS NULL OR
+          (length(reviewer_record_digest) = 71 AND substr(reviewer_record_digest, 1, 7) = 'sha256:')
+        ),
+        review_result_digest TEXT CHECK (
+          review_result_digest IS NULL OR
+          (length(review_result_digest) = 71 AND substr(review_result_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_digest TEXT CHECK (
+          bundle_digest IS NULL OR
+          (length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_artifact_json TEXT CHECK (
+          bundle_artifact_json IS NULL OR json_valid(bundle_artifact_json)
+        ),
+        decision TEXT CHECK (
+          decision IS NULL OR decision IN ('approved', 'changes-requested', 'human-review-required')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_review_bundles (
+        run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_review_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (
+          decision IN ('approved', 'changes-requested', 'human-review-required')
+        ),
+        bundle_json TEXT NOT NULL CHECK (
+          length(bundle_json) BETWEEN 2 AND 16777216 AND json_valid(bundle_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_review_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_review_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_review_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.candidateDigest') IS NOT NEW.candidate_digest OR
+        json_extract(NEW.run_json, '$.discoveryRunId') IS NOT NEW.discovery_run_id OR
+        json_extract(NEW.run_json, '$.discoveryRunDigest') IS NOT NEW.discovery_run_digest OR
+        json_extract(NEW.run_json, '$.discoverySnapshotDigest') IS NOT NEW.discovery_snapshot_digest OR
+        json_extract(NEW.run_json, '$.discoveryPolicyDigest') IS NOT NEW.discovery_policy_digest OR
+        json_extract(NEW.run_json, '$.reviewPolicyDigest') IS NOT NEW.review_policy_digest OR
+        json_extract(NEW.run_json, '$.costPolicyDigest') IS NOT NEW.cost_policy_digest OR
+        json_extract(NEW.run_json, '$.workspaceId') IS NOT NEW.workspace_id OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_discovery_candidates AS candidate
+          JOIN factory_external_pr_discovery_runs AS discovery
+            ON discovery.run_id = candidate.run_id
+          JOIN factory_external_pr_discovery_snapshots AS snapshot
+            ON snapshot.run_id = candidate.run_id
+          WHERE candidate.run_id = NEW.discovery_run_id
+            AND candidate.candidate_digest = NEW.candidate_digest
+            AND candidate.repository_id = NEW.repository_id
+            AND candidate.pull_request_number = NEW.pull_request_number
+            AND candidate.disposition = 'agent-review-candidate'
+            AND discovery.run_digest = NEW.discovery_run_digest
+            AND discovery.discovery_policy_digest = NEW.discovery_policy_digest
+            AND snapshot.snapshot_digest = NEW.discovery_snapshot_digest
+            AND json(candidate.candidate_json) = json_extract(NEW.run_json, '$.candidate')
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_discovery_events AS event
+              WHERE event.run_id = candidate.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_review_events_no_update
+      BEFORE UPDATE ON factory_external_pr_review_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_review_events_no_delete
+      BEFORE DELETE ON factory_external_pr_review_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_review_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_review_events WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_review_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.reviewRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.patchDigest') IS NOT NEW.patch_digest OR
+        json(NEW.patch_artifact_json) IS NOT json_extract(NEW.event_json, '$.patchArtifact') OR
+        json_extract(NEW.event_json, '$.reviewerId') IS NOT NEW.reviewer_id OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.event_json, '$.reviewerRecordDigest') IS NOT NEW.reviewer_record_digest OR
+        json_extract(NEW.event_json, '$.reviewResultDigest') IS NOT NEW.review_result_digest OR
+        json_extract(NEW.event_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json(NEW.bundle_artifact_json) IS NOT json_extract(NEW.event_json, '$.bundleArtifact') OR
+        json_extract(NEW.event_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT json_extract(run_json, '$.reviewPolicy.id')
+          FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_review_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'workspace-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'workspace-prepared' AND NEW.from_state = 'workspace-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'reviewer-started' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'reviewer-active') OR
+        (NEW.kind = 'reviewer-finished' AND NEW.from_state = 'reviewer-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'recovered' AND NEW.from_state IN ('workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'bundle-recorded' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'failed') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('workspace-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'quarantined')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR review transition'); END;
+      CREATE TRIGGER factory_external_pr_review_events_time_guard
+      BEFORE INSERT ON factory_external_pr_review_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_review_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_review_bundles_no_update
+      BEFORE UPDATE ON factory_external_pr_review_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_bundles_no_delete
+      BEFORE DELETE ON factory_external_pr_review_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_review_bundles_identity_guard
+      BEFORE INSERT ON factory_external_pr_review_bundles
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_review_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.bundle_json, '$.reviewRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.bundle_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.bundle_json, '$.decision') IS NOT NEW.decision
+      BEGIN SELECT RAISE(ABORT, 'factory external PR review bundle identity mismatch'); END;
+
+      PRAGMA user_version = 21;
+      COMMIT;
+    `);
+  }
+
+  if (version < 22) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_feedback_runs (
+        publication_run_id TEXT PRIMARY KEY CHECK (length(publication_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        review_run_digest TEXT NOT NULL CHECK (
+          length(review_run_digest) = 71 AND substr(review_run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        review_policy_digest TEXT NOT NULL CHECK (
+          length(review_policy_digest) = 71 AND substr(review_policy_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_policy_digest TEXT NOT NULL CHECK (
+          length(feedback_policy_digest) = 71 AND substr(feedback_policy_digest, 1, 7) = 'sha256:'
+        ),
+        expected_base_revision TEXT NOT NULL CHECK (length(expected_base_revision) BETWEEN 40 AND 64),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        body_digest TEXT NOT NULL CHECK (
+          length(body_digest) = 71 AND substr(body_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        UNIQUE(review_run_id, feedback_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_feedback_runs_policy_idx
+        ON factory_external_pr_feedback_runs(
+          repository_id, feedback_policy_digest, created_at, publication_run_id
+        );
+
+      CREATE TABLE factory_external_pr_feedback_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        publication_run_id TEXT NOT NULL REFERENCES factory_external_pr_feedback_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 16),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'remote-verified', 'publication-started', 'recovery-pending',
+          'publication-cancelled', 'publication-recorded',
+          'completed', 'skipped', 'attention-required', 'failed'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'remote-verified', 'publication-active', 'recorded', 'completed',
+            'skipped', 'attention-required', 'failed'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'remote-verified', 'publication-active', 'recorded', 'completed',
+          'skipped', 'attention-required', 'failed'
+        )),
+        record_digest TEXT CHECK (
+          record_digest IS NULL OR
+          (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')
+        ),
+        record_artifact_json TEXT CHECK (
+          record_artifact_json IS NULL OR json_valid(record_artifact_json)
+        ),
+        remote_review_id TEXT CHECK (
+          remote_review_id IS NULL OR length(remote_review_id) BETWEEN 1 AND 20
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(publication_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_feedback_records (
+        publication_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_feedback_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        record_digest TEXT NOT NULL UNIQUE CHECK (
+          length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        remote_review_id TEXT NOT NULL CHECK (length(remote_review_id) BETWEEN 1 AND 20),
+        record_json TEXT NOT NULL CHECK (
+          length(record_json) BETWEEN 2 AND 1048576 AND json_valid(record_json)
+        ),
+        UNIQUE(repository_id, pull_request_number, remote_review_id)
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_feedback_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_runs
+      WHEN
+        json_extract(NEW.run_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.run_json, '$.reviewRunDigest') IS NOT NEW.review_run_digest OR
+        json_extract(NEW.run_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.run_json, '$.reviewPolicyDigest') IS NOT NEW.review_policy_digest OR
+        json_extract(NEW.run_json, '$.feedbackPolicyDigest') IS NOT NEW.feedback_policy_digest OR
+        json_extract(NEW.run_json, '$.expectedBaseRevision') IS NOT NEW.expected_base_revision OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.bodyArtifact.digest') IS NOT NEW.body_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_review_runs AS review
+          JOIN factory_external_pr_review_bundles AS bundle ON bundle.run_id = review.run_id
+          WHERE review.run_id = NEW.review_run_id
+            AND review.run_digest = NEW.review_run_digest
+            AND review.repository_id = NEW.repository_id
+            AND review.pull_request_number = NEW.pull_request_number
+            AND review.review_policy_digest = NEW.review_policy_digest
+            AND bundle.bundle_digest = NEW.bundle_digest
+            AND json(review.run_json) = json_extract(NEW.run_json, '$.reviewRun')
+            AND json(bundle.bundle_json) = json_extract(NEW.run_json, '$.bundle')
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_review_events AS event
+              WHERE event.run_id = review.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_feedback_events_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json(NEW.record_artifact_json) IS NOT json_extract(NEW.event_json, '$.recordArtifact') OR
+        json_extract(NEW.event_json, '$.remoteReviewId') IS NOT NEW.remote_review_id OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'pr-broker' OR
+        json_extract(NEW.event_json, '$.actor.id') IS NOT (
+          SELECT json_extract(run_json, '$.feedbackPolicy.publisherId')
+          FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.publication_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'remote-verified' AND NEW.from_state = 'ready' AND NEW.to_state = 'remote-verified') OR
+        (NEW.kind = 'publication-started' AND NEW.from_state = 'remote-verified' AND NEW.to_state = 'publication-active') OR
+        (NEW.kind = 'recovery-pending' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'publication-active') OR
+        (NEW.kind = 'publication-cancelled' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'skipped') OR
+        (NEW.kind = 'publication-recorded' AND NEW.from_state IN ('remote-verified', 'publication-active') AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'skipped' AND NEW.from_state IN ('ready', 'remote-verified') AND NEW.to_state = 'skipped') OR
+        (NEW.kind = 'attention-required' AND NEW.from_state = 'publication-active' AND NEW.to_state = 'attention-required') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'remote-verified') AND NEW.to_state = 'failed')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR feedback transition'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'remote-verified', 'publication-started', 'recovery-pending', 'publication-cancelled', 'skipped', 'attention-required', 'failed') AND
+          NEW.record_digest IS NULL AND NEW.record_artifact_json IS NULL AND NEW.remote_review_id IS NULL) OR
+        (NEW.kind = 'publication-recorded' AND NEW.record_digest IS NOT NULL AND
+          NEW.record_artifact_json IS NOT NULL AND NEW.remote_review_id IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.record_digest IS NULL AND
+          NEW.record_artifact_json IS NULL AND NEW.remote_review_id IS NOT NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_feedback_events_time_guard
+      BEFORE INSERT ON factory_external_pr_feedback_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_feedback_events
+          WHERE publication_run_id = NEW.publication_run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_feedback_records_no_update
+      BEFORE UPDATE ON factory_external_pr_feedback_records
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_records_no_delete
+      BEFORE DELETE ON factory_external_pr_feedback_records
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_feedback_records_identity_guard
+      BEFORE INSERT ON factory_external_pr_feedback_records
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_feedback_runs
+          WHERE publication_run_id = NEW.publication_run_id
+        ) OR
+        json_extract(NEW.record_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.record_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.record_json, '$.remoteReviewId') IS NOT NEW.remote_review_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR feedback record identity mismatch'); END;
+
+      PRAGMA user_version = 22;
+      COMMIT;
+    `);
+  }
+
+  if (version < 23) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_repair_decisions (
+        decision_id TEXT PRIMARY KEY CHECK (length(decision_id) = 36),
+        decision_digest TEXT NOT NULL UNIQUE CHECK (
+          length(decision_digest) = 71 AND substr(decision_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        review_run_digest TEXT NOT NULL CHECK (
+          length(review_run_digest) = 71 AND substr(review_run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_publication_run_id TEXT NOT NULL CHECK (length(feedback_publication_run_id) = 36),
+        feedback_publication_run_digest TEXT NOT NULL CHECK (
+          length(feedback_publication_run_digest) = 71 AND
+          substr(feedback_publication_run_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_record_digest TEXT NOT NULL CHECK (
+          length(feedback_record_digest) = 71 AND substr(feedback_record_digest, 1, 7) = 'sha256:'
+        ),
+        admission_policy_digest TEXT NOT NULL CHECK (
+          length(admission_policy_digest) = 71 AND substr(admission_policy_digest, 1, 7) = 'sha256:'
+        ),
+        decision_status TEXT NOT NULL CHECK (decision_status IN ('authorized', 'denied')),
+        authorization_digest TEXT UNIQUE CHECK (
+          authorization_digest IS NULL OR
+          (length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:')
+        ),
+        created_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        decision_json TEXT NOT NULL CHECK (
+          length(decision_json) BETWEEN 2 AND 1048576 AND json_valid(decision_json)
+        ),
+        UNIQUE(bundle_digest, admission_policy_digest),
+        CHECK ((decision_status = 'authorized') = (authorization_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_external_pr_repair_decisions_policy_idx
+        ON factory_external_pr_repair_decisions(
+          repository_id, admission_policy_digest, created_at, decision_id
+        );
+
+      CREATE TABLE factory_external_pr_repair_authorizations (
+        authorization_id TEXT PRIMARY KEY CHECK (length(authorization_id) = 36),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        decision_id TEXT NOT NULL UNIQUE REFERENCES factory_external_pr_repair_decisions(decision_id),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        review_run_id TEXT NOT NULL CHECK (length(review_run_id) = 36),
+        bundle_digest TEXT NOT NULL CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_record_digest TEXT NOT NULL CHECK (
+          length(feedback_record_digest) = 71 AND substr(feedback_record_digest, 1, 7) = 'sha256:'
+        ),
+        admission_policy_digest TEXT NOT NULL CHECK (
+          length(admission_policy_digest) = 71 AND substr(admission_policy_digest, 1, 7) = 'sha256:'
+        ),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        expires_at TEXT NOT NULL,
+        authorization_json TEXT NOT NULL CHECK (
+          length(authorization_json) BETWEEN 2 AND 33554432 AND json_valid(authorization_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_repair_decisions_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_decisions
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decisions are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_decisions_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_decisions
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decisions are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_decisions_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_decisions
+      WHEN
+        json_extract(NEW.decision_json, '$.decisionId') IS NOT NEW.decision_id OR
+        json_extract(NEW.decision_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.decision_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.decision_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.decision_json, '$.reviewRunDigest') IS NOT NEW.review_run_digest OR
+        json_extract(NEW.decision_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.decision_json, '$.feedbackPublicationRunId')
+          IS NOT NEW.feedback_publication_run_id OR
+        json_extract(NEW.decision_json, '$.feedbackPublicationRunDigest')
+          IS NOT NEW.feedback_publication_run_digest OR
+        json_extract(NEW.decision_json, '$.feedbackRecordDigest')
+          IS NOT NEW.feedback_record_digest OR
+        json_extract(NEW.decision_json, '$.admissionPolicyDigest')
+          IS NOT NEW.admission_policy_digest OR
+        json_extract(NEW.decision_json, '$.status') IS NOT NEW.decision_status OR
+        json_extract(NEW.decision_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.decision_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.decision_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.decision_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.decision_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.decision_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-admission' OR
+        json_extract(NEW.decision_json, '$.actor.sessionId') IS NOT NEW.decision_id OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_feedback_runs AS feedback
+          JOIN factory_external_pr_feedback_records AS record
+            ON record.publication_run_id = feedback.publication_run_id
+          WHERE feedback.publication_run_id = NEW.feedback_publication_run_id
+            AND feedback.run_digest = NEW.feedback_publication_run_digest
+            AND feedback.repository_id = NEW.repository_id
+            AND feedback.pull_request_number = NEW.pull_request_number
+            AND feedback.review_run_id = NEW.review_run_id
+            AND feedback.review_run_digest = NEW.review_run_digest
+            AND feedback.bundle_digest = NEW.bundle_digest
+            AND record.record_digest = NEW.feedback_record_digest
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_feedback_events AS event
+              WHERE event.publication_run_id = feedback.publication_run_id
+                AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair decision identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_authorizations_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_authorizations
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorizations are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_authorizations_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_authorizations
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorizations are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_authorizations_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_authorizations
+      WHEN
+        json_extract(NEW.authorization_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.authorization_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.authorization_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.authorization_json, '$.reviewRunId') IS NOT NEW.review_run_id OR
+        json_extract(NEW.authorization_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json_extract(NEW.authorization_json, '$.feedbackRecordDigest')
+          IS NOT NEW.feedback_record_digest OR
+        json_extract(NEW.authorization_json, '$.admissionPolicyDigest')
+          IS NOT NEW.admission_policy_digest OR
+        json_extract(NEW.authorization_json, '$.expectedHeadRevision')
+          IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.authorization_json, '$.expiresAt') IS NOT NEW.expires_at OR
+        json_extract(NEW.authorization_json, '$.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.release') IS NOT 0 OR
+        json_extract(NEW.authorization_json, '$.publicationMode') IS NOT 'replacement-draft' OR
+        json_extract(NEW.authorization_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.authorization_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.authorization_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-admission' OR
+        json_extract(NEW.authorization_json, '$.actor.sessionId') IS NOT NEW.authorization_id OR
+        NOT EXISTS (
+          SELECT 1 FROM factory_external_pr_repair_decisions AS decision
+          WHERE decision.decision_id = NEW.decision_id
+            AND decision.decision_status = 'authorized'
+            AND decision.authorization_digest = NEW.authorization_digest
+            AND decision.repository_id = NEW.repository_id
+            AND decision.pull_request_number = NEW.pull_request_number
+            AND decision.review_run_id = NEW.review_run_id
+            AND decision.bundle_digest = NEW.bundle_digest
+            AND decision.feedback_record_digest = NEW.feedback_record_digest
+            AND decision.admission_policy_digest = NEW.admission_policy_digest
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair authorization identity mismatch'); END;
+
+      PRAGMA user_version = 23;
+      COMMIT;
+    `);
+  }
+
+  if (version < 24) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_repair_execution_runs (
+        run_id TEXT PRIMARY KEY CHECK (length(run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        authorization_id TEXT NOT NULL REFERENCES factory_external_pr_repair_authorizations(authorization_id),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        admission_decision_digest TEXT NOT NULL CHECK (
+          length(admission_decision_digest) = 71 AND
+          substr(admission_decision_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_publication_run_digest TEXT NOT NULL CHECK (
+          length(feedback_publication_run_digest) = 71 AND
+          substr(feedback_publication_run_digest, 1, 7) = 'sha256:'
+        ),
+        feedback_record_digest TEXT NOT NULL CHECK (
+          length(feedback_record_digest) = 71 AND substr(feedback_record_digest, 1, 7) = 'sha256:'
+        ),
+        admission_policy_digest TEXT NOT NULL CHECK (
+          length(admission_policy_digest) = 71 AND substr(admission_policy_digest, 1, 7) = 'sha256:'
+        ),
+        repair_execution_policy_digest TEXT NOT NULL CHECK (
+          length(repair_execution_policy_digest) = 71 AND
+          substr(repair_execution_policy_digest, 1, 7) = 'sha256:'
+        ),
+        workspace_id TEXT NOT NULL UNIQUE CHECK (length(workspace_id) = 36),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        UNIQUE(authorization_digest, repair_execution_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_repair_execution_runs_policy_idx
+        ON factory_external_pr_repair_execution_runs(
+          repository_id, repair_execution_policy_digest, created_at, run_id
+        );
+
+      CREATE TABLE factory_external_pr_repair_execution_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        run_id TEXT NOT NULL REFERENCES factory_external_pr_repair_execution_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 32),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'workspace-started', 'workspace-prepared', 'repairer-started',
+          'recovered', 'bundle-recorded', 'completed', 'failed', 'quarantined'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'prepared', 'repairer-active', 'recorded',
+            'completed', 'failed', 'quarantined'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'prepared', 'repairer-active', 'recorded',
+          'completed', 'failed', 'quarantined'
+        )),
+        source_patch_digest TEXT CHECK (
+          source_patch_digest IS NULL OR
+          (length(source_patch_digest) = 71 AND substr(source_patch_digest, 1, 7) = 'sha256:')
+        ),
+        source_patch_artifact_json TEXT CHECK (
+          source_patch_artifact_json IS NULL OR json_valid(source_patch_artifact_json)
+        ),
+        repairer_id TEXT CHECK (repairer_id IS NULL OR length(repairer_id) BETWEEN 1 AND 128),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        repairer_record_digest TEXT CHECK (
+          repairer_record_digest IS NULL OR
+          (length(repairer_record_digest) = 71 AND substr(repairer_record_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_digest TEXT CHECK (
+          bundle_digest IS NULL OR
+          (length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_artifact_json TEXT CHECK (
+          bundle_artifact_json IS NULL OR json_valid(bundle_artifact_json)
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_repair_execution_bundles (
+        run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_repair_execution_runs(run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        patch_digest TEXT NOT NULL CHECK (
+          length(patch_digest) = 71 AND substr(patch_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_json TEXT NOT NULL CHECK (
+          length(bundle_json) BETWEEN 2 AND 33554432 AND json_valid(bundle_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_repair_execution_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_execution_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_execution_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_runs
+      WHEN
+        json_extract(NEW.run_json, '$.runId') IS NOT NEW.run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.run_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.run_json, '$.admissionDecisionDigest') IS NOT NEW.admission_decision_digest OR
+        json_extract(NEW.run_json, '$.feedbackPublicationRunDigest')
+          IS NOT NEW.feedback_publication_run_digest OR
+        json_extract(NEW.run_json, '$.feedbackRecordDigest') IS NOT NEW.feedback_record_digest OR
+        json_extract(NEW.run_json, '$.admissionPolicyDigest') IS NOT NEW.admission_policy_digest OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicyDigest')
+          IS NOT NEW.repair_execution_policy_digest OR
+        json_extract(NEW.run_json, '$.workspaceId') IS NOT NEW.workspace_id OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.run_json, '$.repairAttempt') IS NOT 1 OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.repositoryId')
+          IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.maximumRiskTier') IS NOT 'R1' OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.maximumRepairAttempts') IS NOT 1 OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.publicationMode')
+          IS NOT 'replacement-draft' OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.autoMerge') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicy.release') IS NOT 0 OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_repair_authorizations AS authorization
+          JOIN factory_external_pr_repair_decisions AS decision
+            ON decision.decision_id = authorization.decision_id
+          JOIN factory_external_pr_feedback_runs AS feedback
+            ON feedback.run_digest = decision.feedback_publication_run_digest
+          JOIN factory_external_pr_feedback_records AS record
+            ON record.record_digest = decision.feedback_record_digest
+          WHERE authorization.authorization_id = NEW.authorization_id
+            AND authorization.authorization_digest = NEW.authorization_digest
+            AND authorization.repository_id = NEW.repository_id
+            AND authorization.pull_request_number = NEW.pull_request_number
+            AND authorization.admission_policy_digest = NEW.admission_policy_digest
+            AND authorization.expected_head_revision = NEW.expected_head_revision
+            AND json_extract(authorization.authorization_json, '$.repairExecutionPolicyDigest')
+              = NEW.repair_execution_policy_digest
+            AND decision.decision_digest = NEW.admission_decision_digest
+            AND decision.decision_status = 'authorized'
+            AND feedback.run_digest = NEW.feedback_publication_run_digest
+            AND record.record_digest = NEW.feedback_record_digest
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_feedback_events AS event
+              WHERE event.publication_run_id = feedback.publication_run_id
+                AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_execution_events_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_execution_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_execution_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution events are append-only'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_execution_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_repair_execution_runs WHERE run_id = NEW.run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_repair_execution_events
+          WHERE run_id = NEW.run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_repair_execution_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_repair_execution_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.repairRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.sourcePatchDigest') IS NOT NEW.source_patch_digest OR
+        json(NEW.source_patch_artifact_json) IS NOT json_extract(NEW.event_json, '$.sourcePatchArtifact') OR
+        json_extract(NEW.event_json, '$.repairerId') IS NOT NEW.repairer_id OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.event_json, '$.repairerRecordDigest') IS NOT NEW.repairer_record_digest OR
+        json_extract(NEW.event_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json(NEW.bundle_artifact_json) IS NOT json_extract(NEW.event_json, '$.bundleArtifact') OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.event_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-execution' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'workspace-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'workspace-prepared' AND NEW.from_state = 'workspace-active' AND NEW.to_state = 'prepared') OR
+        (NEW.kind = 'repairer-started' AND NEW.from_state = 'prepared' AND NEW.to_state = 'repairer-active') OR
+        (NEW.kind = 'recovered' AND NEW.from_state IN ('workspace-active', 'prepared') AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'bundle-recorded' AND NEW.from_state = 'repairer-active' AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'workspace-active', 'prepared', 'repairer-active') AND NEW.to_state = 'failed') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('workspace-active', 'prepared', 'repairer-active') AND NEW.to_state = 'quarantined')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR repair execution transition'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'workspace-started', 'recovered') AND
+          NEW.source_patch_digest IS NULL AND NEW.source_patch_artifact_json IS NULL AND
+          NEW.repairer_id IS NULL AND NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.repairer_record_digest IS NULL AND NEW.bundle_digest IS NULL AND
+          NEW.bundle_artifact_json IS NULL) OR
+        (NEW.kind = 'workspace-prepared' AND NEW.source_patch_digest IS NOT NULL AND
+          NEW.source_patch_artifact_json IS NOT NULL AND NEW.repairer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.repairer_record_digest IS NULL AND NEW.bundle_digest IS NULL AND
+          NEW.bundle_artifact_json IS NULL) OR
+        (NEW.kind = 'repairer-started' AND NEW.source_patch_digest IS NULL AND
+          NEW.source_patch_artifact_json IS NULL AND NEW.repairer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.repairer_record_digest IS NULL AND NEW.bundle_digest IS NULL AND
+          NEW.bundle_artifact_json IS NULL) OR
+        (NEW.kind = 'bundle-recorded' AND NEW.source_patch_digest IS NULL AND
+          NEW.source_patch_artifact_json IS NULL AND NEW.repairer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.repairer_record_digest IS NOT NULL AND NEW.bundle_digest IS NOT NULL AND
+          NEW.bundle_artifact_json IS NOT NULL) OR
+        (NEW.kind = 'completed' AND NEW.source_patch_digest IS NULL AND
+          NEW.source_patch_artifact_json IS NULL AND NEW.repairer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.repairer_record_digest IS NULL AND NEW.bundle_digest IS NOT NULL AND
+          NEW.bundle_artifact_json IS NULL) OR
+        (NEW.kind IN ('failed', 'quarantined') AND NEW.source_patch_digest IS NULL AND
+          NEW.source_patch_artifact_json IS NULL AND NEW.repairer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND NEW.bundle_digest IS NULL AND
+          NEW.bundle_artifact_json IS NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_events_time_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_repair_execution_runs WHERE run_id = NEW.run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_repair_execution_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_execution_bundles_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_execution_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_bundles_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_execution_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_execution_bundles_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_execution_bundles
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_execution_runs WHERE run_id = NEW.run_id
+        ) OR
+        json_extract(NEW.bundle_json, '$.repairRunId') IS NOT NEW.run_id OR
+        json_extract(NEW.bundle_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.bundle_json, '$.patchArtifact.digest') IS NOT NEW.patch_digest OR
+        json_extract(NEW.bundle_json, '$.repairAttempt') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.publicationMode') IS NOT 'replacement-draft' OR
+        json_extract(NEW.bundle_json, '$.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.release') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.workspaceClosed') IS NOT 1
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair execution bundle identity mismatch'); END;
+
+      PRAGMA user_version = 24;
+      COMMIT;
+    `);
+  }
+
+  if (version < 25) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_repair_qualification_runs (
+        qualification_run_id TEXT PRIMARY KEY CHECK (length(qualification_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        repair_run_id TEXT NOT NULL REFERENCES factory_external_pr_repair_execution_runs(run_id),
+        repair_run_digest TEXT NOT NULL CHECK (
+          length(repair_run_digest) = 71 AND substr(repair_run_digest, 1, 7) = 'sha256:'
+        ),
+        repair_bundle_digest TEXT NOT NULL REFERENCES factory_external_pr_repair_execution_bundles(bundle_digest),
+        repair_execution_policy_digest TEXT NOT NULL CHECK (
+          length(repair_execution_policy_digest) = 71 AND
+          substr(repair_execution_policy_digest, 1, 7) = 'sha256:'
+        ),
+        qualification_policy_digest TEXT NOT NULL CHECK (
+          length(qualification_policy_digest) = 71 AND
+          substr(qualification_policy_digest, 1, 7) = 'sha256:'
+        ),
+        gate_profile_digest TEXT NOT NULL CHECK (
+          length(gate_profile_digest) = 71 AND substr(gate_profile_digest, 1, 7) = 'sha256:'
+        ),
+        workspace_id TEXT NOT NULL UNIQUE CHECK (length(workspace_id) = 36),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 40 AND 64),
+        repaired_patch_digest TEXT NOT NULL CHECK (
+          length(repaired_patch_digest) = 71 AND substr(repaired_patch_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)
+        ),
+        UNIQUE(repair_bundle_digest, qualification_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_repair_qualification_runs_policy_idx
+        ON factory_external_pr_repair_qualification_runs(
+          repository_id, qualification_policy_digest, created_at, qualification_run_id
+        );
+
+      CREATE TABLE factory_external_pr_repair_qualification_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        qualification_run_id TEXT NOT NULL REFERENCES factory_external_pr_repair_qualification_runs(qualification_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 128),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT CHECK (
+          previous_event_digest IS NULL OR
+          (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')
+        ),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'workspace-started', 'workspace-prepared', 'gate-started',
+          'gate-finished', 'gates-passed', 'reviewer-started', 'reviewer-finished',
+          'recovered', 'bundle-recorded', 'completed', 'failed', 'quarantined'
+        )),
+        from_state TEXT CHECK (
+          from_state IS NULL OR from_state IN (
+            'ready', 'workspace-active', 'gating', 'gate-active', 'reviewing',
+            'reviewer-active', 'recorded', 'completed', 'failed', 'quarantined'
+          )
+        ),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'workspace-active', 'gating', 'gate-active', 'reviewing',
+          'reviewer-active', 'recorded', 'completed', 'failed', 'quarantined'
+        )),
+        patch_digest TEXT CHECK (
+          patch_digest IS NULL OR
+          (length(patch_digest) = 71 AND substr(patch_digest, 1, 7) = 'sha256:')
+        ),
+        patch_artifact_json TEXT CHECK (
+          patch_artifact_json IS NULL OR json_valid(patch_artifact_json)
+        ),
+        gate_id TEXT CHECK (gate_id IS NULL OR length(gate_id) BETWEEN 1 AND 128),
+        isolation_id TEXT CHECK (isolation_id IS NULL OR length(isolation_id) = 36),
+        gate_observation_digest TEXT CHECK (
+          gate_observation_digest IS NULL OR
+          (length(gate_observation_digest) = 71 AND substr(gate_observation_digest, 1, 7) = 'sha256:')
+        ),
+        isolation_record_digest TEXT CHECK (
+          isolation_record_digest IS NULL OR
+          (length(isolation_record_digest) = 71 AND substr(isolation_record_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_id TEXT CHECK (reviewer_id IS NULL OR length(reviewer_id) BETWEEN 1 AND 128),
+        execution_id TEXT CHECK (execution_id IS NULL OR length(execution_id) = 36),
+        request_digest TEXT CHECK (
+          request_digest IS NULL OR
+          (length(request_digest) = 71 AND substr(request_digest, 1, 7) = 'sha256:')
+        ),
+        reviewer_record_digest TEXT CHECK (
+          reviewer_record_digest IS NULL OR
+          (length(reviewer_record_digest) = 71 AND substr(reviewer_record_digest, 1, 7) = 'sha256:')
+        ),
+        review_result_digest TEXT CHECK (
+          review_result_digest IS NULL OR
+          (length(review_result_digest) = 71 AND substr(review_result_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_digest TEXT CHECK (
+          bundle_digest IS NULL OR
+          (length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:')
+        ),
+        bundle_artifact_json TEXT CHECK (
+          bundle_artifact_json IS NULL OR json_valid(bundle_artifact_json)
+        ),
+        decision TEXT CHECK (
+          decision IS NULL OR decision IN ('qualified', 'rejected', 'human-review-required')
+        ),
+        evidence_digest TEXT CHECK (
+          evidence_digest IS NULL OR
+          (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')
+        ),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)
+        ),
+        UNIQUE(qualification_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_repair_qualification_bundles (
+        qualification_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_repair_qualification_runs(qualification_run_id),
+        run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        bundle_digest TEXT NOT NULL UNIQUE CHECK (
+          length(bundle_digest) = 71 AND substr(bundle_digest, 1, 7) = 'sha256:'
+        ),
+        repair_bundle_digest TEXT NOT NULL CHECK (
+          length(repair_bundle_digest) = 71 AND substr(repair_bundle_digest, 1, 7) = 'sha256:'
+        ),
+        repaired_patch_digest TEXT NOT NULL CHECK (
+          length(repaired_patch_digest) = 71 AND substr(repaired_patch_digest, 1, 7) = 'sha256:'
+        ),
+        decision TEXT NOT NULL CHECK (
+          decision IN ('qualified', 'rejected', 'human-review-required')
+        ),
+        bundle_json TEXT NOT NULL CHECK (
+          length(bundle_json) BETWEEN 2 AND 33554432 AND json_valid(bundle_json)
+        )
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_runs
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_runs
+      WHEN
+        json_extract(NEW.run_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.repairRunId') IS NOT NEW.repair_run_id OR
+        json_extract(NEW.run_json, '$.repairRunDigest') IS NOT NEW.repair_run_digest OR
+        json_extract(NEW.run_json, '$.repairBundleDigest') IS NOT NEW.repair_bundle_digest OR
+        json_extract(NEW.run_json, '$.repairExecutionPolicyDigest')
+          IS NOT NEW.repair_execution_policy_digest OR
+        json_extract(NEW.run_json, '$.qualificationPolicyDigest')
+          IS NOT NEW.qualification_policy_digest OR
+        json_extract(NEW.run_json, '$.gateProfileDigest') IS NOT NEW.gate_profile_digest OR
+        json_extract(NEW.run_json, '$.workspaceId') IS NOT NEW.workspace_id OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.repairedPatchDigest') IS NOT NEW.repaired_patch_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.maximumRiskTier') IS NOT 'R1' OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.publicationMode')
+          IS NOT 'replacement-draft' OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.autoMerge') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.qualificationPolicy.release') IS NOT 0 OR
+        NOT EXISTS (
+          SELECT 1
+          FROM factory_external_pr_repair_execution_runs AS execution
+          JOIN factory_external_pr_repair_execution_bundles AS repair
+            ON repair.run_id = execution.run_id
+          WHERE execution.run_id = NEW.repair_run_id
+            AND execution.run_digest = NEW.repair_run_digest
+            AND execution.repository_id = NEW.repository_id
+            AND execution.pull_request_number = NEW.pull_request_number
+            AND execution.repair_execution_policy_digest = NEW.repair_execution_policy_digest
+            AND repair.bundle_digest = NEW.repair_bundle_digest
+            AND repair.patch_digest = NEW.repaired_patch_digest
+            AND EXISTS (
+              SELECT 1 FROM factory_external_pr_repair_execution_events AS event
+              WHERE event.run_id = execution.run_id AND event.kind = 'completed'
+            )
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_events
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_chain_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.correlation_id IS NOT (
+          SELECT correlation_id FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.sequence != COALESCE((
+          SELECT MAX(sequence) + 1 FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ), 1) OR
+        (NEW.sequence = 1 AND (NEW.previous_event_digest IS NOT NULL OR NEW.from_state IS NOT NULL)) OR
+        (NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+          SELECT event_digest FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        )) OR
+        (NEW.sequence > 1 AND NEW.from_state IS NOT (
+          SELECT to_state FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event chain mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.patchDigest') IS NOT NEW.patch_digest OR
+        json(NEW.patch_artifact_json) IS NOT json_extract(NEW.event_json, '$.patchArtifact') OR
+        json_extract(NEW.event_json, '$.gateId') IS NOT NEW.gate_id OR
+        json_extract(NEW.event_json, '$.isolationId') IS NOT NEW.isolation_id OR
+        json_extract(NEW.event_json, '$.gateObservationDigest')
+          IS NOT NEW.gate_observation_digest OR
+        json_extract(NEW.event_json, '$.isolationRecordDigest')
+          IS NOT NEW.isolation_record_digest OR
+        json_extract(NEW.event_json, '$.reviewerId') IS NOT NEW.reviewer_id OR
+        json_extract(NEW.event_json, '$.executionId') IS NOT NEW.execution_id OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT NEW.request_digest OR
+        json_extract(NEW.event_json, '$.reviewerRecordDigest')
+          IS NOT NEW.reviewer_record_digest OR
+        json_extract(NEW.event_json, '$.reviewResultDigest') IS NOT NEW.review_result_digest OR
+        json_extract(NEW.event_json, '$.bundleDigest') IS NOT NEW.bundle_digest OR
+        json(NEW.bundle_artifact_json) IS NOT json_extract(NEW.event_json, '$.bundleArtifact') OR
+        json_extract(NEW.event_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'policy-engine' OR
+        json_extract(NEW.event_json, '$.actor.id')
+          IS NOT 'agentlab/external-pull-request-repair-qualification' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.qualification_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'workspace-started' AND NEW.from_state = 'ready' AND NEW.to_state = 'workspace-active') OR
+        (NEW.kind = 'workspace-prepared' AND NEW.from_state = 'workspace-active' AND NEW.to_state IN ('gating', 'reviewing')) OR
+        (NEW.kind = 'gate-started' AND NEW.from_state = 'gating' AND NEW.to_state = 'gate-active') OR
+        (NEW.kind = 'gate-finished' AND NEW.from_state = 'gate-active' AND NEW.to_state = 'gating') OR
+        (NEW.kind = 'gates-passed' AND NEW.from_state = 'gating' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'reviewer-started' AND NEW.from_state = 'reviewing' AND NEW.to_state = 'reviewer-active') OR
+        (NEW.kind = 'reviewer-finished' AND NEW.from_state = 'reviewer-active' AND NEW.to_state = 'reviewing') OR
+        (NEW.kind = 'recovered' AND NEW.from_state IN ('workspace-active', 'gating', 'reviewing') AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'bundle-recorded' AND NEW.from_state IN ('gating', 'reviewing') AND NEW.to_state = 'recorded') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'recorded' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'failed' AND NEW.from_state IN ('ready', 'workspace-active', 'gating', 'gate-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'failed') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('workspace-active', 'gating', 'gate-active', 'reviewing', 'reviewer-active') AND NEW.to_state = 'quarantined')
+      )
+      BEGIN SELECT RAISE(ABORT, 'illegal factory external PR repair qualification transition'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_fields_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN NOT (
+        (NEW.kind IN ('registered', 'workspace-started', 'gates-passed', 'recovered') AND
+          NEW.patch_digest IS NULL AND NEW.patch_artifact_json IS NULL AND
+          NEW.gate_id IS NULL AND NEW.isolation_id IS NULL AND
+          NEW.gate_observation_digest IS NULL AND NEW.isolation_record_digest IS NULL AND
+          NEW.reviewer_id IS NULL AND NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'workspace-prepared' AND NEW.patch_digest IS NOT NULL AND
+          NEW.patch_artifact_json IS NOT NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'gate-started' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NOT NULL AND
+          NEW.isolation_id IS NOT NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'gate-finished' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NOT NULL AND
+          NEW.isolation_id IS NOT NULL AND NEW.gate_observation_digest IS NOT NULL AND
+          NEW.isolation_record_digest IS NOT NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'reviewer-started' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'reviewer-finished' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NOT NULL AND
+          NEW.execution_id IS NOT NULL AND NEW.request_digest IS NOT NULL AND
+          NEW.reviewer_record_digest IS NOT NULL AND NEW.review_result_digest IS NOT NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'bundle-recorded' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NOT NULL AND NEW.bundle_artifact_json IS NOT NULL AND
+          NEW.decision IS NOT NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind = 'completed' AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NOT NULL AND NEW.bundle_artifact_json IS NULL AND
+          NEW.decision IS NOT NULL AND NEW.evidence_digest IS NULL) OR
+        (NEW.kind IN ('failed', 'quarantined') AND NEW.patch_digest IS NULL AND
+          NEW.patch_artifact_json IS NULL AND NEW.gate_id IS NULL AND
+          NEW.isolation_id IS NULL AND NEW.gate_observation_digest IS NULL AND
+          NEW.isolation_record_digest IS NULL AND NEW.reviewer_id IS NULL AND
+          NEW.execution_id IS NULL AND NEW.request_digest IS NULL AND
+          NEW.reviewer_record_digest IS NULL AND NEW.review_result_digest IS NULL AND
+          NEW.bundle_digest IS NULL AND NEW.bundle_artifact_json IS NULL AND NEW.decision IS NULL)
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event fields mismatch'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_events_time_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_events
+      WHEN
+        (NEW.sequence = 1 AND NEW.occurred_at IS NOT (
+          SELECT created_at FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        )) OR
+        (NEW.sequence > 1 AND NEW.occurred_at < (
+          SELECT occurred_at FROM factory_external_pr_repair_qualification_events
+          WHERE qualification_run_id = NEW.qualification_run_id
+          ORDER BY sequence DESC LIMIT 1
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification event timestamp mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_no_update
+      BEFORE UPDATE ON factory_external_pr_repair_qualification_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_no_delete
+      BEFORE DELETE ON factory_external_pr_repair_qualification_bundles
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundles are immutable'); END;
+      CREATE TRIGGER factory_external_pr_repair_qualification_bundles_identity_guard
+      BEFORE INSERT ON factory_external_pr_repair_qualification_bundles
+      WHEN
+        NEW.run_digest IS NOT (
+          SELECT run_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.repair_bundle_digest IS NOT (
+          SELECT repair_bundle_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        NEW.repaired_patch_digest IS NOT (
+          SELECT repaired_patch_digest FROM factory_external_pr_repair_qualification_runs
+          WHERE qualification_run_id = NEW.qualification_run_id
+        ) OR
+        json_extract(NEW.bundle_json, '$.qualificationRunId') IS NOT NEW.qualification_run_id OR
+        json_extract(NEW.bundle_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.bundle_json, '$.repairBundleDigest') IS NOT NEW.repair_bundle_digest OR
+        json_extract(NEW.bundle_json, '$.repairedPatchArtifact.digest')
+          IS NOT NEW.repaired_patch_digest OR
+        json_extract(NEW.bundle_json, '$.decision') IS NOT NEW.decision OR
+        json_extract(NEW.bundle_json, '$.usageComplete') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.workspaceUnchanged') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.workspaceClosed') IS NOT 1 OR
+        json_extract(NEW.bundle_json, '$.publicationMode') IS NOT 'replacement-draft' OR
+        json_extract(NEW.bundle_json, '$.remoteWrite') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.autoMerge') IS NOT 0 OR
+        json_extract(NEW.bundle_json, '$.release') IS NOT 0
+      BEGIN SELECT RAISE(ABORT, 'factory external PR repair qualification bundle identity mismatch'); END;
+
+      PRAGMA user_version = 25;
+      COMMIT;
+    `);
+  }
+
+  if (version < 26) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_external_pr_replacement_draft_runs (
+        publication_run_id TEXT PRIMARY KEY CHECK (length(publication_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        original_pull_request_number INTEGER NOT NULL CHECK (original_pull_request_number > 0),
+        qualification_bundle_digest TEXT NOT NULL UNIQUE REFERENCES factory_external_pr_repair_qualification_bundles(bundle_digest),
+        publication_policy_digest TEXT NOT NULL CHECK (length(publication_policy_digest) = 71 AND substr(publication_policy_digest, 1, 7) = 'sha256:'),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (length(run_json) BETWEEN 2 AND 33554432 AND json_valid(run_json)),
+        UNIQUE(qualification_bundle_digest, publication_policy_digest),
+        CHECK (created_at < deadline_at)
+      ) STRICT;
+      CREATE INDEX factory_external_pr_replacement_draft_runs_policy_idx
+        ON factory_external_pr_replacement_draft_runs(repository_id, publication_policy_digest, created_at, publication_run_id);
+
+      CREATE TABLE factory_external_pr_replacement_draft_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        publication_run_id TEXT NOT NULL REFERENCES factory_external_pr_replacement_draft_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 16),
+        event_digest TEXT NOT NULL UNIQUE CHECK (length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'),
+        previous_event_digest TEXT CHECK (previous_event_digest IS NULL OR (length(previous_event_digest) = 71 AND substr(previous_event_digest, 1, 7) = 'sha256:')),
+        kind TEXT NOT NULL CHECK (kind IN ('registered', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened', 'completed', 'stale', 'quarantined')),
+        from_state TEXT CHECK (from_state IS NULL OR from_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened')),
+        to_state TEXT NOT NULL CHECK (to_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened', 'completed', 'stale', 'quarantined')),
+        proposal_digest TEXT CHECK (proposal_digest IS NULL OR (length(proposal_digest) = 71 AND substr(proposal_digest, 1, 7) = 'sha256:')),
+        proposal_artifact_json TEXT CHECK (proposal_artifact_json IS NULL OR json_valid(proposal_artifact_json)),
+        head_revision TEXT CHECK (head_revision IS NULL OR length(head_revision) BETWEEN 40 AND 64),
+        record_digest TEXT CHECK (record_digest IS NULL OR (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:')),
+        record_artifact_json TEXT CHECK (record_artifact_json IS NULL OR json_valid(record_artifact_json)),
+        evidence_digest TEXT CHECK (evidence_digest IS NULL OR (length(evidence_digest) = 71 AND substr(evidence_digest, 1, 7) = 'sha256:')),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (length(event_json) BETWEEN 2 AND 16777216 AND json_valid(event_json)),
+        UNIQUE(publication_run_id, sequence)
+      ) STRICT;
+
+      CREATE TABLE factory_external_pr_replacement_draft_records (
+        publication_run_id TEXT PRIMARY KEY REFERENCES factory_external_pr_replacement_draft_runs(publication_run_id),
+        run_digest TEXT NOT NULL CHECK (length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'),
+        record_digest TEXT NOT NULL UNIQUE CHECK (length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'),
+        replacement_pull_request_number INTEGER NOT NULL CHECK (replacement_pull_request_number > 0),
+        head_revision TEXT NOT NULL CHECK (length(head_revision) BETWEEN 40 AND 64),
+        publisher_id TEXT NOT NULL CHECK (length(publisher_id) BETWEEN 1 AND 128),
+        record_json TEXT NOT NULL CHECK (length(record_json) BETWEEN 2 AND 16777216 AND json_valid(record_json))
+      ) STRICT;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_runs BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_runs BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft runs are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_runs_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_runs
+      WHEN json_extract(NEW.run_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.originalPullRequestNumber') IS NOT NEW.original_pull_request_number OR
+        json_extract(NEW.run_json, '$.qualificationBundleDigest') IS NOT NEW.qualification_bundle_digest OR
+        json_extract(NEW.run_json, '$.publicationPolicyDigest') IS NOT NEW.publication_policy_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.run_json, '$.publicationPolicy.draft') IS NOT 1 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.contributorBranchWrite') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.forcePush') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.approval') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.autoMerge') IS NOT 0 OR
+        json_extract(NEW.run_json, '$.publicationPolicy.release') IS NOT 0
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft run identity mismatch'); END;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_events BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_events BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft events are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_events
+      WHEN json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.proposalDigest') IS NOT NEW.proposal_digest OR
+        json(NEW.proposal_artifact_json) IS NOT json_extract(NEW.event_json, '$.proposalArtifact') OR
+        json_extract(NEW.event_json, '$.headRevision') IS NOT NEW.head_revision OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json(NEW.record_artifact_json) IS NOT json_extract(NEW.event_json, '$.recordArtifact') OR
+        json_extract(NEW.event_json, '$.evidenceDigest') IS NOT NEW.evidence_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'pr-broker' OR
+        json_extract(NEW.event_json, '$.actor.sessionId') IS NOT NEW.publication_run_id
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft event identity mismatch'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_events_transition_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_events
+      WHEN NOT (
+        (NEW.kind = 'registered' AND NEW.from_state IS NULL AND NEW.to_state = 'ready') OR
+        (NEW.kind = 'branch-publish-intent-recorded' AND NEW.from_state = 'ready' AND NEW.to_state = 'branch-publish-intent-recorded') OR
+        (NEW.kind = 'branch-published' AND NEW.from_state = 'branch-publish-intent-recorded' AND NEW.to_state = 'branch-published') OR
+        (NEW.kind = 'pull-request-open-intent-recorded' AND NEW.from_state = 'branch-published' AND NEW.to_state = 'pull-request-open-intent-recorded') OR
+        (NEW.kind = 'pull-request-opened' AND NEW.from_state = 'pull-request-open-intent-recorded' AND NEW.to_state = 'pull-request-opened') OR
+        (NEW.kind = 'completed' AND NEW.from_state = 'pull-request-opened' AND NEW.to_state = 'completed') OR
+        (NEW.kind = 'stale' AND NEW.from_state IN ('ready', 'branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded') AND NEW.to_state = 'stale') OR
+        (NEW.kind = 'quarantined' AND NEW.from_state IN ('branch-publish-intent-recorded', 'branch-published', 'pull-request-open-intent-recorded', 'pull-request-opened') AND NEW.to_state = 'quarantined')
+      ) BEGIN SELECT RAISE(ABORT, 'illegal factory external PR replacement-draft transition'); END;
+
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_no_update BEFORE UPDATE ON factory_external_pr_replacement_draft_records BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_no_delete BEFORE DELETE ON factory_external_pr_replacement_draft_records BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft records are immutable'); END;
+      CREATE TRIGGER factory_external_pr_replacement_draft_records_identity_guard
+      BEFORE INSERT ON factory_external_pr_replacement_draft_records
+      WHEN json_extract(NEW.record_json, '$.publicationRunId') IS NOT NEW.publication_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.replacementPullRequestNumber') IS NOT NEW.replacement_pull_request_number OR
+        json_extract(NEW.record_json, '$.headRevision') IS NOT NEW.head_revision OR
+        json_extract(NEW.record_json, '$.publisherId') IS NOT NEW.publisher_id OR
+        json_extract(NEW.record_json, '$.draft') IS NOT 1
+      BEGIN SELECT RAISE(ABORT, 'factory external PR replacement-draft record identity mismatch'); END;
+
+      PRAGMA user_version = 26;
+      COMMIT;
+    `);
+  }
+
+  if (version < 27) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_daily_quota_reservations (
+        reservation_id TEXT PRIMARY KEY CHECK (length(reservation_id) = 36),
+        reservation_digest TEXT NOT NULL UNIQUE CHECK (
+          length(reservation_digest) = 71 AND substr(reservation_digest, 1, 7) = 'sha256:'
+        ),
+        task_id TEXT NOT NULL UNIQUE CHECK (length(task_id) = 36),
+        quota_policy_digest TEXT NOT NULL CHECK (
+          length(quota_policy_digest) = 71 AND substr(quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        organization_id TEXT NOT NULL CHECK (length(organization_id) BETWEEN 1 AND 128),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 1 AND 128),
+        schedule_run_id TEXT NOT NULL REFERENCES factory_schedule_runs(run_id),
+        schedule_run_digest TEXT NOT NULL CHECK (
+          length(schedule_run_digest) = 71 AND substr(schedule_run_digest, 1, 7) = 'sha256:'
+        ),
+        canary_reservation_digest TEXT NOT NULL
+          REFERENCES factory_canary_task_reservations(reservation_digest),
+        window_start TEXT NOT NULL,
+        window_end TEXT NOT NULL,
+        wall_clock_seconds INTEGER NOT NULL CHECK (wall_clock_seconds > 0),
+        max_agent_turns INTEGER NOT NULL CHECK (max_agent_turns > 0),
+        max_tool_calls INTEGER NOT NULL CHECK (max_tool_calls > 0),
+        max_input_tokens INTEGER NOT NULL CHECK (max_input_tokens > 0),
+        max_output_tokens INTEGER NOT NULL CHECK (max_output_tokens > 0),
+        max_cost_microusd INTEGER NOT NULL CHECK (max_cost_microusd >= 0),
+        max_processes INTEGER NOT NULL CHECK (max_processes > 0),
+        max_output_bytes INTEGER NOT NULL CHECK (max_output_bytes > 0),
+        max_workers INTEGER NOT NULL CHECK (max_workers > 0),
+        max_repair_attempts INTEGER NOT NULL CHECK (max_repair_attempts >= 0),
+        max_changed_files INTEGER NOT NULL CHECK (max_changed_files >= 0),
+        max_changed_lines INTEGER NOT NULL CHECK (max_changed_lines >= 0),
+        draft_pull_requests INTEGER NOT NULL CHECK (draft_pull_requests = 1),
+        reserved_at TEXT NOT NULL,
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        reservation_json TEXT NOT NULL CHECK (
+          length(reservation_json) BETWEEN 2 AND 4194304 AND json_valid(reservation_json)
+        ),
+        CHECK (window_start <= reserved_at AND reserved_at < window_end)
+      ) STRICT;
+      CREATE INDEX factory_daily_quota_reservations_repository_window_idx
+        ON factory_daily_quota_reservations(
+          organization_id, repository_id, window_start, reservation_id
+        );
+      CREATE INDEX factory_daily_quota_reservations_organization_window_idx
+        ON factory_daily_quota_reservations(organization_id, window_start, reservation_id);
+
+      CREATE TRIGGER factory_daily_quota_reservations_no_update
+      BEFORE UPDATE ON factory_daily_quota_reservations
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservations are immutable'); END;
+      CREATE TRIGGER factory_daily_quota_reservations_no_delete
+      BEFORE DELETE ON factory_daily_quota_reservations
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservations are immutable'); END;
+      CREATE TRIGGER factory_daily_quota_reservations_identity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        json_extract(NEW.reservation_json, '$.reservationId') IS NOT NEW.reservation_id OR
+        json_extract(NEW.reservation_json, '$.quotaPolicyDigest') IS NOT NEW.quota_policy_digest OR
+        json_extract(NEW.reservation_json, '$.quotaPolicy.organizationId') IS NOT NEW.organization_id OR
+        json_extract(NEW.reservation_json, '$.organizationId') IS NOT NEW.organization_id OR
+        json_extract(NEW.reservation_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.reservation_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.reservation_json, '$.scheduleRunId') IS NOT NEW.schedule_run_id OR
+        json_extract(NEW.reservation_json, '$.scheduleRunDigest') IS NOT NEW.schedule_run_digest OR
+        json_extract(NEW.reservation_json, '$.canaryReservationDigest') IS NOT NEW.canary_reservation_digest OR
+        json_extract(NEW.reservation_json, '$.windowStart') IS NOT NEW.window_start OR
+        json_extract(NEW.reservation_json, '$.windowEnd') IS NOT NEW.window_end OR
+        json_extract(NEW.reservation_json, '$.budget.wallClockSeconds') IS NOT NEW.wall_clock_seconds OR
+        json_extract(NEW.reservation_json, '$.budget.maxAgentTurns') IS NOT NEW.max_agent_turns OR
+        json_extract(NEW.reservation_json, '$.budget.maxToolCalls') IS NOT NEW.max_tool_calls OR
+        json_extract(NEW.reservation_json, '$.budget.maxInputTokens') IS NOT NEW.max_input_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputTokens') IS NOT NEW.max_output_tokens OR
+        json_extract(NEW.reservation_json, '$.budget.maxCostMicrousd') IS NOT NEW.max_cost_microusd OR
+        json_extract(NEW.reservation_json, '$.budget.maxProcesses') IS NOT NEW.max_processes OR
+        json_extract(NEW.reservation_json, '$.budget.maxOutputBytes') IS NOT NEW.max_output_bytes OR
+        json_extract(NEW.reservation_json, '$.budget.maxWorkers') IS NOT NEW.max_workers OR
+        json_extract(NEW.reservation_json, '$.budget.maxRepairAttempts') IS NOT NEW.max_repair_attempts OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedFiles') IS NOT NEW.max_changed_files OR
+        json_extract(NEW.reservation_json, '$.budget.maxChangedLines') IS NOT NEW.max_changed_lines OR
+        json_extract(NEW.reservation_json, '$.draftPullRequests') IS NOT NEW.draft_pull_requests OR
+        json_extract(NEW.reservation_json, '$.reservedAt') IS NOT NEW.reserved_at OR
+        json_extract(NEW.reservation_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        NEW.schedule_run_digest IS NOT (
+          SELECT run_digest FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ) OR
+        NEW.quota_policy_digest IS NOT json_extract((
+          SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ), '$.dailyQuotaPolicyDigest') OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.repository_id IS NOT (
+          SELECT repository_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.wall_clock_seconds IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_agent_turns IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_tool_calls IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_input_tokens IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_output_tokens IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_cost_microusd IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_processes IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_output_bytes IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_workers IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_repair_attempts IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_changed_files IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        NEW.max_changed_lines IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs
+            WHERE run_id = NEW.schedule_run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs
+            WHERE run_id = NEW.schedule_run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE reservation_digest = NEW.canary_reservation_digest) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        NEW.window_start IS NOT (
+          SELECT substr(scheduled_for, 1, 10) || 'T00:00:00.000Z'
+          FROM factory_schedule_runs WHERE run_id = NEW.schedule_run_id
+        ) OR
+        NEW.window_end IS NOT strftime(
+          '%Y-%m-%dT00:00:00.000Z', NEW.window_start, '+1 day'
+        ) OR
+        json_extract(NEW.reservation_json, '$.organizationQuota') IS NOT
+          json_extract(NEW.reservation_json, '$.quotaPolicy.organization') OR
+        json_extract(NEW.reservation_json, '$.repositoryQuota') IS NOT (
+          SELECT value FROM json_each(
+            json_extract(NEW.reservation_json, '$.quotaPolicy.repositories')
+          ) WHERE json_extract(value, '$.repositoryId') = NEW.repository_id
+        )
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota reservation identity mismatch'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_policy_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN EXISTS (
+        SELECT 1 FROM factory_daily_quota_reservations
+        WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start
+          AND quota_policy_digest <> NEW.quota_policy_digest
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory daily quota policy drift'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_repository_capacity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start) + 1 >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.maximumTasksPerDay') OR
+        COALESCE((SELECT SUM(draft_pull_requests) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.draft_pull_requests >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.maximumDraftPullRequestsPerDay') OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.wall_clock_seconds >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.wallClockSeconds') OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_agent_turns >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxAgentTurns') OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_tool_calls >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxToolCalls') OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_input_tokens >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxInputTokens') OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_output_tokens >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxOutputTokens') OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_cost_microusd >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxCostMicrousd') OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_processes >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxProcesses') OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_output_bytes >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxOutputBytes') OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_workers >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxWorkers') OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_repair_attempts >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxRepairAttempts') OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_changed_files >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxChangedFiles') OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND repository_id = NEW.repository_id
+            AND window_start = NEW.window_start), 0) + NEW.max_changed_lines >
+          json_extract(NEW.reservation_json, '$.repositoryQuota.budget.maxChangedLines')
+      BEGIN SELECT RAISE(ABORT, 'factory daily repository quota capacity exceeded'); END;
+
+      CREATE TRIGGER factory_daily_quota_reservations_organization_capacity_guard
+      BEFORE INSERT ON factory_daily_quota_reservations
+      WHEN
+        (SELECT COUNT(*) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start) + 1 >
+          json_extract(NEW.reservation_json, '$.organizationQuota.maximumTasksPerDay') OR
+        COALESCE((SELECT SUM(draft_pull_requests) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.draft_pull_requests >
+          json_extract(NEW.reservation_json, '$.organizationQuota.maximumDraftPullRequestsPerDay') OR
+        COALESCE((SELECT SUM(wall_clock_seconds) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.wall_clock_seconds >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.wallClockSeconds') OR
+        COALESCE((SELECT SUM(max_agent_turns) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_agent_turns >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxAgentTurns') OR
+        COALESCE((SELECT SUM(max_tool_calls) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_tool_calls >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxToolCalls') OR
+        COALESCE((SELECT SUM(max_input_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_input_tokens >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxInputTokens') OR
+        COALESCE((SELECT SUM(max_output_tokens) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_output_tokens >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxOutputTokens') OR
+        COALESCE((SELECT SUM(max_cost_microusd) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_cost_microusd >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxCostMicrousd') OR
+        COALESCE((SELECT SUM(max_processes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_processes >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxProcesses') OR
+        COALESCE((SELECT SUM(max_output_bytes) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_output_bytes >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxOutputBytes') OR
+        COALESCE((SELECT SUM(max_workers) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_workers >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxWorkers') OR
+        COALESCE((SELECT SUM(max_repair_attempts) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_repair_attempts >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxRepairAttempts') OR
+        COALESCE((SELECT SUM(max_changed_files) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_changed_files >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxChangedFiles') OR
+        COALESCE((SELECT SUM(max_changed_lines) FROM factory_daily_quota_reservations
+          WHERE organization_id = NEW.organization_id AND window_start = NEW.window_start), 0) +
+          NEW.max_changed_lines >
+          json_extract(NEW.reservation_json, '$.organizationQuota.budget.maxChangedLines')
+      BEGIN SELECT RAISE(ABORT, 'factory daily organization quota capacity exceeded'); END;
+
+      DROP TRIGGER factory_schedule_events_canary_claim_guard;
+      CREATE TRIGGER factory_schedule_events_canary_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') NOT IN (
+          'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.task_id IS NOT (
+          SELECT task_id FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(NEW.event_json, '$.canaryReservationDigest')
+        ) OR
+        json_extract(NEW.event_json, '$.requestDigest') IS NOT (
+          SELECT request_digest FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.authorityDigest') IS NOT (
+          SELECT preparation_authority_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        (SELECT schedule_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT schedule_policy_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT policy_bundle_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT (
+            SELECT factory_policy_bundle_digest FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ) OR
+        (SELECT role_identity_policy_digest FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS NOT json_extract((
+            SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+          ), '$.roleIdentityPolicyDigest') OR
+        (SELECT stage FROM factory_canary_task_reservations
+          WHERE task_id = NEW.task_id) IS 'read-only-shadow' OR
+        json_extract(NEW.event_json, '$.reservation.wallClockSeconds') IS NOT (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxAgentTurns') IS NOT (
+          SELECT max_agent_turns FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxToolCalls') IS NOT (
+          SELECT max_tool_calls FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxInputTokens') IS NOT (
+          SELECT max_input_tokens FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputTokens') IS NOT (
+          SELECT max_output_tokens FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxCostMicrousd') IS NOT (
+          SELECT max_cost_microusd FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxProcesses') IS NOT (
+          SELECT max_processes FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxOutputBytes') IS NOT (
+          SELECT max_output_bytes FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxWorkers') IS NOT (
+          SELECT max_workers FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxRepairAttempts') IS NOT (
+          SELECT max_repair_attempts FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedFiles') IS NOT (
+          SELECT max_changed_files FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.reservation.maxChangedLines') IS NOT (
+          SELECT max_changed_lines FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        NEW.occurred_at < (
+          SELECT reserved_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) OR
+        unixepoch(NEW.occurred_at) + (
+          SELECT wall_clock_seconds FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ) > unixepoch((
+          SELECT expires_at FROM factory_canary_task_reservations WHERE task_id = NEW.task_id
+        ))
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule canary claim mismatch'); END;
+
+      DROP TRIGGER factory_schedule_events_canary_finish_guard;
+      CREATE TRIGGER factory_schedule_events_canary_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') NOT IN (
+          'agentlab.schedule-event.v2', 'agentlab.schedule-event.v3'
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.canaryReservationDigest') OR
+        NEW.occurred_at > (
+          SELECT expires_at FROM factory_canary_task_reservations
+          WHERE reservation_digest = json_extract(NEW.event_json, '$.canaryReservationDigest')
+        )
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule canary finish mismatch'); END;
+
+      CREATE TRIGGER factory_schedule_events_daily_quota_claim_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-claimed' AND json_extract((
+        SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+      ), '$.schemaVersion') = 'agentlab.schedule-run.v3' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.schedule-event.v3' OR
+        json_extract(NEW.event_json, '$.dailyQuotaReservationDigest') IS NOT (
+          SELECT reservation_digest FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        NEW.run_id IS NOT (
+          SELECT schedule_run_id FROM factory_daily_quota_reservations
+          WHERE reservation_digest = json_extract(
+            NEW.event_json, '$.dailyQuotaReservationDigest'
+          )
+        ) OR
+        json_extract(NEW.event_json, '$.canaryReservationDigest') IS NOT (
+          SELECT canary_reservation_digest FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract(NEW.event_json, '$.taskCorrelationId') IS NOT (
+          SELECT correlation_id FROM factory_daily_quota_reservations
+          WHERE task_id = NEW.task_id
+        ) OR
+        json_extract((SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id),
+          '$.dailyQuotaPolicyDigest') IS NOT (
+            SELECT quota_policy_digest FROM factory_daily_quota_reservations
+            WHERE task_id = NEW.task_id
+          )
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule daily quota claim mismatch'); END;
+
+      CREATE TRIGGER factory_schedule_events_daily_quota_finish_guard
+      BEFORE INSERT ON factory_schedule_events
+      WHEN NEW.kind = 'task-finished' AND json_extract((
+        SELECT run_json FROM factory_schedule_runs WHERE run_id = NEW.run_id
+      ), '$.schemaVersion') = 'agentlab.schedule-run.v3' AND (
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.schedule-event.v3' OR
+        json_extract(NEW.event_json, '$.dailyQuotaReservationDigest') IS NOT json_extract((
+          SELECT event_json FROM factory_schedule_events
+          WHERE run_id = NEW.run_id ORDER BY sequence DESC LIMIT 1
+        ), '$.dailyQuotaReservationDigest')
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory schedule daily quota finish mismatch'); END;
+
+      PRAGMA user_version = 27;
+      COMMIT;
+    `);
+  }
+
+  if (version < 28) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+
+      CREATE TRIGGER factory_control_events_identity_guard
+      BEFORE INSERT ON factory_control_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.control-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.control') IS NOT NEW.control_name OR
+        json_extract(NEW.event_json, '$.enabled') IS NOT NEW.enabled OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reason') IS NOT NEW.reason
+      BEGIN SELECT RAISE(ABORT, 'factory control event identity mismatch'); END;
+
+      CREATE TABLE factory_incident_containments (
+        containment_id TEXT PRIMARY KEY CHECK (length(containment_id) = 36),
+        containment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(containment_digest) = 71 AND substr(containment_digest, 1, 7) = 'sha256:'
+        ),
+        health_report_digest TEXT NOT NULL UNIQUE CHECK (
+          length(health_report_digest) = 71 AND substr(health_report_digest, 1, 7) = 'sha256:'
+        ),
+        health_policy_digest TEXT NOT NULL CHECK (
+          length(health_policy_digest) = 71 AND substr(health_policy_digest, 1, 7) = 'sha256:'
+        ),
+        daily_quota_policy_digest TEXT NOT NULL CHECK (
+          length(daily_quota_policy_digest) = 71 AND
+          substr(daily_quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        observed_at TEXT NOT NULL,
+        broker_was_enabled INTEGER NOT NULL CHECK (broker_was_enabled IN (0, 1)),
+        scheduler_was_enabled INTEGER NOT NULL CHECK (scheduler_was_enabled IN (0, 1)),
+        broker_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        scheduler_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        contained_at TEXT NOT NULL,
+        containment_json TEXT NOT NULL CHECK (
+          length(containment_json) BETWEEN 2 AND 8388608 AND json_valid(containment_json)
+        ),
+        CHECK (broker_was_enabled = 1 OR scheduler_was_enabled = 1),
+        CHECK ((broker_was_enabled = 1) = (broker_disable_event_digest IS NOT NULL)),
+        CHECK ((scheduler_was_enabled = 1) = (scheduler_disable_event_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_incident_containments_observed_idx
+        ON factory_incident_containments(observed_at DESC, containment_id DESC);
+      CREATE TRIGGER factory_incident_containments_no_update
+      BEFORE UPDATE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_no_delete
+      BEFORE DELETE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_identity_guard
+      BEFORE INSERT ON factory_incident_containments
+      WHEN
+        json_extract(NEW.containment_json, '$.schemaVersion') IS NOT
+          'agentlab.incident-containment.v1' OR
+        json_extract(NEW.containment_json, '$.containmentId') IS NOT NEW.containment_id OR
+        json_extract(NEW.containment_json, '$.healthReportDigest') IS NOT
+          NEW.health_report_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.healthPolicyDigest') IS NOT
+          NEW.health_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.dailyQuotaPolicyDigest') IS NOT
+          NEW.daily_quota_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.containment_json, '$.healthReport.status') IS NOT 'critical' OR
+        json_extract(NEW.containment_json, '$.healthReport.incidentRecommended') IS NOT 1 OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.brokerDisableEventDigest') IS NOT
+          NEW.broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.schedulerDisableEventDigest') IS NOT
+          NEW.scheduler_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.containment_json, '$.actor.role') IS NOT 'incident-commander' OR
+        json_type(NEW.containment_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.containment_json, '$.containedAt') IS NOT NEW.contained_at OR
+        NEW.contained_at < NEW.observed_at OR
+        (NEW.broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.broker_disable_event_digest
+            AND control_name = 'pr-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.scheduler_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.scheduler_disable_event_digest
+            AND control_name = 'scheduler'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory incident containment identity mismatch'); END;
+
+      PRAGMA user_version = 28;
+      COMMIT;
+    `);
+  }
+
+  if (version < 29) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_merge_control_events (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT NOT NULL UNIQUE CHECK (length(event_id) = 36),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        control_name TEXT NOT NULL CHECK (control_name = 'merge-broker'),
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 65536 AND json_valid(event_json)
+        ),
+        occurred_at TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 500)
+      ) STRICT;
+      CREATE INDEX factory_merge_control_events_name_idx
+        ON factory_merge_control_events(control_name, sequence DESC);
+      CREATE TRIGGER factory_merge_control_events_no_update
+      BEFORE UPDATE ON factory_merge_control_events
+      BEGIN SELECT RAISE(ABORT, 'factory merge control events are append-only'); END;
+      CREATE TRIGGER factory_merge_control_events_no_delete
+      BEFORE DELETE ON factory_merge_control_events
+      BEGIN SELECT RAISE(ABORT, 'factory merge control events are append-only'); END;
+      CREATE TRIGGER factory_merge_control_events_identity_guard
+      BEFORE INSERT ON factory_merge_control_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT 'agentlab.control-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.control') IS NOT NEW.control_name OR
+        json_extract(NEW.event_json, '$.enabled') IS NOT NEW.enabled OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reason') IS NOT NEW.reason
+      BEGIN SELECT RAISE(ABORT, 'factory merge control event identity mismatch'); END;
+      PRAGMA user_version = 29;
+      COMMIT;
+    `);
+  }
+
+  if (version < 30) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE factory_autonomous_merge_runs (
+        merge_run_id TEXT PRIMARY KEY CHECK (length(merge_run_id) = 36),
+        run_digest TEXT NOT NULL UNIQUE CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_id TEXT NOT NULL UNIQUE CHECK (length(authorization_id) = 36),
+        authorization_digest TEXT NOT NULL UNIQUE CHECK (
+          length(authorization_digest) = 71 AND substr(authorization_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_json TEXT NOT NULL CHECK (
+          length(authorization_json) BETWEEN 2 AND 8388608 AND json_valid(authorization_json)
+        ),
+        task_id TEXT NOT NULL UNIQUE REFERENCES factory_task_contracts(task_id),
+        contract_digest TEXT NOT NULL REFERENCES factory_task_contracts(contract_digest),
+        repository_id TEXT NOT NULL CHECK (length(repository_id) BETWEEN 3 AND 140),
+        pull_request_number INTEGER NOT NULL CHECK (pull_request_number > 0),
+        expected_head_revision TEXT NOT NULL CHECK (length(expected_head_revision) BETWEEN 7 AND 64),
+        merge_policy_digest TEXT NOT NULL CHECK (
+          length(merge_policy_digest) = 71 AND substr(merge_policy_digest, 1, 7) = 'sha256:'
+        ),
+        created_at TEXT NOT NULL,
+        deadline_at TEXT NOT NULL CHECK (deadline_at > created_at),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        run_json TEXT NOT NULL CHECK (
+          length(run_json) BETWEEN 2 AND 8388608 AND json_valid(run_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_runs_active_idx
+        ON factory_autonomous_merge_runs(repository_id, merge_policy_digest, created_at);
+      CREATE TRIGGER factory_autonomous_merge_runs_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_runs
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge runs are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_runs_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_runs
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge runs are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_runs_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_runs
+      WHEN
+        json_extract(NEW.run_json, '$.schemaVersion') IS NOT 'agentlab.autonomous-merge-run.v1' OR
+        json_extract(NEW.run_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.run_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.run_json, '$.authorizationDigest') IS NOT NEW.authorization_digest OR
+        json_extract(NEW.run_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.run_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.run_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.run_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.run_json, '$.expectedHeadRevision') IS NOT NEW.expected_head_revision OR
+        json_extract(NEW.run_json, '$.mergePolicyDigest') IS NOT NEW.merge_policy_digest OR
+        json_extract(NEW.run_json, '$.createdAt') IS NOT NEW.created_at OR
+        json_extract(NEW.run_json, '$.deadlineAt') IS NOT NEW.deadline_at OR
+        json_extract(NEW.run_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.authorization_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-authorization.v1' OR
+        json_extract(NEW.authorization_json, '$.authorizationId') IS NOT NEW.authorization_id OR
+        json_extract(NEW.authorization_json, '$.taskId') IS NOT NEW.task_id OR
+        json_extract(NEW.authorization_json, '$.contractDigest') IS NOT NEW.contract_digest OR
+        json_extract(NEW.authorization_json, '$.repositoryId') IS NOT NEW.repository_id OR
+        json_extract(NEW.authorization_json, '$.pullRequestNumber') IS NOT NEW.pull_request_number OR
+        json_extract(NEW.authorization_json, '$.expectedHeadRevision') IS NOT
+          NEW.expected_head_revision OR
+        json_extract(NEW.authorization_json, '$.mergePolicyDigest') IS NOT NEW.merge_policy_digest
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge run identity mismatch'); END;
+
+      CREATE TABLE factory_autonomous_merge_events (
+        event_id TEXT PRIMARY KEY CHECK (length(event_id) = 36),
+        merge_run_id TEXT NOT NULL REFERENCES factory_autonomous_merge_runs(merge_run_id),
+        run_digest TEXT NOT NULL REFERENCES factory_autonomous_merge_runs(run_digest),
+        sequence INTEGER NOT NULL CHECK (sequence BETWEEN 1 AND 9),
+        event_digest TEXT NOT NULL UNIQUE CHECK (
+          length(event_digest) = 71 AND substr(event_digest, 1, 7) = 'sha256:'
+        ),
+        previous_event_digest TEXT REFERENCES factory_autonomous_merge_events(event_digest),
+        kind TEXT NOT NULL CHECK (kind IN (
+          'registered', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'evidence-recorded',
+          'completed', 'stale', 'quarantined'
+        )),
+        from_state TEXT CHECK (from_state IS NULL OR from_state IN (
+          'ready', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'merge-evidence-recorded'
+        )),
+        to_state TEXT NOT NULL CHECK (to_state IN (
+          'ready', 'ready-intent-recorded', 'ready-for-review',
+          'enqueue-intent-recorded', 'enqueued', 'merged', 'merge-evidence-recorded',
+          'completed', 'stale', 'quarantined'
+        )),
+        merge_queue_entry_id TEXT,
+        merged_revision TEXT,
+        merged_at TEXT,
+        record_digest TEXT UNIQUE,
+        evidence_bundle_digest TEXT REFERENCES factory_evidence_bundles(bundle_digest),
+        task_event_digest TEXT UNIQUE REFERENCES factory_task_events(event_digest),
+        occurred_at TEXT NOT NULL,
+        reason_code TEXT NOT NULL CHECK (length(reason_code) BETWEEN 1 AND 128),
+        correlation_id TEXT NOT NULL CHECK (length(correlation_id) = 36),
+        event_json TEXT NOT NULL CHECK (
+          length(event_json) BETWEEN 2 AND 8388608 AND json_valid(event_json)
+        ),
+        UNIQUE (merge_run_id, sequence),
+        CHECK ((kind = 'registered') = (sequence = 1)),
+        CHECK ((kind = 'registered') = (previous_event_digest IS NULL)),
+        CHECK ((kind = 'registered') = (from_state IS NULL)),
+        CHECK ((kind IN ('enqueued', 'merged')) = (merge_queue_entry_id IS NOT NULL)),
+        CHECK ((kind = 'merged') = (merged_revision IS NOT NULL)),
+        CHECK ((kind = 'merged') = (merged_at IS NOT NULL)),
+        CHECK ((kind = 'evidence-recorded') = (record_digest IS NOT NULL)),
+        CHECK ((kind = 'evidence-recorded') = (evidence_bundle_digest IS NOT NULL)),
+        CHECK ((kind = 'completed') = (task_event_digest IS NOT NULL))
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_events_run_idx
+        ON factory_autonomous_merge_events(merge_run_id, sequence);
+      CREATE TRIGGER factory_autonomous_merge_events_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_events
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge events are append-only'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_events
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge events are append-only'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_sequence_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN NEW.sequence != COALESCE((
+        SELECT MAX(sequence) + 1 FROM factory_autonomous_merge_events
+        WHERE merge_run_id = NEW.merge_run_id
+      ), 1)
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge sequence mismatch'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_chain_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN NEW.sequence > 1 AND NEW.previous_event_digest IS NOT (
+        SELECT event_digest FROM factory_autonomous_merge_events
+        WHERE merge_run_id = NEW.merge_run_id ORDER BY sequence DESC LIMIT 1
+      )
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge digest chain mismatch'); END;
+      CREATE TRIGGER factory_autonomous_merge_events_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_events
+      WHEN
+        json_extract(NEW.event_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-event.v1' OR
+        json_extract(NEW.event_json, '$.eventId') IS NOT NEW.event_id OR
+        json_extract(NEW.event_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.event_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.event_json, '$.sequence') IS NOT NEW.sequence OR
+        json_extract(NEW.event_json, '$.previousEventDigest') IS NOT NEW.previous_event_digest OR
+        json_extract(NEW.event_json, '$.kind') IS NOT NEW.kind OR
+        json_extract(NEW.event_json, '$.from') IS NOT NEW.from_state OR
+        json_extract(NEW.event_json, '$.to') IS NOT NEW.to_state OR
+        json_extract(NEW.event_json, '$.mergeQueueEntryId') IS NOT NEW.merge_queue_entry_id OR
+        json_extract(NEW.event_json, '$.mergedRevision') IS NOT NEW.merged_revision OR
+        json_extract(NEW.event_json, '$.mergedAt') IS NOT NEW.merged_at OR
+        json_extract(NEW.event_json, '$.recordDigest') IS NOT NEW.record_digest OR
+        json_extract(NEW.event_json, '$.evidenceBundleDigest') IS NOT
+          NEW.evidence_bundle_digest OR
+        json_extract(NEW.event_json, '$.taskEventDigest') IS NOT NEW.task_event_digest OR
+        json_extract(NEW.event_json, '$.occurredAt') IS NOT NEW.occurred_at OR
+        json_extract(NEW.event_json, '$.reasonCode') IS NOT NEW.reason_code OR
+        json_extract(NEW.event_json, '$.correlationId') IS NOT NEW.correlation_id OR
+        json_extract(NEW.event_json, '$.actor.kind') IS NOT 'broker' OR
+        json_extract(NEW.event_json, '$.actor.role') IS NOT 'merger' OR
+        json_type(NEW.event_json, '$.actor.sessionId') IS NOT 'null'
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge event identity mismatch'); END;
+
+      CREATE TABLE factory_autonomous_merge_records (
+        merge_run_id TEXT PRIMARY KEY REFERENCES factory_autonomous_merge_runs(merge_run_id),
+        run_digest TEXT NOT NULL UNIQUE REFERENCES factory_autonomous_merge_runs(run_digest),
+        record_digest TEXT NOT NULL UNIQUE CHECK (
+          length(record_digest) = 71 AND substr(record_digest, 1, 7) = 'sha256:'
+        ),
+        authorization_digest TEXT NOT NULL UNIQUE REFERENCES
+          factory_autonomous_merge_runs(authorization_digest),
+        merged_revision TEXT NOT NULL CHECK (length(merged_revision) BETWEEN 7 AND 64),
+        merge_queue_entry_id TEXT NOT NULL CHECK (length(merge_queue_entry_id) BETWEEN 1 AND 256),
+        merged_at TEXT NOT NULL,
+        recorded_at TEXT NOT NULL CHECK (recorded_at >= merged_at),
+        record_json TEXT NOT NULL CHECK (
+          length(record_json) BETWEEN 2 AND 8388608 AND json_valid(record_json)
+        )
+      ) STRICT;
+      CREATE INDEX factory_autonomous_merge_records_merged_idx
+        ON factory_autonomous_merge_records(merged_at, merge_run_id);
+      CREATE TRIGGER factory_autonomous_merge_records_no_update
+      BEFORE UPDATE ON factory_autonomous_merge_records
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge records are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_records_no_delete
+      BEFORE DELETE ON factory_autonomous_merge_records
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge records are immutable'); END;
+      CREATE TRIGGER factory_autonomous_merge_records_identity_guard
+      BEFORE INSERT ON factory_autonomous_merge_records
+      WHEN
+        json_extract(NEW.record_json, '$.schemaVersion') IS NOT
+          'agentlab.autonomous-merge-record.v1' OR
+        json_extract(NEW.record_json, '$.mergeRunId') IS NOT NEW.merge_run_id OR
+        json_extract(NEW.record_json, '$.runDigest') IS NOT NEW.run_digest OR
+        json_extract(NEW.record_json, '$.authorizationDigest') IS NOT
+          NEW.authorization_digest OR
+        json_extract(NEW.record_json, '$.mergedRevision') IS NOT NEW.merged_revision OR
+        json_extract(NEW.record_json, '$.mergeQueueEntryId') IS NOT NEW.merge_queue_entry_id OR
+        json_extract(NEW.record_json, '$.mergedAt') IS NOT NEW.merged_at OR
+        json_extract(NEW.record_json, '$.recordedAt') IS NOT NEW.recorded_at
+      BEGIN SELECT RAISE(ABORT, 'factory autonomous merge record identity mismatch'); END;
+      PRAGMA user_version = 30;
+      COMMIT;
+    `);
+  }
+
+  if (version < 31) {
+    database.exec(`
+      BEGIN IMMEDIATE;
+      DROP TRIGGER factory_incident_containments_identity_guard;
+      DROP TRIGGER factory_incident_containments_no_update;
+      DROP TRIGGER factory_incident_containments_no_delete;
+      CREATE TABLE factory_incident_containments_v31 (
+        containment_id TEXT PRIMARY KEY CHECK (length(containment_id) = 36),
+        containment_digest TEXT NOT NULL UNIQUE CHECK (
+          length(containment_digest) = 71 AND substr(containment_digest, 1, 7) = 'sha256:'
+        ),
+        health_report_digest TEXT NOT NULL UNIQUE CHECK (
+          length(health_report_digest) = 71 AND substr(health_report_digest, 1, 7) = 'sha256:'
+        ),
+        health_policy_digest TEXT NOT NULL CHECK (
+          length(health_policy_digest) = 71 AND substr(health_policy_digest, 1, 7) = 'sha256:'
+        ),
+        daily_quota_policy_digest TEXT NOT NULL CHECK (
+          length(daily_quota_policy_digest) = 71 AND
+          substr(daily_quota_policy_digest, 1, 7) = 'sha256:'
+        ),
+        observed_at TEXT NOT NULL,
+        broker_was_enabled INTEGER NOT NULL CHECK (broker_was_enabled IN (0, 1)),
+        scheduler_was_enabled INTEGER NOT NULL CHECK (scheduler_was_enabled IN (0, 1)),
+        merge_broker_was_enabled INTEGER NOT NULL CHECK (
+          merge_broker_was_enabled IN (0, 1)
+        ),
+        broker_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        scheduler_disable_event_digest TEXT UNIQUE REFERENCES factory_control_events(event_digest),
+        merge_broker_disable_event_digest TEXT UNIQUE
+          REFERENCES factory_merge_control_events(event_digest),
+        contained_at TEXT NOT NULL,
+        containment_json TEXT NOT NULL CHECK (
+          length(containment_json) BETWEEN 2 AND 8388608 AND json_valid(containment_json)
+        ),
+        CHECK (
+          broker_was_enabled = 1 OR scheduler_was_enabled = 1 OR
+          merge_broker_was_enabled = 1
+        ),
+        CHECK ((broker_was_enabled = 1) = (broker_disable_event_digest IS NOT NULL)),
+        CHECK ((scheduler_was_enabled = 1) = (scheduler_disable_event_digest IS NOT NULL)),
+        CHECK (
+          (merge_broker_was_enabled = 1) =
+          (merge_broker_disable_event_digest IS NOT NULL)
+        )
+      ) STRICT;
+      INSERT INTO factory_incident_containments_v31 (
+        containment_id, containment_digest, health_report_digest, health_policy_digest,
+        daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
+        merge_broker_was_enabled, broker_disable_event_digest,
+        scheduler_disable_event_digest, merge_broker_disable_event_digest, contained_at,
+        containment_json
+      )
+      SELECT
+        containment_id, containment_digest, health_report_digest, health_policy_digest,
+        daily_quota_policy_digest, observed_at, broker_was_enabled, scheduler_was_enabled,
+        0, broker_disable_event_digest, scheduler_disable_event_digest, NULL, contained_at,
+        containment_json
+      FROM factory_incident_containments;
+      DROP TABLE factory_incident_containments;
+      ALTER TABLE factory_incident_containments_v31 RENAME TO factory_incident_containments;
+      CREATE INDEX factory_incident_containments_observed_idx
+        ON factory_incident_containments(observed_at DESC, containment_id DESC);
+      CREATE UNIQUE INDEX factory_incident_containments_merge_disable_idx
+        ON factory_incident_containments(merge_broker_disable_event_digest)
+        WHERE merge_broker_disable_event_digest IS NOT NULL;
+      CREATE TRIGGER factory_incident_containments_no_update
+      BEFORE UPDATE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_no_delete
+      BEFORE DELETE ON factory_incident_containments
+      BEGIN SELECT RAISE(ABORT, 'factory incident containments are append-only'); END;
+      CREATE TRIGGER factory_incident_containments_identity_guard
+      BEFORE INSERT ON factory_incident_containments
+      WHEN
+        json_extract(NEW.containment_json, '$.schemaVersion') IS NOT
+          'agentlab.incident-containment.v1' OR
+        json_extract(NEW.containment_json, '$.containmentId') IS NOT NEW.containment_id OR
+        json_extract(NEW.containment_json, '$.healthReportDigest') IS NOT
+          NEW.health_report_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.healthPolicyDigest') IS NOT
+          NEW.health_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.dailyQuotaPolicyDigest') IS NOT
+          NEW.daily_quota_policy_digest OR
+        json_extract(NEW.containment_json, '$.healthReport.observedAt') IS NOT NEW.observed_at OR
+        json_extract(NEW.containment_json, '$.healthReport.status') IS NOT 'critical' OR
+        json_extract(NEW.containment_json, '$.healthReport.incidentRecommended') IS NOT 1 OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.healthReport.authority.mergeBrokerEnabled') IS NOT
+          NEW.merge_broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.prBrokerEnabled') IS NOT
+          NEW.broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.schedulerEnabled') IS NOT
+          NEW.scheduler_was_enabled OR
+        json_extract(NEW.containment_json, '$.authorityBefore.mergeBrokerEnabled') IS NOT
+          NEW.merge_broker_was_enabled OR
+        json_extract(NEW.containment_json, '$.brokerDisableEventDigest') IS NOT
+          NEW.broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.schedulerDisableEventDigest') IS NOT
+          NEW.scheduler_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.mergeBrokerDisableEventDigest') IS NOT
+          NEW.merge_broker_disable_event_digest OR
+        json_extract(NEW.containment_json, '$.actor.kind') IS NOT 'control-plane' OR
+        json_extract(NEW.containment_json, '$.actor.role') IS NOT 'incident-commander' OR
+        json_type(NEW.containment_json, '$.actor.sessionId') IS NOT 'null' OR
+        json_extract(NEW.containment_json, '$.containedAt') IS NOT NEW.contained_at OR
+        NEW.contained_at < NEW.observed_at OR
+        (NEW.broker_was_enabled = 0 AND NEW.scheduler_was_enabled = 0 AND
+          NEW.merge_broker_was_enabled = 0) OR
+        ((NEW.broker_was_enabled = 1) != (NEW.broker_disable_event_digest IS NOT NULL)) OR
+        ((NEW.scheduler_was_enabled = 1) !=
+          (NEW.scheduler_disable_event_digest IS NOT NULL)) OR
+        ((NEW.merge_broker_was_enabled = 1) !=
+          (NEW.merge_broker_disable_event_digest IS NOT NULL)) OR
+        (NEW.merge_broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_merge_control_events
+          WHERE event_digest = NEW.merge_broker_disable_event_digest
+            AND control_name = 'merge-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.broker_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.broker_disable_event_digest
+            AND control_name = 'pr-broker'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        )) OR
+        (NEW.scheduler_disable_event_digest IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM factory_control_events
+          WHERE event_digest = NEW.scheduler_disable_event_digest
+            AND control_name = 'scheduler'
+            AND enabled = 0
+            AND occurred_at = NEW.contained_at
+            AND json_extract(event_json, '$.actor.kind') = 'control-plane'
+            AND json_extract(event_json, '$.actor.role') = 'incident-commander'
+            AND json_extract(event_json, '$.actor.id') =
+              json_extract(NEW.containment_json, '$.actor.id')
+            AND json_type(event_json, '$.actor.sessionId') = 'null'
+            AND instr(reason, NEW.health_report_digest) > 0
+        ))
+      BEGIN SELECT RAISE(ABORT, 'factory incident containment identity mismatch'); END;
+      PRAGMA user_version = 31;
       COMMIT;
     `);
   }

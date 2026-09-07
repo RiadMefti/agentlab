@@ -38,6 +38,58 @@ export async function runFactoryBrokerOpenDraft(
   dependencies: FactoryBrokerOpenDraftRunnerDependencies = defaultDependencies
 ): Promise<number> {
   assertCommandInput(configPath, taskId, expectedPolicyBundleDigest, confirmation);
+  return executeFactoryBrokerOpenDraft(
+    configPath,
+    taskId,
+    expectedPolicyBundleDigest,
+    { taskId },
+    null,
+    dependencies
+  );
+}
+
+interface CanaryBrokerCoordinates {
+  readonly reservationDigest: Sha256Digest;
+  readonly schedulePolicyDigest: Sha256Digest;
+  readonly roleIdentityPolicyDigest: Sha256Digest;
+}
+
+/** Uses evaluated canary authority instead of a per-task human confirmation. */
+export async function runFactoryBrokerOpenCanaryDraft(
+  configPath: string,
+  taskId: string,
+  reservationDigest: string,
+  schedulePolicyDigest: string,
+  roleIdentityPolicyDigest: string,
+  expectedPolicyBundleDigest: string,
+  dependencies: FactoryBrokerOpenDraftRunnerDependencies = defaultDependencies
+): Promise<number> {
+  const canary = assertCanaryCommandInput(
+    configPath,
+    taskId,
+    reservationDigest,
+    schedulePolicyDigest,
+    roleIdentityPolicyDigest,
+    expectedPolicyBundleDigest
+  );
+  return executeFactoryBrokerOpenDraft(
+    configPath,
+    taskId,
+    expectedPolicyBundleDigest,
+    { taskId, canary },
+    canary,
+    dependencies
+  );
+}
+
+async function executeFactoryBrokerOpenDraft(
+  configPath: string,
+  taskId: string,
+  expectedPolicyBundleDigest: Sha256Digest,
+  command: Readonly<Record<string, unknown>>,
+  canary: CanaryBrokerCoordinates | null,
+  dependencies: FactoryBrokerOpenDraftRunnerDependencies
+): Promise<number> {
   const config = await dependencies.loadConfig(configPath);
   const runtime = dependencies.createRuntime(config);
   let preflight: FactoryBrokerPreflight;
@@ -53,7 +105,7 @@ export async function runFactoryBrokerOpenDraft(
     } else if (preflight.status !== "ready") {
       result = { status: "blocked", reasonCodes: preflight.reasonCodes, outcome: null };
     } else {
-      const outcome = await runtime.commands.openDraft({ taskId });
+      const outcome = await runtime.commands.openDraft(command);
       assertOutcomeIdentity(outcome, preflight, taskId);
       result = {
         status: outcome.status,
@@ -65,7 +117,7 @@ export async function runFactoryBrokerOpenDraft(
     return closeAfterFailure(runtime, error);
   }
   await runtime.close();
-  dependencies.write(`${serializeResult(preflight, taskId, result)}\n`);
+  dependencies.write(`${serializeResult(preflight, taskId, result, canary)}\n`);
   return result.status === "opened" ? 0 : 2;
 }
 
@@ -87,6 +139,35 @@ function assertCommandInput(
   }
 }
 
+function assertCanaryCommandInput(
+  configPath: string,
+  taskId: string,
+  reservationDigest: string,
+  schedulePolicyDigest: string,
+  roleIdentityPolicyDigest: string,
+  expectedPolicyBundleDigest: string
+): CanaryBrokerCoordinates {
+  if (!isNormalizedAbsolutePath(configPath)) {
+    throw new Error("Factory canary broker command requires a normalized absolute config path.");
+  }
+  if (!isFactoryTaskId(taskId)) throw new Error("Factory canary broker task ID is invalid.");
+  for (const [label, digest] of [
+    ["reservation", reservationDigest],
+    ["schedule policy", schedulePolicyDigest],
+    ["role policy", roleIdentityPolicyDigest],
+    ["factory policy", expectedPolicyBundleDigest]
+  ] as const) {
+    if (!isSha256Digest(digest)) {
+      throw new Error(`Factory canary broker ${label} digest is invalid.`);
+    }
+  }
+  return {
+    reservationDigest,
+    schedulePolicyDigest,
+    roleIdentityPolicyDigest
+  };
+}
+
 function assertOutcomeIdentity(
   outcome: BrokerDraftOutcome,
   preflight: FactoryBrokerPreflight,
@@ -104,11 +185,15 @@ function assertOutcomeIdentity(
 function serializeResult(
   preflight: FactoryBrokerPreflight,
   taskId: string,
-  result: BrokerDraftResult
+  result: BrokerDraftResult,
+  canary: CanaryBrokerCoordinates | null
 ): string {
   const opened = result.outcome?.status === "opened" ? result.outcome.record : null;
   return JSON.stringify({
-    schemaVersion: "agentlab.broker-open-draft-result.v1",
+    schemaVersion:
+      canary === null
+        ? "agentlab.broker-open-draft-result.v1"
+        : "agentlab.broker-open-canary-draft-result.v1",
     status: result.status,
     taskId,
     policyBundleDigest: preflight.policyBundleDigest,
@@ -118,6 +203,7 @@ function serializeResult(
       baseRevision: preflight.repository.baseRevision
     },
     reasonCodes: [...new Set(result.reasonCodes)].sort(),
+    ...(canary === null ? {} : { canary }),
     pullRequest:
       opened === null
         ? null

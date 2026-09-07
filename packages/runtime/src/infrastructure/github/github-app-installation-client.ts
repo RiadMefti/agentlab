@@ -3,6 +3,15 @@ import { request as httpsRequest } from "node:https";
 import { z } from "zod";
 
 import { GitHubApiError } from "./github-rest-client.js";
+import type {
+  CreateGitHubAppInstallationTokenInput,
+  GitHubAppInstallationApi
+} from "./github-app-installation-api.js";
+
+export type {
+  CreateGitHubAppInstallationTokenInput,
+  GitHubAppInstallationApi
+} from "./github-app-installation-api.js";
 
 export const githubPullRequestBrokerPermissions = Object.freeze({
   checks: "read",
@@ -21,16 +30,6 @@ const requestSchema = z
       .regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u)
   })
   .strict();
-
-export interface CreateGitHubAppInstallationTokenInput {
-  readonly installationId: number;
-  readonly repositoryNumericId: number;
-  readonly jwt: string;
-}
-
-export interface GitHubAppInstallationApi {
-  createToken(input: CreateGitHubAppInstallationTokenInput): Promise<unknown>;
-}
 
 export interface GitHubAppInstallationRestClientOptions {
   readonly timeoutMs?: number;

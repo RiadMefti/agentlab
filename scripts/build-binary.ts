@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { constants as osConstants, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -6,6 +6,7 @@ import { appVersion } from "../apps/tui/src/version.js";
 import { exitCodeForSignal } from "../apps/tui/src/bootstrap/signal-exit.js";
 import { assertBinarySbomCorrespondence } from "./binary-sbom-correspondence.js";
 import { generateBinarySbom, type BinarySbomTarget } from "./generate-release-sbom.js";
+import { createRuntimeSmokeSandbox } from "./runtime-smoke-sandbox.js";
 
 const OPEN_TUI_NATIVE_PACKAGES = [
   "@opentui/core-darwin-arm64",
@@ -93,32 +94,39 @@ async function main(): Promise<void> {
   }
   await chmod(artifactPath, 0o755);
 
-  await assertOutput(artifactPath, ["--version"], `${appVersion}\n`);
-  const help = await capture(artifactPath, ["--help"]);
-  if (!help.includes("agentlab")) {
-    throw new Error("Packaged binary help smoke test failed.");
-  }
-  await assertDiagnosticsRedirected(artifactPath);
-  await assertSignalCleanup(artifactPath);
+  const smokeSandbox = await createRuntimeSmokeSandbox("agentlab-compiled-smoke-");
+  try {
+    await assertOutput(artifactPath, ["--version"], `${appVersion}\n`, smokeSandbox.environment);
+    const help = await capture(artifactPath, ["--help"], smokeSandbox.environment);
+    if (!help.includes("agentlab")) {
+      throw new Error("Packaged binary help smoke test failed.");
+    }
+    await assertDiagnosticsRedirected(artifactPath, smokeSandbox.environment);
+    await assertSignalCleanup(artifactPath, smokeSandbox.environment);
 
-  if (process.platform === "linux") {
-    await assertFailure(
-      artifactPath,
-      [],
-      { OPENTUI_LIBC: "musl" },
-      "This Linux executable requires glibc"
-    );
+    if (process.platform === "linux") {
+      await assertFailure(
+        artifactPath,
+        [],
+        { ...smokeSandbox.environment, OPENTUI_LIBC: "musl" },
+        "This Linux executable requires glibc"
+      );
+    }
+  } finally {
+    await smokeSandbox.dispose();
   }
   process.stdout.write(`Packaged ${artifactPath} and ${sbomPath}\n`);
 }
 
-async function assertSignalCleanup(executable: string): Promise<void> {
+async function assertSignalCleanup(
+  executable: string,
+  environment: Readonly<Record<string, string>>
+): Promise<void> {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT", "SIGABRT", "SIGBUS"] as const) {
-    const stateRoot = await privateSmokeStateDirectory("agentlab-compiled-signal-");
     let output = "";
     const decoder = new TextDecoder();
     const child = Bun.spawn([executable], {
-      env: { ...process.env, XDG_STATE_HOME: stateRoot },
+      env: environment,
       terminal: {
         cols: 100,
         rows: 30,
@@ -149,55 +157,46 @@ async function assertSignalCleanup(executable: string): Promise<void> {
       }
     } finally {
       if (!child.killed) child.kill();
-      await rm(stateRoot, { force: true, recursive: true });
     }
   }
 }
 
-async function assertDiagnosticsRedirected(executable: string): Promise<void> {
-  const stateRoot = await privateSmokeStateDirectory("agentlab-diagnostics-smoke-");
-  try {
-    const child = Bun.spawn([executable], {
-      env: { ...process.env, XDG_STATE_HOME: stateRoot },
-      stderr: "pipe",
-      stdout: "ignore"
-    });
-    const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    const diagnosticPath = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
-    let log = "";
-    let logReadError: unknown;
-    if (diagnosticPath !== undefined) {
-      try {
-        log = await readFile(diagnosticPath, "utf8");
-      } catch (error: unknown) {
-        logReadError = error;
-      }
+async function assertDiagnosticsRedirected(
+  executable: string,
+  environment: Readonly<Record<string, string>>
+): Promise<void> {
+  const child = Bun.spawn([executable], {
+    env: environment,
+    stderr: "pipe",
+    stdout: "ignore"
+  });
+  const [exitCode, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  const diagnosticPath = /diagnostics: ([^\n]+)/u.exec(stderr)?.[1];
+  let log = "";
+  let logReadError: unknown;
+  if (diagnosticPath !== undefined) {
+    try {
+      log = await readFile(diagnosticPath, "utf8");
+    } catch (error: unknown) {
+      logReadError = error;
     }
-    if (
-      exitCode === 0 ||
-      diagnosticPath === undefined ||
-      stderr.includes("must run in an interactive terminal") ||
-      !log.includes("must run in an interactive terminal")
-    ) {
-      throw new Error(
-        `Packaged binary did not isolate renderer diagnostics from stderr: ${formatSmokeDetails({
-          diagnosticPath,
-          exitCode,
-          log,
-          logReadError,
-          stderr
-        })}`
-      );
-    }
-  } finally {
-    await rm(stateRoot, { force: true, recursive: true });
   }
-}
-
-async function privateSmokeStateDirectory(prefix: string): Promise<string> {
-  // macOS exposes its temporary directory through /var, which is a symlink to /private/var.
-  // Canonicalize this test-owned directory instead of weakening the production symlink guard.
-  return realpath(await mkdtemp(join(tmpdir(), prefix)));
+  if (
+    exitCode === 0 ||
+    diagnosticPath === undefined ||
+    stderr.includes("must run in an interactive terminal") ||
+    !log.includes("must run in an interactive terminal")
+  ) {
+    throw new Error(
+      `Packaged binary did not isolate renderer diagnostics from stderr: ${formatSmokeDetails({
+        diagnosticPath,
+        exitCode,
+        log,
+        logReadError,
+        stderr
+      })}`
+    );
+  }
 }
 
 function formatSmokeDetails(details: {
@@ -231,16 +230,25 @@ function formatSmokeDetails(details: {
 async function assertOutput(
   executable: string,
   args: readonly string[],
-  expected: string
+  expected: string,
+  environment: Readonly<Record<string, string>>
 ): Promise<void> {
-  const output = await capture(executable, args);
+  const output = await capture(executable, args, environment);
   if (output !== expected) {
     throw new Error(`Packaged binary returned unexpected output for ${args.join(" ")}.`);
   }
 }
 
-async function capture(executable: string, args: readonly string[]): Promise<string> {
-  const process = Bun.spawn([executable, ...args], { stderr: "pipe", stdout: "pipe" });
+async function capture(
+  executable: string,
+  args: readonly string[],
+  environment: Readonly<Record<string, string>>
+): Promise<string> {
+  const process = Bun.spawn([executable, ...args], {
+    env: environment,
+    stderr: "pipe",
+    stdout: "pipe"
+  });
   const [exitCode, stdout, stderr] = await Promise.all([
     process.exited,
     new Response(process.stdout).text(),
@@ -259,7 +267,7 @@ async function assertFailure(
   expectedError: string
 ): Promise<void> {
   const child = Bun.spawn([executable, ...args], {
-    env: { ...process.env, ...environment },
+    env: environment,
     stderr: "pipe",
     stdout: "ignore"
   });

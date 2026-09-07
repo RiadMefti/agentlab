@@ -169,6 +169,31 @@ describe("SqliteFactoryPreparationRepository", () => {
     }
   });
 
+  it("lists only eligible scheduled work in oldest-first order", async () => {
+    const repository = new SqliteFactoryPreparationRepository(":memory:");
+    try {
+      const later = await registerTriggeredPreparation(
+        repository,
+        "scheduled",
+        "3",
+        "2026-08-30T11:00:00.000Z"
+      );
+      await registerTriggeredPreparation(repository, "manual", "2", "2026-08-30T09:00:00.000Z");
+      const earlier = await registerTriggeredPreparation(
+        repository,
+        "scheduled",
+        "1",
+        "2026-08-30T10:00:00.000Z"
+      );
+
+      await expect(repository.listScheduled(10)).resolves.toEqual([earlier, later]);
+      await expect(repository.listScheduled(1)).resolves.toEqual([earlier]);
+      expect(() => repository.listScheduled(0)).toThrow(/limit/u);
+    } finally {
+      repository.close();
+    }
+  });
+
   it("enforces immutable preparation rows at the SQLite boundary", async () => {
     const databasePath = temporaryDatabase("agentlab-preparation-journal-");
     const fixture = testFactoryPreparationFixture();
@@ -201,6 +226,20 @@ describe("SqliteFactoryPreparationRepository", () => {
     const historical = new DatabaseSync(databasePath);
     try {
       historical.exec(`
+        DROP TRIGGER factory_schedule_events_daily_quota_finish_guard;
+        DROP TRIGGER factory_schedule_events_daily_quota_claim_guard;
+        DROP TABLE factory_daily_quota_reservations;
+        DROP TRIGGER factory_pull_request_dispatches_canary_guard;
+        DROP TRIGGER factory_schedule_events_canary_finish_guard;
+        DROP TRIGGER factory_schedule_events_canary_claim_guard;
+        DROP TABLE factory_canary_task_reservations;
+        DROP TABLE factory_eval_attestations;
+        DROP TABLE factory_canary_cohorts;
+        DROP TABLE factory_canary_approvals;
+        DROP TABLE factory_eval_assessments;
+        DROP TABLE factory_eval_runs;
+        DROP TABLE factory_schedule_events;
+        DROP TABLE factory_schedule_runs;
         DROP TABLE factory_pull_request_update_events;
         DROP TABLE factory_pull_request_updates;
         DROP TABLE factory_pull_request_repair_events;
@@ -211,6 +250,37 @@ describe("SqliteFactoryPreparationRepository", () => {
         DROP TABLE factory_execution_runs;
         DROP TABLE factory_preparation_events;
         DROP TABLE factory_preparations;
+        DROP TABLE factory_eval_production_events;
+        DROP TABLE factory_eval_production_jobs;
+        DROP TABLE factory_maintenance_discovery_events;
+        DROP TABLE factory_maintenance_discovery_runs;
+        DROP TABLE factory_external_pr_replacement_draft_records;
+        DROP TABLE factory_external_pr_replacement_draft_events;
+        DROP TABLE factory_external_pr_replacement_draft_runs;
+        DROP TABLE factory_external_pr_repair_qualification_bundles;
+        DROP TABLE factory_external_pr_repair_qualification_events;
+        DROP TABLE factory_external_pr_repair_qualification_runs;
+        DROP TABLE factory_external_pr_repair_execution_bundles;
+        DROP TABLE factory_external_pr_repair_execution_events;
+        DROP TABLE factory_external_pr_repair_execution_runs;
+        DROP TABLE factory_external_pr_repair_authorizations;
+        DROP TABLE factory_external_pr_repair_decisions;
+        DROP TABLE factory_external_pr_feedback_records;
+        DROP TABLE factory_external_pr_feedback_events;
+        DROP TABLE factory_incident_containments;
+        DROP TABLE factory_autonomous_merge_records;
+        DROP TABLE factory_autonomous_merge_events;
+        DROP TABLE factory_autonomous_merge_runs;
+        DROP TABLE factory_merge_control_events;
+        DROP TRIGGER factory_control_events_identity_guard;
+        DROP TABLE factory_external_pr_feedback_runs;
+        DROP TABLE factory_external_pr_review_bundles;
+        DROP TABLE factory_external_pr_review_events;
+        DROP TABLE factory_external_pr_review_runs;
+        DROP TABLE factory_external_pr_discovery_candidates;
+        DROP TABLE factory_external_pr_discovery_snapshots;
+        DROP TABLE factory_external_pr_discovery_events;
+        DROP TABLE factory_external_pr_discovery_runs;
         PRAGMA user_version = 5;
       `);
       historical
@@ -280,6 +350,47 @@ function registrationEvent(requestDigest: string, authorityDigest: string) {
     summary: null,
     correlationId: correlationId()
   });
+}
+
+async function registerTriggeredPreparation(
+  repository: SqliteFactoryPreparationRepository,
+  trigger: "manual" | "scheduled",
+  id: string,
+  createdAt: string
+) {
+  const fixture = testFactoryPreparationFixture();
+  const taskId = `${id.repeat(8)}-${id.repeat(4)}-4${id.repeat(3)}-8${id.repeat(3)}-${id.repeat(12)}`;
+  const request = codec.intakeRequest({
+    ...fixture.request,
+    taskId,
+    createdAt,
+    deduplicationKey: testDigest(id),
+    requestSources: [{ kind: "local", ref: `request-${id}` }],
+    trigger
+  });
+  const authority = codec.preparationAuthority({
+    ...fixture.authority,
+    taskId,
+    requestDigest: request.digest
+  });
+  const event = codec.preparationEvent({
+    schemaVersion: "agentlab.preparation-event.v1",
+    eventId: `${id.repeat(8)}-${id.repeat(4)}-4${id.repeat(3)}-9${id.repeat(3)}-${id.repeat(12)}`,
+    taskId,
+    sequence: 1,
+    requestDigest: request.digest,
+    authorityDigest: authority.digest,
+    previousEventDigest: null,
+    kind: "registered",
+    from: null,
+    to: "registered",
+    actor: controlPlaneActor(),
+    occurredAt: authority.value.issuedAt,
+    reasonCode: "request-registered",
+    summary: null,
+    correlationId: correlationId()
+  });
+  return repository.register(request, authority, event);
 }
 
 function phaseStarted(

@@ -85,6 +85,33 @@ describe("FactoryIntakeOperator", () => {
     }
   });
 
+  it("requires distinct confirmation and preserves scheduled intake identity", async () => {
+    const harness = intakeHarness(() => "a".repeat(40));
+    try {
+      await expect(
+        harness.operator.register({
+          ...command(harness.policyBundleDigest),
+          trigger: "scheduled",
+          confirmation: "register-request"
+        })
+      ).rejects.toThrow(/confirmation/u);
+
+      const result = await harness.operator.register({
+        ...command(harness.policyBundleDigest),
+        trigger: "scheduled",
+        confirmation: "register-scheduled-request"
+      });
+      await expect(harness.repository.findById(result.taskId)).resolves.toMatchObject({
+        request: { trigger: "scheduled" }
+      });
+      await expect(harness.operator.register(command(harness.policyBundleDigest))).rejects.toThrow(
+        /different immutable content/u
+      );
+    } finally {
+      harness.repository.close();
+    }
+  });
+
   it("blocks inactive ownership and incomplete exact-model cost policy", async () => {
     const harness = intakeHarness(() => "a".repeat(40), { active: false, emptyCosts: true });
     try {

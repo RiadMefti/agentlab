@@ -1,7 +1,7 @@
 import type { FactoryWorkspace } from "../../domain/factory-workspace.js";
 import {
   emptyFactoryBudgetUsage,
-  isFactoryPreparationRunRequest,
+  isFactoryReadOnlyRunRequest,
   parseFactoryProviderRunRequest,
   type FactoryAgentAdapter,
   type FactoryAgentCommand,
@@ -22,6 +22,7 @@ export const codexFactoryAgentAdapter: FactoryAgentAdapter = {
     provider: "codex",
     roles: ["implementer", "repairer", "reviewer"],
     preparationPhases: ["qualify", "specify", "plan"],
+    maintenanceDiscovery: true,
     maximumToolFilesystemAccess: "workspace-write",
     toolNetwork: "off",
     acceptsCommandAllowlist: false,
@@ -31,10 +32,7 @@ export const codexFactoryAgentAdapter: FactoryAgentAdapter = {
     const request = parseFactoryProviderRunRequest(requestInput);
     assertCodexRequest(request, workspace);
     assertFactoryExecutable(executable);
-    const sandbox =
-      isFactoryPreparationRunRequest(request) || request.role === "reviewer"
-        ? "read-only"
-        : "workspace-write";
+    const sandbox = isFactoryReadOnlyRunRequest(request) ? "read-only" : "workspace-write";
     const args = [
       "--ask-for-approval",
       "never",
@@ -94,7 +92,7 @@ function assertCodexRequest(request: FactoryProviderRunRequest, workspace: Facto
   ) {
     throw new Error("Codex factory adapter cannot enforce the requested capabilities.");
   }
-  const readOnly = isFactoryPreparationRunRequest(request) || request.role === "reviewer";
+  const readOnly = isFactoryReadOnlyRunRequest(request);
   const expectedFilesystem = readOnly ? "read" : "workspace-write";
   const expectedGit = readOnly ? "read" : "worktree-write";
   if (

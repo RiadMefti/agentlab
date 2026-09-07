@@ -813,6 +813,7 @@ class FakePreparationAgentExecutor implements FactoryPreparationAgentExecutor {
           : ([] as const),
         maximumToolFilesystemAccess: "workspace-write" as const,
         toolNetwork: "off" as const,
+        maintenanceDiscovery: true,
         acceptsCommandAllowlist: false,
         acceptsSecrets: false as const
       }

@@ -5,6 +5,18 @@ import type {
   FactoryRemoteRepositorySnapshot
 } from "../domain/factory-pull-request-broker.js";
 import type { FactoryControlRepository } from "../domain/factory-task-repository.js";
+import type {
+  FactoryCanaryBrokerService,
+  FactoryCanaryBrokerTickReport
+} from "./factory-canary-broker-service.js";
+import type {
+  FactoryCanaryPullRequestMaintenanceService,
+  FactoryCanaryPullRequestMaintenanceTickReport
+} from "./factory-canary-pull-request-maintenance-service.js";
+import type {
+  FactoryCanaryPullRequestUpdateService,
+  FactoryCanaryPullRequestUpdateTickReport
+} from "./factory-canary-pull-request-update-service.js";
 import { factoryRepositoryGovernanceDenials } from "./factory-pull-request-policy.js";
 import type {
   FactoryPullRequestOutcome,
@@ -42,6 +54,12 @@ export interface FactoryBrokerOperatorDependencies {
   readonly pullRequestObservations: Pick<FactoryPullRequestObservationService, "observe">;
   readonly pullRequestRepairAdmissions: Pick<FactoryPullRequestRepairAdmissionService, "admit">;
   readonly pullRequestUpdates: Pick<FactoryPullRequestUpdateService, "update">;
+  readonly canaryBroker: Pick<FactoryCanaryBrokerService, "tick"> | null;
+  readonly canaryPullRequestMaintenance: Pick<
+    FactoryCanaryPullRequestMaintenanceService,
+    "tick"
+  > | null;
+  readonly canaryPullRequestUpdates: Pick<FactoryCanaryPullRequestUpdateService, "tick"> | null;
 }
 
 /** Public authority-plane boundary; this process has no model or provider execution dependency. */
@@ -80,6 +98,31 @@ export class FactoryBrokerOperator {
       });
     }
     return this.dependencies.pullRequests.openDraft(input);
+  }
+
+  public reconcileCanaryDrafts(input: unknown): Promise<FactoryCanaryBrokerTickReport> {
+    if (this.dependencies.canaryBroker === null) {
+      throw new Error("Canary broker reconciliation requires broker config v3.");
+    }
+    return this.dependencies.canaryBroker.tick(input);
+  }
+
+  public maintainCanaryPullRequests(
+    input: unknown
+  ): Promise<FactoryCanaryPullRequestMaintenanceTickReport> {
+    if (this.dependencies.canaryPullRequestMaintenance === null) {
+      throw new Error("Canary PR maintenance requires broker config v3.");
+    }
+    return this.dependencies.canaryPullRequestMaintenance.tick(input);
+  }
+
+  public updateCanaryPullRequests(
+    input: unknown
+  ): Promise<FactoryCanaryPullRequestUpdateTickReport> {
+    if (this.dependencies.canaryPullRequestUpdates === null) {
+      throw new Error("Canary PR update consumption requires broker config v3.");
+    }
+    return this.dependencies.canaryPullRequestUpdates.tick(input);
   }
 
   public observePullRequest(input: unknown): Promise<FactoryPullRequestObservationOutcome> {

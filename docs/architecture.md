@@ -18,12 +18,15 @@ project / conversation
     └── ...
 ```
 
-The interactive product is local-only and single-process. Optional factory operations use three
-separate, short-lived local compositions: a credentialless model-bearing worker, a human-only local
-authority operator, and a credential-bearing draft-PR broker. Only the broker may make explicit
-GitHub API calls; none is loaded into the interactive runtime. AgentLab has no HTTP server,
-WebSocket gateway, browser renderer, desktop shell, remote mode, app command language, MCP bridge,
-or provider-session translation layer.
+The interactive product is local-only and single-process. Optional factory operations use separate,
+short-lived local compositions: a credentialless model-bearing worker, a human-only local switch
+operator, a credential-bearing draft-PR broker, credentialless governed intake and maintenance
+discovery operators, an offline sandboxed eval producer, a credentialless deterministic
+evaluator/verifier, an isolated key-bearing eval attestor, a separate human canary-authority
+operator, a credentialless canary-admission operator, and a read-only unit renderer. Only the broker
+may make explicit GitHub API calls; none is loaded into the interactive runtime. AgentLab has no
+HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command language,
+MCP bridge, or provider-session translation layer.
 
 ## Two paths
 
@@ -50,19 +53,20 @@ attempts remain workers beneath that conversation's single captain, and provider
 stays behind ports. Deterministic code—not captain instructions—owns task state, capabilities,
 budgets, gates, evidence, and remote authority.
 
-The source tree now contains the dormant stages 1–4 safety path: strict contracts; an immutable
-SQLite task/evidence ledger; deterministic risk policy and kill switches; content-addressed
-artifacts; exact-base disposable worktrees; bounded provider-native implement, repair, and
-independent-review adapters; sandboxed deterministic gates; authenticated evidence channels; and a
-separate GitHub adapter that can reconstruct one exact patch and request only a draft PR after
-rechecking repository governance. Factory policy 1.3 conservatively classifies the complete allowed
-write scope before execution, binds preparation evidence to the compiled contract, and pins per-tier
-process-tree limits. Every agent or gate executor requires an injected OS isolator; the Linux
-adapter creates a unique transient systemd user scope with cgroup CPU, memory, swap, and task
-ceilings and has no unbounded fallback. The wrapper strips its user-manager environment before
-starting the target. Deterministic gates run Bubblewrap inside that scope. The model-bearing
-subprocess environment is allowlisted and excludes repository, cloud, and package credentials. The
-broker credential is acquired only at the separate broker boundary.
+The source tree now contains the dormant stages 1–4 safety path, bounded local scheduler admission,
+and a dormant eval-production/promotion lane: strict contracts; immutable SQLite task/evidence/eval
+journals; deterministic risk and promotion policy; kill switches; content-addressed artifacts;
+exact-base disposable worktrees; bounded provider-native implement, repair, and independent-review
+adapters; sandboxed deterministic gates; authenticated evidence channels; and a separate GitHub
+adapter that can reconstruct one exact patch and request only a draft PR after rechecking repository
+governance. Factory policy 1.3 conservatively classifies the complete allowed write scope before
+execution, binds preparation evidence to the compiled contract, and pins per-tier process-tree
+limits. Every agent or gate executor requires an injected OS isolator; the Linux adapter creates a
+unique transient systemd user scope with cgroup CPU, memory, swap, and task ceilings and has no
+unbounded fallback. The wrapper strips its user-manager environment before starting the target.
+Deterministic gates run Bubblewrap inside that scope. The model-bearing subprocess environment is
+allowlisted and excludes repository, cloud, and package credentials. The broker credential is
+acquired only at the separate broker boundary.
 
 That broker boundary has a fixed-purpose GitHub App adapter. It issues a bounded RS256 App JWT and
 requests an installation token for one configured numeric repository ID with only `checks:read`,
@@ -76,38 +80,72 @@ owner-only configuration points to a canonical owner-only App-key file and pins 
 App ID for each required `verify` and `factory-sandbox` context. Config v1 remains compatible and
 cost-blocked. Config v2 additionally points to a separate canonical owner-only cost-policy file so
 future broker and worker processes can load the same rate card without sharing credentials. The
-loader strictly parses `agentlab.cost-policy.v1` before runtime construction. A matching check name
-from another App does not count. Config, cost policy, and key reject symlinks, hard links, non-owner
-permissions, unstable metadata, non-canonical paths, and oversized input. Each key read returns
-fresh mutable bytes that the signer erases after one signature.
+loader strictly parses `agentlab.cost-policy.v1` before runtime construction. Config v3 additionally
+loads the same separately protected schedule and role-identity policies as the worker. Config v4 is
+required for scheduled canary dispatch and also loads and pins the reviewed daily aggregate quota
+policy. Config v5 adds the exact repository and autonomous-merge policy coordinates used by the
+credentialless admission and distinct merger. A matching check name from another App does not count.
+Config, policies, and key reject symlinks, hard links, non-owner permissions, unstable metadata,
+non-canonical paths, and oversized input. Each key read returns fresh mutable bytes that the signer
+erases after one signature.
 
 Human enablement is a fourth exact runtime package entry, `@agentlab/runtime/factory-authority`. Its
 strict owner-only `agentlab.local-factory-authority.v1` config contains only a durable database path
-and a pinned operator identifier. The composition can inspect both switches and atomically
-compare-and-set only `pr-broker`, recording a canonical append-only human control event. It exposes
-no scheduler mutation, task execution, process runner, provider, GitHub, tmux, terminal, broker, or
+and a pinned operator identifier. The composition can inspect all three switches and atomically
+compare-and-set `scheduler`, `pr-broker`, or `merge-broker` through distinct commands and
+confirmations, recording a canonical append-only human control event for each switch. It exposes no
+scheduler execution, task execution, process runner, provider, GitHub, tmux, terminal, broker, or
 interactive runtime capability. SQLite's single-writer lease and `BEGIN IMMEDIATE` make the
 expected-state check and append one transaction. OS file ownership is the local authorization
 boundary; the configured operator identifier is audit metadata, not independent proof of a person,
 so production use requires a dedicated non-shared operating-system account.
 
-The product CLI exposes separate authority inspection, broker and worker preflight, a manual worker
-task command, and broker authority compare-and-set commands. Each loads only its exact runtime,
-emits one deterministically ordered non-secret JSON record after clean shutdown, and exits with 0
-for success/ready, 2 for a policy-blocked preflight, or 1 for an operational failure. Authority
-mutation requires the exact expected and desired opposite states, a bounded reason, and the matching
-literal enable/disable confirmation. The explicit `broker-open-draft` command additionally requires
-a task UUID, the operator's expected policy digest, and the literal `--confirm-draft`. It never
-calls the write port unless broker preflight is clean and the digest matches. The service then
-rechecks the exact task, policy, evidence, complete usage, base revision, remote governance, and
-kill switch around its durable idempotent dispatch. The broker command port deliberately has no
-authority-switch command, and the authority port has no remote-write command, so broker and human
-enablement duties remain separate. Scheduler has no CLI enable path. All switches remain
-default-off. An empty rate card adds `cost-policy-unconfigured` to preflight and independently
-denies draft mutation, so readiness is not merely advisory. The safe manual ceremony is: inspect;
-require broker preflight to report only `pr-broker-disabled`; enable with compare-and-set; issue the
-exact draft command; then compare-and-set disable even when the draft attempt fails. The broker's
-immediate preflight and inner rechecks remain authoritative throughout.
+The product CLI exposes separate authority inspection, broker and worker preflight, manual and
+scheduled worker commands, and independent scheduler/PR-broker/merge-broker authority
+compare-and-set commands. Each loads only its exact runtime, emits one deterministically ordered
+non-secret JSON record after clean shutdown, and exits with 0 for success/ready, 2 for a
+policy-blocked preflight, or 1 for an operational failure. Authority mutation requires the exact
+expected and desired opposite states, a bounded reason, and the matching literal enable/disable
+confirmation. The explicit `broker-open-draft` command additionally requires a task UUID, the
+operator's expected policy digest, and the literal `--confirm-draft`. It never calls the write port
+unless broker preflight is clean and the digest matches. The service then rechecks the exact task,
+policy, evidence, complete usage, base revision, remote governance, and kill switch around its
+durable idempotent dispatch. The broker command port deliberately has no authority-switch command,
+and the authority port has no remote-write command, so broker and human enablement duties remain
+separate. Scheduler authority has its own exact CLI path, but that runtime cannot execute work. All
+switches remain default-off. An empty rate card adds `cost-policy-unconfigured` to preflight and
+independently denies draft mutation, so readiness is not merely advisory. The safe manual ceremony
+is: inspect; require broker preflight to report only `pr-broker-disabled`; enable with
+compare-and-set; issue the exact draft command; then compare-and-set disable even when the draft
+attempt fails. The broker's immediate preflight and inner rechecks remain authoritative throughout.
+
+The distinct `broker-open-canary-draft` command replaces the per-task confirmation only for a
+scheduled task with an exact `brokered-draft-pr` reservation. It requires broker config v4 plus the
+reservation, schedule-policy, role-policy, and factory-policy digests. The broker independently
+proves the unexpired canary and daily quota reservations and exact completed scheduler handoff
+before dispatch and every resumable checkpoint. Scheduled tasks cannot use the manual command, and
+non-scheduled tasks cannot present canary authority. This command does not enable the broker,
+discover work, install a timer, merge, or release.
+
+The separate one-shot `broker-canary-tick` command projects pending work by joining immutable
+completed scheduler handoffs to absent or incomplete dispatch journals. It does not create a second
+mutable queue. Config v4 and exact schedule, daily-quota, role, and factory-policy pins are
+mandatory. One tick inspects at most `maximumCandidatesPerTick`, attempts at most
+`maximumTasksPerTick`, prioritizes current authority and then crash recovery within that class, and
+routes every candidate through the same reservation-revalidating draft service. Expiry and
+deterministic denial produce attention output; a denial stops the remaining page. The command cannot
+enable authority, install a timer, merge, or release.
+
+The separate one-shot `broker-pr-maintenance-tick` command projects exact open schema-v2 canary PR
+heads from completed scheduler handoffs, latest durable PR lineage, and append-only evidence. One
+resolved daily slot, the reservation, current PR record and head, broker, and exact schedule, role,
+and factory-policy digests form the immutable maintenance identity. The schedule policy bounds both
+inspection and attempts. A new observation rechecks canary authority before its credentialed read;
+an actionable observation rechecks it again before existing deterministic repair admission. The
+slot-bound observation is the crash checkpoint, so admission can resume without another remote read.
+Clear or pending facts create no repair authority; unsafe, denied, expired, or regressed work
+reports attention. The command cannot execute repair, update the branch, enable authority, merge, or
+release.
 
 The separate `broker-observe-pr` command binds the same owner-only config, task UUID, policy digest,
 clean preflight, and literal `--confirm-observe`, but calls only a credentialed read port plus the
@@ -119,6 +157,133 @@ their configured App IDs count as trusted; ambiguous or truncated pages fail clo
 remain explicitly untrusted fields inside the content-addressed artifact, while the CLI emits only
 counts, revisions, digests, and a deterministic facts-only disposition. The command cannot update
 the branch, invoke a provider, transition into repair, merge, or release.
+
+The separate `external-pr-discovery-tick` command inventories bounded external pull requests through
+`@agentlab/runtime/factory-external-pull-request-discovery`. Its dedicated GitHub App token requests
+exactly `checks:read`, `contents:read`, and `pull_requests:read`; the composition has no provider,
+process, checkout, broker-write, merge, or release port. One policy-pinned daily slot reads no more
+than its configured pull-request and changed-file ceilings, checks the repository identity, and
+re-reads each pull request after its files so a mutable head, base, state, or detail fails closed.
+Titles, bodies, and file paths remain untrusted fields in a canonical content-addressed snapshot.
+SQLite schema v20 appends immutable run, event, snapshot, and candidate records. Deterministic
+dispositions only create inventory for a future review stage; they confer no execution or GitHub
+write authority.
+
+The separate `external-pr-review-tick` command consumes only those immutable
+`agent-review-candidate` records through `@agentlab/runtime/factory-external-pull-request-review`.
+This composition is model-capable but credentialless: architecture rules permit pinned provider
+adapters, systemd process isolation, local Git, SQLite, and artifacts while forbidding every GitHub,
+broker, tmux, interactive, merge, and release path. It never fetches. Exact base/head objects must
+already exist in the configured local repository; a detached head worktree reconstructs the
+merge-base patch and its changed paths must equal the authenticated discovery inventory. Ordered,
+skill-pinned reviewer profiles run with read-only filesystem/Git, no network, secrets, commands, or
+remote repository capability. Distinct provider sessions, complete exact-model cost accounting,
+aggregate budgets, cgroup ceilings, strict JSON, and a clean worktree are mandatory. SQLite schema
+v21 journals recovery-bounded state and a content-addressed quorum bundle. Split verdicts route to a
+human; no result grants GitHub authority.
+
+The separate `external-pr-feedback-tick` command consumes only completed v21 review bundles through
+`@agentlab/runtime/factory-external-pull-request-feedback`. It runs under a distinct pinned non-root
+UID and a dedicated selected-repository GitHub App whose token requests only `pull_requests:write`;
+it does not reuse discovery or branch-write credentials. The composition has no provider, process
+runner, checkout, content write, draft, repair, merge, deployment, or release port. A deterministic
+sanitized body omits contributor title/body, neutralizes mentions and Markdown controls, declares
+itself advisory, and embeds the exact bundle digest. The adapter can submit only a `COMMENT` review
+on the exact open, unmerged base/head; it cannot express GitHub approval or change-request state.
+New publication requires the default-off broker switch before intent and again immediately before
+POST. SQLite schema v22 stores immutable publication runs, append-only events, and authenticated
+remote records. Durable intent precedes POST; an uncertain outcome is reconciled only by the exact
+body marker, reviewed head, and configured App user ID. Blind POST retry is forbidden, and
+unresolved or conflicting remote evidence reports attention. See
+[ADR 0025](decisions/0025-feedback-only-external-pull-request-review-publication.md).
+
+The fourth external-PR plane is deterministic repair admission through
+`@agentlab/runtime/factory-external-pull-request-repair-admission`. It runs under another exact
+non-root UID and has no provider, process, workspace, GitHub, credential, branch mutation, merge,
+deployment, or release path. A schema-v23 decision must join one completed review bundle to its
+exact completed feedback publication and a canonical admission policy that transitively pins future
+repair execution, cost, role, gate, and skill authority. Only unanimous `changes-requested` results
+within reviewed author/fork, age, severity, finding, file, and line limits can receive one expiring
+R1 authorization. The capability carries evidence digests and finding selectors, never contributor
+or review prose, and fixes publication to a future replacement draft with remote write, auto-merge,
+and release disabled. Denials are immutable too, exact retries are idempotent, and scheduler
+revocation before the transaction prevents authority creation. See
+[ADR 0026](decisions/0026-deterministic-external-pull-request-repair-admission.md).
+
+The fifth external-PR plane is credentialless repair execution through
+`@agentlab/runtime/factory-external-pull-request-repair-execution`. Its owner-only configuration
+pins the canonical execution and admission policies, cost and role policies, ordered skill packages,
+provider executable identity, repository, artifact root, worktree root, and systemd isolation tools.
+The composition can run a pinned provider and write one isolated worktree, but it contains no GitHub
+client, App key, remote-repository write, broker, merge, deployment, release, tmux, or interactive
+port. It never fetches: the exact authorized base/head objects and original patch must already be
+present locally and must reproduce the authenticated discovery inventory.
+
+One schema-v23 authorization creates one schema-v24 repair run. The repairer receives exact finding
+selectors resolved from the bound review bundle; all finding prose and repository content are
+delimited as untrusted data. Network, secrets, command allowlists, commits, pushes, publication,
+merge, and release are forbidden. Changed files, lines, patch bytes, prompt bytes, cost, tokens,
+processes, wall time, protected paths, deadline, and recovery attempts are bounded by the immutable
+policy. SQLite enforces immutable runs, append-only legal transitions, and immutable patch bundles.
+The scheduler is checked before admission and again before the agent starts. Existing journals are
+reconciled before readiness or scheduler blockers can stop fresh execution. Recovery may retry
+workspace setup only before `repairer-started`; any inactive or uncertain post-start outcome is
+quarantined so the same authorization can never silently run a second model attempt. Success closes
+the worktree before recording a content-addressed replacement-draft patch bundle with
+`remoteWrite:false`, `autoMerge:false`, and `release:false`. This plane does not run the final
+strict gate/review floor and cannot publish the bundle; those are separate authority stages. See
+[ADR 0027](decisions/0027-credentialless-external-pull-request-repair-execution.md).
+
+The sixth external-PR plane is credentialless post-repair qualification through
+`@agentlab/runtime/factory-external-pull-request-repair-qualification`. Its owner-only configuration
+mutually pins the qualification and repair-execution policies, cost and role policies, exact review
+skills, provider binaries, repository and storage roots, and an inline content-addressed gate
+profile. Before runtime construction the loader hashes every canonical gate executable and rejects
+drift or conflicting digests. The composition has no GitHub client, token, remote-repository port,
+broker, merge, deployment, release, tmux, terminal, or interactive path.
+
+One completed schema-v24 repair bundle creates one immutable schema-v25 qualification run. The
+worker reconstructs the exact repaired patch at the authenticated head without fetching and proves
+the patch digest and change set before work starts. It then journals intent and runs the exact
+ordered format → architecture → typecheck → lint → test → build → secret-scan floor in an offline
+bubblewrap/systemd boundary. Every gate executable, argument vector, timeout, output ceiling,
+evidence kind, and isolation record is policy-bound. A failed gate deterministically rejects the
+repair. Passing gates are followed by the configured independent review quorum in sessions distinct
+from the repairer and from each other. Codex review is read-only with a sandboxed process; Claude
+review is read-only with no process capability. Both have network off, no secrets, no command
+allowlist, and no remote authority. Aggregate work is reserved inside the immutable budget and
+deadline.
+
+SQLite v25 stores immutable runs and bundles plus an append-only legal event chain. Intent is
+durable before every gate or reviewer process. Stable pre-process states may rebuild the exact
+worktree within the recovery limit; an interrupted active process is reconciled and quarantined,
+never blindly rerun. Artifact digests are re-read on recovery, repairer/reviewer identity is checked
+at the persistence boundary, and a final `qualified`, `rejected`, or `human-review-required` bundle
+is recorded only after every required observation is complete and the unchanged worktree is closed.
+The result fixes publication mode to `replacement-draft` and keeps remote write, auto-merge, and
+release false. Replacement-draft publication remains a separate broker authority. See
+[ADR 0028](decisions/0028-credentialless-external-pull-request-repair-qualification.md).
+
+The seventh external-PR plane is the separately credentialed publication composition
+`@agentlab/runtime/factory-external-pull-request-replacement-draft`. It runs under a policy-pinned
+broker UID distinct from worker and attestor identities and uses a separate repository-scoped GitHub
+App with only checks-read, contents-write, and pull-requests-write. The architecture closure
+contains no provider, agent, gate, approval, merge, deployment, release, terminal, or tmux path.
+
+Only a completed schema-v25 `qualified` bundle can create an immutable schema-v26 publication run.
+Before each mutation the adapter re-reads the original open PR and requires its exact URL, base
+branch/revision, qualified head, and the full governance floor. The repaired commit is
+deterministic, has the original qualified head as its sole parent, and is normally pushed without
+force to `agentlab/external-repair/pr-<number>-<qualification-prefix>` in the base repository. No
+contributor or fork branch can be named as a push destination.
+
+SQLite records branch and PR intents before their remote effects. Recovery accepts only the exact
+branch SHA and reconciles a draft by exact base/head/title/body marker plus the pinned GitHub App
+user ID. Original movement becomes terminal stale; conflicting remote identity or final drift is
+quarantined. The immutable record links the original PR, replacement PR, proposal, qualification,
+branch, commit, broker, and publisher. The plane can only create and verify a draft; it cannot
+approve, merge, release, deploy, or activate itself. See
+[ADR 0029](decisions/0029-brokered-external-pull-request-replacement-drafts.md).
 
 The separate `broker-authorize-repair` command adds an explicit local admission boundary after
 observation. It requires clean broker preflight, an exact observation digest, the policy pin, and
@@ -147,6 +312,27 @@ terminal state. Success returns to a local `pr-proposed` checkpoint. The composi
 GitHub, broker credential, authority-control, merge, or release port; publishing the repaired branch
 is a separately authorized broker operation.
 
+The one-shot `worker-pr-repair-tick` command automates only that credentialless execution handoff.
+Its read projection prioritizes any nonterminal repair journal over fresh work, including across
+scheduler, cost, identity, or host-readiness blockers. Fresh entries must join an exact actionable
+slot-bound canary observation and authorization to current schema-v2 PR lineage, scheduler handoff,
+reservation, broker, and schedule/quota/role/factory policies. Config v4 and caller pins are
+mandatory. Before model work, the command requires ready worker preflight and current canary
+authority, and conservatively reserves the task's complete contract budget against the schedule tick
+budget. The existing repair journal, isolation, gates, distinct reviewer, cumulative task budget,
+and no-retry semantics remain authoritative. It stops at `pr-proposed` and cannot reach GitHub or
+mutate authority.
+
+The one-shot `broker-pr-update-tick` command closes the scheduled repair handoff without weakening
+the broker boundary. Its read projection places every nonterminal update journal before fresh work.
+Fresh candidates must join an exact completed repair to its maintenance observation and
+authorization, current schema-v2 PR head, canary and daily quota reservations, completed scheduler
+handoff, scheduled R1 task, broker, and schedule/quota/role/factory policy pins. The existing update
+service remains the sole write path: it journals before mutation, performs a deterministic non-force
+child update, verifies and authenticates the new head, and returns the task to `pr-open` for another
+slot-bound observation. Candidate and action counts are schedule-bounded. The command has no model,
+authority-mutation, merge, release, deployment, or timer-installation port.
+
 The separate `broker-update-draft` command binds the owner-only broker config, task UUID, exact
 repair-authorization digest, policy digest, and literal `--confirm-update`. The broker revalidates
 the completed repair journal and evidence, exact repaired patch and complete cumulative usage,
@@ -166,14 +352,139 @@ only `pr-proposed → pr-open`, and makes later observation and repair admission
 The model-bearing worker never receives the GitHub credential; the broker cannot run a provider.
 
 The explicit `worker-run` command likewise binds an owner-only worker config, task UUID, expected
-policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled is not a
-manual-work denial; every other preflight reason remains blocking. Under the worker's existing
-single-writer queue, a resumable application runner reconciles interrupted preparation and execution
-journals, advances the bounded qualify/specify/plan chain, atomically materializes the contract,
-rechecks execution admission, and invokes the existing implement/gate/review/repair service. Durable
-identity disagreement fails closed. The command stops at `pr-proposed`, emits only a compact
-non-secret report, and cannot reach GitHub, broker credentials, control mutation, merge, or release
-capability.
+policy digest, generated correlation UUID, and literal `--confirm-run`. Scheduler-disabled and an
+unconfigured schedule policy are not manual-work denials; every other preflight reason remains
+blocking. Under the worker's existing single-writer queue, a resumable application runner reconciles
+interrupted preparation and execution journals, advances the bounded qualify/specify/plan chain,
+atomically materializes the contract, rechecks execution admission, and invokes the existing
+implement/gate/review/repair service. Durable identity disagreement fails closed. The command stops
+at `pr-proposed`, emits only a compact non-secret report, and cannot reach GitHub, broker
+credentials, control mutation, merge, or release capability.
+
+The `scheduler-tick` command is a one-shot local reconciliation operation, not an embedded daemon.
+It requires the exact loaded schedule-policy, daily-quota-policy, and factory-policy digests. The
+scheduler resolves the latest daily UTC slot, refuses to create a run beyond its bounded start
+deadline, but may resume an already-created run after that deadline. Before resolving a new slot, it
+reconciles the single oldest open run even across a UTC day boundary. More than one open run is an
+integrity failure, and an open run pinned to different schedule or factory policy blocks new work
+for operator recovery. A wall clock behind the open run or its latest event also blocks before
+worker execution. SQLite version 11 gives each stable schedule ID/slot pair one immutable run and
+this append-only chain:
+
+```text
+registered/ready
+  ├─ task-skipped ───────────────────────────────┐
+  └─ task-claimed/task-active → task-finished ──┤
+                                                 └─ completed
+```
+
+Only intake requests whose immutable trigger is `scheduled` are eligible. Before selection,
+preflight requires the scheduler switch, exact role-identity, schedule, daily-quota, and factory
+policy pins, complete cost policy, and a healthy isolated worker host. Each claim durably binds the
+request and authority digests, first reserves the task's complete authority budget ceiling plus one
+possible draft against repository/day and organization/day ceilings, reserves the same budget
+against the per-tick aggregate quota, and records a durable task correlation before any model work.
+Daily reservations are append-only and never released. A crash or lost result leaves `task-active`;
+retry invokes the existing journal-aware task runner with that same correlation. Duplicate ticks
+read the completed slot without selecting or running work again. The single SQLite writer lease
+prevents overlapping local schedulers, and database uniqueness remains the final idempotency guard.
+The scheduler has no broker, remote credential, authority mutation, merge, or release capability and
+stops every successful task at `pr-proposed`. AgentLab does not install a timer; an owner-governed
+system timer must invoke this one-shot command with the reviewed digests. Scheduled activation
+requires worker config v4, a separately reviewed daily quota policy, and a canonical role policy
+that proves a non-root worker UID distinct from the eval-attestor UID before persistence is opened;
+preflight rechecks and reports both policy digests, and schedule-run/event v3 persists the quota
+reservation across crashes. SQLite schema 27 atomically enforces exact canary/run/repository/budget
+linkage and all repository and organization UTC-day ceilings. The broker independently proves that
+same reservation before scheduled remote writes. See
+[ADR 0011](decisions/0011-enforced-signer-worker-identities.md) and
+[ADR 0030](decisions/0030-durable-daily-aggregate-quotas.md) and
+[Local factory scheduler operations](factory-operations.md).
+
+Configuration promotion is a separate four-process boundary accepted by
+[ADR 0007](decisions/0007-deterministic-evaluation-and-canary-authority.md) and
+[ADR 0009](decisions/0009-isolated-eval-attestation.md), with offline evidence production defined by
+[ADR 0022](decisions/0022-sandboxed-eval-evidence-production.md). The exact
+`@agentlab/runtime/factory-eval-producer` composition accepts one digest-pinned immutable production
+job and runs only administrator-installed baseline, challenger, and grader executables. Each exact
+executable is re-hashed before use and after execution. Fixed protocols run sequentially in
+no-network, empty-home bubblewrap sandboxes inside resource-bounded systemd user scopes. Fixtures,
+outputs, traces, stdout/stderr, grader evidence, requests, isolation, timings, and complete usage
+are content-addressed. SQLite version 19 stores the immutable job and append-only pre/post-execution
+journal; a dangling active scope is never rerun and becomes terminal only after exact systemd
+inactivity is confirmed. Only a complete matched matrix emits `agentlab.eval-run.v1`. The producer
+has no provider secret, evaluator, signer, human authority, scheduler, broker, GitHub, merge, or
+release capability, and is intentionally absent from the daily maintenance chain.
+
+The exact `@agentlab/runtime/factory-evaluator` composition is credentialless: it ingests one strict
+owner-only matched eval report from a pinned gate-runner ID, computes conservative deterministic
+metrics from raw samples, and records one pass/deny assessment. Config v2 also pins one Ed25519
+public key and independent freshness/lifetime limits. The evaluator can verify a canonical DSSE
+in-toto statement against the exact immutable run and assessment and append one attestation record.
+It has no signer, provider executor, process runner, worktree, GitHub, authority switch, merge, or
+release port. The producer's run grants no authority and must traverse this evaluator boundary.
+
+The exact `@agentlab/runtime/factory-eval-attestor` composition receives only the same strict run,
+runner identity, private-key coordinate, key ID, role-identity policy, and timing bounds. It proves
+the configured non-root signer UID before key access, emits one portable signed artifact, and has no
+database, verifier ledger, provider, process, repository, GitHub, broker, authority, merge, release,
+or canary port. Signing and verification are separate crypto modules and separate transitive
+executable allowlists. A signature authenticates exact bytes and key custody; the sandboxed producer
+proves recorded lineage and isolation, not that an installed harness or grader was honest. Each
+predicate binds the shared role-policy digest, and the evaluator independently pins it; this
+prevents a valid signer key from silently authenticating a different signer/worker deployment.
+
+The distinct `@agentlab/runtime/factory-canary-authority` composition accepts only an exact verified
+attestation digest and one strict owner-only human request. Config v2 independently pins and
+re-verifies the public key, runner, timing limits, and role-identity policy before it can issue one
+expiring cohort for exactly one repository, R0/R1, a bounded task count, and a complete aggregate
+budget capped by the evaluated suite and attestation lifetime. The only stages are
+`read-only-shadow`, `local-proposal`, and `brokered-draft-pr`; `autoMerge` and `release` are literal
+`false`. SQLite version 14 atomically stores immutable run/assessment, verified-attestation, and
+approval/cohort records; v2 authority directly binds the attestation and role-policy digests. Legacy
+v1 authority remains readable but cannot be newly issued or consumed autonomously. No composition
+runs a canary. The separate `@agentlab/runtime/factory-canary-admission` composition re-verifies an
+exact v2 cohort, signature, role-policy, evaluated candidate, schedule/policy/skill pins,
+repository, R0/R1 ceiling, preparation authority, and current validity before atomically reserving a
+scheduled task's complete budget. SQLite version 15 makes reservations immutable and enforces
+aggregate cohort task and budget ceilings inside the insert transaction. Admission has no model,
+process, GitHub, broker, merge, or release capability. New schedule claims are schema-v3 events
+carrying the exact canary and daily quota reservation digests. SQLite version 16 rejects missing,
+mismatched, read-only, expired, or insufficient-lifetime claims and binds completion to the same
+digest. The worker independently reloads and validates the reservation before every resumable
+preparation or execution phase. SQLite version 27 additionally binds the quota reservation before
+model work and through completion. Legacy unbound active claims cannot resume. SQLite version 17
+extends the same chain through the credential boundary: every scheduled initial dispatch is schema
+v2, stores the reservation plus schedule and role-policy digests, requires the exact completed
+`ready-for-broker` scheduler handoff, and is revalidated before each broker checkpoint. Manual
+dispatch remains schema v1. See [ADR 0012](decisions/0012-attested-canary-authority.md),
+[ADR 0013](decisions/0013-durable-canary-task-admission.md),
+[ADR 0014](decisions/0014-canary-bound-scheduled-execution.md),
+[ADR 0015](decisions/0015-canary-bound-draft-pr-dispatch.md),
+[ADR 0016](decisions/0016-bounded-canary-broker-reconciliation.md),
+[ADR 0017](decisions/0017-slot-bound-canary-pr-maintenance.md),
+[ADR 0018](decisions/0018-recovery-first-canary-pr-repair-consumer.md),
+[ADR 0019](decisions/0019-recovery-first-canary-pr-update-consumer.md), and
+[Local factory evaluation operations](factory-evaluation-operations.md).
+
+The separate `@agentlab/runtime/factory-maintenance-discovery` composition closes scheduled intake
+without widening authority. A repository-owned policy pins one provider-neutral read-only scout
+skill/profile, exact budgets, R1-only maintenance classes, confidence, scope/protected paths, and
+daily count ceilings. The provider receives an exact-base isolated worktree with read-only Git and
+filesystem, offline tools, no secrets, one worker, and zero change/repair budget. Its strict output
+is untrusted. Trusted admission independently proves every evidence/affected path is tracked at the
+exact base, applies class/confidence/scope/protected/count rules, derives identity and authority,
+and registers only existing scheduled preparation intake under a reviewed R1 grant. SQLite version
+18 stores one immutable policy/day run and an append-only execution/finding journal. This
+composition cannot reserve, execute, contact GitHub, mutate switches, merge, or release.
+
+Canary-admission config v2 adds the exact schedule policy and a bounded consumer. While the
+scheduler switch is enabled it examines at most the schedule candidate ceiling and reserves at most
+the task ceiling, but every task still passes the existing independently signed, human-issued cohort
+and aggregate-budget service. Daily-cycle manifest v2 pins the discovery, preparation-grant, cohort,
+and candidate coordinates and prepends discovery → canary admission to the existing scheduler/broker
+chain. Manifest v1 remains supported. The renderer still cannot install or enable anything. See
+[ADR 0021](decisions/0021-durable-maintenance-discovery-and-canary-consumption.md).
 
 Evidence append is not a general control-plane command. Bootstrap registers exact in-memory object
 capabilities for the control plane, execution observer, gate observer, and one named PR broker. The
@@ -208,9 +519,10 @@ for every preparation and execution provider/model, and a one-to-one match betwe
 manifest and canonical skill-package digest. Packages, request, and authority are published to the
 immutable artifact store; the request, authority, and first event are then inserted atomically under
 the SQLite writer lease. CLI registration requires a prior policy digest and literal
-`--confirm-register`. Intake has no provider/model adapter, GitHub credential, broker, scheduler
-switch, gate executor, tmux, terminal, or interactive-runtime path; executable closure allowlists
-enforce that separation.
+`--confirm-register` for manual work or `--confirm-register-scheduled` for scheduler-eligible work;
+the trigger is immutable and participates in exact-retry identity. Intake has no provider/model
+adapter, GitHub credential, broker, scheduler switch, gate executor, tmux, terminal, or
+interactive-runtime path; executable closure allowlists enforce that separation.
 
 The dormant preparation application advances exactly one `qualify`, `specify`, or `plan` checkpoint
 at a time through a provider-neutral execution port. Codex and Claude adapters advertise these
@@ -276,6 +588,15 @@ checkpoint without creating a second PR or manufacturing completion. A checkpoin
 broker revocation performs no new write. If revocation races an already in-flight remote call, its
 exact result is journaled but the task cannot advance; the dispatch remains recoverable.
 
+Manual dispatch uses `agentlab.pull-request-dispatch.v1`. Scheduled dispatch uses v2 and binds the
+exact canary reservation, schedule policy, and role policy. SQLite version 17 rejects a scheduled v1
+run or a v2 run without the matching R1 `brokered-draft-pr` reservation and completed scheduler
+handoff. The broker reloads that authority before every phase, and PR evidence records its digest.
+The canary broker read model derives desired work from that immutable handoff and observed progress
+from the dispatch journal. Current reservations sort before expired ones; within each class,
+recoverable dispatches sort before new work. Completed dispatches disappear from the projection,
+while the existing five checkpoints remain the sole write-side recovery record.
+
 Post-PR repair uses a different SQLite version 9 journal rather than reopening the terminal initial
 execution journal. Its immutable header binds the authorization, observation, prior patch, task
 contract, policy, repository/base, cumulative repair slot, and correlation ID. The shared execution
@@ -320,45 +641,117 @@ evaluates the execution stage with zero pre-execution usage and an empty change 
 allowed R1 task, and otherwise leaves the task planned with the denial recorded as evidence.
 Already-queued work is idempotent. The service cannot enable scheduler or broker authority.
 
-The worker's local configuration is a separate owner-only v1 document. It pins the database,
-artifact/worktree roots, hardened Git tools, systemd isolation identity, Bubblewrap/runtime mounts,
-the exact seven external R1 gate commands and evidence kinds, and one or more supported provider
-executables by canonical path, SHA-256 digest, and exact `--version` output. Its separately
-protected cost policy is loaded through the same fail-closed rate-card boundary as broker config v2.
-Provider resolution rechecks file identity/digest and version for each use under a fixed environment
-that contains no GitHub, package-registry, or cloud credential variables. The schema has no GitHub
-App, remote-repository, or authority-control field, and the sandbox refuses `/` as a runtime mount.
+The worker's local configuration remains backward-compatible as an owner-only v1 document. It pins
+the database, artifact/worktree roots, hardened Git tools, systemd isolation identity,
+Bubblewrap/runtime mounts, the exact seven external R1 gate commands and evidence kinds, and one or
+more supported provider executables by canonical path, SHA-256 digest, and exact `--version` output.
+Its separately protected cost policy is loaded through the same fail-closed rate-card boundary as
+broker config v2. Owner-only worker config v2 adds one canonical separately protected
+`agentlab.schedule-policy.v1` file. That policy fixes the daily UTC time, bounded start deadline,
+candidate and task limits, and aggregate reservation ceiling for one tick; it contains no command,
+credential, merge, or release field. Provider resolution rechecks file identity/digest and version
+for each use under a fixed environment that contains no GitHub, package-registry, or cloud
+credential variables. The schema has no GitHub App, remote-repository, or authority-control field,
+and the sandbox refuses `/` as a runtime mount.
 
 The worker path is now composed only through the separate `@agentlab/runtime/factory-worker`
-subpath; it is not reachable from `local-runtime.ts`, scheduled, deployed, published, or enabled.
-Its read-only host preflight revalidates canonical executable and runtime paths, owner-only
-artifact/worktree roots, exact systemd/provider identities, credentialless fixed-argv probes, cost
-readiness, user-manager reachability, and the observed scheduler switch. A maximum of 32 admitted
-commands execute serially against one SQLite writer lease. Recovery remains callable when normal
-work is cost- or host-blocked, and close drains admitted work and proves process cleanup before
-repositories and the lease are released. The port exposes no intake-authority issuer, control
-switch, GitHub adapter, or broker credential. An explicit policy-pinned `worker-run` command can
-resume one already registered task through those existing services and stops at broker readiness; it
-does not enable the scheduler or perform a remote write. The authorization-bound `worker-repair-pr`
-command uses the same closure for one fresh post-PR attempt, repeats the gate/review floor, and
-stops at a new local proposal. A separate broker composition, owner-only key source, readiness
-command, and explicit draft-only command also exist. The isolated human authority composition and
-non-interactive CLI can change only the broker switch; the normal TUI cannot invoke factory
-authority, worker, or broker commands. Current branch protection requires exact `verify` and
-`factory-sandbox` checks, dismisses stale reviews, enforces administrators, and forbids force-push
-and deletion. It still has zero required approvals, does not require approval of the latest push,
-and has neither a CODEOWNERS policy nor required code-owner review. Preflight therefore reports
-blocked for those controls and `cost-policy-unconfigured`. The cost-accounting mechanism exists, but
-the repository ships no live config or provider/model rates. Config v2 can now provision a reviewed
-owner-only rate card; actual rate, authority config, and broker-key provisioning remain activation
-prerequisites. An incomplete usage record already denies PR creation, and the explicit write command
-refuses a blocked preflight or unexpected policy digest. Governed intake is implemented but no live
-intake configuration or task has been provisioned. No live agent task or PR has been created by this
-code. Bounded PR-head observation and durable feedback evidence plus deterministic repair admission
-and fresh credentialless repair execution are implemented. Brokered repaired-branch update, crash
-reconciliation, authenticated head-lineage advancement, and re-observation are implemented.
-Scheduler/quotas, eval promotion, merge, release, canary, and incident automation remain later
-stages.
+subpath; it is not reachable from `local-runtime.ts`. No live v2 config, schedule policy, timer, or
+scheduler authority is provisioned, deployed, or enabled. Its read-only host preflight revalidates
+canonical executable and runtime paths, owner-only artifact/worktree roots, exact systemd/provider
+identities, credentialless fixed-argv probes, cost readiness, user-manager reachability, the
+schedule-policy digest, and the observed scheduler switch. A maximum of 32 admitted commands execute
+serially against one SQLite writer lease. Recovery remains callable when normal work is cost- or
+host-blocked, and close drains admitted work and proves process cleanup before repositories and the
+lease are released. The port exposes no intake-authority issuer, control switch, GitHub adapter, or
+broker credential. An explicit policy-pinned `worker-run` command can resume one already registered
+task through those existing services and stops at broker readiness; it does not enable the scheduler
+or perform a remote write. The authorization-bound `worker-repair-pr` command uses the same closure
+for one fresh post-PR attempt, repeats the gate/review floor, and stops at a new local proposal. A
+separate broker composition, owner-only key source, readiness command, and explicit draft-only
+command also exist. The isolated human authority composition and non-interactive CLI can change only
+the scheduler, PR-broker, or merge-broker switch through distinct compare-and-set methods; the
+normal TUI cannot invoke factory authority, worker, or broker commands. Current branch protection
+requires exact `verify` and `factory-sandbox` checks, dismisses stale reviews, enforces
+administrators, and forbids force-push and deletion. It still has zero required approvals, does not
+require approval of the latest push, and has neither a CODEOWNERS policy nor required code-owner
+review. Preflight therefore reports blocked for those controls and `cost-policy-unconfigured`. The
+cost-accounting mechanism exists, but the repository ships no live config or provider/model rates.
+Config v5 can additionally pin the autonomous-merge policy and compiled factory-policy v3 digest
+from worker through PR broker, credentialless admission, and the separate merger; actual rates,
+authority config, and broker/merger-key provisioning remain activation prerequisites. An incomplete
+usage record already denies PR creation, and each explicit write command refuses a blocked preflight
+or unexpected policy digest. Governed intake is implemented but no live intake configuration or task
+has been provisioned. No live agent task or PR has been created by this code. Bounded PR-head
+observation and durable feedback evidence plus deterministic repair admission and fresh
+credentialless repair execution are implemented. Brokered repaired-branch update, crash
+reconciliation, authenticated head-lineage advancement, and re-observation are implemented. A
+bounded daily-slot consumer joins scheduled canary PRs to authenticated observations and
+deterministic repair admission, and a recovery-first credentialless consumer now turns exact
+authorizations into gated local repair proposals. A separate recovery-first broker consumer
+publishes those proposals through the existing durable non-force update service and returns them to
+exact-head observation. Durable bounded daily maintenance discovery, automatic consumption of
+pre-existing human cohort authority, and a separate offline sandboxed eval producer are implemented.
+A separate bounded external pull-request inventory now journals stable heads and changed paths with
+a read-only App. A separate credentialless consumer can reconstruct exact locally present patches,
+run independent reviewed skills in isolated provider sessions, and journal complete local review
+evidence, but it cannot fetch, approve, repair, push, merge, or release. A third, feedback-only
+broker can publish an exact completed bundle as deterministic `COMMENT` feedback and reconcile an
+uncertain write without granting approval, repair, branch mutation, merge, or release authority. A
+fourth credentialless plane can make a bounded immutable repair-admission decision from that
+completed feedback. A fifth credentialless plane consumes that exact selectors-only authorization
+once and records a bounded local patch bundle after closing its isolated workspace. Strict
+post-repair gates and independent review are implemented in a sixth credentialless plane; a seventh
+separately credentialed plane can publish only qualified repairs as contributor-safe replacement
+drafts. None of the external-PR stages is part of the daily chain or provisioned with live policy,
+skills, rates, object mirroring, or accounts. The eval producer has no provisioned harness, fixture,
+candidate, job, or account. Host-local repository/day and organization/day quotas are implemented in
+the shared SQLite control plane; cross-host/global coordination, a secretless hosted-provider eval
+gateway, owner-provisioned activation, telemetry-driven canary comparison, release, deployment,
+rollback, alert delivery, and incident coordination remain later stages. A credentialless
+merge-admission plane can issue one short-lived authorization only for a scheduled R1 task whose
+immutable contract opted into automatic merge and whose latest exact-head observation proves the
+policy-bound trusted checks and independent-review floor. A separate merger UID and
+selected-repository GitHub App can mark that exact draft ready and enqueue its exact head through
+GitHub's merge queue. It has no direct-merge or release operation, persists intent before each
+remote mutation, reconciles ambiguous outcomes, and records exact merge readback before
+transitioning the task to `merged`.
+
+The read-only daily-cycle compiler now requires one v5 owner-only manifest and verifies reviewed
+policy digests, including daily aggregate quotas, operations health, and autonomous merge, plus the
+AgentLab executable digest; distinct worker, PR-broker, merger, incident-controller, and attestor
+UIDs; repair ceilings; and timeouts. It emits a content-addressed system-level systemd bundle whose
+non-persistent UTC timer chains fixed-argv one-shot services across separate UIDs, begins with
+disable-only containment, stops on any nonzero result, performs a final exact-head observation, then
+runs merge admission and the merger. Every stage first runs fixed `/usr/bin/sha256sum` argv against
+the generated exact executable check record, so binary drift stops before AgentLab runs. The
+renderer cannot write or install artifacts, call the service manager, change authority, or touch the
+ledger. The complete scheduled R1 path through queue-backed merge is implemented but unprovisioned,
+disabled by default, and unactivated; release and deployment remain outside it.
+
+The separate `@agentlab/runtime/factory-operations-health` composition opens that ledger with SQLite
+read-only and `query_only`, pins strict owner-reviewed health and daily-quota policies, and
+revalidates canonical control, schedule, task, and quota documents against materialized columns. It
+emits one content-addressed healthy/degraded/critical report covering authority state, recent/open
+schedules, recent/active tasks, and current UTC-day quota utilization. Its architecture closure has
+no writer lease, agent/provider, GitHub, authority mutation, worker, broker, terminal, tmux, merge,
+release, deployment, rollback, or incident port. No monitor unit, alert delivery, automatic
+containment, or report archive is provisioned.
+
+The separate `@agentlab/runtime/factory-incident-containment` composition retains the query-only
+health source but adds only a disable-only incident repository under an isolated reviewed UID. It
+recomputes health internally. On critical health, SQLite schema 31 compare-and-disables merge
+broker, PR broker, then scheduler inside one transaction and appends the canonical report,
+containment record, and three control-event digest bindings. It cannot accept an external report and
+has no enable, provider, GitHub, model, release, or deployment port. Daily-cycle v5 runs this
+command first; degraded or critical exit codes stop the chain. The command and rendered units remain
+dormant and unprovisioned.
+
+The merge boundary is exposed only through `@agentlab/runtime/factory-autonomous-merge-admission`
+and `@agentlab/runtime/factory-autonomous-merger`. The first has local policy/evidence authority but
+no remote credential. The second owns only merge-queue reconciliation and an ephemeral dedicated App
+token; it has no provider or worker executor. SQLite schemas 29–31 keep merge authority, run, event,
+authorization, and result material append-only and cross-bound to canonical digests. See
+[ADR 0033](decisions/0033-policy-bound-autonomous-r1-merge-queue.md).
 
 ## Dependency map
 
@@ -371,6 +764,21 @@ intake operator ───▶ @agentlab/runtime/factory-intake ▶ local-factory-
 broker preflight ─▶ @agentlab/runtime/factory-broker ▶ local-factory-broker composition
 worker operator ───▶ @agentlab/runtime/factory-worker ▶ local-factory-worker composition
 human operator ────▶ @agentlab/runtime/factory-authority ▶ local-factory-authority composition
+eval producer ──────▶ @agentlab/runtime/factory-eval-producer ▶ local-factory-eval-producer composition
+eval runner ────────▶ @agentlab/runtime/factory-evaluator ▶ local-factory-evaluator composition
+eval signer ────────▶ @agentlab/runtime/factory-eval-attestor ▶ local-factory-eval-attestor composition
+release controller ▶ @agentlab/runtime/factory-canary-authority ▶ local-factory-canary-authority composition
+canary admission ───▶ @agentlab/runtime/factory-canary-admission ▶ local-factory-canary-admission composition
+incident controller ▶ @agentlab/runtime/factory-incident-containment ▶ disable-only containment composition
+merge admission ─────▶ @agentlab/runtime/factory-autonomous-merge-admission ▶ credentialless exact-head admission
+merge broker ────────▶ @agentlab/runtime/factory-autonomous-merger ▶ merge-queue-only GitHub composition
+maintenance scout ──▶ @agentlab/runtime/factory-maintenance-discovery ▶ local-factory-maintenance-discovery composition
+external PR reader ──▶ @agentlab/runtime/factory-external-pull-request-discovery ▶ read-only discovery composition
+external PR reviewer ▶ @agentlab/runtime/factory-external-pull-request-review ▶ credentialless review composition
+external PR feedback ▶ @agentlab/runtime/factory-external-pull-request-feedback ▶ feedback-only publisher composition
+external PR admission ▶ @agentlab/runtime/factory-external-pull-request-repair-admission ▶ deterministic admission composition
+external PR repairer ▶ @agentlab/runtime/factory-external-pull-request-repair-execution ▶ credentialless repair composition
+unit renderer ─────▶ @agentlab/runtime/factory-orchestration ▶ local-factory-orchestration compiler
                                                          │              │
                                                          ▼              ▼
                                                    application     infrastructure
@@ -382,15 +790,15 @@ human operator ────▶ @agentlab/runtime/factory-authority ▶ local-fac
 launcher (distribution only; independent source graph)
 ```
 
-| Area                      | Owns                                                                  | May depend on workspace areas                  |
-| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
-| `packages/contracts`      | Zod schemas and stable shared data shapes                             | contracts                                      |
-| `runtime/domain`          | Invariants, value objects, errors, and ports                          | domain, contracts                              |
-| `runtime/application`     | Typed use cases, validated commands, coordination, ownership          | application, domain, contracts                 |
-| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters         | infrastructure, domain, contracts              |
-| runtime composition roots | Interactive, intake, worker, human-authority, and broker construction | runtime layers, contracts                      |
-| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation               | TUI, contracts, registered runtime public APIs |
-| `packages/launcher`       | Binary acquisition, verification, and process handoff                 | launcher                                       |
+| Area                      | Owns                                                                                                             | May depend on workspace areas                  |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `packages/contracts`      | Zod schemas and stable shared data shapes                                                                        | contracts                                      |
+| `runtime/domain`          | Invariants, value objects, errors, and ports                                                                     | domain, contracts                              |
+| `runtime/application`     | Typed use cases, validated commands, coordination, ownership                                                     | application, domain, contracts                 |
+| `runtime/infrastructure`  | SQLite, filesystem, provider, process, tmux, and PTY adapters                                                    | infrastructure, domain, contracts              |
+| runtime composition roots | Interactive, intake, worker, eval producer/evaluator, admission, authorities, broker, and dormant unit rendering | runtime layers, contracts                      |
+| `apps/tui`                | Rendering, input, dialogs, and bounded CLI presentation                                                          | TUI, contracts, registered runtime public APIs |
+| `packages/launcher`       | Binary acquisition, verification, and process handoff                                                            | launcher                                       |
 
 The product-source rules are executable and fail closed:
 
@@ -399,15 +807,43 @@ The product-source rules are executable and fail closed:
 - Domain and application code cannot import outward into infrastructure or presentation.
 - Infrastructure implements domain ports and cannot depend on application use cases.
 - TUI and CLI code see runtime modules only through registered package entry points. The intake,
-  broker, worker, and human-authority subpaths are exact; every runtime deep import fails.
+  broker, worker, eval-producer, evaluator, eval-attestor, switch-authority, canary-authority,
+  canary-admission, incident-containment, autonomous-merge-admission, autonomous-merger,
+  maintenance-discovery, and orchestration-renderer subpaths are exact; every runtime deep import
+  fails.
 - The broker composition closure cannot reach provider, tmux, terminal, or interactive-composition
   modules. The worker closure can reach only its explicit pinned factory-provider allowlist and
   cannot reach GitHub, broker, tmux, terminal, dynamic discovery, or interactive composition. The
   interactive closure cannot reach any factory composition or GitHub authority modules. The human
   authority closure has an explicit application/infrastructure allowlist and cannot reach remote,
   model, process-execution, worker, broker, tmux, terminal, or interactive capabilities.
+- Autonomous merge admission and merger have disjoint exact allowlists. Admission may read canonical
+  task, policy, reservation, PR-lineage, and evidence state but has no GitHub credential or remote
+  adapter. The merger may reach only its merge journal, evidence publisher, fixed GitHub App token
+  source, and merge-queue adapter; it cannot reach providers, workers, direct merge, release, tmux,
+  terminal, or the interactive runtime.
 - Intake has its own exact allowlist and can reach only local persistence, immutable artifacts, and
   fixed-argv Git revision observation—not providers, gates, GitHub, broker, or control mutation.
+- Eval-producer, evaluator, eval-attestor, canary-authority, and canary-admission closures have
+  separate exact allowlists. The producer may reach only its offline sandbox/process, artifact, and
+  production-ledger adapters; it cannot reach providers, secrets, evaluation/signing/authority,
+  scheduler, broker, GitHub, merge, release, tmux, terminal, or interactive modules. The remaining
+  promotion closures cannot reach provider or process execution. The evaluator cannot reach signing
+  or human canary issuance; the attestor cannot reach the evaluator, SQLite, or any authority.
+  Canary admission cannot issue human authority or execute the task it reserves.
+- Maintenance discovery has its own exact allowlist. It may reuse read-only provider, isolated
+  worktree, immutable artifact, scheduled-intake, and policy modules, but cannot reach the execution
+  worker composition, broker/GitHub, human authority, merge/release, terminal, tmux, or interactive
+  runtime.
+- External PR discovery, review, feedback, repair admission, repair execution, and repair
+  qualification each have separate closed allowlists. Discovery can only read GitHub, review can run
+  pinned credentialless providers against local objects, and feedback can only read the exact PR and
+  submit a comment review through its dedicated App. Admission can only read completed local
+  evidence and write a bounded selectors-only capability. Repair execution can run one
+  workspace-writing provider against authenticated local objects but has no credential or remote
+  port and emits only a closed-workspace patch bundle. Qualification can run only the pinned offline
+  gate floor and read-only independent reviewers over that exact bundle. No one closure can combine
+  model execution, a credential, remote branch mutation, merge, or release authority.
 - The product source graph must remain acyclic.
 - The root workspace manifest inventories every workspace. A checked architecture registry must
   classify every workspace manifest and production source root exactly once; unknown roots,
@@ -432,19 +868,29 @@ never exclude workspace production source.
 
 ## Placement guide
 
-| Change                                                       | Location                                          |
-| ------------------------------------------------------------ | ------------------------------------------------- |
-| Shared external input or persisted data shape                | `packages/contracts`                              |
-| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                     |
-| Product use case or coordination policy                      | `packages/runtime/src/application`                |
-| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`             |
-| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`           |
-| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`    |
-| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`    |
-| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts` |
-| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`    |
-| Terminal rendering, input, or interaction state              | `apps/tui`                                        |
-| Installer, cache, or binary handoff                          | `packages/launcher`                               |
+| Change                                                       | Location                                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Shared external input or persisted data shape                | `packages/contracts`                                                           |
+| Pure invariant, identity, value, error, or adapter interface | `packages/runtime/src/domain`                                                  |
+| Product use case or coordination policy                      | `packages/runtime/src/application`                                             |
+| Operating-system, database, tmux, PTY, or provider behavior  | `packages/runtime/src/infrastructure`                                          |
+| Interactive object construction and resource lifetime        | `packages/runtime/src/local-runtime.ts`                                        |
+| Broker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-broker.ts`                                 |
+| Worker-only object construction and resource lifetime        | `packages/runtime/src/local-factory-worker.ts`                                 |
+| Human control construction and resource lifetime             | `packages/runtime/src/local-factory-authority.ts`                              |
+| Intake-only object construction and resource lifetime        | `packages/runtime/src/local-factory-intake.ts`                                 |
+| Eval-only object construction and resource lifetime          | `packages/runtime/src/local-factory-evaluator.ts`                              |
+| Eval-production object construction and resource lifetime    | `packages/runtime/src/local-factory-eval-producer.ts`                          |
+| Eval-signing object construction and resource lifetime       | `packages/runtime/src/local-factory-eval-attestor.ts`                          |
+| Human canary construction and resource lifetime              | `packages/runtime/src/local-factory-canary-authority.ts`                       |
+| Canary admission construction and resource lifetime          | `packages/runtime/src/local-factory-canary-admission.ts`                       |
+| Maintenance discovery construction and resource lifetime     | `packages/runtime/src/local-factory-maintenance-discovery.ts`                  |
+| External PR review construction and resource lifetime        | `packages/runtime/src/local-factory-external-pull-request-review.ts`           |
+| External PR feedback construction and resource lifetime      | `packages/runtime/src/local-factory-external-pull-request-feedback.ts`         |
+| External PR admission construction and resource lifetime     | `packages/runtime/src/local-factory-external-pull-request-repair-admission.ts` |
+| External PR repair construction and resource lifetime        | `packages/runtime/src/local-factory-external-pull-request-repair-execution.ts` |
+| Terminal rendering, input, or interaction state              | `apps/tui`                                                                     |
+| Installer, cache, or binary handoff                          | `packages/launcher`                                                            |
 
 Supported providers are a deliberately closed compile-time set. Provider neutrality means native
 launch/capability adapters behind stable ports, not runtime plugins or a flattened provider-session
@@ -700,6 +1146,15 @@ annotated-tag-on-main validation, checksums, SBOM/provenance attestations, immut
 OIDC trusted npm publication, byte-for-byte candidate comparison, and release recovery verification.
 Release-control changes require separate review.
 
+Interactive application smoke tests are an isolated release boundary. Before either the source TUI
+or newly compiled application is executed, the harness creates one canonical owner-only disposable
+root and pins its home, temporary, XDG data/config/state/cache/runtime, AgentLab database/cache, and
+tmux socket paths below that root. The child receives only an allowlist of non-secret host
+variables; provider credentials, provider executable overrides, ambient AgentLab overrides, and an
+existing `TMUX` identity never cross the boundary. Every interactive-runtime smoke subprocess uses
+that exact environment, and the root is removed after success or failure. See
+[ADR 0008](decisions/0008-isolated-runtime-smokes.md).
+
 ## Architecture acceptance
 
 The architecture is releasable only when automated tests prove:
@@ -720,5 +1175,7 @@ The architecture is releasable only when automated tests prove:
 - a caller deadline cannot cancel or poison eventual all-operation drain and cleanup;
 - failed or timed-out command, provider-query, and PTY cleanup stays owned, blocks lease release,
   and succeeds only after a confirmed retry; and
+- interactive runtime smokes confine every writable path below a disposable private root and do not
+  inherit operator credentials, database overrides, or tmux identity; and
 - formatting, strict types, lint, unit/component tests, real tmux/Bun PTY integration, production
   build, packaging, dependency audit, and release metadata all pass.

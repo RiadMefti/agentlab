@@ -1,10 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
-import { factoryCostPolicySchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  factoryAutonomousMergePolicySchema,
+  factoryCostPolicySchema,
+  factoryDailyQuotaPolicySchema,
+  factorySchedulePolicySchema,
+  type FactoryAutonomousMergePolicy,
+  type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy,
+  type Sha256Digest
+} from "@agentlab/contracts";
 
 import { ArtifactFactorySkillSource } from "./application/artifact-factory-skill-source.js";
 import { FactoryControlPlane } from "./application/factory-control-plane.js";
+import { FactoryDailyQuotaService } from "./application/factory-daily-quota-service.js";
+import { FactoryCanaryPullRequestRepairService } from "./application/factory-canary-pull-request-repair-service.js";
 import {
   createFactoryEvidenceCredential,
   FactoryEvidenceIngress
@@ -16,6 +29,8 @@ import { FactoryPreparationMaterializer } from "./application/factory-preparatio
 import { FactoryPreparationService } from "./application/factory-preparation-service.js";
 import { FactoryPullRequestRepairExecutionService } from "./application/factory-pull-request-repair-execution-service.js";
 import { FactoryPullRequestRepairRecoveryService } from "./application/factory-pull-request-repair-recovery-service.js";
+import { FactoryPullRequestCanaryAuthority } from "./application/factory-pull-request-canary-authority.js";
+import { FactorySchedulerService } from "./application/factory-scheduler-service.js";
 import {
   FactoryWorkerOperator,
   validateFactoryWorkerInventory
@@ -30,8 +45,13 @@ import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.j
 import { RuntimeResourceOwner } from "./application/runtime-resource-owner.js";
 import { RuntimeTaskOwner } from "./application/runtime-task-owner.js";
 import { FactoryCostAccountant } from "./domain/factory-cost-accounting.js";
+import { assertFactoryProcessRoleIdentity } from "./domain/factory-role-identity.js";
 import type { FactoryGateDefinition } from "./domain/factory-gate.js";
-import { FactoryPolicyEngine, defaultFactoryPolicyBundle } from "./domain/factory-policy.js";
+import {
+  createAutonomousR1FactoryPolicyBundle,
+  FactoryPolicyEngine,
+  defaultFactoryPolicyBundle
+} from "./domain/factory-policy.js";
 import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
 import { factoryPathsOverlap } from "./infrastructure/filesystem/factory-workspace-paths.js";
 import { GitFactoryRepositoryRevisionReader } from "./infrastructure/filesystem/git-factory-repository-revision.js";
@@ -44,11 +64,15 @@ import {
 import { SqliteConversationRepository } from "./infrastructure/persistence/sqlite-conversation-repository.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryDailyQuotaRepository } from "./infrastructure/persistence/sqlite-factory-daily-quota-repository.js";
+import { SqliteFactoryCanaryReservationRepository } from "./infrastructure/persistence/sqlite-factory-canary-reservation-repository.js";
+import { SqliteFactoryCanaryPullRequestRepairQueue } from "./infrastructure/persistence/sqlite-factory-canary-pull-request-repair-queue.js";
 import { SqliteFactoryPullRequestDispatchRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryPullRequestUpdateRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-update-repository.js";
 import { SqliteFactoryPreparationRepository } from "./infrastructure/persistence/sqlite-factory-preparation-repository.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
+import { SqliteFactoryScheduleRepository } from "./infrastructure/persistence/sqlite-factory-schedule-repository.js";
 import { SqliteFactoryTaskMaterializer } from "./infrastructure/persistence/sqlite-factory-task-materializer.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 import { BubblewrapFactoryGateSandbox } from "./infrastructure/process/bubblewrap-factory-gate-sandbox.js";
@@ -85,6 +109,13 @@ export interface LocalFactoryWorkerOptions {
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
   readonly costPolicy?: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly expectedRoleIdentityPolicyDigest?: Sha256Digest;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
+  readonly expectedAutonomousMergePolicyDigest?: Sha256Digest;
+  readonly expectedFactoryPolicyBundleDigest?: Sha256Digest;
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   readonly now?: () => string;
   readonly createId?: () => string;
@@ -94,9 +125,74 @@ export interface LocalFactoryWorkerOptions {
 export function createLocalFactoryWorker(
   options: LocalFactoryWorkerOptions
 ): LocalFactoryWorkerRuntime {
+  const documents = new NodeFactoryDocumentCodec();
   const costPolicy = factoryCostPolicySchema.parse(
     options.costPolicy ?? defaultFactoryPolicyBundle.costPolicy
   );
+  const schedulePolicy =
+    options.schedulePolicy === undefined
+      ? null
+      : factorySchedulePolicySchema.parse(options.schedulePolicy);
+  const dailyQuotaPolicy =
+    options.dailyQuotaPolicy === undefined
+      ? null
+      : factoryDailyQuotaPolicySchema.parse(options.dailyQuotaPolicy);
+  if ((schedulePolicy === null) !== (dailyQuotaPolicy === null)) {
+    throw new Error("Scheduled factory work requires a daily aggregate quota policy.");
+  }
+  const identityPolicy =
+    options.roleIdentityPolicy === undefined
+      ? null
+      : documents.roleIdentityPolicy(options.roleIdentityPolicy);
+  if ((identityPolicy === null) !== (options.expectedRoleIdentityPolicyDigest === undefined)) {
+    throw new Error("Factory worker role identity policy and reviewed digest must be paired.");
+  }
+  if (
+    identityPolicy !== null &&
+    identityPolicy.digest !== options.expectedRoleIdentityPolicyDigest
+  ) {
+    throw new Error("Factory worker role identity policy changed after review.");
+  }
+  if (schedulePolicy !== null && identityPolicy === null) {
+    throw new Error("Scheduled factory work requires an enforced role identity policy.");
+  }
+  const autonomousMergePolicy =
+    options.autonomousMergePolicy === undefined
+      ? null
+      : documents.autonomousMergePolicy(
+          factoryAutonomousMergePolicySchema.parse(options.autonomousMergePolicy)
+        );
+  if (
+    [
+      autonomousMergePolicy,
+      options.expectedAutonomousMergePolicyDigest,
+      options.expectedFactoryPolicyBundleDigest
+    ].filter((value) => value !== null && value !== undefined).length !== 0 &&
+    (autonomousMergePolicy === null ||
+      options.expectedAutonomousMergePolicyDigest === undefined ||
+      options.expectedFactoryPolicyBundleDigest === undefined)
+  ) {
+    throw new Error("Factory worker autonomous merge policy and reviewed digests must be paired.");
+  }
+  const schedulePolicyDocument =
+    schedulePolicy === null ? null : documents.schedulePolicy(schedulePolicy);
+  const dailyQuotaPolicyDocument =
+    dailyQuotaPolicy === null ? null : documents.dailyQuotaPolicy(dailyQuotaPolicy);
+  if (
+    autonomousMergePolicy !== null &&
+    (autonomousMergePolicy.digest !== options.expectedAutonomousMergePolicyDigest ||
+      schedulePolicyDocument === null ||
+      dailyQuotaPolicyDocument === null ||
+      identityPolicy === null ||
+      autonomousMergePolicy.value.schedulePolicyDigest !== schedulePolicyDocument.digest ||
+      autonomousMergePolicy.value.dailyQuotaPolicyDigest !== dailyQuotaPolicyDocument.digest ||
+      autonomousMergePolicy.value.roleIdentityPolicyDigest !== identityPolicy.digest)
+  ) {
+    throw new Error("Factory worker autonomous merge policy coordinates changed after review.");
+  }
+  if (identityPolicy !== null) {
+    assertFactoryProcessRoleIdentity(identityPolicy.value, "worker", process.getuid?.());
+  }
   if (factoryPathsOverlap(options.artifactRoot, options.workspaceRoot)) {
     throw new Error("Factory artifact and worktree roots must not overlap.");
   }
@@ -110,7 +206,6 @@ export function createLocalFactoryWorker(
     if (writerLease.databasePath === ":memory:") {
       throw new Error("The local factory worker requires a durable SQLite database.");
     }
-    const documents = new NodeFactoryDocumentCodec();
     const databasePath = writerLease.databasePath;
     const conversations = repositories.track(new SqliteConversationRepository(databasePath));
     const factory = repositories.track(new SqliteFactoryRepository(databasePath, { documents }));
@@ -132,8 +227,31 @@ export function createLocalFactoryWorker(
     const pullRequestUpdates = repositories.track(
       new SqliteFactoryPullRequestUpdateRepository(databasePath, { documents })
     );
+    const schedules = repositories.track(
+      new SqliteFactoryScheduleRepository(databasePath, { documents })
+    );
+    const dailyQuotas = repositories.track(
+      new SqliteFactoryDailyQuotaRepository(databasePath, { documents })
+    );
+    const canaryReservations = repositories.track(
+      new SqliteFactoryCanaryReservationRepository(databasePath, { documents })
+    );
+    const canaryPullRequestRepairQueue =
+      schedulePolicyDocument === null
+        ? null
+        : repositories.track(new SqliteFactoryCanaryPullRequestRepairQueue(databasePath));
     const artifacts = new FileFactoryArtifactStore(options.artifactRoot);
-    const policyBundle = encodeCanonicalDocument({ ...defaultFactoryPolicyBundle, costPolicy });
+    const policyBundle = encodeCanonicalDocument(
+      autonomousMergePolicy === null
+        ? { ...defaultFactoryPolicyBundle, costPolicy }
+        : createAutonomousR1FactoryPolicyBundle({ costPolicy, mergePolicy: autonomousMergePolicy })
+    );
+    if (
+      autonomousMergePolicy !== null &&
+      policyBundle.digest !== options.expectedFactoryPolicyBundleDigest
+    ) {
+      throw new Error("Factory worker policy bundle changed after review.");
+    }
     const policy = new FactoryPolicyEngine(policyBundle.digest, policyBundle.value);
     const costAccountant = new FactoryCostAccountant(policyBundle.digest, costPolicy);
     const resources = new RuntimeResourceOwner();
@@ -344,10 +462,16 @@ export function createLocalFactoryWorker(
       gates: options.gates,
       configuredProviders: options.providers.map(({ provider }) => provider),
       providers,
-      hostEnvironment
+      hostEnvironment,
+      ...(identityPolicy === null
+        ? {}
+        : { expectedWorkerUserId: identityPolicy.value.worker.userId })
     });
     const operator = new FactoryWorkerOperator({
       policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
+      dailyQuotaPolicyDigest: dailyQuotaPolicyDocument?.digest ?? null,
       costPolicyConfigured: costPolicy.rules.length > 0,
       configuredProviders: options.providers.map(({ provider }) => provider),
       gateIds: gates.availableGateIds(),
@@ -361,16 +485,85 @@ export function createLocalFactoryWorker(
       pullRequestRepair,
       pullRequestRepairRecovery
     });
+    const pullRequestCanaryAuthority = new FactoryPullRequestCanaryAuthority({
+      policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
+      dailyQuotaPolicy: dailyQuotaPolicyDocument,
+      preparations,
+      reservations: canaryReservations,
+      schedules,
+      dailyQuotas: dailyQuotaPolicy === null ? null : dailyQuotas,
+      documents,
+      now
+    });
     const taskRunner = new FactoryWorkerTaskRunner({
       policyBundleDigest: policyBundle.digest,
+      schedulePolicyDigest: schedulePolicyDocument?.digest ?? null,
+      roleIdentityPolicyDigest: identityPolicy?.digest ?? null,
       preparations,
+      reservations: canaryReservations,
       tasks: factory,
       executions,
-      worker: operator
+      documents,
+      worker: operator,
+      now
     });
+    const scheduledPolicies =
+      schedulePolicyDocument === null || dailyQuotaPolicyDocument === null
+        ? null
+        : {
+            schedule: schedulePolicyDocument,
+            identity: requiredRoleIdentityPolicy(identityPolicy),
+            dailyQuota: dailyQuotaPolicyDocument
+          };
+    const dailyQuotaService =
+      scheduledPolicies === null
+        ? null
+        : new FactoryDailyQuotaService({
+            policy: scheduledPolicies.dailyQuota,
+            quotas: dailyQuotas,
+            documents,
+            now,
+            createId
+          });
+    const scheduler =
+      scheduledPolicies === null
+        ? null
+        : new FactorySchedulerService({
+            schedulePolicy: scheduledPolicies.schedule,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
+            dailyQuotaPolicy: scheduledPolicies.dailyQuota,
+            schedules,
+            preparations,
+            reservations: canaryReservations,
+            worker: operator,
+            taskRunner,
+            dailyQuotas: requiredDailyQuotaService(dailyQuotaService),
+            documents,
+            now,
+            createId
+          });
+    const canaryPullRequestRepairs =
+      scheduledPolicies === null || canaryPullRequestRepairQueue === null
+        ? null
+        : new FactoryCanaryPullRequestRepairService({
+            schedulePolicy: scheduledPolicies.schedule,
+            factoryPolicyBundleDigest: policyBundle.digest,
+            roleIdentityPolicyDigest: scheduledPolicies.identity.digest,
+            queue: canaryPullRequestRepairQueue,
+            tasks: factory,
+            canaryAuthority: pullRequestCanaryAuthority,
+            worker: operator,
+            now,
+            createId
+          });
     return new LocalFactoryWorkerCoordinator({
       operator,
       taskRunner,
+      scheduler,
+      canaryPullRequestRepairs,
       tasks: new RuntimeTaskOwner(),
       resources,
       repositories,
@@ -392,9 +585,127 @@ export function createLocalFactoryWorker(
   }
 }
 
+function requiredRoleIdentityPolicy(
+  policy: ReturnType<NodeFactoryDocumentCodec["roleIdentityPolicy"]> | null
+): ReturnType<NodeFactoryDocumentCodec["roleIdentityPolicy"]> {
+  if (policy === null) {
+    throw new Error("Scheduled factory work lost its enforced role identity policy.");
+  }
+  return policy;
+}
+
+function requiredDailyQuotaService(
+  service: FactoryDailyQuotaService | null
+): FactoryDailyQuotaService {
+  if (service === null) {
+    throw new Error("Scheduled factory work lost its daily quota authority.");
+  }
+  return service;
+}
+
 export function createConfiguredLocalFactoryWorker(
   config: LocalFactoryWorkerConfig
 ): LocalFactoryWorkerRuntime {
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v1" &&
+    config.schedulePolicy !== undefined
+  ) {
+    throw new Error("Factory worker v1 configuration cannot attach a schedule policy.");
+  }
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v2" &&
+    config.schedulePolicy === undefined
+  ) {
+    throw new Error("Factory worker v2 configuration requires its loaded schedule policy.");
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v2") {
+    throw new Error("Factory worker v2 cannot run scheduled work without enforced role identity.");
+  }
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v3" &&
+    config.roleIdentityPolicy === undefined
+  ) {
+    throw new Error("Factory worker v3 configuration requires its role identity policy.");
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v3") {
+    if (config.schedulePolicy !== undefined) {
+      throw new Error(
+        "Scheduled factory work requires a v4 or v5 worker config with daily quotas."
+      );
+    }
+    const roleIdentityPolicy = config.roleIdentityPolicy;
+    if (roleIdentityPolicy === undefined) {
+      throw new Error("Factory worker v3 configuration lost its loaded role identity policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+    });
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v4") {
+    if (
+      config.schedulePolicy === undefined ||
+      config.dailyQuotaPolicy === undefined ||
+      config.roleIdentityPolicy === undefined
+    ) {
+      throw new Error("Factory worker v4 configuration lost a required scheduled policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      schedulePolicy: config.schedulePolicy,
+      dailyQuotaPolicy: config.dailyQuotaPolicy,
+      roleIdentityPolicy: config.roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest
+    });
+  }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v5") {
+    if (
+      config.schedulePolicy === undefined ||
+      config.dailyQuotaPolicy === undefined ||
+      config.roleIdentityPolicy === undefined ||
+      config.autonomousMergePolicy === undefined
+    ) {
+      throw new Error("Factory worker v5 configuration lost a required autonomous merge policy.");
+    }
+    return createLocalFactoryWorker({
+      databasePath: config.databasePath,
+      artifactRoot: config.artifactRoot,
+      workspaceRoot: config.workspaceRoot,
+      gitExecutable: config.gitExecutable,
+      flockExecutable: config.flockExecutable,
+      systemd: config.systemd,
+      sandbox: config.sandbox,
+      providers: config.providers,
+      gates: config.gates,
+      costPolicy: config.costPolicy,
+      schedulePolicy: config.schedulePolicy,
+      dailyQuotaPolicy: config.dailyQuotaPolicy,
+      roleIdentityPolicy: config.roleIdentityPolicy,
+      expectedRoleIdentityPolicyDigest: config.expectedRoleIdentityPolicyDigest,
+      autonomousMergePolicy: config.autonomousMergePolicy,
+      expectedAutonomousMergePolicyDigest: config.expectedMergePolicyDigest,
+      expectedFactoryPolicyBundleDigest: config.expectedFactoryPolicyBundleDigest
+    });
+  }
   return createLocalFactoryWorker({
     databasePath: config.databasePath,
     artifactRoot: config.artifactRoot,
@@ -415,10 +726,14 @@ export type {
 } from "./application/local-factory-worker-coordinator.js";
 export type { FactoryWorkerPreflight } from "./application/factory-worker-operator.js";
 export type { FactoryWorkerTaskRunReport } from "./application/factory-worker-task-runner.js";
+export type { FactorySchedulerTickReport } from "./application/factory-scheduler-service.js";
+export type { FactoryCanaryPullRequestRepairTickReport } from "./application/factory-canary-pull-request-repair-service.js";
 export type { FactoryPullRequestRepairExecutionOutcome } from "./application/factory-pull-request-repair-execution-service.js";
 export type { FactoryGateDefinition } from "./domain/factory-gate.js";
 export {
   loadLocalFactoryWorkerConfig,
   type LocalFactoryWorkerConfig
 } from "./infrastructure/filesystem/local-factory-worker-config.js";
+export { loadLocalFactorySchedulePolicy } from "./infrastructure/filesystem/local-factory-schedule-policy.js";
+export { loadLocalFactoryDailyQuotaPolicy } from "./infrastructure/filesystem/local-factory-daily-quota-policy.js";
 export type { FactoryAgentProviderBinding } from "./infrastructure/providers/pinned-factory-agent-provider-resolver.js";

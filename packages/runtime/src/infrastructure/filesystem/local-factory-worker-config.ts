@@ -1,12 +1,24 @@
 import { isAbsolute, parse, resolve } from "node:path";
 
-import { sha256DigestSchema, type FactoryCostPolicy } from "@agentlab/contracts";
+import {
+  sha256DigestSchema,
+  type FactoryAutonomousMergePolicy,
+  type FactoryCostPolicy,
+  type FactoryDailyQuotaPolicy,
+  type FactoryRoleIdentityPolicy,
+  type FactorySchedulePolicy
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import type { FactoryGateDefinition } from "../../domain/factory-gate.js";
 import type { FactoryAgentProviderBinding } from "../providers/pinned-factory-agent-provider-resolver.js";
+import { encodeCanonicalDocument } from "../persistence/canonical-factory-documents.js";
 import { factoryPathsOverlap } from "./factory-workspace-paths.js";
+import { loadLocalFactoryAutonomousMergePolicies } from "./local-factory-autonomous-merge-config.js";
 import { loadLocalFactoryCostPolicy } from "./local-factory-cost-policy.js";
+import { loadLocalFactoryDailyQuotaPolicy } from "./local-factory-daily-quota-policy.js";
+import { loadLocalFactorySchedulePolicy } from "./local-factory-schedule-policy.js";
+import { loadLocalFactoryRoleIdentityPolicy } from "./local-factory-role-identity-policy.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
 const absolutePathSchema = z
@@ -57,9 +69,8 @@ const gateDefinitionSchema = z
     maximumOutputBytes: z.number().int().min(1).max(1_073_741_824)
   })
   .strict();
-const configSchema = z
+const commonConfigSchema = z
   .object({
-    schemaVersion: z.literal("agentlab.local-factory-worker.v1"),
     databasePath: absolutePathSchema,
     artifactRoot: nonRootAbsolutePathSchema,
     workspaceRoot: nonRootAbsolutePathSchema,
@@ -83,34 +94,62 @@ const configSchema = z
     providers: z.array(providerBindingSchema).min(1).max(2),
     gates: z.array(gateDefinitionSchema).length(7)
   })
-  .strict()
-  .superRefine((config, context) => {
-    uniqueBy(config.providers, ({ provider }) => provider, context, ["providers"], "provider IDs");
-    uniqueBy(config.gates, ({ id }) => id, context, ["gates"], "gate IDs");
-    uniqueBy(
-      config.sandbox.runtimeRoots,
-      (value) => value,
-      context,
-      ["sandbox", "runtimeRoots"],
-      "runtime roots"
-    );
-    if (factoryPathsOverlap(config.artifactRoot, config.workspaceRoot)) {
-      context.addIssue({
-        code: "custom",
-        path: ["workspaceRoot"],
-        message: "Factory artifact and worktree roots must not overlap."
-      });
-    }
-    for (const gate of config.gates) {
-      if (gate.evidenceKind !== requiredGateEvidence[gate.id]) {
-        context.addIssue({
-          code: "custom",
-          path: ["gates"],
-          message: `Factory gate ${gate.id} has the wrong evidence kind.`
-        });
-      }
-    }
-  });
+  .strict();
+
+const configV1Schema = commonConfigSchema
+  .extend({ schemaVersion: z.literal("agentlab.local-factory-worker.v1") })
+  .superRefine(validateWorkerConfig);
+
+const configV2Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v2"),
+    schedulePolicyPath: absolutePathSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configV3Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v3"),
+    schedulePolicyPath: absolutePathSchema.optional(),
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configV4Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v4"),
+    schedulePolicyPath: absolutePathSchema,
+    dailyQuotaPolicyPath: absolutePathSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configV5Schema = commonConfigSchema
+  .extend({
+    schemaVersion: z.literal("agentlab.local-factory-worker.v5"),
+    repositoryId: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,38})\/[a-z0-9._-]{1,100}$/u),
+    schedulePolicyPath: absolutePathSchema,
+    dailyQuotaPolicyPath: absolutePathSchema,
+    roleIdentityPolicyPath: absolutePathSchema,
+    mergePolicyPath: absolutePathSchema,
+    expectedFactoryPolicyBundleDigest: sha256DigestSchema,
+    expectedSchedulePolicyDigest: sha256DigestSchema,
+    expectedDailyQuotaPolicyDigest: sha256DigestSchema,
+    expectedRoleIdentityPolicyDigest: sha256DigestSchema,
+    expectedMergePolicyDigest: sha256DigestSchema
+  })
+  .superRefine(validateWorkerConfig);
+
+const configSchema = z.union([
+  configV1Schema,
+  configV2Schema,
+  configV3Schema,
+  configV4Schema,
+  configV5Schema
+]);
 
 const requiredGateEvidence = {
   format: "test",
@@ -122,9 +161,44 @@ const requiredGateEvidence = {
   "secret-scan": "security"
 } as const;
 
+function validateWorkerConfig(
+  config: z.infer<typeof commonConfigSchema>,
+  context: z.RefinementCtx
+): void {
+  uniqueBy(config.providers, ({ provider }) => provider, context, ["providers"], "provider IDs");
+  uniqueBy(config.gates, ({ id }) => id, context, ["gates"], "gate IDs");
+  uniqueBy(
+    config.sandbox.runtimeRoots,
+    (value) => value,
+    context,
+    ["sandbox", "runtimeRoots"],
+    "runtime roots"
+  );
+  if (factoryPathsOverlap(config.artifactRoot, config.workspaceRoot)) {
+    context.addIssue({
+      code: "custom",
+      path: ["workspaceRoot"],
+      message: "Factory artifact and worktree roots must not overlap."
+    });
+  }
+  for (const gate of config.gates) {
+    if (gate.evidenceKind !== requiredGateEvidence[gate.id]) {
+      context.addIssue({
+        code: "custom",
+        path: ["gates"],
+        message: `Factory gate ${gate.id} has the wrong evidence kind.`
+      });
+    }
+  }
+}
+
 type ParsedLocalFactoryWorkerConfig = z.infer<typeof configSchema>;
 export type LocalFactoryWorkerConfig = ParsedLocalFactoryWorkerConfig & {
   readonly costPolicy: FactoryCostPolicy;
+  readonly schedulePolicy?: FactorySchedulePolicy;
+  readonly dailyQuotaPolicy?: FactoryDailyQuotaPolicy;
+  readonly roleIdentityPolicy?: FactoryRoleIdentityPolicy;
+  readonly autonomousMergePolicy?: FactoryAutonomousMergePolicy;
   readonly providers: readonly FactoryAgentProviderBinding[];
   readonly gates: readonly FactoryGateDefinition[];
 };
@@ -145,8 +219,50 @@ export async function loadLocalFactoryWorkerConfig(
   } finally {
     content.fill(0);
   }
+  if (config.schemaVersion === "agentlab.local-factory-worker.v5") {
+    const policies = await loadLocalFactoryAutonomousMergePolicies(config);
+    return {
+      ...config,
+      costPolicy: policies.costPolicy,
+      schedulePolicy: policies.schedulePolicy,
+      dailyQuotaPolicy: policies.dailyQuotaPolicy,
+      roleIdentityPolicy: policies.roleIdentityPolicy,
+      autonomousMergePolicy: policies.mergePolicy.value
+    };
+  }
   const costPolicy = await loadLocalFactoryCostPolicy(config.costPolicyPath);
-  return { ...config, costPolicy };
+  const schedulePolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v2"
+      ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+      : config.schemaVersion === "agentlab.local-factory-worker.v3" &&
+          config.schedulePolicyPath !== undefined
+        ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+        : config.schemaVersion === "agentlab.local-factory-worker.v4"
+          ? await loadLocalFactorySchedulePolicy(config.schedulePolicyPath)
+          : undefined;
+  const dailyQuotaPolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v4"
+      ? await loadLocalFactoryDailyQuotaPolicy(config.dailyQuotaPolicyPath)
+      : undefined;
+  const roleIdentityPolicy =
+    config.schemaVersion === "agentlab.local-factory-worker.v3" ||
+    config.schemaVersion === "agentlab.local-factory-worker.v4"
+      ? await loadLocalFactoryRoleIdentityPolicy(config.roleIdentityPolicyPath)
+      : undefined;
+  if (
+    config.schemaVersion === "agentlab.local-factory-worker.v4" &&
+    (dailyQuotaPolicy === undefined ||
+      encodeCanonicalDocument(dailyQuotaPolicy).digest !== config.expectedDailyQuotaPolicyDigest)
+  ) {
+    throw new Error("Factory worker daily quota policy changed after review.");
+  }
+  return {
+    ...config,
+    costPolicy,
+    ...(schedulePolicy === undefined ? {} : { schedulePolicy }),
+    ...(dailyQuotaPolicy === undefined ? {} : { dailyQuotaPolicy }),
+    ...(roleIdentityPolicy === undefined ? {} : { roleIdentityPolicy })
+  };
 }
 
 function uniqueBy<Value>(

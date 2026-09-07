@@ -7,6 +7,12 @@ import type {
 import type { CommandSpec } from "./command.js";
 import type { FactoryWorkspace } from "./factory-workspace.js";
 
+export class FactoryGateProcessCleanupUnconfirmedError extends Error {
+  public constructor(message: string, cause: unknown) {
+    super(message, { cause });
+  }
+}
+
 export interface FactoryGateDefinition {
   readonly id: string;
   readonly evidenceKind: Extract<EvidenceKind, "test" | "build" | "security" | "provenance">;
