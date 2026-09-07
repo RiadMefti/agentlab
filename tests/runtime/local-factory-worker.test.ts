@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createConfiguredLocalFactoryWorker,
@@ -21,6 +21,7 @@ const executableContent =
 const temporaryRoots: string[] = [];
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -129,6 +130,9 @@ describe("local factory worker composition", () => {
       throw new Error("This identity-bound composition test requires a non-root POSIX user.");
     }
     const fixture = workerOptions();
+    // Configured composition reads the host environment; this unit test uses fake systemd tools.
+    vi.stubEnv("XDG_RUNTIME_DIR", `/run/user/${String(processUserId)}`);
+    vi.stubEnv("DBUS_SESSION_BUS_ADDRESS", `unix:path=/run/user/${String(processUserId)}/bus`);
     const roleIdentityPolicy = testFactoryRoleIdentityPolicy({
       keyId: testEvalDigest(901),
       workerUserId: processUserId,
