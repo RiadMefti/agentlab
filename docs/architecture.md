@@ -28,6 +28,11 @@ may make explicit GitHub API calls; none is loaded into the interactive runtime.
 HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command language,
 MCP bridge, or provider-session translation layer.
 
+[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) additionally accepts one optional
+long-lived, credentialless local ledger owner. Its implemented Unix peer-authenticated surface is
+read-only and is not loaded by the interactive runtime. Existing one-shot factory writers have not
+yet migrated behind it; the separated-UID daily chain remains disabled.
+
 ## Two paths
 
 ```text
@@ -722,8 +727,15 @@ UID cannot open these stores, and broadening a disposable database's mode still 
 ownership-only chmod. This is not solved by the documented provisioning step. Existing same-user
 service integration and systemd unit verification do not exercise this cross-UID handoff. Keep the
 daily factory disabled until an authenticated storage-authority boundary replaces direct shared
-access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) records a proposed
-design, not an accepted or implemented replacement.
+access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) accepts a single-owner
+service. The implemented `factory-ledger` and `factory-ledger-client` public entries support only
+expiring UID-authorized authority/task reads, with strict policy and immutable identity checks.
+Positive real cross-UID tests prove those reads and reject direct storage access and forged
+mutations; transport tests bound frames, deadlines, shutdown, and peer identity. Source-graph rules
+exclude provider/GitHub/arbitrary-command capabilities from the owner and persistence from clients.
+This does not yet move task mutations, artifacts, worker execution, or broker intents behind the
+service. The optional Linux transport requires a pinned isolated Python installation and
+owner-controlled filesystem provisioning; see the ADR for its limits and activation criteria.
 
 The read-only daily-cycle compiler accepts v4/v5 owner-only manifests and verifies reviewed policy
 digests, including daily aggregate quotas, operations health, and autonomous merge, plus the

@@ -66,6 +66,16 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
     packageName: "@agentlab/runtime",
     sourceRoot: "packages/runtime/src",
     publicExports: {
+      "./factory-ledger": {
+        source: "packages/runtime/src/local-factory-ledger.ts",
+        default: "./dist/local-factory-ledger.js",
+        types: "./dist/local-factory-ledger.d.ts"
+      },
+      "./factory-ledger-client": {
+        source: "packages/runtime/src/local-factory-ledger-client.ts",
+        default: "./dist/local-factory-ledger-client.js",
+        types: "./dist/local-factory-ledger-client.d.ts"
+      },
       ".": {
         source: "packages/runtime/src/local-runtime.ts",
         default: "./dist/local-runtime.js",
@@ -455,6 +465,18 @@ function compositionBoundaryViolations(
 ): readonly ArchitectureViolation[] {
   const rules = [
     {
+      entry: "packages/runtime/src/local-factory-ledger.ts",
+      description: "credentialless single-owner ledger",
+      forbidden: (path: string) => !isLedgerSharedModule(path) && !ledgerOwnerModules.has(path)
+    },
+    {
+      entry: "packages/runtime/src/local-factory-ledger-client.ts",
+      description: "storage-free ledger client",
+      forbidden: (path: string) =>
+        !isLedgerSharedModule(path) &&
+        path !== "packages/runtime/src/local-factory-ledger-client.ts"
+    },
+    {
       entry: "packages/runtime/src/local-factory-broker.ts",
       description: "broker composition",
       forbidden: (path: string) =>
@@ -487,6 +509,8 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-runtime.ts",
       description: "interactive composition",
       forbidden: (path: string) =>
+        path === "packages/runtime/src/local-factory-ledger.ts" ||
+        path === "packages/runtime/src/local-factory-ledger-client.ts" ||
         path === "packages/runtime/src/local-factory-broker.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
         isFactoryIntakeModule(path) ||
@@ -800,6 +824,34 @@ function compositionBoundaryViolations(
     }
   }
   return violations;
+}
+
+const ledgerOwnerModules = new Set([
+  "packages/runtime/src/local-factory-ledger.ts",
+  "packages/runtime/src/application/factory-ledger-queries.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-ledger-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts"
+]);
+
+function isLedgerSharedModule(path: string): boolean {
+  return (
+    path.startsWith("packages/contracts/src/") ||
+    path.startsWith("packages/runtime/src/domain/") ||
+    path === "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts" ||
+    ["helper", "process", "transport"].some(
+      (suffix) =>
+        path === `packages/runtime/src/infrastructure/process/linux-ledger-peer-${suffix}.ts`
+    )
+  );
 }
 
 function brokerCommandForbidden(path: string): boolean {
@@ -2451,6 +2503,8 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/runtime/src/application/")) return "runtime-application";
   if (path.startsWith("packages/runtime/src/infrastructure/")) return "runtime-infrastructure";
   if (
+    path === "packages/runtime/src/local-factory-ledger.ts" ||
+    path === "packages/runtime/src/local-factory-ledger-client.ts" ||
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||

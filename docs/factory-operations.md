@@ -15,17 +15,20 @@ cannot perform the artifact store's chmod. Relaxing the disposable database's mo
 mandatory chmod, so group/ACL provisioning alone cannot make this implementation work.
 
 Run `npm run test:factory-role-isolation` on Linux with unprivileged user namespaces, `unshare`,
-`newuidmap`/`newgidmap`, and assigned subordinate UID/GID ranges. It executes the real built
-adapters under two distinct mapped UIDs, creates only disposable test storage, and verifies these
-denials. The test passes when isolation holds; it is **not** a successful factory handoff test. It
-is opt-in and is not included in the hosted `factory-sandbox` job. Missing namespace support fails
-the explicit test command rather than reporting a successful proof.
+`newuidmap`/`newgidmap`, Python 3, and assigned subordinate UID/GID ranges. It executes the real
+built adapters under distinct mapped UIDs, creates only disposable test storage, and verifies these
+denials. A second positive test starts the actual ledger owner as UID 1 and authenticates clients as
+UIDs 2 and 3; both read their assigned immutable task, while UID 4 and forged privileged operations
+are rejected. Neither proof is a complete software-factory handoff. The explicit command and hosted
+`factory-sandbox` job run both tests; missing prerequisites fail rather than report successful
+proof.
 
-The proposed correction is a single-owner local ledger service with authenticated, role-limited
-commands and verified evidence handoffs. It is not implemented or approved by the current ADRs; see
-[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
-below remain reference material, not an executable activation recipe. Do not weaken private storage,
-share role credentials, or rotate storage ownership between stages as a workaround.
+The accepted correction is a single-owner local ledger service with authenticated, role-limited
+commands and verified evidence handoffs. Only its scoped read boundary is implemented; mutations,
+artifact transfer, role migration, crash recovery, and a real brokered-PR canary remain outstanding.
+See [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning
+instructions below remain reference material, not an executable activation recipe. Do not weaken
+private storage, share role credentials, or rotate storage ownership between stages as a workaround.
 
 ## Reviewed inputs
 

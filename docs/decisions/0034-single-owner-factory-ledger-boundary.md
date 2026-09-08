@@ -1,6 +1,6 @@
 # ADR 0034: Single-owner factory ledger boundary
 
-Status: proposed; implementation and architectural approval pending
+Status: accepted on 2026-09-07; implementation in progress, activation not approved by test results
 
 ## Evidence and problem
 
@@ -25,10 +25,10 @@ storage would additionally let that role replace authoritative state; append-onl
 methods and content hashes alone do not prevent the file owner from rewriting the underlying files.
 The interactive single-user runtime's private storage behavior is valid and must be preserved.
 
-The reproduction proves denial of direct storage access. It does not prove a working service,
-authenticated IPC, remote governance, model isolation, or the complete software-factory loop.
+That reproduction proves denial of direct storage access. The separate positive read-boundary proof
+described below does not yet prove remote governance, model isolation, or the complete factory loop.
 
-## Proposed decision
+## Decision
 
 One dedicated local ledger service owns the factory database, lease, and artifact directories. No
 model worker, review publisher, PR broker, merger, or attestor gets direct write access to those
@@ -60,6 +60,45 @@ records intent before remote effects, and uncertain results reconcile without bl
 No transport outage may fall back to direct SQLite access, relaxed permissions, or shared
 credentials.
 
+## Implemented read boundary and limits
+
+`@agentlab/runtime/factory-ledger` exclusively owns its SQLite database and writer lease; it serves
+only `authority.read` and exact-contract `task.read`. Its public client has no direct persistence or
+generic RPC fallback. An expiring content-addressed read policy assigns distinct non-root UIDs and
+task/contract pairs. Caller-supplied identities, extra fields, mutations, stale policy digests, and
+unassigned tasks fail closed. These read grants confer no execution, review, or publication
+authority.
+
+The Linux-only transport uses a digest-pinned Python interpreter with fixed `-I -S -u -c` arguments,
+an empty environment, and a static standard-library helper. It obtains peer identities using
+[`SO_PEERCRED`](https://man7.org/linux/man-pages/man7/unix.7.html), authenticates both ends before
+request disclosure, and bounds framing, output, backlog, and absolute per-connection deadlines.
+Python's [socket API](https://docs.python.org/3/library/socket.html) supplies the supported
+peer-credential interface; [isolated startup options](https://docs.python.org/3/using/cmdline.html)
+prevent environment, user-site, and site initialization from injecting helper code. This is an
+explicit optional factory host prerequisite, not a Python dependency of the interactive product. The
+interpreter's standard library and its containing filesystem remain trusted host inputs; a binary
+digest alone does not attest the whole interpreter installation.
+
+Only the service owner can write the socket parent. Socket mode `0666` permits connection, not
+operation authority: the kernel UID allowlist applies before reading a body, and the application
+checks the current policy and exact task grant. Provisioning must keep all ancestor directories and
+interpreter files outside client control; checking the immediate parents is not a substitute for
+that host trust boundary. Existing socket paths are refused, never blindly unlinked. Abnormal-death
+stale-socket recovery remains an explicit operator task until a verified recovery protocol exists.
+
+The positive integration runs the actual built service under mapped UID 1 and public clients under
+UIDs 2 and 3. Both read their assigned task without opening the database or lease; UID 4 is
+rejected, and forged privileged operations fail. Ordinary transport tests cover wrong server
+identity, malformed/oversized frames, slow clients, late replies, clean restart, and bounded
+shutdown. Both positive and negative cross-UID proofs run through `test:factory-role-isolation`, now
+required by the hosted `factory-sandbox` job. Architecture fitness rules exclude providers, GitHub,
+and arbitrary command execution from the ledger owner and exclude persistence from clients.
+
+This implementation does **not** transfer artifacts, expose mutations, run workers through the
+service, install a daemon, recover remote intents, or repair the existing daily chain. Those remain
+activation blockers. A successful read-boundary test must not be reported as a brokered-PR canary.
+
 ## Implementation sequence
 
 1. Specify the typed role operations and threat/authority boundaries; implement local peer
@@ -89,6 +128,6 @@ credentials.
 - Required local/hosted checks, a real bounded canary, incident disablement, ledger backup/restore,
   and the brokered-PR observation record pass on the exact deployable binary and policies.
 
-This proposal does not transfer repository ownership, install a daemon, change permissions on live
+This decision does not transfer repository ownership, install a daemon, change permissions on live
 state, provision credentials, spend a model budget, or enable factory authority. Approval of this
 architecture is distinct from confirming that its future implementation satisfies these checks.

@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./factory-ledger": {
+      "types": "./dist/local-factory-ledger.d.ts",
+      "default": "./dist/local-factory-ledger.js"
+    },
+    "./factory-ledger-client": {
+      "types": "./dist/local-factory-ledger-client.d.ts",
+      "default": "./dist/local-factory-ledger-client.js"
+    },
     ".": {
       "types": "./dist/local-runtime.d.ts",
       "default": "./dist/local-runtime.js"
