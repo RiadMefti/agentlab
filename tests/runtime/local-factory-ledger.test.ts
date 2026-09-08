@@ -1,6 +1,7 @@
 import {
   chmod,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
   realpath,
@@ -15,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   loadLocalFactoryLedgerConfig,
+  localFactoryLedgerConfigSchema,
   type LocalFactoryLedgerConfig
 } from "../../packages/runtime/src/infrastructure/filesystem/local-factory-ledger-config.js";
 import { pinnedLocalExecutableDigest } from "../../packages/runtime/src/infrastructure/filesystem/pinned-local-executable.js";
@@ -96,6 +98,60 @@ describe.skipIf(process.platform !== "linux" || process.getuid?.() === 0)(
       expect(await readFile(config.transport.socketPath, "utf8")).toBe("do not replace");
       const lease = acquireSqliteWriterLease(config.databasePath, { contentionTimeoutMs: 50 });
       lease.close();
+    });
+
+    it("requires isolated artifact storage, matching producers, coherent quotas and enough frame capacity", async () => {
+      const artifactRoot = join(root, "artifacts");
+      const principal = config.policy.principals[0];
+      if (principal === undefined) throw new Error("Missing fixture principal.");
+      const candidate = {
+        ...config,
+        schemaVersion: "agentlab.local-factory-ledger.v3",
+        artifacts: {
+          root: artifactRoot,
+          policy: {
+            schemaVersion: "agentlab.ledger-artifact-policy.v1",
+            expiresAt: config.policy.expiresAt,
+            maximumArtifactBytes: 1024,
+            maximumTaskBytes: 4096,
+            maximumTaskArtifacts: 4,
+            maximumTotalBytes: 8192,
+            maximumTotalArtifacts: 8,
+            principals: [{ uid: principal.uid, id: "worker", kind: "implementer" }]
+          }
+        }
+      };
+      const parsed = localFactoryLedgerConfigSchema.parse(candidate);
+      await expect(createLocalFactoryLedger(parsed)).rejects.toMatchObject({ code: "ENOENT" });
+      await mkdir(artifactRoot, { mode: 0o700 });
+      await chmod(artifactRoot, 0o750);
+      await expect(createLocalFactoryLedger(parsed)).rejects.toThrow(/owner-only/u);
+      await expect(lstat(config.databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+      await chmod(artifactRoot, 0o700);
+      for (const invalid of [
+        { ...candidate, artifacts: { ...candidate.artifacts, root } },
+        { ...candidate, transport: { ...candidate.transport, maximumBytes: 1024 } },
+        {
+          ...candidate,
+          artifacts: {
+            ...candidate.artifacts,
+            policy: { ...candidate.artifacts.policy, maximumTotalBytes: 2048 }
+          }
+        },
+        {
+          ...candidate,
+          policy: {
+            ...config.policy,
+            principals: [{ ...config.policy.principals[0], role: "broker" }]
+          }
+        }
+      ])
+        expect(localFactoryLedgerConfigSchema.safeParse(invalid).success).toBe(false);
+      const service = await createLocalFactoryLedger(parsed);
+      services.push(service);
+      expect(service.artifactPolicyDigest).toMatch(/^sha256:/u);
+      expect(service.authorityPolicyDigest).toBeNull();
+      await service.close();
     });
 
     it("keeps an exclusive lease until close, then supports idempotent shutdown and restart", async () => {

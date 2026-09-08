@@ -13,6 +13,7 @@ import {
   NodeFactoryDocumentCodec
 } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
+import { latestSchemaVersion } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { testControlEvent, testDigest } from "../helpers/factory.js";
 
 const fixtures: { root: string; repository: SqliteFactoryRepository }[] = [];
@@ -98,7 +99,9 @@ describe("ledger authority commands", () => {
     const raw = new DatabaseSync(f.path);
     try {
       // Reconstruct the preceding layout only inside this fresh, test-owned database.
-      raw.exec("DROP TABLE factory_ledger_authority_receipts; PRAGMA user_version = 31;");
+      raw.exec(
+        "DROP TABLE factory_ledger_artifact_reservations; DROP TABLE factory_ledger_authority_receipts; PRAGMA user_version = 31;"
+      );
     } finally {
       raw.close();
     }
@@ -108,7 +111,9 @@ describe("ledger authority commands", () => {
       await expect(upgraded.findAuthorityReceipt(1001, randomUUID())).resolves.toBeNull();
       const check = new DatabaseSync(f.path);
       try {
-        expect(check.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 32 });
+        expect(check.prepare("PRAGMA user_version").get()).toMatchObject({
+          user_version: latestSchemaVersion
+        });
         expect(check.prepare("PRAGMA quick_check").get()).toMatchObject({ quick_check: "ok" });
       } finally {
         check.close();

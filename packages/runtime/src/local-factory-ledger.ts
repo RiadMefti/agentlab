@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { FactoryLedgerAuthority } from "./application/factory-ledger-authority.js";
+import { FactoryLedgerArtifacts } from "./application/factory-ledger-artifacts.js";
 import { FactoryLedgerQueries } from "./application/factory-ledger-queries.js";
 import { cleanupFailedRuntimeConstruction } from "./application/local-runtime-construction.js";
 import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.js";
@@ -12,6 +13,11 @@ import {
   type LocalFactoryLedgerConfig
 } from "./infrastructure/filesystem/local-factory-ledger-config.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
+import { FileFactoryArtifactStore } from "./infrastructure/filesystem/file-factory-artifact-store.js";
+import { NodeFactoryArtifactWireCodec } from "./infrastructure/filesystem/node-factory-artifact-wire-codec.js";
+import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
+import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
+import { SqliteFactoryLedgerArtifactRepository } from "./infrastructure/persistence/sqlite-factory-ledger-artifact-repository.js";
 import {
   encodeCanonicalDocument,
   NodeFactoryDocumentCodec
@@ -24,6 +30,7 @@ import { listenLinuxLedgerPeer } from "./infrastructure/process/linux-ledger-pee
 export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig): Promise<{
   readonly policyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest>;
   readonly authorityPolicyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest> | null;
+  readonly artifactPolicyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest> | null;
   readonly stopped: Promise<void>;
   close: () => Promise<void>;
 }> {
@@ -43,11 +50,13 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
     const repository = repositories.track(new SqliteFactoryRepository(lease.databasePath));
     const policyDigest = factoryLedgerReadPolicyDigest(config.policy);
     const authorityPolicyDigest =
-      config.schemaVersion === "agentlab.local-factory-ledger.v2"
+      "authorityPolicy" in config && config.authorityPolicy !== undefined
         ? encodeCanonicalDocument(config.authorityPolicy).digest
         : null;
     const authority =
-      config.schemaVersion === "agentlab.local-factory-ledger.v2" && authorityPolicyDigest !== null
+      "authorityPolicy" in config &&
+      config.authorityPolicy !== undefined &&
+      authorityPolicyDigest !== null
         ? new FactoryLedgerAuthority({
             peerPolicy: config.policy,
             peerPolicyDigest: policyDigest,
@@ -60,6 +69,45 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
             createId: randomUUID
           })
         : null;
+    const artifactPolicyDigest =
+      config.schemaVersion === "agentlab.local-factory-ledger.v3"
+        ? encodeCanonicalDocument(config.artifacts.policy).digest
+        : null;
+    let artifacts: FactoryLedgerArtifacts | null = null;
+    if (
+      config.schemaVersion === "agentlab.local-factory-ledger.v3" &&
+      artifactPolicyDigest !== null
+    ) {
+      const executions = repositories.track(
+        new SqliteFactoryExecutionRepository(lease.databasePath)
+      );
+      const repairs = repositories.track(
+        new SqliteFactoryPullRequestRepairExecutionRepository(lease.databasePath)
+      );
+      const artifactReservations = repositories.track(
+        new SqliteFactoryLedgerArtifactRepository(lease.databasePath)
+      );
+      artifacts = new FactoryLedgerArtifacts({
+        peerPolicy: config.policy,
+        peerPolicyDigest: policyDigest,
+        policy: config.artifacts.policy,
+        policyDigest: artifactPolicyDigest,
+        contexts: {
+          task: (taskId) => repository.findById(taskId),
+          execution: (taskId, coordinate) =>
+            coordinate.kind === "execution"
+              ? executions.findByTaskId(taskId)
+              : repairs.findByAuthorizationDigest(coordinate.authorizationDigest)
+        },
+        repository: artifactReservations,
+        artifacts: new FileFactoryArtifactStore(config.artifacts.root, {
+          maximumArtifactBytes: config.artifacts.policy.maximumArtifactBytes
+        }),
+        wire: new NodeFactoryArtifactWireCodec(),
+        encode: encodeCanonicalDocument,
+        now: () => new Date().toISOString()
+      });
+    }
     const queries = new FactoryLedgerQueries({
       policy: config.policy,
       policyDigest,
@@ -90,7 +138,16 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
           const response =
             isAuthority && authority !== null
               ? await authority.execute(peer.uid, request)
-              : await queries.execute(peer.uid, request);
+              : typeof request === "object" &&
+                  request !== null &&
+                  "operation" in request &&
+                  typeof request.operation === "string" &&
+                  ["artifact.submit", "artifact.read", "artifact.receipt"].includes(
+                    request.operation
+                  ) &&
+                  artifacts !== null
+                ? await artifacts.execute(peer.uid, request)
+                : await queries.execute(peer.uid, request);
           return new TextEncoder().encode(JSON.stringify(response));
         })
     );
@@ -115,7 +172,7 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
     const stopped = listener.closed.then(close);
     // Keep rejected shutdown observable through stopped without an unhandled process rejection.
     void stopped.catch(() => undefined);
-    return { policyDigest, authorityPolicyDigest, stopped, close };
+    return { policyDigest, authorityPolicyDigest, artifactPolicyDigest, stopped, close };
   } catch (error: unknown) {
     await tasks.stopAndDrain();
     const failures = cleanupFailedRuntimeConstruction(

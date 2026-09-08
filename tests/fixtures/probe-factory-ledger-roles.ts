@@ -15,16 +15,23 @@ import { fileURLToPath } from "node:url";
 
 import {
   evidenceBundleSchema,
+  factoryExecutionRunSchema,
+  factoryExecutionEventSchema,
+  factoryLedgerArtifactExecutionSchema,
   immutableTaskContractSchema,
+  maximumLedgerArtifactBytes,
   sha256DigestSchema,
   taskEventSchema
 } from "@agentlab/contracts";
 import { createLocalFactoryLedger } from "@agentlab/runtime/factory-ledger";
 import { createLocalFactoryLedgerClient } from "@agentlab/runtime/factory-ledger-client";
 import { createLocalFactoryLedgerOperator } from "@agentlab/runtime/factory-ledger-operator";
+import { createLocalFactoryLedgerArtifacts } from "@agentlab/runtime/factory-ledger-artifacts";
 import { z } from "zod";
 
 import { pinnedLocalExecutableDigest } from "../../packages/runtime/dist/infrastructure/filesystem/pinned-local-executable.js";
+import { FileFactoryArtifactStore } from "../../packages/runtime/dist/infrastructure/filesystem/file-factory-artifact-store.js";
+import { SqliteFactoryExecutionRepository } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/dist/infrastructure/persistence/canonical-factory-documents.js";
 import { openSqliteDatabase } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-factory-repository.js";
@@ -65,7 +72,12 @@ const readySchema = z.strictObject({
   taskId: z.uuid(),
   contractDigest: sha256DigestSchema,
   policyDigest: sha256DigestSchema,
-  authorityPolicyDigest: sha256DigestSchema
+  authorityPolicyDigest: sha256DigestSchema,
+  artifactPolicyDigest: sha256DigestSchema,
+  taskSequence: z.number().int().positive(),
+  taskEventDigest: sha256DigestSchema,
+  execution: factoryLedgerArtifactExecutionSchema,
+  operationId: z.uuid()
 });
 const mode = process.argv[2];
 if (mode === undefined) {
@@ -168,8 +180,8 @@ if (mode === undefined) {
     pythonPath,
     pythonDigest: await pinnedLocalExecutableDigest(pythonPath, "Proof interpreter"),
     socketPath: join(root, "owner", "ledger.sock"),
-    maximumBytes: 131_072,
-    timeoutMs: 1000
+    maximumBytes: 16_777_216,
+    timeoutMs: 3000
   };
   if (mode === "owner") {
     const rawSeed = process.env.AGENTLAB_LEDGER_PROOF_SEED ?? "";
@@ -177,8 +189,10 @@ if (mode === undefined) {
     const seed = z
       .strictObject({
         contract: immutableTaskContractSchema,
-        event: taskEventSchema,
-        evidence: evidenceBundleSchema
+        taskEvents: z.array(taskEventSchema).min(1),
+        evidence: evidenceBundleSchema,
+        executionRun: factoryExecutionRunSchema,
+        executionEvents: z.array(factoryExecutionEventSchema).min(1)
       })
       .parse(JSON.parse(rawSeed) as unknown);
     const documents = new NodeFactoryDocumentCodec();
@@ -187,17 +201,51 @@ if (mode === undefined) {
     try {
       await repository.create(
         contract,
-        documents.taskEvent(seed.event),
+        documents.taskEvent(seed.taskEvents[0]),
         documents.evidenceBundle(seed.evidence)
       );
+      for (const event of seed.taskEvents.slice(1))
+        await repository.append(documents.taskEvent(event));
     } finally {
       repository.close();
     }
+    const executions = new SqliteFactoryExecutionRepository(databasePath);
+    try {
+      await executions.register(
+        documents.executionRun(seed.executionRun),
+        documents.executionEvent(seed.executionEvents[0])
+      );
+      for (const event of seed.executionEvents.slice(1))
+        await executions.append(documents.executionEvent(event));
+    } finally {
+      executions.close();
+    }
+    const taskEvent = documents.taskEvent(seed.taskEvents.at(-1));
+    const operation = documents.executionEvent(seed.executionEvents.at(-1));
+    if (operation.value.kind !== "operation-started")
+      throw new Error("Fixture operation is inactive.");
+    mkdirSync(join(root, "owner", "artifacts"), { mode: 0o700 });
     const policyExpiresAt = new Date(Date.now() + 60_000).toISOString();
     const runtime = await createLocalFactoryLedger({
-      schemaVersion: "agentlab.local-factory-ledger.v2",
+      schemaVersion: "agentlab.local-factory-ledger.v3",
       databasePath,
       transport,
+      artifacts: {
+        root: join(root, "owner", "artifacts"),
+        policy: {
+          schemaVersion: "agentlab.ledger-artifact-policy.v1",
+          expiresAt: policyExpiresAt,
+          maximumArtifactBytes: maximumLedgerArtifactBytes,
+          maximumTaskBytes: maximumLedgerArtifactBytes,
+          maximumTaskArtifacts: 8,
+          maximumTotalBytes: maximumLedgerArtifactBytes * 2,
+          maximumTotalArtifacts: 16,
+          principals: [
+            { uid: 2, id: "worker", kind: "implementer" },
+            { uid: 3, id: "broker", kind: "reader" }
+          ]
+        }
+      },
       authorityPolicy: {
         schemaVersion: "agentlab.ledger-authority-policy.v1",
         expiresAt: policyExpiresAt,
@@ -234,7 +282,17 @@ if (mode === undefined) {
       taskId: contract.value.taskId,
       contractDigest: contract.digest,
       policyDigest: runtime.policyDigest,
-      authorityPolicyDigest: runtime.authorityPolicyDigest
+      authorityPolicyDigest: runtime.authorityPolicyDigest,
+      artifactPolicyDigest: runtime.artifactPolicyDigest,
+      taskSequence: taskEvent.value.sequence,
+      taskEventDigest: taskEvent.digest,
+      execution: {
+        kind: "execution",
+        runId: operation.value.runId,
+        runDigest: operation.value.runDigest,
+        eventDigest: operation.digest
+      },
+      operationId: operation.value.operationId
     });
     await Promise.race([stop, runtime.stopped]);
     await runtime.close();
@@ -312,7 +370,8 @@ if (mode === undefined) {
     let authorityRead = false;
     try {
       const task = await client.readTask(ready.taskId, ready.contractDigest);
-      taskRead = task.contractDigest === ready.contractDigest && task.sequence === 1;
+      taskRead =
+        task.contractDigest === ready.contractDigest && task.sequence === ready.taskSequence;
       const authority = await client.readAuthority();
       authorityRead = !authority.scheduler && !authority.prBroker && !authority.mergeBroker;
     } catch {
@@ -364,6 +423,63 @@ if (mode === undefined) {
     } catch {
       authorityChangeDenied = true;
     }
+    const artifacts = createLocalFactoryLedgerArtifacts({
+      transport,
+      serverUid: 1,
+      principalId: uid === 2 ? "worker" : uid === 3 ? "broker" : "stranger",
+      principalKind: "implementer",
+      peerPolicyDigest: ready.policyDigest,
+      artifactPolicyDigest: ready.artifactPolicyDigest
+    });
+    const bytes = Buffer.alloc(maximumLedgerArtifactBytes, 0xa7);
+    bytes.set([0, 255, 10, 97, 0, 13]);
+    const artifact = artifacts.describe(bytes, "application/octet-stream");
+    const upload = {
+      taskId: ready.taskId,
+      contractDigest: ready.contractDigest,
+      idempotencyKey: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      expectedTaskEventDigest: ready.taskEventDigest,
+      execution: ready.execution,
+      attempt: 1,
+      operationId: ready.operationId,
+      artifact
+    };
+    let artifactSubmit = false;
+    let artifactReplayStable = false;
+    let artifactRead = false;
+    let directArtifactDenied = false;
+    try {
+      const stored = await artifacts.submit(upload, bytes);
+      artifactSubmit = stored.stored;
+      const replay = await artifacts.submit(upload, bytes);
+      const receipt = await artifacts.receipt(
+        ready.taskId,
+        ready.contractDigest,
+        upload.idempotencyKey,
+        artifacts.intentDigest(upload)
+      );
+      artifactReplayStable =
+        replay.reservationDigest === stored.reservationDigest &&
+        receipt.reservationDigest === stored.reservationDigest &&
+        receipt.stored;
+    } catch {
+      /* Only the assigned worker may submit for this active operation. */
+    }
+    try {
+      const copied = await artifacts.read(ready.taskId, ready.contractDigest, artifact.digest);
+      artifactRead = Buffer.from(copied.bytes).equals(Buffer.from(bytes));
+    } catch {
+      /* An unknown peer must not read any artifact bytes. */
+    }
+    try {
+      await new FileFactoryArtifactStore(join(root, "owner", "artifacts")).read(
+        artifact.digest,
+        bytes.byteLength
+      );
+    } catch {
+      directArtifactDenied = true;
+    }
     let directDatabaseDenied = false;
     let directLeaseDenied = false;
     try {
@@ -383,6 +499,10 @@ if (mode === undefined) {
         authorityRead,
         forgedOperationDenied,
         authorityChangeDenied,
+        artifactSubmit,
+        artifactReplayStable,
+        artifactRead,
+        directArtifactDenied,
         directDatabaseDenied,
         directLeaseDenied
       }) + "\n"

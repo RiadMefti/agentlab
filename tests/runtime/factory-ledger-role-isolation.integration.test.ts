@@ -3,31 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
-import { testEvidenceBundle, testFactoryContract, testTaskEvent } from "../helpers/factory.js";
+import { ledgerArtifactSeed } from "../helpers/factory-ledger-artifacts.js";
 
 describe.skipIf(process.env.AGENTLAB_RUN_FACTORY_ROLE_ISOLATION !== "1")(
-  "single-owner ledger cross-UID reads and operator writes",
+  "single-owner ledger cross-UID reads, artifact transfers and operator writes",
   () => {
-    it("serves exact tasks to isolated worker/broker UIDs while denying raw storage, forgeries, and strangers", () => {
-      const contract = new NodeFactoryDocumentCodec().taskContract(testFactoryContract());
-      const seed = {
-        contract: contract.value,
-        event: testTaskEvent({
-          eventId: "33333333-3333-4333-8333-333333333333",
-          contractDigest: contract.digest,
-          sequence: 1,
-          from: null,
-          to: "intake",
-          previousEventDigest: null
-        }),
-        evidence: testEvidenceBundle({
-          bundleId: "55555555-5555-4555-8555-555555555555",
-          contractDigest: contract.digest,
-          sequence: 1,
-          previousBundleDigest: null
-        })
-      };
+    it("serves exact tasks and eight-MiB artifacts to isolated worker/broker UIDs while denying raw storage, forgeries, and strangers", () => {
+      const seed = ledgerArtifactSeed(new Date().toISOString());
       const result = spawnSync(
         "/usr/bin/unshare",
         [
@@ -63,6 +45,10 @@ describe.skipIf(process.env.AGENTLAB_RUN_FACTORY_ROLE_ISOLATION !== "1")(
           authorityRead: uid !== 4,
           forgedOperationDenied: true,
           authorityChangeDenied: true,
+          artifactSubmit: uid === 2,
+          artifactReplayStable: uid === 2,
+          artifactRead: uid !== 4,
+          directArtifactDenied: true,
           directDatabaseDenied: true,
           directLeaseDenied: true
         })),

@@ -19,18 +19,36 @@ Run `npm run test:factory-role-isolation` on Linux with unprivileged user namesp
 built adapters under distinct mapped UIDs, creates only disposable test storage, and verifies these
 denials. A second positive test starts the actual ledger owner as UID 1 and authenticates clients as
 UIDs 2 and 3; both read their assigned immutable task, while UID 4 and unauthorized operator
-commands are rejected. UID 5 separately proves scoped switch changes, stable receipts, and
-stale/replay rejection. These proofs are not a complete software-factory handoff. The explicit
-command and hosted `factory-sandbox` job run both tests; missing prerequisites fail rather than
-report successful proof.
+commands are rejected. UID 2 also uploads binary content that UID 3 reads through the socket; both
+remain unable to open the artifact store directly. UID 5 separately proves scoped switch changes,
+stable receipts, and stale/replay rejection. These proofs are not a complete software-factory
+handoff. The explicit command and hosted `factory-sandbox` job run both tests; missing prerequisites
+fail rather than report successful proof.
 
 The accepted correction is a single-owner local ledger service with authenticated, role-limited
 commands and verified evidence handoffs. Scoped reads and separately granted operator switch changes
-with atomic, idempotent receipts are implemented. Task mutations, artifact transfer, role migration,
-full process-crash recovery, and a real brokered-PR canary remain outstanding. See
-[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
-below remain reference material, not an executable activation recipe. Do not weaken private storage,
-share role credentials, or rotate storage ownership between stages as a workaround.
+with atomic, idempotent receipts and bounded artifact transfers are implemented. Task mutations,
+worker/broker integration, role migration, full process-crash recovery, and a real brokered-PR
+canary remain outstanding. See [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md).
+The provisioning instructions below remain reference material, not an executable activation recipe.
+Do not weaken private storage, share role credentials, or rotate storage ownership between stages as
+a workaround.
+
+Ledger config v3 requires a pre-provisioned canonical owner-only artifact root, an expiring artifact
+policy with distinct producer/reader UIDs matching the peer policy, and transport capacity for
+base64 content plus its envelope. Each object is capped at 8 MiB; reviewed policy also caps task and
+ledger-wide cumulative bytes and reservation counts. Producer grants distinguish implementer,
+reviewer, and gate-observer, but confer no authority to approve gates or publish evidence. Uploads
+must name an existing task's exact contract/state head and active execution or PR-repair operation.
+Readers can request only artifacts associated with their assigned task, never a filesystem path.
+
+Artifact reservations are immutable and charged before the file write. A lost reply is reconciled by
+the original UID, key, and intent digest using `artifact.receipt`; `stored: false` means delivery is
+incomplete, not that quota was released. An expired upload cannot run again. Do not delete a
+reservation or lower usage to retry uncertain work. The store verifies content hashes, synchronizes
+files and publication directories, and treats corruption as a failure. Back up the stopped ledger
+and its artifact store together; a pre-schema-33 binary requires restoring its compatible backup,
+not lowering the schema number. This API alone does not run a model, pass a gate, or create a PR.
 
 ## Reviewed inputs
 

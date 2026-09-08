@@ -30,9 +30,9 @@ MCP bridge, or provider-session translation layer.
 
 [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) additionally accepts one optional
 long-lived, credentialless local ledger owner. Its Unix peer-authenticated surface provides scoped
-reads and separately granted, idempotent human switch operations; it is not loaded by the
-interactive runtime. Existing one-shot factory writers have not yet migrated behind it; the
-separated-UID daily chain remains disabled.
+reads, separately granted idempotent human switch operations, and task-bound artifact transfers; it
+is not loaded by the interactive runtime. Existing one-shot factory writers have not yet migrated
+behind it; the separated-UID daily chain remains disabled.
 
 ## Two paths
 
@@ -737,9 +737,15 @@ Expired commands can be reconciled without mutation through a separately authori
 Positive real cross-UID tests prove those reads and reject direct storage access and forged
 mutations; transport tests bound frames, deadlines, shutdown, and peer identity. Source-graph rules
 exclude provider/GitHub/arbitrary-command capabilities from the owner and persistence from clients.
-This does not yet move task mutations, artifacts, worker execution, or broker intents behind the
-service. The optional Linux transport requires a pinned isolated Python installation and
-owner-controlled filesystem provisioning; see the ADR for its limits and activation criteria.
+Config v3 and the storage-free `factory-ledger-artifacts` entry transfer digest-verified bytes using
+separate producer/reader grants. Submissions bind the active task and execution operation, both
+policy pins, a short deadline, and an immutable idempotency key. Schema 33 reserves task/global byte
+and object quotas before publication; interrupted reservations remain charged and reconcile without
+accepting new evidence authority. Files and publication directories are synchronized before storage
+is acknowledged. Existing canonical evidence can authorize task-scoped reads. This does not yet move
+task mutations, worker execution, or broker intents behind the service. The optional Linux transport
+requires a pinned isolated Python installation and owner-controlled filesystem provisioning; see the
+ADR for its limits and activation criteria.
 
 The read-only daily-cycle compiler accepts v4/v5 owner-only manifests and verifies reviewed policy
 digests, including daily aggregate quotas, operations health, and autonomous merge, plus the

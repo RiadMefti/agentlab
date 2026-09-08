@@ -1,5 +1,12 @@
 import type { Sha256Digest } from "@agentlab/contracts";
 
+export class FactoryArtifactNotFoundError extends Error {
+  public constructor() {
+    super("Factory artifact is absent.");
+    this.name = "FactoryArtifactNotFoundError";
+  }
+}
+
 export interface StoredFactoryArtifact {
   readonly digest: Sha256Digest;
   readonly sizeBytes: number;

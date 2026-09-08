@@ -394,10 +394,12 @@ ownership-only permission changes. A live two-UID proof reproduces the failed ha
 verification and same-user integration tests do not prove this deployment works. See
 [the single-owner ledger decision](docs/decisions/0034-single-owner-factory-ledger-boundary.md) for
 evidence and the accepted correction. Authenticated reads and separately granted, idempotent
-operator switch changes pass a positive cross-UID test; task writes, artifact transfers, and role
-migration remain unfinished. Do not weaken permissions or collapse role identities to activate the
-current chain. See [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for
-implemented controls, activation blockers, and later phases, and
+operator switch changes and bounded, digest-verified artifact transfers pass a positive cross-UID
+test. Uploads are task/attempt-bound untrusted claims with durable quota reservations, not gate or
+review approvals. Task writes, worker/broker integration, and role migration remain unfinished. Do
+not weaken permissions or collapse role identities to activate the current chain. See
+[ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
+activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion
 separation; [ADR 0009](docs/decisions/0009-isolated-eval-attestation.md) for the signing boundary;
 [ADR 0011](docs/decisions/0011-enforced-signer-worker-identities.md) for enforced OS identities;

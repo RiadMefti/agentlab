@@ -5,6 +5,7 @@ import { dirname, isAbsolute, normalize } from "node:path";
 import {
   factoryLedgerReadPolicySchema,
   factoryLedgerAuthorityPolicySchema,
+  factoryLedgerArtifactPolicySchema,
   type Sha256Digest
 } from "@agentlab/contracts";
 import { z } from "zod";
@@ -29,12 +30,20 @@ export const localFactoryLedgerConfigSchema = z
     readOnlyLedgerConfigSchema.extend({
       schemaVersion: z.literal("agentlab.local-factory-ledger.v2"),
       authorityPolicy: factoryLedgerAuthorityPolicySchema
+    }),
+    readOnlyLedgerConfigSchema.extend({
+      schemaVersion: z.literal("agentlab.local-factory-ledger.v3"),
+      authorityPolicy: factoryLedgerAuthorityPolicySchema.optional(),
+      artifacts: z.strictObject({
+        root: readOnlyLedgerConfigSchema.shape.databasePath.refine((path) => path !== "/"),
+        policy: factoryLedgerArtifactPolicySchema
+      })
     })
   ])
   .superRefine((config, context) => {
     if (
-      config.schemaVersion === "agentlab.local-factory-ledger.v2" &&
-      config.authorityPolicy.grants.some(
+      "authorityPolicy" in config &&
+      config.authorityPolicy?.grants.some(
         (grant) =>
           !config.policy.principals.some(
             (peer) => peer.uid === grant.uid && peer.id === grant.id && peer.role === "operator"
@@ -46,6 +55,27 @@ export const localFactoryLedgerConfigSchema = z
         message: "Authority grants require matching operator principals."
       });
     }
+    if (
+      config.schemaVersion === "agentlab.local-factory-ledger.v3" &&
+      (config.transport.maximumBytes <
+        Math.ceil(config.artifacts.policy.maximumArtifactBytes / 3) * 4 + 32768 ||
+        [config.databasePath, config.transport.socketPath].some(
+          (path) => path === config.artifacts.root || path.startsWith(`${config.artifacts.root}/`)
+        ) ||
+        config.artifacts.policy.principals.some(
+          (principal) =>
+            !config.policy.principals.some(
+              (peer) =>
+                peer.uid === principal.uid &&
+                peer.id === principal.id &&
+                (principal.kind === "reader" || peer.role === "worker")
+            )
+        ))
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Artifact transport capacity, isolated root, or peer grants are invalid."
+      });
   });
 export type LocalFactoryLedgerConfig = z.infer<typeof localFactoryLedgerConfigSchema>;
 
@@ -65,6 +95,19 @@ export async function assertLedgerOwnedDirectories(
         "Ledger storage and socket parents must be canonical, owner-controlled directories."
       );
     }
+  }
+  if (config.schemaVersion === "agentlab.local-factory-ledger.v3") {
+    const path = config.artifacts.root;
+    const metadata = await lstat(path);
+    if (
+      (await realpath(path)) !== path ||
+      !metadata.isDirectory() ||
+      metadata.uid !== process.getuid?.() ||
+      (metadata.mode & 0o077) !== 0
+    )
+      throw new Error(
+        "Ledger artifact root must be a pre-provisioned canonical owner-only directory."
+      );
   }
 }
 
