@@ -747,6 +747,15 @@ task mutations, worker execution, or broker intents behind the service. The opti
 requires a pinned isolated Python installation and owner-controlled filesystem provisioning; see the
 ADR for its limits and activation criteria.
 
+An internal operation-worker adapter stages the next execution boundary. Strict canonical job
+documents bind task/run/operation, assigned role, policies, exact base/seed patch, provider or named
+gate, and limits. Each operation reconstructs a fresh private worktree; reviews and gates cannot
+change its candidate. Result claims are returned only after verified identity checks and workspace
+closure. Uncertain process or construction cleanup blocks new work until exact recovery succeeds.
+Installed gate limits can be narrowed by a job, never widened. Real-worktree tests cover this
+executor with injected process outputs; durable remote claims and the orchestration bridge are still
+absent. Nothing composes this adapter into the interactive product or enables factory work.
+
 The read-only daily-cycle compiler accepts v4/v5 owner-only manifests and verifies reviewed policy
 digests, including daily aggregate quotas, operations health, and autonomous merge, plus the
 AgentLab executable digest; distinct worker, PR-broker, merger, incident-controller, and attestor

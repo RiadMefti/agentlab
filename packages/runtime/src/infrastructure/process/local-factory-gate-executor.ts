@@ -60,6 +60,20 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
   public async execute(input: FactoryGateExecutionInput): Promise<FactoryGateExecutionOutput> {
     const definition = this.#definitions.get(input.gateId);
     if (definition === undefined) throw new Error(`Factory gate ${input.gateId} is not installed.`);
+    const timeoutMs =
+      input.maximumWallClockSeconds === undefined
+        ? definition.timeoutMs
+        : Math.min(
+            definition.timeoutMs,
+            z.number().int().min(1).max(3600).parse(input.maximumWallClockSeconds) * 1000
+          );
+    const maximumOutputBytes =
+      input.maximumOutputBytes === undefined
+        ? definition.maximumOutputBytes
+        : Math.min(
+            definition.maximumOutputBytes,
+            z.number().int().min(1).max(1_073_741_824).parse(input.maximumOutputBytes)
+          );
     const sandboxedCommand = await this.sandbox.wrap(definition.command, input.workspace);
     const isolated = await this.processIsolator.isolate({
       command: sandboxedCommand,
@@ -71,9 +85,9 @@ export class LocalFactoryGateExecutor implements FactoryGateExecutor {
     try {
       const output = await this.runner.run(command.executable, command.args, {
         cwd: input.workspace.root,
-        timeoutMs: definition.timeoutMs,
-        maxBufferBytes: definition.maximumOutputBytes,
-        maxCombinedBufferBytes: definition.maximumOutputBytes,
+        timeoutMs,
+        maxBufferBytes: maximumOutputBytes,
+        maxCombinedBufferBytes: maximumOutputBytes,
         cleanupProcessTree: true,
         environment: {
           PATH: "/usr/bin:/bin",

@@ -27,6 +27,9 @@ export interface FactoryGateExecutionInput {
   readonly isolationId: string;
   readonly workspace: FactoryWorkspace;
   readonly resourceLimits: FactoryResourceLimits;
+  /** Optional caller ceilings may narrow an installed gate, never expand it. */
+  readonly maximumWallClockSeconds?: number;
+  readonly maximumOutputBytes?: number;
 }
 
 export interface FactoryGateExecutionOutput {

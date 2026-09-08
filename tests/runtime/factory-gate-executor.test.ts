@@ -27,6 +27,44 @@ afterEach(() => {
 });
 
 describe("LocalFactoryGateExecutor", () => {
+  it("narrows installed time/output limits for a job and rejects invalid overrides before execution", async () => {
+    const runner = new FakeRunner({ stdout: "ok", stderr: "" });
+    const executor = new LocalFactoryGateExecutor(
+      [{ ...testGate, timeoutMs: 10000 }],
+      passthroughSandbox,
+      passthroughProcessIsolator,
+      runner,
+      timestamps()
+    );
+    await executor.execute({
+      ...gateInput("/work"),
+      maximumWallClockSeconds: 2,
+      maximumOutputBytes: 32
+    });
+    expect(runner.calls[0]?.options).toMatchObject({
+      timeoutMs: 2000,
+      maxBufferBytes: 32,
+      maxCombinedBufferBytes: 32
+    });
+    await executor.execute({
+      ...gateInput("/work"),
+      maximumWallClockSeconds: 20,
+      maximumOutputBytes: 2048
+    });
+    expect(runner.calls[1]?.options).toMatchObject({
+      timeoutMs: 10000,
+      maxBufferBytes: 1024,
+      maxCombinedBufferBytes: 1024
+    });
+    for (const invalid of [
+      { maximumWallClockSeconds: 0 },
+      { maximumOutputBytes: 0 },
+      { maximumWallClockSeconds: 1.5 }
+    ])
+      await expect(executor.execute({ ...gateInput("/work"), ...invalid })).rejects.toThrow();
+    expect(runner.calls).toHaveLength(2);
+  });
+
   it("runs only installed argument vectors through the mandatory sandbox", async () => {
     const runner = new FakeRunner({ stdout: "ok", stderr: "" });
     const executor = new LocalFactoryGateExecutor(

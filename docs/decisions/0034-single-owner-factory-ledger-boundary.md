@@ -159,6 +159,23 @@ This implementation does **not** expose task mutations, run workers through the 
 daemon, recover remote intents, or repair the existing daily chain. Those remain activation
 blockers. Successful IPC tests must not be reported as a brokered-PR canary.
 
+The next execution adapter now has strict immutable agent/gate operation and result contracts and an
+internal `FactoryLedgerOperationWorker`. Each operation uses its own physical worktree, named by the
+caller-pinned operation ID rather than reusing the orchestration workspace. It reconstructs the
+exact base and seed patch, resolves only an installed provider or gate under pinned local policy,
+applies run/output/resource ceilings, and closes the worktree before returning a canonical result
+claim. Reviewer and gate operations must leave the candidate patch unchanged. This preserves the
+existing execution-service ports while allowing independent role checkouts in the eventual remote
+bridge.
+
+The adapter refuses overlapping work and in-process operation replays. Failed construction,
+unconfirmed process cleanup, or a mismatched isolation identity blocks further work until the
+existing exact process/worktree recovery port confirms inactivity. Recovery never reruns a model.
+Its tests use real Git worktrees with injected model/gate outputs; they are not live model,
+authenticated job-dispatch, or cross-UID execution proofs. Durable claim/report persistence, socket
+dispatch, the owner-side orchestration bridge, and deployment wiring remain unimplemented; the
+adapter is not exposed by a CLI command or composed into the live ledger yet.
+
 ## Implementation sequence
 
 1. Specify the typed role operations and threat/authority boundaries; implement local peer
