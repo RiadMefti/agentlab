@@ -47,9 +47,9 @@ describe("legacy database startup migration", () => {
           { name: "factory_canary_cohorts_no_delete" },
           { name: "factory_canary_cohorts_no_update" }
         ]);
-        expect(() => insert(database, "factory_canary_cohorts", cohortRow())).toThrow(
-          /identity mismatch/u
-        );
+        expect(() => {
+          insert(database, "factory_canary_cohorts", cohortRow());
+        }).toThrow(/identity mismatch/u);
       } finally {
         database.close();
       }
@@ -76,11 +76,15 @@ describe("legacy database startup migration", () => {
       removeLegacyRunDigest(database, 12);
       const before = legacySnapshot(database);
 
-      expect(() => migrate(database)).toThrow(/contains immutable records; manual recovery/u);
+      expect(() => {
+        migrate(database);
+      }).toThrow(/contains immutable records; manual recovery/u);
 
       expect(legacySnapshot(database)).toEqual(before);
       expect(userVersion(database)).toBe(12);
-      expect(() => database.exec("DELETE FROM factory_canary_cohorts")).toThrow(/immutable/u);
+      expect(() => {
+        database.exec("DELETE FROM factory_canary_cohorts");
+      }).toThrow(/immutable/u);
     } finally {
       database.close();
     }
@@ -93,7 +97,9 @@ describe("legacy database startup migration", () => {
       database.exec(`PRAGMA user_version = ${String(latestSchemaVersion + 1)}`);
       const before = legacySnapshot(database);
 
-      expect(() => migrate(database)).toThrow(/is newer than this app supports/u);
+      expect(() => {
+        migrate(database);
+      }).toThrow(/is newer than this app supports/u);
 
       expect(legacySnapshot(database)).toEqual(before);
       expect(userVersion(database)).toBe(latestSchemaVersion + 1);
@@ -109,7 +115,9 @@ describe("legacy database startup migration", () => {
       database.exec("ALTER TABLE factory_canary_cohorts ADD COLUMN unexpected TEXT");
       const before = legacySnapshot(database);
 
-      expect(() => migrate(database)).toThrow(/unsupported column layout/u);
+      expect(() => {
+        migrate(database);
+      }).toThrow(/unsupported column layout/u);
 
       expect(legacySnapshot(database)).toEqual(before);
       expect(userVersion(database)).toBe(12);
@@ -133,7 +141,9 @@ function historicalDatabase(version: number): DatabaseSync {
     if (userVersion(database) === version) throw complete;
   });
   try {
-    expect(() => migrate(database)).toThrow(complete);
+    expect(() => {
+      migrate(database);
+    }).toThrow(complete);
   } finally {
     spy.mockRestore();
   }
@@ -151,9 +161,9 @@ function removeLegacyRunDigest(database: DatabaseSync, version: number): void {
   const guard =
     version < 14
       ? row.sql
-          .replace(/        NEW\.run_digest IS NOT \([\s\S]*?\n        \) OR\n/u, "")
+          .replace(/ {8}NEW\.run_digest IS NOT \([\s\S]*?\n {8}\) OR\n/u, "")
           .replace(
-            /        json_extract\(NEW\.cohort_json, '\$\.runDigest'\) IS NOT NEW\.run_digest OR\n/u,
+            / {8}json_extract\(NEW\.cohort_json, '\$\.runDigest'\) IS NOT NEW\.run_digest OR\n/u,
             ""
           )
       : row.sql;
