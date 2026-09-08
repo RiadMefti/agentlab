@@ -1,6 +1,6 @@
 # ADR 0033: Policy-bound autonomous R1 merge queue
 
-Status: accepted, implemented, dormant
+Status: accepted service design; implemented, dormant, cross-UID deployment blocked
 
 ## Context
 
@@ -81,6 +81,12 @@ head. Both retain read-only repository permissions and checkout without persiste
 workflow change does not itself enable or enforce a merge queue in repository settings.
 
 ## Consequences
+
+The live two-UID proof added on 2026-09-07 contradicts deployment readiness: the worker, broker,
+merger, and incident roles cannot share the owner-only SQLite/lease/artifact adapters. A successful
+same-user service test or systemd unit verification does not establish this handoff. See
+[ADR 0034](0034-single-owner-factory-ledger-boundary.md) for the proposed correction. Keep automatic
+operation disabled; this blocker is separate from GitHub merge-queue eligibility and credentials.
 
 AgentLab contains a dormant scheduled R1 implementation from governed intake to queue-backed merge,
 with policy continuity, role separation, finite authority, intent-before-effect recovery, and

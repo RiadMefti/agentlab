@@ -26,13 +26,22 @@ describe.runIf(process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1")(
     };
 
     afterEach(async () => {
+      let serverPid: string | undefined;
       try {
+        const { stdout } = await runner.run("tmux", [
+          "-S",
+          socketPath,
+          "display-message",
+          "-p",
+          "#{pid}"
+        ]);
+        serverPid = stdout.trim();
         await runner.run("tmux", ["-S", socketPath, "kill-server"]);
       } catch {
         // A failed setup may not have created the private server.
-      } finally {
-        rmSync(socketPath, { force: true });
       }
+      if (serverPid !== undefined) await waitForServerExit(serverPid);
+      rmSync(socketPath, { force: true });
     });
 
     it("captures joined history rows without replaying the current viewport", async () => {
@@ -107,6 +116,8 @@ describe.runIf(process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1")(
       const staleTarget = await attachmentTarget(socketRunner, name);
 
       await runner.run("tmux", ["-S", socketPath, "kill-server"]);
+      // The command response can precede server exit; a leftover socket path is not liveness.
+      await waitForServerExit(staleTarget.serverPid);
       await runner.run("tmux", [
         "-S",
         socketPath,
@@ -119,6 +130,10 @@ describe.runIf(process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1")(
           args: ["-e", 'console.log("foreign history"); setInterval(() => undefined, 1000)']
         })
       ]);
+
+      const replacementTarget = await attachmentTarget(socketRunner, name);
+      expect(replacementTarget.runtimeId).toBe(staleTarget.runtimeId);
+      expect(replacementTarget.serverPid).not.toBe(staleTarget.serverPid);
 
       await expect
         .poll(async () => {
@@ -182,6 +197,32 @@ describe.runIf(process.env.AGENTLAB_RUN_TMUX_INTEGRATION === "1")(
     });
   }
 );
+
+async function waitForServerExit(serverPid: string): Promise<void> {
+  const pid = Number(serverPid);
+  if (!Number.isSafeInteger(pid) || pid < 1)
+    throw new Error("tmux returned an invalid server PID.");
+  await expect
+    .poll(
+      () => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch (error: unknown) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ESRCH"
+          )
+            return true;
+          throw error;
+        }
+      },
+      { timeout: 5_000 }
+    )
+    .toBe(true);
+}
 
 async function attachmentTarget(
   runner: CommandRunner,
