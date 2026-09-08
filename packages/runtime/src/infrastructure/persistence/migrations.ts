@@ -16,6 +16,8 @@ export function migrate(database: DatabaseSync): void {
     );
   }
 
+  repairEmptyLegacyCanaryCohorts(database, version);
+
   if (version < 1) {
     database.exec(`
       BEGIN IMMEDIATE;
@@ -6685,6 +6687,53 @@ export function migrate(database: DatabaseSync): void {
       PRAGMA user_version = 31;
       COMMIT;
     `);
+  }
+}
+
+/** Repairs the original schema-12 layout before later migrations validate its triggers. */
+function repairEmptyLegacyCanaryCohorts(database: DatabaseSync, version: number): void {
+  if (version < 12) return;
+  const readColumns = (): string[] =>
+    (database.prepare("PRAGMA table_info(factory_canary_cohorts)").all() as { name: string }[])
+      .map((column) => column.name)
+      .sort();
+  if (readColumns().includes("run_digest")) return;
+
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const columns = readColumns();
+    if (!columns.includes("run_digest")) {
+      const expectedColumns = [
+        "cohort_id",
+        "cohort_digest",
+        "assessment_digest",
+        "approval_digest",
+        "challenger_candidate_digest",
+        "stage",
+        "issued_at",
+        "expires_at",
+        "cohort_json",
+        ...(version >= 14 ? ["attestation_digest", "role_identity_policy_digest"] : [])
+      ].sort();
+      if (JSON.stringify(columns) !== JSON.stringify(expectedColumns)) {
+        throw new Error("Legacy factory canary table has an unsupported column layout.");
+      }
+      if (database.prepare("SELECT 1 FROM factory_canary_cohorts LIMIT 1").get() !== undefined) {
+        throw new Error(
+          "Legacy factory canary table is missing run_digest and contains immutable records; " +
+            "manual recovery is required before migration. No records were changed."
+        );
+      }
+      database.exec(`
+        ALTER TABLE factory_canary_cohorts ADD COLUMN run_digest TEXT NOT NULL CHECK (
+          length(run_digest) = 71 AND substr(run_digest, 1, 7) = 'sha256:'
+        );
+      `);
+    }
+    database.exec("COMMIT");
+  } catch (error: unknown) {
+    database.exec("ROLLBACK");
+    throw error;
   }
 }
 
