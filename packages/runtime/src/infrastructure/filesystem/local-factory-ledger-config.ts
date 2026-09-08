@@ -2,14 +2,18 @@ import { createHash } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, normalize } from "node:path";
 
-import { factoryLedgerReadPolicySchema, type Sha256Digest } from "@agentlab/contracts";
+import {
+  factoryLedgerReadPolicySchema,
+  factoryLedgerAuthorityPolicySchema,
+  type Sha256Digest
+} from "@agentlab/contracts";
 import { z } from "zod";
 
 import { canonicalJson } from "../persistence/canonical-factory-documents.js";
 import { ledgerPeerOptionsSchema } from "../process/linux-ledger-peer-process.js";
 import { privateLocalFilePath, readPrivateLocalFile } from "./private-local-file.js";
 
-export const localFactoryLedgerConfigSchema = z.strictObject({
+const readOnlyLedgerConfigSchema = z.strictObject({
   schemaVersion: z.literal("agentlab.local-factory-ledger.v1"),
   databasePath: z
     .string()
@@ -19,6 +23,30 @@ export const localFactoryLedgerConfigSchema = z.strictObject({
   transport: ledgerPeerOptionsSchema,
   policy: factoryLedgerReadPolicySchema
 });
+export const localFactoryLedgerConfigSchema = z
+  .discriminatedUnion("schemaVersion", [
+    readOnlyLedgerConfigSchema,
+    readOnlyLedgerConfigSchema.extend({
+      schemaVersion: z.literal("agentlab.local-factory-ledger.v2"),
+      authorityPolicy: factoryLedgerAuthorityPolicySchema
+    })
+  ])
+  .superRefine((config, context) => {
+    if (
+      config.schemaVersion === "agentlab.local-factory-ledger.v2" &&
+      config.authorityPolicy.grants.some(
+        (grant) =>
+          !config.policy.principals.some(
+            (peer) => peer.uid === grant.uid && peer.id === grant.id && peer.role === "operator"
+          )
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Authority grants require matching operator principals."
+      });
+    }
+  });
 export type LocalFactoryLedgerConfig = z.infer<typeof localFactoryLedgerConfigSchema>;
 
 /** Provisioning creates these directories; a service must not bless a shared writable parent. */

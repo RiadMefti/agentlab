@@ -25,8 +25,8 @@ storage would additionally let that role replace authoritative state; append-onl
 methods and content hashes alone do not prevent the file owner from rewriting the underlying files.
 The interactive single-user runtime's private storage behavior is valid and must be preserved.
 
-That reproduction proves denial of direct storage access. The separate positive read-boundary proof
-described below does not yet prove remote governance, model isolation, or the complete factory loop.
+That reproduction proves denial of direct storage access. The separate positive IPC proofs described
+below does not yet prove remote governance, model isolation, or the complete factory loop.
 
 ## Decision
 
@@ -60,14 +60,41 @@ records intent before remote effects, and uncertain results reconcile without bl
 No transport outage may fall back to direct SQLite access, relaxed permissions, or shared
 credentials.
 
-## Implemented read boundary and limits
+## Implemented boundaries and limits
 
-`@agentlab/runtime/factory-ledger` exclusively owns its SQLite database and writer lease; it serves
-only `authority.read` and exact-contract `task.read`. Its public client has no direct persistence or
-generic RPC fallback. An expiring content-addressed read policy assigns distinct non-root UIDs and
-task/contract pairs. Caller-supplied identities, extra fields, mutations, stale policy digests, and
-unassigned tasks fail closed. These read grants confer no execution, review, or publication
-authority.
+`@agentlab/runtime/factory-ledger` exclusively owns its SQLite database and writer lease. Config v1
+serves only `authority.read` and exact-contract `task.read`. Its public client has no direct
+persistence or generic RPC fallback. An expiring content-addressed read policy assigns distinct
+non-root UIDs and task/contract pairs. Caller-supplied identities, extra fields, mutations, stale
+policy digests, and unassigned tasks fail closed. These read grants confer no execution, review, or
+publication authority.
+
+Config v2 additionally accepts an explicit, expiring, content-addressed authority policy. A grant
+must match a distinct `operator` UID and identity in the peer policy; workers and brokers cannot
+receive it. Per-control grants can be disable-only. The separate storage-free
+`@agentlab/runtime/factory-ledger-operator` entry exposes `authority.inspect`, `authority.change`,
+and `authority.receipt`; the read client does not acquire mutation methods.
+
+An authority command binds both reviewed policy digests, its kernel-authenticated principal,
+control, expected boolean **and last event digest**, requested opposite state, exact confirmation,
+reason, idempotency key, and a deadline at most 120 seconds away. These are global switch commands,
+so the control event digest replaces task/attempt coordinates. The service derives the human actor;
+no actor or role can be supplied in a command. Existing execution, canary, evidence, quota, and
+broker gates remain mandatory after a switch changes.
+
+Schema 32 adds append-only authority receipts without enabling any control. One `BEGIN IMMEDIATE`
+transaction records either a stable CAS conflict or both the ordinary control event and canonical
+receipt. Retries with identical intent return the original receipt, even after another command has
+disabled the switch; reusing a key for different bytes is denied. The event digest prevents a stale
+off-state command from bypassing a later on/off cycle. Expired commands cannot execute, but a
+currently authorized operator can retrieve their receipt by key and exact intent digest without
+repeating a mutation. A receipt describes the original result, not necessarily today's state.
+
+Migration/recovery procedure: stop the ledger owner, make and integrity-check a consistent SQLite
+backup, then start the new owner on its dedicated factory database. The migration preserves all
+existing control/task records. Rolling back to a schema-31 binary requires restoring that backup,
+not lowering `user_version` or dropping evidence. Existing single-user authority compositions have
+not been removed; they are not a fallback for cross-UID service clients.
 
 The Linux-only transport uses a digest-pinned Python interpreter with fixed `-I -S -u -c` arguments,
 an empty environment, and a static standard-library helper. It obtains peer identities using
@@ -89,15 +116,19 @@ stale-socket recovery remains an explicit operator task until a verified recover
 
 The positive integration runs the actual built service under mapped UID 1 and public clients under
 UIDs 2 and 3. Both read their assigned task without opening the database or lease; UID 4 is
-rejected, and forged privileged operations fail. Ordinary transport tests cover wrong server
-identity, malformed/oversized frames, slow clients, late replies, clean restart, and bounded
-shutdown. Both positive and negative cross-UID proofs run through `test:factory-role-isolation`, now
-required by the hosted `factory-sandbox` job. Architecture fitness rules exclude providers, GitHub,
-and arbitrary command execution from the ledger owner and exclude persistence from clients.
+rejected, and forged privileged operations and valid operator commands from leaf roles fail. UID 5
+alone changes a disposable switch, reconciles its receipt, disables it, and proves a late replay
+cannot re-enable it. Unit tests inject receipt-write failure to prove event rollback, verify
+reopen/reconciliation and immutable receipt checks, and deny stale pins, expired grants, wrong
+identities, and disable-only escalation. Ordinary transport tests cover wrong server identity,
+malformed/oversized frames, slow clients, late replies, clean restart, and bounded shutdown. Both
+positive and negative cross-UID proofs run through `test:factory-role-isolation`, now required by
+the hosted `factory-sandbox` job. Architecture fitness rules exclude providers, GitHub, and
+arbitrary command execution from the ledger owner and exclude persistence from clients.
 
-This implementation does **not** transfer artifacts, expose mutations, run workers through the
+This implementation does **not** transfer artifacts, expose task mutations, run workers through the
 service, install a daemon, recover remote intents, or repair the existing daily chain. Those remain
-activation blockers. A successful read-boundary test must not be reported as a brokered-PR canary.
+activation blockers. Successful IPC tests must not be reported as a brokered-PR canary.
 
 ## Implementation sequence
 

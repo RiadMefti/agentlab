@@ -18,17 +18,19 @@ Run `npm run test:factory-role-isolation` on Linux with unprivileged user namesp
 `newuidmap`/`newgidmap`, Python 3, and assigned subordinate UID/GID ranges. It executes the real
 built adapters under distinct mapped UIDs, creates only disposable test storage, and verifies these
 denials. A second positive test starts the actual ledger owner as UID 1 and authenticates clients as
-UIDs 2 and 3; both read their assigned immutable task, while UID 4 and forged privileged operations
-are rejected. Neither proof is a complete software-factory handoff. The explicit command and hosted
-`factory-sandbox` job run both tests; missing prerequisites fail rather than report successful
-proof.
+UIDs 2 and 3; both read their assigned immutable task, while UID 4 and unauthorized operator
+commands are rejected. UID 5 separately proves scoped switch changes, stable receipts, and
+stale/replay rejection. These proofs are not a complete software-factory handoff. The explicit
+command and hosted `factory-sandbox` job run both tests; missing prerequisites fail rather than
+report successful proof.
 
 The accepted correction is a single-owner local ledger service with authenticated, role-limited
-commands and verified evidence handoffs. Only its scoped read boundary is implemented; mutations,
-artifact transfer, role migration, crash recovery, and a real brokered-PR canary remain outstanding.
-See [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning
-instructions below remain reference material, not an executable activation recipe. Do not weaken
-private storage, share role credentials, or rotate storage ownership between stages as a workaround.
+commands and verified evidence handoffs. Scoped reads and separately granted operator switch changes
+with atomic, idempotent receipts are implemented. Task mutations, artifact transfer, role migration,
+full process-crash recovery, and a real brokered-PR canary remain outstanding. See
+[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
+below remain reference material, not an executable activation recipe. Do not weaken private storage,
+share role credentials, or rotate storage ownership between stages as a workaround.
 
 ## Reviewed inputs
 

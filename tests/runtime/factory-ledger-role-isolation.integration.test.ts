@@ -7,7 +7,7 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import { testEvidenceBundle, testFactoryContract, testTaskEvent } from "../helpers/factory.js";
 
 describe.skipIf(process.env.AGENTLAB_RUN_FACTORY_ROLE_ISOLATION !== "1")(
-  "single-owner ledger cross-UID reads",
+  "single-owner ledger cross-UID reads and operator writes",
   () => {
     it("serves exact tasks to isolated worker/broker UIDs while denying raw storage, forgeries, and strangers", () => {
       const contract = new NodeFactoryDocumentCodec().taskContract(testFactoryContract());
@@ -62,9 +62,19 @@ describe.skipIf(process.env.AGENTLAB_RUN_FACTORY_ROLE_ISOLATION !== "1")(
           taskRead: uid !== 4,
           authorityRead: uid !== 4,
           forgedOperationDenied: true,
+          authorityChangeDenied: true,
           directDatabaseDenied: true,
           directLeaseDenied: true
-        }))
+        })),
+        operator: {
+          uid: 5,
+          applied: true,
+          replayStable: true,
+          lateReplayDidNotEnable: true,
+          staleStateRejected: true,
+          directDatabaseDenied: true,
+          directLeaseDenied: true
+        }
       });
     }, 45_000);
   }

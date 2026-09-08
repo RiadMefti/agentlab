@@ -1,8 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
-export const FACTORY_DATABASE_SCHEMA_VERSION = 31;
+import { migrateFactoryLedgerAuthority } from "./migrate-factory-ledger-authority.js";
 
-export const latestSchemaVersion = 31;
+export const FACTORY_DATABASE_SCHEMA_VERSION = 32;
+
+export const latestSchemaVersion = 32;
 
 /** Applies forward-only SQLite migrations in transactions. */
 export function migrate(database: DatabaseSync): void {
@@ -6688,6 +6690,7 @@ export function migrate(database: DatabaseSync): void {
       COMMIT;
     `);
   }
+  if (version < 32) migrateFactoryLedgerAuthority(database);
 }
 
 /** Repairs the original schema-12 layout before later migrations validate its triggers. */

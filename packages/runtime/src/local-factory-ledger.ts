@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+
+import { FactoryLedgerAuthority } from "./application/factory-ledger-authority.js";
 import { FactoryLedgerQueries } from "./application/factory-ledger-queries.js";
 import { cleanupFailedRuntimeConstruction } from "./application/local-runtime-construction.js";
 import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.js";
@@ -9,6 +12,10 @@ import {
   type LocalFactoryLedgerConfig
 } from "./infrastructure/filesystem/local-factory-ledger-config.js";
 import { isUnconfirmedDatabaseInitializationError } from "./infrastructure/persistence/sqlite-database.js";
+import {
+  encodeCanonicalDocument,
+  NodeFactoryDocumentCodec
+} from "./infrastructure/persistence/canonical-factory-documents.js";
 import { SqliteFactoryRepository } from "./infrastructure/persistence/sqlite-factory-repository.js";
 import { acquireSqliteWriterLease } from "./infrastructure/persistence/sqlite-writer-lease.js";
 import { listenLinuxLedgerPeer } from "./infrastructure/process/linux-ledger-peer-transport.js";
@@ -16,6 +23,7 @@ import { listenLinuxLedgerPeer } from "./infrastructure/process/linux-ledger-pee
 /** Long-lived exclusive ledger owner. V1 serves scoped reads, never grants execution authority. */
 export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig): Promise<{
   readonly policyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest>;
+  readonly authorityPolicyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest> | null;
   readonly stopped: Promise<void>;
   close: () => Promise<void>;
 }> {
@@ -34,6 +42,24 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
   try {
     const repository = repositories.track(new SqliteFactoryRepository(lease.databasePath));
     const policyDigest = factoryLedgerReadPolicyDigest(config.policy);
+    const authorityPolicyDigest =
+      config.schemaVersion === "agentlab.local-factory-ledger.v2"
+        ? encodeCanonicalDocument(config.authorityPolicy).digest
+        : null;
+    const authority =
+      config.schemaVersion === "agentlab.local-factory-ledger.v2" && authorityPolicyDigest !== null
+        ? new FactoryLedgerAuthority({
+            peerPolicy: config.policy,
+            peerPolicyDigest: policyDigest,
+            authorityPolicy: config.authorityPolicy,
+            authorityPolicyDigest,
+            repository,
+            documents: new NodeFactoryDocumentCodec(),
+            encode: encodeCanonicalDocument,
+            now: () => new Date().toISOString(),
+            createId: randomUUID
+          })
+        : null;
     const queries = new FactoryLedgerQueries({
       policy: config.policy,
       policyDigest,
@@ -53,7 +79,19 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
           } catch {
             // A constant denial is returned; malformed bytes never reach repository methods.
           }
-          return new TextEncoder().encode(JSON.stringify(await queries.execute(peer.uid, request)));
+          const isAuthority =
+            typeof request === "object" &&
+            request !== null &&
+            "operation" in request &&
+            typeof request.operation === "string" &&
+            ["authority.inspect", "authority.change", "authority.receipt"].includes(
+              request.operation
+            );
+          const response =
+            isAuthority && authority !== null
+              ? await authority.execute(peer.uid, request)
+              : await queries.execute(peer.uid, request);
+          return new TextEncoder().encode(JSON.stringify(response));
         })
     );
     let closing: Promise<void> | null = null;
@@ -77,7 +115,7 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
     const stopped = listener.closed.then(close);
     // Keep rejected shutdown observable through stopped without an unhandled process rejection.
     void stopped.catch(() => undefined);
-    return { policyDigest, stopped, close };
+    return { policyDigest, authorityPolicyDigest, stopped, close };
   } catch (error: unknown) {
     await tasks.stopAndDrain();
     const failures = cleanupFailedRuntimeConstruction(

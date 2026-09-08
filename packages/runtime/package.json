@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./factory-ledger-operator": {
+      "types": "./dist/local-factory-ledger-operator.d.ts",
+      "default": "./dist/local-factory-ledger-operator.js"
+    },
     "./factory-ledger": {
       "types": "./dist/local-factory-ledger.d.ts",
       "default": "./dist/local-factory-ledger.js"

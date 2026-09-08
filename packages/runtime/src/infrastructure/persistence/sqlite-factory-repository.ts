@@ -5,6 +5,9 @@ import {
   factoryControlNameSchema,
   type FactoryControlEvent,
   type FactoryControlName,
+  type FactoryLedgerAuthorityHead,
+  type FactoryLedgerAuthorityIntent,
+  type FactoryLedgerAuthorityReceipt,
   factoryTaskStateSchema,
   type FactoryTaskState,
   type ImmutableTaskContract,
@@ -27,6 +30,10 @@ import type {
 import { isFactoryTaskTransitionAllowed } from "../../domain/factory-task-state.js";
 import { NodeFactoryDocumentCodec } from "./canonical-factory-documents.js";
 import { openSqliteDatabase, type SqliteDatabaseOptions } from "./sqlite-database.js";
+import {
+  readLedgerAuthorityReceipt,
+  recordLedgerAuthorityReceipt
+} from "./sqlite-factory-ledger-authority-receipts.js";
 
 interface ContractRow {
   readonly task_id: unknown;
@@ -300,6 +307,44 @@ export class SqliteFactoryRepository
 
   public state(): Promise<FactoryAuthorityState> {
     return Promise.resolve(this.#authorityState());
+  }
+
+  public authorityHead(control: FactoryControlName): Promise<FactoryLedgerAuthorityHead> {
+    return Promise.resolve(this.#authorityHead(factoryControlNameSchema.parse(control)));
+  }
+
+  public findAuthorityReceipt(
+    principalUid: number,
+    idempotencyKey: string
+  ): Promise<CanonicalFactoryDocument<FactoryLedgerAuthorityReceipt> | null> {
+    return Promise.resolve(
+      readLedgerAuthorityReceipt(this.#database, principalUid, idempotencyKey, (control, digest) =>
+        this.#findControlEvent(control, digest)
+      )
+    );
+  }
+
+  public changeAuthority(
+    intent: CanonicalFactoryDocument<FactoryLedgerAuthorityIntent>,
+    proposedEvent: CanonicalFactoryDocument<FactoryControlEvent>,
+    now: () => string
+  ): Promise<CanonicalFactoryDocument<FactoryLedgerAuthorityReceipt>> {
+    const event = this.#verifiedControlDocument(proposedEvent);
+    return Promise.resolve(
+      this.#inTransaction(() =>
+        recordLedgerAuthorityReceipt({
+          database: this.#database,
+          intent,
+          event,
+          now,
+          head: () => this.#authorityHead(event.value.control),
+          findEvent: (control, digest) => this.#findControlEvent(control, digest),
+          insertEvent: () => {
+            this.#insertControlEvent(event);
+          }
+        })
+      )
+    );
   }
 
   public appendEvidence(
@@ -623,6 +668,22 @@ export class SqliteFactoryRepository
   }
 
   #latestControlValue(control: FactoryControlName): boolean {
+    return this.#authorityHead(control).enabled;
+  }
+
+  #findControlEvent(
+    control: FactoryControlName,
+    digest: string
+  ): CanonicalFactoryDocument<FactoryControlEvent> | null {
+    const row = this.#database
+      .prepare(
+        `SELECT ${CONTROL_COLUMNS} FROM ${this.#controlTable(control)} WHERE event_digest = ? AND control_name = ?`
+      )
+      .get(digest, control) as ControlRow | undefined;
+    return row === undefined ? null : this.#controlFromRow(row);
+  }
+
+  #authorityHead(control: FactoryControlName): FactoryLedgerAuthorityHead {
     const table = this.#controlTable(control);
     const row = this.#database
       .prepare(
@@ -633,7 +694,12 @@ export class SqliteFactoryRepository
          LIMIT 1`
       )
       .get(control) as ControlRow | undefined;
-    return row === undefined ? false : this.#controlFromRow(row).value.enabled;
+    const event = row === undefined ? null : this.#controlFromRow(row);
+    return {
+      enabled: event?.value.enabled ?? false,
+      event: event?.value ?? null,
+      eventDigest: event?.digest ?? null
+    };
   }
 
   #authorityState(): FactoryAuthorityState {

@@ -21,6 +21,7 @@ import {
 } from "@agentlab/contracts";
 import { createLocalFactoryLedger } from "@agentlab/runtime/factory-ledger";
 import { createLocalFactoryLedgerClient } from "@agentlab/runtime/factory-ledger-client";
+import { createLocalFactoryLedgerOperator } from "@agentlab/runtime/factory-ledger-operator";
 import { z } from "zod";
 
 import { pinnedLocalExecutableDigest } from "../../packages/runtime/dist/infrastructure/filesystem/pinned-local-executable.js";
@@ -38,7 +39,7 @@ const mappings = readFileSync("/proc/self/uid_map", "utf8")
 if (
   process.getuid?.() !== 0 ||
   !mappings.some(([inner, outer, count]) => inner === 0 && (outer ?? 0) > 0 && count === 1) ||
-  !mappings.some(([inner, outer, count]) => inner === 1 && (outer ?? 0) > 0 && (count ?? 0) >= 4)
+  !mappings.some(([inner, outer, count]) => inner === 1 && (outer ?? 0) > 0 && (count ?? 0) >= 5)
 ) {
   throw new Error(
     "Ledger proof requires an unprivileged root-mapped namespace with subordinate IDs."
@@ -63,7 +64,8 @@ function stopOwnedProcessGroup(pid: number): void {
 const readySchema = z.strictObject({
   taskId: z.uuid(),
   contractDigest: sha256DigestSchema,
-  policyDigest: sha256DigestSchema
+  policyDigest: sha256DigestSchema,
+  authorityPolicyDigest: sha256DigestSchema
 });
 const mode = process.argv[2];
 if (mode === undefined) {
@@ -112,10 +114,16 @@ if (mode === undefined) {
       clearTimeout(timer);
     });
     const results: unknown[] = [];
-    for (const uid of [2, 3, 4]) {
+    for (const uid of [2, 3, 4, 5]) {
       const child = spawnSync(
         process.execPath,
-        [fileURLToPath(import.meta.url), "client", root, String(uid), JSON.stringify(ready)],
+        [
+          fileURLToPath(import.meta.url),
+          uid === 5 ? "operator" : "client",
+          root,
+          String(uid),
+          JSON.stringify(ready)
+        ],
         {
           encoding: "utf8",
           timeout: 10_000,
@@ -130,7 +138,9 @@ if (mode === undefined) {
     }
     owner.send("close");
     if ((await closed) !== 0) throw new Error(`Ledger owner shutdown failed: ${diagnostics}`);
-    process.stdout.write(JSON.stringify({ ownerUid: 1, clients: results }) + "\n");
+    process.stdout.write(
+      JSON.stringify({ ownerUid: 1, clients: results.slice(0, 3), operator: results[3] }) + "\n"
+    );
   } finally {
     if (owner.pid !== undefined) {
       stopOwnedProcessGroup(owner.pid);
@@ -143,11 +153,11 @@ if (mode === undefined) {
   if (
     typeof root !== "string" ||
     !/^\/tmp\/agentlab-ledger-role-proof-[A-Za-z0-9]+$/u.test(root) ||
-    !["owner", "client"].includes(mode)
+    !["owner", "client", "operator"].includes(mode)
   )
     throw new Error("Unexpected ledger proof arguments.");
   const uid = mode === "owner" ? 1 : Number(process.argv[4]);
-  if (![1, 2, 3, 4].includes(uid) || !process.setgroups || !process.setgid || !process.setuid)
+  if (![1, 2, 3, 4, 5].includes(uid) || !process.setgroups || !process.setgid || !process.setuid)
     throw new Error("Invalid proof identity.");
   process.setgroups([]);
   process.setgid(uid);
@@ -183,13 +193,21 @@ if (mode === undefined) {
     } finally {
       repository.close();
     }
+    const policyExpiresAt = new Date(Date.now() + 60_000).toISOString();
     const runtime = await createLocalFactoryLedger({
-      schemaVersion: "agentlab.local-factory-ledger.v1",
+      schemaVersion: "agentlab.local-factory-ledger.v2",
       databasePath,
       transport,
+      authorityPolicy: {
+        schemaVersion: "agentlab.ledger-authority-policy.v1",
+        expiresAt: policyExpiresAt,
+        grants: [
+          { uid: 5, id: "maintainer", controls: [{ control: "scheduler", allowEnable: true }] }
+        ]
+      },
       policy: {
         schemaVersion: "agentlab.ledger-read-policy.v1",
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        expiresAt: policyExpiresAt,
         principals: [
           {
             uid: 2,
@@ -202,7 +220,8 @@ if (mode === undefined) {
             id: "broker",
             role: "broker",
             tasks: [{ taskId: contract.value.taskId, contractDigest: contract.digest }]
-          }
+          },
+          { uid: 5, id: "maintainer", role: "operator", tasks: [] }
         ]
       }
     });
@@ -214,11 +233,74 @@ if (mode === undefined) {
     process.send?.({
       taskId: contract.value.taskId,
       contractDigest: contract.digest,
-      policyDigest: runtime.policyDigest
+      policyDigest: runtime.policyDigest,
+      authorityPolicyDigest: runtime.authorityPolicyDigest
     });
     await Promise.race([stop, runtime.stopped]);
     await runtime.close();
     process.disconnect();
+  } else if (mode === "operator") {
+    const ready = readySchema.parse(JSON.parse(process.argv[5] ?? "null") as unknown);
+    const operator = createLocalFactoryLedgerOperator({
+      transport,
+      serverUid: 1,
+      operatorId: "maintainer",
+      peerPolicyDigest: ready.policyDigest,
+      authorityPolicyDigest: ready.authorityPolicyDigest
+    });
+    const before = await operator.inspect();
+    const command = {
+      idempotencyKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      control: "scheduler" as const,
+      enabled: true,
+      expectedEnabled: before.scheduler.enabled,
+      expectedEventDigest: before.scheduler.eventDigest,
+      confirmation: "enable-scheduler" as const,
+      reason: "Disposable cross-account authority proof."
+    };
+    const first = await operator.change(command);
+    const replay = await operator.change(command);
+    const receipt = await operator.receipt(command.idempotencyKey, operator.intentDigest(command));
+    await operator.change({
+      ...command,
+      idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      expectedEnabled: true,
+      expectedEventDigest: first.receipt.head.eventDigest,
+      enabled: false,
+      confirmation: "disable-scheduler"
+    });
+    await operator.change(command);
+    const stale = await operator.change({
+      ...command,
+      idempotencyKey: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    });
+    const after = await operator.inspect();
+    let directDatabaseDenied = false;
+    let directLeaseDenied = false;
+    try {
+      openSqliteDatabase(databasePath).close();
+    } catch {
+      directDatabaseDenied = true;
+    }
+    try {
+      acquireSqliteWriterLease(databasePath).close();
+    } catch {
+      directLeaseDenied = true;
+    }
+    process.stdout.write(
+      JSON.stringify({
+        uid,
+        applied: first.receipt.outcome === "applied",
+        replayStable:
+          first.receiptDigest === replay.receiptDigest &&
+          first.receiptDigest === receipt.receiptDigest,
+        lateReplayDidNotEnable: !after.scheduler.enabled,
+        staleStateRejected: stale.receipt.outcome === "conflict",
+        directDatabaseDenied,
+        directLeaseDenied
+      }) + "\n"
+    );
   } else {
     const ready = readySchema.parse(JSON.parse(process.argv[5] ?? "null") as unknown);
     const client = createLocalFactoryLedgerClient({
@@ -260,6 +342,28 @@ if (mode === undefined) {
     } catch {
       forgedOperationDenied = uid === 4;
     }
+    let authorityChangeDenied = false;
+    try {
+      const operator = createLocalFactoryLedgerOperator({
+        transport,
+        serverUid: 1,
+        operatorId: "maintainer",
+        peerPolicyDigest: ready.policyDigest,
+        authorityPolicyDigest: ready.authorityPolicyDigest
+      });
+      await operator.change({
+        idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+        control: "scheduler",
+        expectedEnabled: false,
+        expectedEventDigest: null,
+        enabled: true,
+        reason: "Attempting an operator-only command from an unauthorized UID.",
+        confirmation: "enable-scheduler"
+      });
+    } catch {
+      authorityChangeDenied = true;
+    }
     let directDatabaseDenied = false;
     let directLeaseDenied = false;
     try {
@@ -278,6 +382,7 @@ if (mode === undefined) {
         taskRead,
         authorityRead,
         forgedOperationDenied,
+        authorityChangeDenied,
         directDatabaseDenied,
         directLeaseDenied
       }) + "\n"

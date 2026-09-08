@@ -29,9 +29,10 @@ HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, ap
 MCP bridge, or provider-session translation layer.
 
 [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) additionally accepts one optional
-long-lived, credentialless local ledger owner. Its implemented Unix peer-authenticated surface is
-read-only and is not loaded by the interactive runtime. Existing one-shot factory writers have not
-yet migrated behind it; the separated-UID daily chain remains disabled.
+long-lived, credentialless local ledger owner. Its Unix peer-authenticated surface provides scoped
+reads and separately granted, idempotent human switch operations; it is not loaded by the
+interactive runtime. Existing one-shot factory writers have not yet migrated behind it; the
+separated-UID daily chain remains disabled.
 
 ## Two paths
 
@@ -728,8 +729,11 @@ ownership-only chmod. This is not solved by the documented provisioning step. Ex
 service integration and systemd unit verification do not exercise this cross-UID handoff. Keep the
 daily factory disabled until an authenticated storage-authority boundary replaces direct shared
 access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) accepts a single-owner
-service. The implemented `factory-ledger` and `factory-ledger-client` public entries support only
+service. The implemented `factory-ledger` and `factory-ledger-client` public entries support
 expiring UID-authorized authority/task reads, with strict policy and immutable identity checks.
+Config v2 and the separate `factory-ledger-operator` entry add explicitly granted operator switch
+changes with a 120-second command ceiling, exact event-digest CAS, and atomic append-only receipts.
+Expired commands can be reconciled without mutation through a separately authorized receipt query.
 Positive real cross-UID tests prove those reads and reject direct storage access and forged
 mutations; transport tests bound frames, deadlines, shutdown, and peer identity. Source-graph rules
 exclude provider/GitHub/arbitrary-command capabilities from the owner and persistence from clients.

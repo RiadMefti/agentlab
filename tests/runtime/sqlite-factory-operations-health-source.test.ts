@@ -6,7 +6,10 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastructure/persistence/canonical-factory-documents.js";
-import { migrate } from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
+import {
+  migrate,
+  FACTORY_DATABASE_SCHEMA_VERSION
+} from "../../packages/runtime/src/infrastructure/persistence/migrations.js";
 import { SqliteFactoryOperationsHealthSource } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.js";
 import { SqliteFactoryScheduleRepository } from "../../packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.js";
@@ -59,7 +62,9 @@ describe("SqliteFactoryOperationsHealthSource", () => {
     database.close();
     chmodSync(path, 0o600);
 
-    expect(() => new SqliteFactoryOperationsHealthSource(path)).toThrow(/schema 31/u);
+    expect(() => new SqliteFactoryOperationsHealthSource(path)).toThrow(
+      `schema ${String(FACTORY_DATABASE_SCHEMA_VERSION)}`
+    );
     expect(() => new SqliteFactoryOperationsHealthSource(join(root, "missing.sqlite"))).toThrow();
   });
 });
