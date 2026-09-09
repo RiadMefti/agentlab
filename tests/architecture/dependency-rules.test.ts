@@ -24,6 +24,14 @@ describe("architecture dependency rules", () => {
   it("keeps ledger clients storage-free and ledger owners credentialless and model-free", () => {
     const pairs = [
       [
+        "packages/runtime/src/local-factory-ledger-operations.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-operation-queue.ts"
+      ],
+      [
+        "packages/runtime/src/local-runtime.ts",
+        "packages/runtime/src/local-factory-ledger-operations.ts"
+      ],
+      [
         "packages/runtime/src/local-factory-ledger-artifacts.ts",
         "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts"
       ],
@@ -1179,6 +1187,10 @@ function architectureFixture(): string {
         default: "./dist/local-factory-ledger-artifacts.js",
         types: "./dist/local-factory-ledger-artifacts.d.ts"
       },
+      "./factory-ledger-operations": {
+        default: "./dist/local-factory-ledger-operations.js",
+        types: "./dist/local-factory-ledger-operations.d.ts"
+      },
       "./factory-ledger-operator": {
         default: "./dist/local-factory-ledger-operator.js",
         types: "./dist/local-factory-ledger-operator.d.ts"
@@ -1272,6 +1284,7 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-ledger.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-ledger-artifacts.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger-operations.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-ledger-operator.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-ledger-client.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-intake.ts", "export {};\n");

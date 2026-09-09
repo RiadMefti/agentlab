@@ -30,9 +30,10 @@ MCP bridge, or provider-session translation layer.
 
 [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) additionally accepts one optional
 long-lived, credentialless local ledger owner. Its Unix peer-authenticated surface provides scoped
-reads, separately granted idempotent human switch operations, and task-bound artifact transfers; it
-is not loaded by the interactive runtime. Existing one-shot factory writers have not yet migrated
-behind it; the separated-UID daily chain remains disabled.
+reads, separately granted idempotent human switch operations, task-bound artifact transfers, and
+immutable one-shot worker job claims and result receipts; it is not loaded by the interactive
+runtime. Only the trusted owner can enqueue a journal-bound operation. Existing one-shot factory
+writers have not yet migrated behind it; the separated-UID daily chain remains disabled.
 
 ## Two paths
 

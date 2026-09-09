@@ -100,7 +100,7 @@ describe("ledger authority commands", () => {
     try {
       // Reconstruct the preceding layout only inside this fresh, test-owned database.
       raw.exec(
-        "DROP TABLE factory_ledger_artifact_reservations; DROP TABLE factory_ledger_authority_receipts; PRAGMA user_version = 31;"
+        "DROP TABLE factory_ledger_operation_receipts; DROP TABLE factory_ledger_operation_claims; DROP TABLE factory_ledger_operations; DROP TABLE factory_ledger_artifact_reservations; DROP TABLE factory_ledger_authority_receipts; PRAGMA user_version = 31;"
       );
     } finally {
       raw.close();

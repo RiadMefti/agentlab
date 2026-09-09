@@ -197,7 +197,9 @@ describe("ledger artifact handoff", () => {
     };
     const raw = new DatabaseSync(f.path);
     try {
-      raw.exec("DROP TABLE factory_ledger_artifact_reservations; PRAGMA user_version = 32;");
+      raw.exec(
+        "DROP TABLE factory_ledger_operation_receipts; DROP TABLE factory_ledger_operation_claims; DROP TABLE factory_ledger_operations; DROP TABLE factory_ledger_artifact_reservations; PRAGMA user_version = 32;"
+      );
     } finally {
       raw.close();
     }

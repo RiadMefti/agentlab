@@ -1,8 +1,14 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   chownSync,
   copyFileSync,
+  cpSync,
+  readdirSync,
+  lstatSync,
+  existsSync,
+  writeFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,6 +24,7 @@ import {
   factoryExecutionRunSchema,
   factoryExecutionEventSchema,
   factoryLedgerArtifactExecutionSchema,
+  factoryLedgerOperationSchema,
   immutableTaskContractSchema,
   maximumLedgerArtifactBytes,
   sha256DigestSchema,
@@ -27,12 +34,20 @@ import { createLocalFactoryLedger } from "@agentlab/runtime/factory-ledger";
 import { createLocalFactoryLedgerClient } from "@agentlab/runtime/factory-ledger-client";
 import { createLocalFactoryLedgerOperator } from "@agentlab/runtime/factory-ledger-operator";
 import { createLocalFactoryLedgerArtifacts } from "@agentlab/runtime/factory-ledger-artifacts";
+import { createLocalFactoryLedgerOperations } from "@agentlab/runtime/factory-ledger-operations";
 import { z } from "zod";
 
 import { pinnedLocalExecutableDigest } from "../../packages/runtime/dist/infrastructure/filesystem/pinned-local-executable.js";
 import { FileFactoryArtifactStore } from "../../packages/runtime/dist/infrastructure/filesystem/file-factory-artifact-store.js";
+import { GitFactoryWorkspaceManager } from "../../packages/runtime/dist/infrastructure/filesystem/git-factory-workspace.js";
+import { NodeFactoryArtifactWireCodec } from "../../packages/runtime/dist/infrastructure/filesystem/node-factory-artifact-wire-codec.js";
+import { FactoryLedgerOperationWorker } from "../../packages/runtime/dist/application/factory-ledger-operation-worker.js";
+import { NodeCommandRunner } from "../../packages/runtime/dist/infrastructure/process/command-runner.js";
 import { SqliteFactoryExecutionRepository } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-factory-execution-repository.js";
-import { NodeFactoryDocumentCodec } from "../../packages/runtime/dist/infrastructure/persistence/canonical-factory-documents.js";
+import {
+  NodeFactoryDocumentCodec,
+  encodeCanonicalDocument
+} from "../../packages/runtime/dist/infrastructure/persistence/canonical-factory-documents.js";
 import { openSqliteDatabase } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-database.js";
 import { SqliteFactoryRepository } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-factory-repository.js";
 import { acquireSqliteWriterLease } from "../../packages/runtime/dist/infrastructure/persistence/sqlite-writer-lease.js";
@@ -74,6 +89,9 @@ const readySchema = z.strictObject({
   policyDigest: sha256DigestSchema,
   authorityPolicyDigest: sha256DigestSchema,
   artifactPolicyDigest: sha256DigestSchema,
+  operationPolicyDigest: sha256DigestSchema,
+  workerPolicyDigest: sha256DigestSchema,
+  jobDigest: sha256DigestSchema,
   taskSequence: z.number().int().positive(),
   taskEventDigest: sha256DigestSchema,
   execution: factoryLedgerArtifactExecutionSchema,
@@ -85,6 +103,23 @@ if (mode === undefined) {
   chmodSync(root, 0o755);
   mkdirSync(join(root, "owner"), { mode: 0o755 });
   chownSync(join(root, "owner"), 1, 1);
+  const source = process.env.AGENTLAB_LEDGER_PROOF_SOURCE ?? "";
+  if (
+    !/^\/tmp\/agentlab-ledger-source-[A-Za-z0-9]+\/source$/u.test(source) ||
+    realpathSync(source) !== source
+  )
+    throw new Error("Expected a canonical test-owned source repository.");
+  cpSync(source, join(root, "worker-source"), { recursive: true, dereference: false });
+  const assignWorker = (path: string): void => {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) throw new Error("Fixture source must not contain symbolic links.");
+    if (stat.isDirectory()) for (const name of readdirSync(path)) assignWorker(join(path, name));
+    chownSync(path, 2, 2);
+  };
+  assignWorker(join(root, "worker-source"));
+  chmodSync(join(root, "worker-source"), 0o700);
+  mkdirSync(join(root, "worker-workspaces"), { mode: 0o700 });
+  chownSync(join(root, "worker-workspaces"), 2, 2);
   // Host root is unmapped in this namespace. Pin a private, namespace-root-owned interpreter copy.
   copyFileSync(realpathSync("/usr/bin/python3"), join(root, "python"));
   chownSync(join(root, "python"), 0, 0);
@@ -138,7 +173,7 @@ if (mode === undefined) {
         ],
         {
           encoding: "utf8",
-          timeout: 10_000,
+          timeout: 15_000,
           killSignal: "SIGKILL",
           maxBuffer: 1_048_576,
           env: { PATH: "/usr/bin:/bin", NODE_NO_WARNINGS: "1" }
@@ -192,7 +227,8 @@ if (mode === undefined) {
         taskEvents: z.array(taskEventSchema).min(1),
         evidence: evidenceBundleSchema,
         executionRun: factoryExecutionRunSchema,
-        executionEvents: z.array(factoryExecutionEventSchema).min(1)
+        executionEvents: z.array(factoryExecutionEventSchema).min(1),
+        job: factoryLedgerOperationSchema
       })
       .parse(JSON.parse(rawSeed) as unknown);
     const documents = new NodeFactoryDocumentCodec();
@@ -225,20 +261,28 @@ if (mode === undefined) {
     if (operation.value.kind !== "operation-started")
       throw new Error("Fixture operation is inactive.");
     mkdirSync(join(root, "owner", "artifacts"), { mode: 0o700 });
-    const policyExpiresAt = new Date(Date.now() + 60_000).toISOString();
+    const policyExpiresAt = new Date(Date.now() + 300_000).toISOString();
     const runtime = await createLocalFactoryLedger({
-      schemaVersion: "agentlab.local-factory-ledger.v3",
+      schemaVersion: "agentlab.local-factory-ledger.v4",
       databasePath,
       transport,
+      operationPolicy: {
+        schemaVersion: "agentlab.ledger-operation-policy.v1",
+        expiresAt: policyExpiresAt,
+        maximumTaskJobs: 10,
+        maximumTotalJobs: 20,
+        maximumStoredJobBytes: 1_048_576,
+        principals: [{ ...seed.job.principal, workerPolicyDigest: seed.job.workerPolicyDigest }]
+      },
       artifacts: {
         root: join(root, "owner", "artifacts"),
         policy: {
           schemaVersion: "agentlab.ledger-artifact-policy.v1",
           expiresAt: policyExpiresAt,
           maximumArtifactBytes: maximumLedgerArtifactBytes,
-          maximumTaskBytes: maximumLedgerArtifactBytes,
+          maximumTaskBytes: maximumLedgerArtifactBytes * 2,
           maximumTaskArtifacts: 8,
-          maximumTotalBytes: maximumLedgerArtifactBytes * 2,
+          maximumTotalBytes: maximumLedgerArtifactBytes * 4,
           maximumTotalArtifacts: 16,
           principals: [
             { uid: 2, id: "worker", kind: "implementer" },
@@ -278,12 +322,16 @@ if (mode === undefined) {
         if (value === "close") resolve();
       });
     });
+    const jobDigest = await runtime.enqueueOperation(encodeCanonicalDocument(seed.job));
     process.send?.({
       taskId: contract.value.taskId,
       contractDigest: contract.digest,
       policyDigest: runtime.policyDigest,
       authorityPolicyDigest: runtime.authorityPolicyDigest,
       artifactPolicyDigest: runtime.artifactPolicyDigest,
+      operationPolicyDigest: runtime.operationPolicyDigest,
+      workerPolicyDigest: seed.job.workerPolicyDigest,
+      jobDigest,
       taskSequence: taskEvent.value.sequence,
       taskEventDigest: taskEvent.digest,
       execution: {
@@ -480,6 +528,174 @@ if (mode === undefined) {
     } catch {
       directArtifactDenied = true;
     }
+    let operationExecuted = false;
+    let operationReplayDenied = false;
+    let operationAccessDenied = false;
+    const jobs = createLocalFactoryLedgerOperations({
+      transport,
+      serverUid: 1,
+      principalId: uid === 2 ? "worker" : uid === 3 ? "broker" : "stranger",
+      principalKind: "implementer",
+      workerPolicyDigest: ready.workerPolicyDigest,
+      peerPolicyDigest: ready.policyDigest,
+      operationPolicyDigest: ready.operationPolicyDigest
+    });
+    try {
+      const offered = await jobs.next({
+        taskId: ready.taskId,
+        contractDigest: ready.contractDigest
+      });
+      if (offered.status !== "job" || offered.job.kind !== "agent")
+        throw new Error("Expected the fixture agent job.");
+      const coordinates = {
+        taskId: ready.taskId,
+        contractDigest: ready.contractDigest,
+        jobId: offered.job.jobId,
+        jobDigest: offered.jobDigest
+      };
+      const invocationId = randomUUID();
+      const claimed = await jobs.claim(coordinates, invocationId);
+      if (!claimed.newlyClaimed || claimed.claimDigest === null)
+        throw new Error("Job was not freshly claimed.");
+      const replay = await jobs.claim(coordinates, invocationId);
+      operationReplayDenied = !replay.newlyClaimed && replay.claimDigest === claimed.claimDigest;
+      try {
+        await jobs.claim(coordinates, randomUUID());
+        operationReplayDenied = false;
+      } catch {
+        /* No new invocation may claim it. */
+      }
+      const job = encodeCanonicalDocument(offered.job);
+      const manager = new GitFactoryWorkspaceManager(new NodeCommandRunner(), {
+        root: join(root, "worker-workspaces"),
+        gitExecutable: "/usr/bin/git",
+        flockExecutable: "/usr/bin/flock",
+        createId: randomUUID
+      });
+      let physicalPath = "";
+      // Real cross-UID dispatch and Git lifecycle; the provider/process report is explicitly a fixture.
+      const worker = new FactoryLedgerOperationWorker({
+        principal: offered.job.principal,
+        workerPolicyDigest: ready.workerPolicyDigest,
+        factoryPolicyDigest: offered.job.factoryPolicyDigest,
+        repository: { id: offered.job.repository.id, root: join(root, "worker-source") },
+        workspaces: manager,
+        recovery: {
+          reconcile: () =>
+            Promise.resolve({ status: "uncertain", reasonCode: "process-state-uncertain" })
+        },
+        agents: {
+          capabilities: () => [
+            {
+              provider: "codex",
+              roles: ["implementer"],
+              preparationPhases: [],
+              maintenanceDiscovery: false,
+              maximumToolFilesystemAccess: "workspace-write",
+              toolNetwork: "off",
+              acceptsCommandAllowlist: true,
+              acceptsSecrets: false
+            }
+          ],
+          preflight: () => undefined,
+          execute: (input) => {
+            physicalPath = input.workspace.root;
+            const startedAt = new Date().toISOString();
+            writeFileSync(
+              join(input.workspace.root, "tests", "fixture.txt"),
+              "worker changed fixture\n"
+            );
+            return Promise.resolve({
+              status: "succeeded",
+              exitCode: 0,
+              stdout: "",
+              stderr: "",
+              finalOutput: "Fixture only",
+              providerSessionId: invocationId,
+              providerVersion: "1.0.0",
+              harnessVersion: "fixture-only",
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              usage: {
+                wallClockSeconds: 1,
+                agentTurns: 1,
+                toolCalls: 1,
+                inputTokens: 1,
+                outputTokens: 1,
+                costMicrousd: 0,
+                processes: 1,
+                outputBytes: 12,
+                workers: 1,
+                repairAttempts: 0,
+                changedFiles: 1,
+                changedLines: 2
+              },
+              usageComplete: true,
+              errorCode: null,
+              isolation: {
+                isolationId: job.value.jobId,
+                mechanism: { id: "fixture-only", version: "1" },
+                scopeName: `agentlab-factory-${job.value.jobId.replaceAll("-", "")}.scope`,
+                limits: job.value.resourceLimits
+              }
+            });
+          }
+        },
+        providers: {
+          resolve: () => Promise.resolve({ executable: "/fixture/provider", version: "1.0.0" })
+        },
+        gates: {
+          availableGateIds: () => [],
+          execute: () => Promise.reject(new Error("Fixture gate unavailable."))
+        },
+        wire: new NodeFactoryArtifactWireCodec(),
+        encode: encodeCanonicalDocument,
+        now: () => new Date().toISOString()
+      });
+      const result = await worker.execute(job);
+      const resultBytes = Buffer.from(result.json);
+      const resultKey = randomUUID();
+      const uploaded = await artifacts.submit(
+        {
+          taskId: ready.taskId,
+          contractDigest: ready.contractDigest,
+          idempotencyKey: resultKey,
+          expiresAt: new Date(Date.now() + 30_000).toISOString(),
+          expectedTaskEventDigest: ready.taskEventDigest,
+          execution: job.value.execution,
+          attempt: job.value.attempt,
+          operationId: job.value.jobId,
+          artifact: artifacts.describe(
+            resultBytes,
+            "application/vnd.agentlab.ledger-operation-result+json"
+          )
+        },
+        resultBytes
+      );
+      const reported = await jobs.report(
+        coordinates,
+        claimed.claimDigest,
+        resultKey,
+        uploaded.reservationDigest
+      );
+      const reconciled = await jobs.report(
+        coordinates,
+        claimed.claimDigest,
+        resultKey,
+        uploaded.reservationDigest
+      );
+      operationExecuted =
+        physicalPath !== "" &&
+        !existsSync(physicalPath) &&
+        readFileSync(join(root, "worker-source", "tests", "fixture.txt"), "utf8") ===
+          "original\n" &&
+        result.value.patch.patch.includes("+worker changed fixture") &&
+        reported.receiptDigest === reconciled.receiptDigest &&
+        reported.receipt?.resultArtifact.digest === result.digest;
+    } catch (error: unknown) {
+      if (uid === 2) throw error;
+      operationAccessDenied = true;
+    }
     let directDatabaseDenied = false;
     let directLeaseDenied = false;
     try {
@@ -503,6 +719,9 @@ if (mode === undefined) {
         artifactReplayStable,
         artifactRead,
         directArtifactDenied,
+        operationExecuted,
+        operationReplayDenied,
+        operationAccessDenied,
         directDatabaseDenied,
         directLeaseDenied
       }) + "\n"

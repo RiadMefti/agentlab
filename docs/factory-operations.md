@@ -27,12 +27,12 @@ fail rather than report successful proof.
 
 The accepted correction is a single-owner local ledger service with authenticated, role-limited
 commands and verified evidence handoffs. Scoped reads and separately granted operator switch changes
-with atomic, idempotent receipts and bounded artifact transfers are implemented. Task mutations,
-worker/broker integration, role migration, full process-crash recovery, and a real brokered-PR
-canary remain outstanding. See [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md).
-The provisioning instructions below remain reference material, not an executable activation recipe.
-Do not weaken private storage, share role credentials, or rotate storage ownership between stages as
-a workaround.
+with atomic, idempotent receipts, bounded artifact transfers, and durable worker job claims/result
+receipts are implemented. Task mutations, the execution-service bridge, worker/broker deployment,
+role migration, full process-crash recovery, and a real brokered-PR canary remain outstanding. See
+[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
+below remain reference material, not an executable activation recipe. Do not weaken private storage,
+share role credentials, or rotate storage ownership between stages as a workaround.
 
 Ledger config v3 requires a pre-provisioned canonical owner-only artifact root, an expiring artifact
 policy with distinct producer/reader UIDs matching the peer policy, and transport capacity for
@@ -49,6 +49,16 @@ reservation or lower usage to retry uncertain work. The store verifies content h
 files and publication directories, and treats corruption as a failure. Back up the stopped ledger
 and its artifact store together; a pre-schema-33 binary requires restoring its compatible backup,
 not lowering the schema number. This API alone does not run a model, pass a gate, or create a PR.
+
+Ledger config v4 additionally pins operation principals to matching artifact producers and requires
+full job-frame capacity. Only the owner can enqueue; the socket exposes next/inspect/claim/report,
+not arbitrary jobs, paths, commands, or SQL. Schema 34 records immutable jobs, one-shot claims, and
+result receipts. Claims compare the exact task and execution heads atomically. A lost claim reply
+can be inspected or replayed, but `newlyClaimed: false` never authorizes execution. One unresolved
+claim blocks further work for that UID; expiry does not release or reassign it. A canonical result
+must come through the assigned producer's exact artifact reservation and match the job and claim. It
+records a report, not approval or a task transition. Back up before schema 34; rollback requires a
+compatible backup. Verified remote cleanup/recovery and a deployed worker host remain pending.
 
 ## Reviewed inputs
 

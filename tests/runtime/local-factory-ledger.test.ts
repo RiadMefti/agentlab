@@ -170,5 +170,64 @@ describe.skipIf(process.platform !== "linux" || process.getuid?.() === 0)(
       const lease = acquireSqliteWriterLease(config.databasePath, { contentionTimeoutMs: 50 });
       lease.close();
     });
+
+    it("requires job-frame capacity and a matching artifact producer before enabling dispatch", async () => {
+      const principal = config.policy.principals[0];
+      if (principal === undefined) throw new Error("Missing fixture principal.");
+      const producer = { uid: principal.uid, id: principal.id, kind: "implementer" };
+      const artifactRoot = join(root, "artifacts");
+      await mkdir(artifactRoot, { mode: 0o700 });
+      const candidate = {
+        ...config,
+        schemaVersion: "agentlab.local-factory-ledger.v4",
+        transport: { ...config.transport, maximumBytes: 16_777_216 },
+        artifacts: {
+          root: artifactRoot,
+          policy: {
+            schemaVersion: "agentlab.ledger-artifact-policy.v1",
+            expiresAt: config.policy.expiresAt,
+            maximumArtifactBytes: 1024,
+            maximumTaskBytes: 4096,
+            maximumTaskArtifacts: 4,
+            maximumTotalBytes: 8192,
+            maximumTotalArtifacts: 8,
+            principals: [producer]
+          }
+        },
+        operationPolicy: {
+          schemaVersion: "agentlab.ledger-operation-policy.v1",
+          expiresAt: config.policy.expiresAt,
+          maximumTaskJobs: 2,
+          maximumTotalJobs: 4,
+          maximumStoredJobBytes: 65536,
+          principals: [{ ...producer, workerPolicyDigest: `sha256:${"a".repeat(64)}` }]
+        }
+      };
+      for (const invalid of [
+        { ...candidate, transport: { ...candidate.transport, maximumBytes: 16_000_000 } },
+        {
+          ...candidate,
+          operationPolicy: {
+            ...candidate.operationPolicy,
+            principals: [{ ...candidate.operationPolicy.principals[0], kind: "reviewer" }]
+          }
+        },
+        {
+          ...candidate,
+          operationPolicy: {
+            ...candidate.operationPolicy,
+            principals: [{ ...candidate.operationPolicy.principals[0], uid: principal.uid + 1 }]
+          }
+        }
+      ])
+        expect(localFactoryLedgerConfigSchema.safeParse(invalid).success).toBe(false);
+      await expect(lstat(config.databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+      const runtime = await createLocalFactoryLedger(
+        localFactoryLedgerConfigSchema.parse(candidate)
+      );
+      services.push(runtime);
+      expect(runtime.operationPolicyDigest).toMatch(/^sha256:/u);
+      await runtime.close();
+    });
   }
 );

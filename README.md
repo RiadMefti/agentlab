@@ -396,8 +396,11 @@ verification and same-user integration tests do not prove this deployment works.
 evidence and the accepted correction. Authenticated reads and separately granted, idempotent
 operator switch changes and bounded, digest-verified artifact transfers pass a positive cross-UID
 test. Uploads are task/attempt-bound untrusted claims with durable quota reservations, not gate or
-review approvals. Task writes, worker/broker integration, and role migration remain unfinished. Do
-not weaken permissions or collapse role identities to activate the current chain. See
+review approvals. Immutable journal-bound jobs now support one-shot claims and canonical result
+receipts. A real cross-UID test exercises private Git worktree execution with a fixture provider;
+claim replay never authorizes a second execution. Task writes, the execution-service bridge,
+worker/broker deployment, and role migration remain unfinished. Do not weaken permissions or
+collapse role identities to activate the current chain. See
 [ADR 0006](docs/decisions/0006-local-software-factory-control-plane.md) for implemented controls,
 activation blockers, and later phases, and
 [ADR 0007](docs/decisions/0007-deterministic-evaluation-and-canary-authority.md) for promotion

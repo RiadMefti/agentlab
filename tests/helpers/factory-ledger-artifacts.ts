@@ -6,10 +6,11 @@ import { NodeFactoryDocumentCodec } from "../../packages/runtime/src/infrastruct
 import { testDigest, testEvidenceBundle, testFactoryContract } from "./factory.js";
 
 /** Trusted fixture state, not an assertion that policy gates or model execution actually ran. */
-export function ledgerArtifactSeed(now: string) {
+export function ledgerArtifactSeed(now: string, repository?: { id: string; baseRevision: string }) {
   const codec = new NodeFactoryDocumentCodec();
   const contract = codec.taskContract({
     ...testFactoryContract(),
+    ...(repository === undefined ? {} : { repository }),
     taskId: randomUUID(),
     createdAt: now,
     expiresAt: new Date(Date.parse(now) + 3_600_000).toISOString()

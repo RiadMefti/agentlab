@@ -3,6 +3,7 @@ export * from "./factory-ledger.js";
 export * from "./factory-ledger-authority.js";
 export * from "./factory-ledger-artifacts.js";
 export * from "./factory-ledger-operation.js";
+export * from "./factory-ledger-operation-queue.js";
 export * from "./factory-canary-admission.js";
 export * from "./factory-autonomous-merge.js";
 export * from "./factory-daily-quota.js";

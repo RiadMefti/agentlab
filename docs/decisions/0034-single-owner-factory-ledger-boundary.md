@@ -118,8 +118,26 @@ to a pre-schema-33 binary requires a compatible backup.
 Whole objects are bounded at 8 MiB and transferred in canonical base64 inside the bounded frame;
 config validation requires enough frame capacity. Current grants support reads of upload
 reservations and direct artifact references in existing canonical evidence for the assigned task.
-Neither knowing a digest nor supplying a path grants access. Nested patch-content references and
-remote job/result integration still need explicit association through the future workflow boundary.
+Neither knowing a digest nor supplying a path grants access. Nested canonical patch-content
+references still need explicit association through the broker workflow boundary. Job inputs carry
+their bounded prompt and seed patch; results use task-bound upload reservations.
+
+Config v4 adds operation grants pinned to matching artifact producers and full job-frame capacity.
+Schema 34 stores canonical immutable jobs, one-shot claims, and result receipts. Only trusted owner
+code can enqueue; there is no socket enqueue command. Enqueue and claim atomically compare the exact
+task/contract and active execution-journal heads, operation ID, attempt, logical workspace, role,
+request or gate, and deadline. Stored job bytes and task/global counts are bounded cumulatively. The
+storage-free `factory-ledger-operations` client exposes next/inspect/claim/report. One unresolved
+claim blocks that UID across tasks. A replay returns the original claim with `newlyClaimed: false`;
+neither expiry, a new nonce, nor restart grants permission to execute it again.
+
+Report acceptance requires the exact claim and producer-owned artifact reservation, canonical
+bounded result content, job identity, resource ceilings, times, provider/gate, and patch invariants.
+The receipt is immutable and idempotent, including reconciliation after a lost reply. It is still an
+executor report, not evidence approval or a task transition. Malformed reports are denied without
+crashing the owner; corrupted durable content fails closed. No leaf can release claims or quota.
+Uncertain jobs remain held pending a separately verified recovery protocol. Back up the stopped
+ledger/artifacts before schema 34; never downgrade by rewriting `user_version`.
 
 The Linux-only transport uses a digest-pinned Python interpreter with fixed `-I -S -u -c` arguments,
 an empty environment, and a static standard-library helper. It obtains peer identities using
@@ -155,9 +173,9 @@ artifact access; broker and unknown UID uploads are denied. Artifact tests also 
 migration, task/global quotas, producer mismatch, digest/size/base64 failures, disk-write failure,
 lost replies, reopen/reconciliation, missing objects, and immutable storage/tamper checks.
 
-This implementation does **not** expose task mutations, run workers through the service, install a
-daemon, recover remote intents, or repair the existing daily chain. Those remain activation
-blockers. Successful IPC tests must not be reported as a brokered-PR canary.
+This implementation does **not** expose task mutations, compose the existing execution service into
+the ledger, install a daemon, recover remote intents, or repair the existing daily chain. Those
+remain activation blockers. Successful IPC tests must not be reported as a brokered-PR canary.
 
 The next execution adapter now has strict immutable agent/gate operation and result contracts and an
 internal `FactoryLedgerOperationWorker`. Each operation uses its own physical worktree, named by the
@@ -171,10 +189,15 @@ bridge.
 The adapter refuses overlapping work and in-process operation replays. Failed construction,
 unconfirmed process cleanup, or a mismatched isolation identity blocks further work until the
 existing exact process/worktree recovery port confirms inactivity. Recovery never reruns a model.
-Its tests use real Git worktrees with injected model/gate outputs; they are not live model,
-authenticated job-dispatch, or cross-UID execution proofs. Durable claim/report persistence, socket
-dispatch, the owner-side orchestration bridge, and deployment wiring remain unimplemented; the
-adapter is not exposed by a CLI command or composed into the live ledger yet.
+Its tests use real Git worktrees with injected model/gate outputs. The cross-UID test now
+additionally enqueues from the owner, authenticates a UID-2 worker, consumes its claim once,
+executes in its private Git worktree, uploads the result, and reconciles the durable receipt. UID 3
+and an unknown UID cannot claim the operation, and the source checkout stays unchanged. The
+provider/process report in that test is explicitly a fixture, not a live model or a brokered-PR
+canary. Queue tests cover atomic rollback, task-head races, quota exhaustion, restart, lost replies,
+conflicting results, malformed reports, migration from schema 33, and immutable canonical storage.
+The owner-side orchestration bridge, verified recovery protocol, and deployment wiring remain
+unimplemented; the adapter is not exposed by a CLI command or composed into the live ledger yet.
 
 ## Implementation sequence
 

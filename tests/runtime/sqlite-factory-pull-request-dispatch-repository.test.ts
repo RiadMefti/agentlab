@@ -519,7 +519,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TABLE factory_autonomous_merge_records;
         DROP TABLE factory_autonomous_merge_events;
         DROP TABLE factory_autonomous_merge_runs;
-        DROP TABLE factory_ledger_artifact_reservations;
+        DROP TABLE factory_ledger_operation_receipts; DROP TABLE factory_ledger_operation_claims; DROP TABLE factory_ledger_operations; DROP TABLE factory_ledger_artifact_reservations;
         DROP TABLE factory_ledger_authority_receipts;
         DROP TABLE factory_merge_control_events;
         DROP TRIGGER factory_control_events_identity_guard;
@@ -606,7 +606,7 @@ describe("SqliteFactoryPullRequestDispatchRepository", () => {
         DROP TABLE factory_autonomous_merge_records;
         DROP TABLE factory_autonomous_merge_events;
         DROP TABLE factory_autonomous_merge_runs;
-        DROP TABLE factory_ledger_artifact_reservations;
+        DROP TABLE factory_ledger_operation_receipts; DROP TABLE factory_ledger_operation_claims; DROP TABLE factory_ledger_operations; DROP TABLE factory_ledger_artifact_reservations;
         DROP TABLE factory_ledger_authority_receipts;
         DROP TABLE factory_merge_control_events;
         DROP TRIGGER factory_control_events_identity_guard;

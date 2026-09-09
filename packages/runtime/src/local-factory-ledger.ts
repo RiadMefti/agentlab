@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 
+import type { FactoryLedgerOperation, Sha256Digest } from "@agentlab/contracts";
+
 import { FactoryLedgerAuthority } from "./application/factory-ledger-authority.js";
 import { FactoryLedgerArtifacts } from "./application/factory-ledger-artifacts.js";
+import { FactoryLedgerOperationQueue } from "./application/factory-ledger-operation-queue.js";
+import type { CanonicalFactoryDocument } from "./domain/factory-documents.js";
+import type { FactoryLedgerArtifactContexts } from "./domain/factory-ledger-artifacts.js";
 import { FactoryLedgerQueries } from "./application/factory-ledger-queries.js";
 import { cleanupFailedRuntimeConstruction } from "./application/local-runtime-construction.js";
 import { RuntimeRepositoryOwner } from "./application/runtime-repository-owner.js";
@@ -18,6 +23,7 @@ import { NodeFactoryArtifactWireCodec } from "./infrastructure/filesystem/node-f
 import { SqliteFactoryExecutionRepository } from "./infrastructure/persistence/sqlite-factory-execution-repository.js";
 import { SqliteFactoryPullRequestRepairExecutionRepository } from "./infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.js";
 import { SqliteFactoryLedgerArtifactRepository } from "./infrastructure/persistence/sqlite-factory-ledger-artifact-repository.js";
+import { SqliteFactoryLedgerOperationQueue } from "./infrastructure/persistence/sqlite-factory-ledger-operation-queue.js";
 import {
   encodeCanonicalDocument,
   NodeFactoryDocumentCodec
@@ -31,6 +37,10 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
   readonly policyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest>;
   readonly authorityPolicyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest> | null;
   readonly artifactPolicyDigest: ReturnType<typeof factoryLedgerReadPolicyDigest> | null;
+  readonly operationPolicyDigest: Sha256Digest | null;
+  readonly enqueueOperation: (
+    job: CanonicalFactoryDocument<FactoryLedgerOperation>
+  ) => Promise<Sha256Digest>;
   readonly stopped: Promise<void>;
   close: () => Promise<void>;
 }> {
@@ -70,14 +80,14 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
           })
         : null;
     const artifactPolicyDigest =
-      config.schemaVersion === "agentlab.local-factory-ledger.v3"
-        ? encodeCanonicalDocument(config.artifacts.policy).digest
-        : null;
+      "artifacts" in config ? encodeCanonicalDocument(config.artifacts.policy).digest : null;
     let artifacts: FactoryLedgerArtifacts | null = null;
-    if (
-      config.schemaVersion === "agentlab.local-factory-ledger.v3" &&
-      artifactPolicyDigest !== null
-    ) {
+    let operations: FactoryLedgerOperationQueue | null = null;
+    const operationPolicyDigest =
+      config.schemaVersion === "agentlab.local-factory-ledger.v4"
+        ? encodeCanonicalDocument(config.operationPolicy).digest
+        : null;
+    if ("artifacts" in config && artifactPolicyDigest !== null) {
       const executions = repositories.track(
         new SqliteFactoryExecutionRepository(lease.databasePath)
       );
@@ -87,26 +97,48 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
       const artifactReservations = repositories.track(
         new SqliteFactoryLedgerArtifactRepository(lease.databasePath)
       );
+      const contexts: FactoryLedgerArtifactContexts = {
+        task: (taskId) => repository.findById(taskId),
+        execution: (taskId, coordinate) =>
+          coordinate.kind === "execution"
+            ? executions.findByTaskId(taskId)
+            : repairs.findByAuthorizationDigest(coordinate.authorizationDigest)
+      };
+      const artifactStore = new FileFactoryArtifactStore(config.artifacts.root, {
+        maximumArtifactBytes: config.artifacts.policy.maximumArtifactBytes
+      });
       artifacts = new FactoryLedgerArtifacts({
         peerPolicy: config.policy,
         peerPolicyDigest: policyDigest,
         policy: config.artifacts.policy,
         policyDigest: artifactPolicyDigest,
-        contexts: {
-          task: (taskId) => repository.findById(taskId),
-          execution: (taskId, coordinate) =>
-            coordinate.kind === "execution"
-              ? executions.findByTaskId(taskId)
-              : repairs.findByAuthorizationDigest(coordinate.authorizationDigest)
-        },
+        contexts,
         repository: artifactReservations,
-        artifacts: new FileFactoryArtifactStore(config.artifacts.root, {
-          maximumArtifactBytes: config.artifacts.policy.maximumArtifactBytes
-        }),
+        artifacts: artifactStore,
         wire: new NodeFactoryArtifactWireCodec(),
         encode: encodeCanonicalDocument,
         now: () => new Date().toISOString()
       });
+      if (
+        config.schemaVersion === "agentlab.local-factory-ledger.v4" &&
+        operationPolicyDigest !== null
+      ) {
+        operations = new FactoryLedgerOperationQueue({
+          peerPolicy: config.policy,
+          peerPolicyDigest: policyDigest,
+          policy: config.operationPolicy,
+          policyDigest: operationPolicyDigest,
+          artifactPolicy: config.artifacts.policy,
+          artifactPolicyDigest,
+          contexts,
+          repository: repositories.track(new SqliteFactoryLedgerOperationQueue(lease.databasePath)),
+          artifactReservations,
+          artifacts: artifactStore,
+          wire: new NodeFactoryArtifactWireCodec(),
+          encode: encodeCanonicalDocument,
+          now: () => new Date().toISOString()
+        });
+      }
     }
     const queries = new FactoryLedgerQueries({
       policy: config.policy,
@@ -127,27 +159,31 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
           } catch {
             // A constant denial is returned; malformed bytes never reach repository methods.
           }
-          const isAuthority =
+          const operation =
             typeof request === "object" &&
             request !== null &&
             "operation" in request &&
-            typeof request.operation === "string" &&
-            ["authority.inspect", "authority.change", "authority.receipt"].includes(
-              request.operation
-            );
+            typeof request.operation === "string"
+              ? request.operation
+              : null;
           const response =
-            isAuthority && authority !== null
-              ? await authority.execute(peer.uid, request)
-              : typeof request === "object" &&
-                  request !== null &&
-                  "operation" in request &&
-                  typeof request.operation === "string" &&
-                  ["artifact.submit", "artifact.read", "artifact.receipt"].includes(
-                    request.operation
+            operation !== null &&
+            operations !== null &&
+            ["operation.next", "operation.inspect", "operation.claim", "operation.report"].includes(
+              operation
+            )
+              ? await operations.execute(peer.uid, request)
+              : operation !== null &&
+                  ["authority.inspect", "authority.change", "authority.receipt"].includes(
+                    operation
                   ) &&
-                  artifacts !== null
-                ? await artifacts.execute(peer.uid, request)
-                : await queries.execute(peer.uid, request);
+                  authority !== null
+                ? await authority.execute(peer.uid, request)
+                : operation !== null &&
+                    ["artifact.submit", "artifact.read", "artifact.receipt"].includes(operation) &&
+                    artifacts !== null
+                  ? await artifacts.execute(peer.uid, request)
+                  : await queries.execute(peer.uid, request);
           return new TextEncoder().encode(JSON.stringify(response));
         })
     );
@@ -172,7 +208,19 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
     const stopped = listener.closed.then(close);
     // Keep rejected shutdown observable through stopped without an unhandled process rejection.
     void stopped.catch(() => undefined);
-    return { policyDigest, authorityPolicyDigest, artifactPolicyDigest, stopped, close };
+    return {
+      policyDigest,
+      authorityPolicyDigest,
+      artifactPolicyDigest,
+      operationPolicyDigest,
+      stopped,
+      close,
+      enqueueOperation: async (job) => {
+        const queue = operations;
+        if (queue === null) throw new Error("Ledger operation dispatch is not configured.");
+        return tasks.run(async () => (await queue.enqueue(job)).job.digest);
+      }
+    };
   } catch (error: unknown) {
     await tasks.stopAndDrain();
     const failures = cleanupFailedRuntimeConstruction(

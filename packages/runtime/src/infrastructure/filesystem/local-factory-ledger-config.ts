@@ -6,6 +6,7 @@ import {
   factoryLedgerReadPolicySchema,
   factoryLedgerAuthorityPolicySchema,
   factoryLedgerArtifactPolicySchema,
+  factoryLedgerOperationPolicySchema,
   type Sha256Digest
 } from "@agentlab/contracts";
 import { z } from "zod";
@@ -24,6 +25,14 @@ const readOnlyLedgerConfigSchema = z.strictObject({
   transport: ledgerPeerOptionsSchema,
   policy: factoryLedgerReadPolicySchema
 });
+const artifactLedgerConfigSchema = readOnlyLedgerConfigSchema.extend({
+  schemaVersion: z.literal("agentlab.local-factory-ledger.v3"),
+  authorityPolicy: factoryLedgerAuthorityPolicySchema.optional(),
+  artifacts: z.strictObject({
+    root: readOnlyLedgerConfigSchema.shape.databasePath.refine((path) => path !== "/"),
+    policy: factoryLedgerArtifactPolicySchema
+  })
+});
 export const localFactoryLedgerConfigSchema = z
   .discriminatedUnion("schemaVersion", [
     readOnlyLedgerConfigSchema,
@@ -31,13 +40,10 @@ export const localFactoryLedgerConfigSchema = z
       schemaVersion: z.literal("agentlab.local-factory-ledger.v2"),
       authorityPolicy: factoryLedgerAuthorityPolicySchema
     }),
-    readOnlyLedgerConfigSchema.extend({
-      schemaVersion: z.literal("agentlab.local-factory-ledger.v3"),
-      authorityPolicy: factoryLedgerAuthorityPolicySchema.optional(),
-      artifacts: z.strictObject({
-        root: readOnlyLedgerConfigSchema.shape.databasePath.refine((path) => path !== "/"),
-        policy: factoryLedgerArtifactPolicySchema
-      })
+    artifactLedgerConfigSchema,
+    artifactLedgerConfigSchema.extend({
+      schemaVersion: z.literal("agentlab.local-factory-ledger.v4"),
+      operationPolicy: factoryLedgerOperationPolicySchema
     })
   ])
   .superRefine((config, context) => {
@@ -56,7 +62,7 @@ export const localFactoryLedgerConfigSchema = z
       });
     }
     if (
-      config.schemaVersion === "agentlab.local-factory-ledger.v3" &&
+      "artifacts" in config &&
       (config.transport.maximumBytes <
         Math.ceil(config.artifacts.policy.maximumArtifactBytes / 3) * 4 + 32768 ||
         [config.databasePath, config.transport.socketPath].some(
@@ -75,6 +81,23 @@ export const localFactoryLedgerConfigSchema = z
       context.addIssue({
         code: "custom",
         message: "Artifact transport capacity, isolated root, or peer grants are invalid."
+      });
+    if (
+      config.schemaVersion === "agentlab.local-factory-ledger.v4" &&
+      (config.transport.maximumBytes < 16_032_768 ||
+        config.operationPolicy.principals.some(
+          (principal) =>
+            !config.artifacts.policy.principals.some(
+              (artifact) =>
+                principal.uid === artifact.uid &&
+                principal.id === artifact.id &&
+                principal.kind === artifact.kind
+            )
+        ))
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Operation grants require matching artifact producers and full job frame capacity."
       });
   });
 export type LocalFactoryLedgerConfig = z.infer<typeof localFactoryLedgerConfigSchema>;
@@ -96,7 +119,7 @@ export async function assertLedgerOwnedDirectories(
       );
     }
   }
-  if (config.schemaVersion === "agentlab.local-factory-ledger.v3") {
+  if ("artifacts" in config) {
     const path = config.artifacts.root;
     const metadata = await lstat(path);
     if (
