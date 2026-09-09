@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FactoryLedgerArtifacts } from "../../packages/runtime/src/application/factory-ledger-artifacts.js";
 import { FactoryLedgerOperationQueue } from "../../packages/runtime/src/application/factory-ledger-operation-queue.js";
+import { createLocalFactoryLedgerExecutionTransport } from "../../packages/runtime/src/local-factory-ledger-execution.js";
 import { FileFactoryArtifactStore } from "../../packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.js";
 import { NodeFactoryArtifactWireCodec } from "../../packages/runtime/src/infrastructure/filesystem/node-factory-artifact-wire-codec.js";
 import {
@@ -236,6 +237,49 @@ describe("durable ledger operation queue", () => {
       prBroker: false,
       mergeBroker: false
     });
+  });
+
+  it("returns no owner result while pending, then reads only the committed receipt", async () => {
+    const f = await fixture();
+    await f.queue.enqueue(f.seed.job);
+    await expect(f.queue.readResult(f.seed.job)).resolves.toBeNull();
+    await f.queue.execute(1001, f.claim);
+    await expect(f.queue.readResult(f.seed.job)).resolves.toBeNull();
+    const report = await f.report();
+    await expect(f.queue.execute(1001, report)).resolves.toMatchObject({
+      status: "job",
+      receipt: { jobId: f.seed.job.value.jobId }
+    });
+    await expect(f.queue.readResult(f.seed.job)).resolves.toMatchObject({
+      value: { jobId: f.seed.job.value.jobId, jobDigest: f.seed.job.digest, workspace: "closed" }
+    });
+  });
+
+  it("round-trips a real SQLite queue through the owner polling transport", async () => {
+    const f = await fixture();
+    await f.queue.enqueue(f.seed.job);
+    let reads = 0;
+    const transport = createLocalFactoryLedgerExecutionTransport(
+      {
+        enqueueOperation: async (job) => (await f.queue.enqueue(job)).job.digest,
+        readOperationResult: async (job) => {
+          reads += 1;
+          if (reads === 2) {
+            await f.queue.execute(1001, f.claim);
+            const report = await f.report();
+            await f.queue.execute(1001, report);
+          }
+          return f.queue.readResult(job);
+        }
+      },
+      { pollIntervalMs: 10, sleep: async () => undefined, now: () => Date.parse(createdAt) }
+    );
+    await expect(
+      transport.awaitResult(f.seed.job, f.seed.job.value.expiresAt)
+    ).resolves.toMatchObject({
+      value: { jobId: f.seed.job.value.jobId, jobDigest: f.seed.job.digest }
+    });
+    expect(reads).toBe(2);
   });
 
   it("denies other UIDs, stale pins, caller enqueue and changed operation identities", async () => {

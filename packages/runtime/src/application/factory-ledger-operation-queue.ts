@@ -7,6 +7,7 @@ import {
   factoryLedgerReadPolicySchema,
   factoryTimestampSchema,
   type FactoryLedgerOperation,
+  type FactoryLedgerOperationResult,
   type FactoryLedgerOperationPolicy,
   type FactoryLedgerOperationResponse,
   type FactoryLedgerReadPolicy,
@@ -94,6 +95,94 @@ export class FactoryLedgerOperationQueue {
       { maximumTaskJobs, maximumTotalJobs, maximumStoredJobBytes },
       this.dependencies.now
     );
+  }
+
+  /** Owner-only result reader; workers can submit bytes but cannot read or reinterpret them. */
+  public async readResult(
+    input: CanonicalFactoryDocument<FactoryLedgerOperation>
+  ): Promise<CanonicalFactoryDocument<FactoryLedgerOperationResult> | null> {
+    const job = this.dependencies.encode(factoryLedgerOperationSchema.parse(input.value));
+    if (job.digest !== input.digest || job.json !== input.json) {
+      throw new ConflictError("Operation job bytes are not canonical.");
+    }
+    const snapshot = await this.dependencies.repository.find(job.value.jobId);
+    if (snapshot === null) return null;
+    if (snapshot.job.digest !== job.digest) {
+      throw new ConflictError("Operation receipt is not bound to the immutable job.");
+    }
+    if (snapshot.receipt === null) return null;
+    if (
+      snapshot.claim === null ||
+      snapshot.receipt.value.jobId !== job.value.jobId ||
+      snapshot.receipt.value.jobDigest !== job.digest ||
+      snapshot.receipt.value.claimDigest !== snapshot.claim.digest
+    )
+      throw new ConflictError("Operation receipt is not bound to the immutable job claim.");
+    const artifact = snapshot.receipt.value.resultArtifact;
+    if (
+      artifact.mediaType !== "application/vnd.agentlab.ledger-operation-result+json" ||
+      artifact.sizeBytes > job.value.limits.maximumResultBytes ||
+      artifact.sizeBytes > this.#artifactPolicy.maximumArtifactBytes
+    )
+      throw new ConflictError("Operation result artifact exceeds its reserved policy bounds.");
+    const bytes = await this.dependencies.artifacts.read(
+      artifact.digest,
+      Math.max(1, artifact.sizeBytes)
+    );
+    if (
+      bytes.byteLength !== artifact.sizeBytes ||
+      this.dependencies.wire.digest(bytes) !== artifact.digest
+    )
+      throw new Error("Operation result artifact failed owner-side integrity verification.");
+    let json: string;
+    let untrusted: unknown;
+    try {
+      json = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      untrusted = JSON.parse(json) as unknown;
+    } catch (error: unknown) {
+      throw new Error("Operation result artifact is not valid UTF-8 JSON.", { cause: error });
+    }
+    const parsed = factoryLedgerOperationResultSchema.safeParse(untrusted);
+    if (!parsed.success)
+      throw new ConflictError("Operation result artifact failed schema validation.");
+    const result = this.dependencies.encode(parsed.data);
+    if (
+      result.json !== json ||
+      result.digest !== artifact.digest ||
+      parsed.data.jobId !== job.value.jobId ||
+      parsed.data.jobDigest !== job.digest ||
+      parsed.data.completedAt < parsed.data.output.finishedAt ||
+      parsed.data.completedAt >= job.value.expiresAt ||
+      parsed.data.output.startedAt < snapshot.claim.value.claimedAt ||
+      parsed.data.output.finishedAt < parsed.data.output.startedAt ||
+      parsed.data.output.isolation.isolationId !== job.value.jobId ||
+      parsed.data.output.isolation.scopeName !==
+        `agentlab-factory-${job.value.jobId.replaceAll("-", "")}.scope` ||
+      parsed.data.output.isolation.limits.maxMemoryBytes >
+        job.value.resourceLimits.maxMemoryBytes ||
+      parsed.data.output.isolation.limits.maxProcesses > job.value.resourceLimits.maxProcesses ||
+      parsed.data.output.isolation.limits.cpuQuotaPercent >
+        job.value.resourceLimits.cpuQuotaPercent ||
+      parsed.data.patch.changeSet.baseRevision !== job.value.repository.baseRevision ||
+      parsed.data.patch.changeSet.headRevision !== null ||
+      parsed.data.patch.changeSet.changedFiles > job.value.limits.maximumChangedFiles ||
+      parsed.data.patch.changeSet.changedLines > job.value.limits.maximumChangedLines ||
+      new TextEncoder().encode(parsed.data.patch.patch).byteLength >
+        job.value.limits.maximumPatchBytes ||
+      (job.value.kind === "agent" &&
+        parsed.data.kind === "agent" &&
+        parsed.data.output.providerVersion !== job.value.providerVersion) ||
+      (job.value.kind === "gate" &&
+        parsed.data.kind === "gate" &&
+        parsed.data.output.gateId !== job.value.gateId) ||
+      ((job.value.kind === "gate" || job.value.principal.kind === "reviewer") &&
+        (job.value.seedPatch === null
+          ? parsed.data.patch.patch !== "" || parsed.data.patch.changeSet.changedFiles !== 0
+          : this.dependencies.encode(parsed.data.patch).digest !==
+            this.dependencies.encode(job.value.seedPatch).digest))
+    )
+      throw new ConflictError("Operation result is not bound to its durable receipt.");
+    return result;
   }
 
   public async execute(uid: number, input: unknown): Promise<FactoryLedgerOperationResponse> {

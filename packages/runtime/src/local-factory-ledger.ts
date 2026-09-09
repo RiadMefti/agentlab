@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { FactoryLedgerOperation, Sha256Digest } from "@agentlab/contracts";
+import type {
+  FactoryLedgerOperation,
+  FactoryLedgerOperationResult,
+  Sha256Digest
+} from "@agentlab/contracts";
 
 import { FactoryLedgerAuthority } from "./application/factory-ledger-authority.js";
 import { FactoryLedgerArtifacts } from "./application/factory-ledger-artifacts.js";
@@ -41,6 +45,10 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
   readonly enqueueOperation: (
     job: CanonicalFactoryDocument<FactoryLedgerOperation>
   ) => Promise<Sha256Digest>;
+  /** Owner-only result read used by the captain bridge; absent for pre-v4 ledgers. */
+  readonly readOperationResult: (
+    job: CanonicalFactoryDocument<FactoryLedgerOperation>
+  ) => Promise<CanonicalFactoryDocument<FactoryLedgerOperationResult> | null>;
   readonly stopped: Promise<void>;
   close: () => Promise<void>;
 }> {
@@ -219,6 +227,11 @@ export async function createLocalFactoryLedger(input: LocalFactoryLedgerConfig):
         const queue = operations;
         if (queue === null) throw new Error("Ledger operation dispatch is not configured.");
         return tasks.run(async () => (await queue.enqueue(job)).job.digest);
+      },
+      readOperationResult: async (job) => {
+        const queue = operations;
+        if (queue === null) throw new Error("Ledger operation dispatch is not configured.");
+        return tasks.run(() => queue.readResult(job));
       }
     };
   } catch (error: unknown) {

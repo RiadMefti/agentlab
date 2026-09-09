@@ -22,6 +22,10 @@ import {
   FactoryEvidenceIngress
 } from "../../packages/runtime/src/application/factory-evidence-ingress.js";
 import { FactoryExecutionService } from "../../packages/runtime/src/application/factory-execution-service.js";
+import type {
+  FactoryLedgerExecutionBridge,
+  FactoryLedgerExecutionResult
+} from "../../packages/runtime/src/application/factory-ledger-execution-bridge.js";
 import { FactoryExecutionRecoveryService } from "../../packages/runtime/src/application/factory-execution-recovery-service.js";
 import { FactoryPullRequestService } from "../../packages/runtime/src/application/factory-pull-request-service.js";
 import { FactoryPullRequestObservationService } from "../../packages/runtime/src/application/factory-pull-request-observation-service.js";
@@ -311,6 +315,22 @@ describe("FactoryExecutionService", () => {
       });
       expect(fixture.gates.executed).toHaveLength(4);
       expect(fixture.agents.roles).toEqual(["implementer"]);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("forwards the reviewed candidate seed to the independent reviewer bridge", async () => {
+    const fixture = await executionFixture({ ledgerExecution: true });
+    try {
+      await expect(
+        fixture.service.execute({ taskId: TEST_FACTORY_TASK_ID })
+      ).resolves.toMatchObject({
+        status: "pr-proposed"
+      });
+      expect(fixture.ledgerSeeds).toHaveLength(2);
+      expect(fixture.ledgerSeeds[0]).toBeNull();
+      expect(fixture.ledgerSeeds[1]).toEqual(fixture.workspaces.lastPatch);
     } finally {
       fixture.close();
     }
@@ -976,6 +996,7 @@ async function executionFixture(
     readonly gateWallClockSeconds?: number;
     readonly agentCleanupUnconfirmed?: boolean;
     readonly recoveryUncertain?: boolean;
+    readonly ledgerExecution?: boolean;
     readonly dispatchAppendFailure?: Extract<
       FactoryPullRequestDispatchEvent["kind"],
       "remote-observed" | "evidence-recorded" | "task-recorded"
@@ -1129,6 +1150,23 @@ async function executionFixture(
     resolve: (provider) => Promise.resolve({ executable: `/opt/${provider}`, version: "1.0.0" })
   };
   const workspaceRecovery = new FakeWorkspaceRecovery(options.recoveryUncertain === true);
+  const ledgerSeeds: (FactoryWorkspacePatch | null)[] = [];
+  const ledgerExecution: Pick<FactoryLedgerExecutionBridge, "execute"> | undefined =
+    options.ledgerExecution === true
+      ? {
+          execute: async (
+            input: Parameters<FactoryLedgerExecutionBridge["execute"]>[0]
+          ): Promise<FactoryLedgerExecutionResult> => {
+            ledgerSeeds.push(input.seedPatch);
+            return {
+              job: null,
+              result: null,
+              output: successfulRun(input.request, input.resourceLimits),
+              patch: input.seedPatch ?? workspacePatch(input.attempt, false)
+            } as unknown as FactoryLedgerExecutionResult;
+          }
+        }
+      : undefined;
   const recovery = new FactoryExecutionRecoveryService({
     executions,
     tasks: repository,
@@ -1158,6 +1196,7 @@ async function executionFixture(
     agents,
     providers,
     gates,
+    ...(ledgerExecution === undefined ? {} : { ledgerExecution }),
     now,
     createId,
     controlPlaneActorId: "agentlab-execution"
@@ -1289,6 +1328,7 @@ async function executionFixture(
     agents,
     gates,
     workspaceRecovery,
+    ledgerSeeds,
     recovery,
     canaryAuthorityChecks,
     task,
@@ -1308,6 +1348,7 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
   public readonly appliedAttempts: number[] = [];
   public readonly closedAttempts: number[] = [];
   public readonly workspaceIds: string[] = [];
+  public lastPatch: FactoryWorkspacePatch | null = null;
   public failNextCreation: boolean;
   readonly #collectCounts = new Map<number, number>();
 
@@ -1349,7 +1390,9 @@ class FakeWorkspaceManager implements FactoryWorkspaceManager {
     const count = (this.#collectCounts.get(workspace.attempt) ?? 0) + 1;
     this.#collectCounts.set(workspace.attempt, count);
     const mutated = this.mutateAfterGates && workspace.attempt === 1 && count >= 2;
-    return Promise.resolve(workspacePatch(workspace.attempt, mutated));
+    const patch = workspacePatch(workspace.attempt, mutated);
+    this.lastPatch = patch;
+    return Promise.resolve(patch);
   }
 }
 

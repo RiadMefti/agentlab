@@ -14,8 +14,8 @@ import type {
   FactoryDocumentCodec
 } from "../domain/factory-documents.js";
 import type {
-  FactoryExecutionJournalRepository,
   FactoryExecutionJournalRun,
+  FactoryExecutionJournalRepository,
   FactoryExecutionJournalSnapshot,
   FactoryExecutionRepository
 } from "../domain/factory-execution-repository.js";
@@ -33,6 +33,8 @@ export interface FactoryExecutionJournalDependencies<
 
 /** Minimum journal capability required by provider and deterministic-gate operations. */
 export interface FactoryExecutionOperationJournal {
+  /** Durable coordinates are exposed for brokered worker dispatch after operation-started. */
+  readonly snapshot?: FactoryExecutionJournalSnapshot<FactoryExecutionJournalRun>;
   startAgent(request: FactoryAgentRunRequest, requestDigest: Sha256Digest): Promise<void>;
   startGate(gateId: string): Promise<string>;
   finishOperation(
