@@ -269,7 +269,8 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
   public async apply(
     workspace: FactoryWorkspace,
     patch: string,
-    maximumPatchBytes: number
+    maximumPatchBytes: number,
+    direction: "forward" | "reverse" = "forward"
   ): Promise<void> {
     const owned = this.#owned.get(workspace.id);
     if (owned?.handle !== workspace || owned.handle.closed) {
@@ -289,11 +290,21 @@ export class GitFactoryWorkspaceManager implements FactoryWorkspaceManager {
       owned.commonGitDirectory,
       owned.lockDirectory
     );
-    await this.#runGit(workspace.root, ["apply", "--index", "--whitespace=error-all", "--"], {
-      lockDirectory: owned.lockDirectory,
-      stdin: patch,
-      maxInputBytes: maximumPatchBytes
-    });
+    await this.#runGit(
+      workspace.root,
+      [
+        "apply",
+        "--index",
+        `--whitespace=${direction === "reverse" ? "nowarn" : "error-all"}`,
+        ...(direction === "reverse" ? ["--reverse"] : []),
+        "--"
+      ],
+      {
+        lockDirectory: owned.lockDirectory,
+        stdin: patch,
+        maxInputBytes: maximumPatchBytes
+      }
+    );
     await this.#verifyWorkspace(
       workspace.root,
       workspace.repositoryRoot,

@@ -33,7 +33,13 @@ export interface CollectFactoryWorkspaceInput {
 
 export interface FactoryWorkspaceManager {
   create(input: CreateFactoryWorkspaceInput): Promise<FactoryWorkspace>;
-  apply(workspace: FactoryWorkspace, patch: string, maximumPatchBytes: number): Promise<void>;
+  /** Applies a canonical patch forward, or reverses an already-applied seed patch. */
+  apply(
+    workspace: FactoryWorkspace,
+    patch: string,
+    maximumPatchBytes: number,
+    direction?: "forward" | "reverse"
+  ): Promise<void>;
   collect(
     workspace: FactoryWorkspace,
     limits: CollectFactoryWorkspaceInput

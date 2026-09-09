@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -162,6 +162,39 @@ describe("GitFactoryWorkspaceManager", () => {
     }
   });
 
+  it("can reverse an applied seed patch without changing the source repository", async () => {
+    const fixture = repositoryFixture({ trackedContent: "original  \n" });
+    const manager = workspaceManager(fixture.factoryRoot);
+    const workspace = await manager.create({
+      taskId: TASK_ID,
+      attempt: 1,
+      repositoryRoot: fixture.repository,
+      baseRevision: fixture.baseRevision
+    });
+    try {
+      writeFileSync(join(workspace.root, "tracked.txt"), "seeded\n", "utf8");
+      const seed = await manager.collect(workspace, {
+        maximumChangedFiles: 2,
+        maximumChangedLines: 10,
+        maximumPatchBytes: 100_000
+      });
+      await manager.apply(workspace, seed.patch, 100_000, "reverse");
+      const clean = await manager.collect(workspace, {
+        maximumChangedFiles: 2,
+        maximumChangedLines: 10,
+        maximumPatchBytes: 100_000
+      });
+      expect(clean.changeSet.changedFiles).toBe(0);
+      expect(clean.patch).toBe("");
+      expect(readFileSync(join(fixture.repository, "tracked.txt"), "utf8")).toBe("original  \n");
+      expect(git(fixture.repository, ["show", `${fixture.baseRevision}:tracked.txt`])).toBe(
+        "original  \n"
+      );
+    } finally {
+      await workspace.closeAndWait();
+    }
+  });
+
   it("rejects repository-defined filters before checkout or staging can execute them", async () => {
     const fixture = repositoryFixture({ attributes: "*.txt filter=evil\n" });
     git(fixture.repository, ["config", "filter.evil.smudge", "false"]);
@@ -233,7 +266,9 @@ function workspaceManager(root: string, owner?: RuntimeResourceOwner): GitFactor
   });
 }
 
-function repositoryFixture(options: { readonly attributes?: string } = {}) {
+function repositoryFixture(
+  options: { readonly attributes?: string; readonly trackedContent?: string } = {}
+) {
   const root = mkdtempSync(join(tmpdir(), "agentlab-git-workspace-"));
   temporaryRoots.push(root);
   const repository = join(root, "repository");
@@ -241,7 +276,7 @@ function repositoryFixture(options: { readonly attributes?: string } = {}) {
   git(root, ["init", "--initial-branch=main", repository]);
   git(repository, ["config", "user.name", "AgentLab Test"]);
   git(repository, ["config", "user.email", "agentlab@example.invalid"]);
-  writeFileSync(join(repository, "tracked.txt"), "original\n", "utf8");
+  writeFileSync(join(repository, "tracked.txt"), options.trackedContent ?? "original\n", "utf8");
   if (options.attributes !== undefined) {
     writeFileSync(join(repository, ".gitattributes"), options.attributes, "utf8");
   }
