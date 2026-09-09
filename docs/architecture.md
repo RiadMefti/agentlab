@@ -28,6 +28,13 @@ may make explicit GitHub API calls; none is loaded into the interactive runtime.
 HTTP server, WebSocket gateway, browser renderer, desktop shell, remote mode, app command language,
 MCP bridge, or provider-session translation layer.
 
+[ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) additionally accepts one optional
+long-lived, credentialless local ledger owner. Its Unix peer-authenticated surface provides scoped
+reads, separately granted idempotent human switch operations, task-bound artifact transfers, and
+immutable one-shot worker job claims and result receipts; it is not loaded by the interactive
+runtime. Only the trusted owner can enqueue a journal-bound operation. Existing one-shot factory
+writers have not yet migrated behind it; the separated-UID daily chain remains disabled.
+
 ## Two paths
 
 ```text
@@ -722,8 +729,33 @@ UID cannot open these stores, and broadening a disposable database's mode still 
 ownership-only chmod. This is not solved by the documented provisioning step. Existing same-user
 service integration and systemd unit verification do not exercise this cross-UID handoff. Keep the
 daily factory disabled until an authenticated storage-authority boundary replaces direct shared
-access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) records a proposed
-design, not an accepted or implemented replacement.
+access. [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md) accepts a single-owner
+service. The implemented `factory-ledger` and `factory-ledger-client` public entries support
+expiring UID-authorized authority/task reads, with strict policy and immutable identity checks.
+Config v2 and the separate `factory-ledger-operator` entry add explicitly granted operator switch
+changes with a 120-second command ceiling, exact event-digest CAS, and atomic append-only receipts.
+Expired commands can be reconciled without mutation through a separately authorized receipt query.
+Positive real cross-UID tests prove those reads and reject direct storage access and forged
+mutations; transport tests bound frames, deadlines, shutdown, and peer identity. Source-graph rules
+exclude provider/GitHub/arbitrary-command capabilities from the owner and persistence from clients.
+Config v3 and the storage-free `factory-ledger-artifacts` entry transfer digest-verified bytes using
+separate producer/reader grants. Submissions bind the active task and execution operation, both
+policy pins, a short deadline, and an immutable idempotency key. Schema 33 reserves task/global byte
+and object quotas before publication; interrupted reservations remain charged and reconcile without
+accepting new evidence authority. Files and publication directories are synchronized before storage
+is acknowledged. Existing canonical evidence can authorize task-scoped reads. This does not yet move
+task mutations, worker execution, or broker intents behind the service. The optional Linux transport
+requires a pinned isolated Python installation and owner-controlled filesystem provisioning; see the
+ADR for its limits and activation criteria.
+
+An internal operation-worker adapter stages the next execution boundary. Strict canonical job
+documents bind task/run/operation, assigned role, policies, exact base/seed patch, provider or named
+gate, and limits. Each operation reconstructs a fresh private worktree; reviews and gates cannot
+change its candidate. Result claims are returned only after verified identity checks and workspace
+closure. Uncertain process or construction cleanup blocks new work until exact recovery succeeds.
+Installed gate limits can be narrowed by a job, never widened. Real-worktree tests cover this
+executor with injected process outputs; durable remote claims and the orchestration bridge are still
+absent. Nothing composes this adapter into the interactive product or enables factory work.
 
 The read-only daily-cycle compiler accepts v4/v5 owner-only manifests and verifies reviewed policy
 digests, including daily aggregate quotas, operations health, and autonomous merge, plus the

@@ -66,6 +66,31 @@ export const architectureRegistry: readonly WorkspaceRegistration[] = [
     packageName: "@agentlab/runtime",
     sourceRoot: "packages/runtime/src",
     publicExports: {
+      "./factory-ledger-operations": {
+        source: "packages/runtime/src/local-factory-ledger-operations.ts",
+        default: "./dist/local-factory-ledger-operations.js",
+        types: "./dist/local-factory-ledger-operations.d.ts"
+      },
+      "./factory-ledger-artifacts": {
+        source: "packages/runtime/src/local-factory-ledger-artifacts.ts",
+        default: "./dist/local-factory-ledger-artifacts.js",
+        types: "./dist/local-factory-ledger-artifacts.d.ts"
+      },
+      "./factory-ledger-operator": {
+        source: "packages/runtime/src/local-factory-ledger-operator.ts",
+        default: "./dist/local-factory-ledger-operator.js",
+        types: "./dist/local-factory-ledger-operator.d.ts"
+      },
+      "./factory-ledger": {
+        source: "packages/runtime/src/local-factory-ledger.ts",
+        default: "./dist/local-factory-ledger.js",
+        types: "./dist/local-factory-ledger.d.ts"
+      },
+      "./factory-ledger-client": {
+        source: "packages/runtime/src/local-factory-ledger-client.ts",
+        default: "./dist/local-factory-ledger-client.js",
+        types: "./dist/local-factory-ledger-client.d.ts"
+      },
       ".": {
         source: "packages/runtime/src/local-runtime.ts",
         default: "./dist/local-runtime.js",
@@ -455,6 +480,39 @@ function compositionBoundaryViolations(
 ): readonly ArchitectureViolation[] {
   const rules = [
     {
+      entry: "packages/runtime/src/local-factory-ledger-operations.ts",
+      description: "storage-free ledger operation client",
+      forbidden: (path: string) =>
+        !isLedgerSharedModule(path) &&
+        path !== "packages/runtime/src/local-factory-ledger-operations.ts"
+    },
+    {
+      entry: "packages/runtime/src/local-factory-ledger-artifacts.ts",
+      description: "storage-free ledger artifact client",
+      forbidden: (path: string) =>
+        !isLedgerSharedModule(path) &&
+        path !== "packages/runtime/src/local-factory-ledger-artifacts.ts"
+    },
+    {
+      entry: "packages/runtime/src/local-factory-ledger-operator.ts",
+      description: "storage-free ledger operator",
+      forbidden: (path: string) =>
+        !isLedgerSharedModule(path) &&
+        path !== "packages/runtime/src/local-factory-ledger-operator.ts"
+    },
+    {
+      entry: "packages/runtime/src/local-factory-ledger.ts",
+      description: "credentialless single-owner ledger",
+      forbidden: (path: string) => !isLedgerSharedModule(path) && !ledgerOwnerModules.has(path)
+    },
+    {
+      entry: "packages/runtime/src/local-factory-ledger-client.ts",
+      description: "storage-free ledger client",
+      forbidden: (path: string) =>
+        !isLedgerSharedModule(path) &&
+        path !== "packages/runtime/src/local-factory-ledger-client.ts"
+    },
+    {
       entry: "packages/runtime/src/local-factory-broker.ts",
       description: "broker composition",
       forbidden: (path: string) =>
@@ -487,6 +545,11 @@ function compositionBoundaryViolations(
       entry: "packages/runtime/src/local-runtime.ts",
       description: "interactive composition",
       forbidden: (path: string) =>
+        path === "packages/runtime/src/local-factory-ledger-operations.ts" ||
+        path === "packages/runtime/src/local-factory-ledger-artifacts.ts" ||
+        path === "packages/runtime/src/local-factory-ledger-operator.ts" ||
+        path === "packages/runtime/src/local-factory-ledger.ts" ||
+        path === "packages/runtime/src/local-factory-ledger-client.ts" ||
         path === "packages/runtime/src/local-factory-broker.ts" ||
         path === "packages/runtime/src/local-factory-worker.ts" ||
         isFactoryIntakeModule(path) ||
@@ -802,6 +865,48 @@ function compositionBoundaryViolations(
   return violations;
 }
 
+const ledgerOwnerModules = new Set([
+  "packages/runtime/src/application/factory-ledger-operation-queue.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-operation-queue.ts",
+  "packages/runtime/src/application/factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-artifact-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-execution-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-repair-execution-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-execution-journal.ts",
+  "packages/runtime/src/local-factory-ledger.ts",
+  "packages/runtime/src/application/factory-ledger-authority.ts",
+  "packages/runtime/src/application/factory-ledger-queries.ts",
+  "packages/runtime/src/application/local-runtime-construction.ts",
+  "packages/runtime/src/application/runtime-repository-owner.ts",
+  "packages/runtime/src/application/runtime-task-owner.ts",
+  "packages/runtime/src/infrastructure/filesystem/local-factory-ledger-config.ts",
+  "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
+  "packages/runtime/src/infrastructure/filesystem/database-target.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
+  "packages/runtime/src/infrastructure/persistence/migrations.ts"
+]);
+
+function isLedgerSharedModule(path: string): boolean {
+  return (
+    path === "packages/runtime/src/infrastructure/filesystem/node-factory-artifact-wire-codec.ts" ||
+    path.startsWith("packages/contracts/src/") ||
+    path.startsWith("packages/runtime/src/domain/") ||
+    path === "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts" ||
+    path === "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts" ||
+    ["helper", "process", "transport"].some(
+      (suffix) =>
+        path === `packages/runtime/src/infrastructure/process/linux-ledger-peer-${suffix}.ts`
+    )
+  );
+}
+
 function brokerCommandForbidden(path: string): boolean {
   return (
     path === "packages/runtime/src/local-runtime.ts" ||
@@ -861,8 +966,12 @@ const factoryAuthorityInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-authority-config.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
@@ -900,6 +1009,9 @@ const factoryIntakeInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-intake-deduplicator.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
@@ -986,6 +1098,9 @@ const factoryEvaluatorInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-signed-eval-attestation.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
@@ -1095,6 +1210,9 @@ const factoryEvalProducerInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-production-repository.ts",
@@ -1179,6 +1297,9 @@ const factoryCanaryAuthorityInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-role-identity-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
@@ -1242,6 +1363,9 @@ const factoryCanaryAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-canary-repository.ts",
@@ -1249,6 +1373,7 @@ const factoryCanaryAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-eval-attestation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-evaluation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
@@ -1365,6 +1490,9 @@ const factoryOperationsHealthInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-operations-health-source.ts"
 ]);
@@ -1422,6 +1550,9 @@ const factoryIncidentContainmentInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-operations-health-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-incident-containment-repository.ts",
@@ -1493,6 +1624,9 @@ const factoryAutonomousMergeAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-schedule-policy.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
@@ -1501,6 +1635,7 @@ const factoryAutonomousMergeAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-dispatch-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-pull-request-update-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-schedule-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
@@ -1566,10 +1701,14 @@ const factoryAutonomousMergerInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/github/github-merger-installation-client.ts",
   "packages/runtime/src/infrastructure/github/github-rest-client.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-autonomous-merge-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts"
 ]);
@@ -1643,11 +1782,15 @@ const factoryMaintenanceDiscoveryInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-intake-deduplicator.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-conversation-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-maintenance-discovery-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-preparation-repository.ts",
+  "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-authority-receipts.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-writer-lease.ts",
   "packages/runtime/src/infrastructure/process/command-runner.ts",
@@ -1746,6 +1889,9 @@ const factoryExternalPullRequestDiscoveryInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/github/github-read-only-installation-client.ts",
   "packages/runtime/src/infrastructure/github/github-rest-client.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-discovery-repository.ts",
@@ -1855,6 +2001,9 @@ const factoryExternalPullRequestReviewInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-external-pull-request-review-repository.ts",
@@ -1962,6 +2111,9 @@ const factoryExternalPullRequestFeedbackInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/github/github-pull-request-api-contracts.ts",
   "packages/runtime/src/infrastructure/github/github-rest-client.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
@@ -2048,6 +2200,9 @@ const factoryExternalPullRequestRepairAdmissionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/local-factory-external-pull-request-repair-admission-config.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
@@ -2167,6 +2322,9 @@ const factoryExternalPullRequestRepairExecutionInfrastructureModules = new Set([
   "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
@@ -2297,6 +2455,9 @@ const factoryExternalPullRequestRepairQualificationInfrastructureModules = new S
   "packages/runtime/src/infrastructure/filesystem/pinned-local-executable.ts",
   "packages/runtime/src/infrastructure/filesystem/private-local-file.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
@@ -2416,6 +2577,9 @@ const factoryExternalPullRequestReplacementDraftInfrastructureModules = new Set(
   "packages/runtime/src/infrastructure/github/github-rest-client.ts",
   "packages/runtime/src/infrastructure/github/github-trusted-status-checks.ts",
   "packages/runtime/src/infrastructure/persistence/canonical-factory-documents.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-authority.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-artifacts.ts",
+  "packages/runtime/src/infrastructure/persistence/migrate-factory-ledger-operations.ts",
   "packages/runtime/src/infrastructure/persistence/migrations.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-database.ts",
   "packages/runtime/src/infrastructure/persistence/sqlite-factory-control-state-reader.ts",
@@ -2451,6 +2615,11 @@ export function architectureLayer(path: string): ArchitectureLayer | null {
   if (path.startsWith("packages/runtime/src/application/")) return "runtime-application";
   if (path.startsWith("packages/runtime/src/infrastructure/")) return "runtime-infrastructure";
   if (
+    path === "packages/runtime/src/local-factory-ledger-operations.ts" ||
+    path === "packages/runtime/src/local-factory-ledger-artifacts.ts" ||
+    path === "packages/runtime/src/local-factory-ledger-operator.ts" ||
+    path === "packages/runtime/src/local-factory-ledger.ts" ||
+    path === "packages/runtime/src/local-factory-ledger-client.ts" ||
     path === "packages/runtime/src/local-runtime.ts" ||
     path === "packages/runtime/src/local-factory-broker.ts" ||
     path === "packages/runtime/src/local-factory-worker.ts" ||

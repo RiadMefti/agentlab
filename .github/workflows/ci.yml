@@ -55,9 +55,24 @@ jobs:
       - name: Install isolation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y bubblewrap dbus-user-session
+          sudo apt-get install --no-install-recommends -y bubblewrap dbus-user-session python3 uidmap
       - name: Permit unprivileged Bubblewrap namespaces on the ephemeral runner
         run: sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Provision subordinate IDs for the cross-account proof on the ephemeral runner
+        shell: bash
+        run: |
+          ensure_subordinate_range() {
+            local mapping_file="$1" mapping_option="$2" range_start range_end
+            if awk -F: -v principal="$USER" '$1 == principal && $3 >= 65536 { found = 1 } END { exit !found }' "$mapping_file"; then
+              return
+            fi
+            range_start="$(awk -F: 'BEGIN { next_id = 100000 } $2 + $3 > next_id { next_id = $2 + $3 } END { printf "%.0f", next_id }' "$mapping_file")"
+            range_end="$((range_start + 65535))"
+            test "$range_end" -lt 4294967294
+            sudo usermod "$mapping_option" "${range_start}-${range_end}" "$USER"
+          }
+          ensure_subordinate_range /etc/subuid --add-subuids
+          ensure_subordinate_range /etc/subgid --add-subgids
       - run: npm ci
       - name: Start the unprivileged user manager and run live isolation tests
         shell: bash
@@ -69,6 +84,8 @@ jobs:
           export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
           systemd-run --user --scope --quiet /usr/bin/true
           npm run test:factory-sandbox
+      - name: Prove authenticated cross-account ledger reads and private storage isolation
+        run: npm run test:factory-role-isolation
 
   package_macos:
     name: package-macos

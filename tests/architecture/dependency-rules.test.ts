@@ -21,6 +21,58 @@ afterEach(() => {
 });
 
 describe("architecture dependency rules", () => {
+  it("keeps ledger clients storage-free and ledger owners credentialless and model-free", () => {
+    const pairs = [
+      [
+        "packages/runtime/src/local-factory-ledger-operations.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-ledger-operation-queue.ts"
+      ],
+      [
+        "packages/runtime/src/local-runtime.ts",
+        "packages/runtime/src/local-factory-ledger-operations.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger-artifacts.ts",
+        "packages/runtime/src/infrastructure/filesystem/file-factory-artifact-store.ts"
+      ],
+      [
+        "packages/runtime/src/local-runtime.ts",
+        "packages/runtime/src/local-factory-ledger-artifacts.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger-operator.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+      ],
+      [
+        "packages/runtime/src/local-runtime.ts",
+        "packages/runtime/src/local-factory-ledger-operator.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger-client.ts",
+        "packages/runtime/src/infrastructure/persistence/sqlite-factory-repository.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger.ts",
+        "packages/runtime/src/infrastructure/github/github-rest-client.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger.ts",
+        "packages/runtime/src/infrastructure/providers/model.ts"
+      ],
+      [
+        "packages/runtime/src/local-factory-ledger.ts",
+        "packages/runtime/src/infrastructure/process/command-runner.ts"
+      ],
+      ["packages/runtime/src/local-runtime.ts", "packages/runtime/src/local-factory-ledger.ts"]
+    ] as const;
+    for (const [entry, target] of pairs) {
+      const report = architectureReport([source(entry, [local(target, target)]), source(target)]);
+      expect(report.violations).toContainEqual(
+        expect.objectContaining({ kind: "composition-boundary", source: entry, target })
+      );
+    }
+  });
+
   it("accepts the repository source graph", async () => {
     const report = await inspectArchitecture(projectRoot);
 
@@ -1127,6 +1179,26 @@ function architectureFixture(): string {
         default: "./dist/local-factory-authority.js",
         types: "./dist/local-factory-authority.d.ts"
       },
+      "./factory-ledger": {
+        default: "./dist/local-factory-ledger.js",
+        types: "./dist/local-factory-ledger.d.ts"
+      },
+      "./factory-ledger-artifacts": {
+        default: "./dist/local-factory-ledger-artifacts.js",
+        types: "./dist/local-factory-ledger-artifacts.d.ts"
+      },
+      "./factory-ledger-operations": {
+        default: "./dist/local-factory-ledger-operations.js",
+        types: "./dist/local-factory-ledger-operations.d.ts"
+      },
+      "./factory-ledger-operator": {
+        default: "./dist/local-factory-ledger-operator.js",
+        types: "./dist/local-factory-ledger-operator.d.ts"
+      },
+      "./factory-ledger-client": {
+        default: "./dist/local-factory-ledger-client.js",
+        types: "./dist/local-factory-ledger-client.d.ts"
+      },
       "./factory-intake": {
         default: "./dist/local-factory-intake.js",
         types: "./dist/local-factory-intake.d.ts"
@@ -1210,6 +1282,11 @@ function architectureFixture(): string {
   write(root, "packages/runtime/src/local-factory-broker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-worker.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-authority.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger-artifacts.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger-operations.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger-operator.ts", "export {};\n");
+  write(root, "packages/runtime/src/local-factory-ledger-client.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-intake.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-evaluator.ts", "export {};\n");
   write(root, "packages/runtime/src/local-factory-eval-attestor.ts", "export {};\n");

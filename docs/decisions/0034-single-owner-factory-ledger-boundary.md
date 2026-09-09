@@ -1,6 +1,6 @@
 # ADR 0034: Single-owner factory ledger boundary
 
-Status: proposed; implementation and architectural approval pending
+Status: accepted on 2026-09-07; implementation in progress, activation not approved by test results
 
 ## Evidence and problem
 
@@ -25,10 +25,10 @@ storage would additionally let that role replace authoritative state; append-onl
 methods and content hashes alone do not prevent the file owner from rewriting the underlying files.
 The interactive single-user runtime's private storage behavior is valid and must be preserved.
 
-The reproduction proves denial of direct storage access. It does not prove a working service,
-authenticated IPC, remote governance, model isolation, or the complete software-factory loop.
+That reproduction proves denial of direct storage access. The separate positive IPC proofs described
+below do not yet prove remote governance, model isolation, or the complete factory loop.
 
-## Proposed decision
+## Decision
 
 One dedicated local ledger service owns the factory database, lease, and artifact directories. No
 model worker, review publisher, PR broker, merger, or attestor gets direct write access to those
@@ -60,6 +60,145 @@ records intent before remote effects, and uncertain results reconcile without bl
 No transport outage may fall back to direct SQLite access, relaxed permissions, or shared
 credentials.
 
+## Implemented boundaries and limits
+
+`@agentlab/runtime/factory-ledger` exclusively owns its SQLite database and writer lease. Config v1
+serves only `authority.read` and exact-contract `task.read`. Its public client has no direct
+persistence or generic RPC fallback. An expiring content-addressed read policy assigns distinct
+non-root UIDs and task/contract pairs. Caller-supplied identities, extra fields, mutations, stale
+policy digests, and unassigned tasks fail closed. These read grants confer no execution, review, or
+publication authority.
+
+Config v2 additionally accepts an explicit, expiring, content-addressed authority policy. A grant
+must match a distinct `operator` UID and identity in the peer policy; workers and brokers cannot
+receive it. Per-control grants can be disable-only. The separate storage-free
+`@agentlab/runtime/factory-ledger-operator` entry exposes `authority.inspect`, `authority.change`,
+and `authority.receipt`; the read client does not acquire mutation methods.
+
+An authority command binds both reviewed policy digests, its kernel-authenticated principal,
+control, expected boolean **and last event digest**, requested opposite state, exact confirmation,
+reason, idempotency key, and a deadline at most 120 seconds away. These are global switch commands,
+so the control event digest replaces task/attempt coordinates. The service derives the human actor;
+no actor or role can be supplied in a command. Existing execution, canary, evidence, quota, and
+broker gates remain mandatory after a switch changes.
+
+Schema 32 adds append-only authority receipts without enabling any control. One `BEGIN IMMEDIATE`
+transaction records either a stable CAS conflict or both the ordinary control event and canonical
+receipt. Retries with identical intent return the original receipt, even after another command has
+disabled the switch; reusing a key for different bytes is denied. The event digest prevents a stale
+off-state command from bypassing a later on/off cycle. Expired commands cannot execute, but a
+currently authorized operator can retrieve their receipt by key and exact intent digest without
+repeating a mutation. A receipt describes the original result, not necessarily today's state.
+
+Migration/recovery procedure: stop the ledger owner, make and integrity-check a consistent SQLite
+backup, then start the new owner on its dedicated factory database. The migration preserves all
+existing control/task records. Rolling back to a schema-31 binary requires restoring that backup,
+not lowering `user_version` or dropping evidence. Existing single-user authority compositions have
+not been removed; they are not a fallback for cross-UID service clients.
+
+Config v3 adds a pre-provisioned canonical owner-only artifact root and an expiring artifact policy.
+The storage-free `factory-ledger-artifacts` client exposes only submit/read/receipt. Separate UID
+grants distinguish implementer, reviewer, gate-observer, and reader. A submission binds the exact
+task contract and event head, initial-execution or PR-repair run and active operation, attempt,
+server-derived producer identity, both policy digests, content digest/size/media type, idempotency
+key, and a deadline no more than 120 seconds away. The active operation must match the producer's
+grant. These bytes remain untrusted claims: no task, evidence bundle, gate, review, or switch is
+advanced by uploading them.
+
+Schema 33 adds immutable quota reservations. One immediate transaction rechecks the task and
+operation heads and reserves cumulative task/global byte and object quotas before any file write.
+The task byte allowance also respects its immutable output budget. Interrupted reservations remain
+charged; no client can release them. Repeated identical intent keeps its reservation, and receipt
+queries can reconcile an expired command without repeating the upload. `stored` reflects verified
+content availability, not evidence approval. File data and publication directories are synchronized
+before acknowledging delivery. Corruption fails closed; a reserved but absent file is an ordinary
+incomplete delivery. The stopped ledger and artifact directory must be backed up together; rollback
+to a pre-schema-33 binary requires a compatible backup.
+
+Whole objects are bounded at 8 MiB and transferred in canonical base64 inside the bounded frame;
+config validation requires enough frame capacity. Current grants support reads of upload
+reservations and direct artifact references in existing canonical evidence for the assigned task.
+Neither knowing a digest nor supplying a path grants access. Nested canonical patch-content
+references still need explicit association through the broker workflow boundary. Job inputs carry
+their bounded prompt and seed patch; results use task-bound upload reservations.
+
+Config v4 adds operation grants pinned to matching artifact producers and full job-frame capacity.
+Schema 34 stores canonical immutable jobs, one-shot claims, and result receipts. Only trusted owner
+code can enqueue; there is no socket enqueue command. Enqueue and claim atomically compare the exact
+task/contract and active execution-journal heads, operation ID, attempt, logical workspace, role,
+request or gate, and deadline. Stored job bytes and task/global counts are bounded cumulatively. The
+storage-free `factory-ledger-operations` client exposes next/inspect/claim/report. One unresolved
+claim blocks that UID across tasks. A replay returns the original claim with `newlyClaimed: false`;
+neither expiry, a new nonce, nor restart grants permission to execute it again.
+
+Report acceptance requires the exact claim and producer-owned artifact reservation, canonical
+bounded result content, job identity, resource ceilings, times, provider/gate, and patch invariants.
+The receipt is immutable and idempotent, including reconciliation after a lost reply. It is still an
+executor report, not evidence approval or a task transition. Malformed reports are denied without
+crashing the owner; corrupted durable content fails closed. No leaf can release claims or quota.
+Uncertain jobs remain held pending a separately verified recovery protocol. Back up the stopped
+ledger/artifacts before schema 34; never downgrade by rewriting `user_version`.
+
+The Linux-only transport uses a digest-pinned Python interpreter with fixed `-I -S -u -c` arguments,
+an empty environment, and a static standard-library helper. It obtains peer identities using
+[`SO_PEERCRED`](https://man7.org/linux/man-pages/man7/unix.7.html), authenticates both ends before
+request disclosure, and bounds framing, output, backlog, and absolute per-connection deadlines.
+Python's [socket API](https://docs.python.org/3/library/socket.html) supplies the supported
+peer-credential interface; [isolated startup options](https://docs.python.org/3/using/cmdline.html)
+prevent environment, user-site, and site initialization from injecting helper code. This is an
+explicit optional factory host prerequisite, not a Python dependency of the interactive product. The
+interpreter's standard library and its containing filesystem remain trusted host inputs; a binary
+digest alone does not attest the whole interpreter installation.
+
+Only the service owner can write the socket parent. Socket mode `0666` permits connection, not
+operation authority: the kernel UID allowlist applies before reading a body, and the application
+checks the current policy and exact task grant. Provisioning must keep all ancestor directories and
+interpreter files outside client control; checking the immediate parents is not a substitute for
+that host trust boundary. Existing socket paths are refused, never blindly unlinked. Abnormal-death
+stale-socket recovery remains an explicit operator task until a verified recovery protocol exists.
+
+The positive integration runs the actual built service under mapped UID 1 and public clients under
+UIDs 2 and 3. Both read their assigned task without opening the database or lease; UID 4 is
+rejected, and forged privileged operations and valid operator commands from leaf roles fail. UID 5
+alone changes a disposable switch, reconciles its receipt, disables it, and proves a late replay
+cannot re-enable it. Unit tests inject receipt-write failure to prove event rollback, verify
+reopen/reconciliation and immutable receipt checks, and deny stale pins, expired grants, wrong
+identities, and disable-only escalation. Ordinary transport tests cover wrong server identity,
+malformed/oversized frames, slow clients, late replies, clean restart, and bounded shutdown. Both
+positive and negative cross-UID proofs run through `test:factory-role-isolation`, now required by
+the hosted `factory-sandbox` job. Architecture fitness rules exclude providers, GitHub, and
+arbitrary command execution from the ledger owner and exclude persistence from clients. The same
+positive test proves UID 2 upload/replay/reconciliation and UID 3 byte reads while both lack direct
+artifact access; broker and unknown UID uploads are denied. Artifact tests also cover schema-32
+migration, task/global quotas, producer mismatch, digest/size/base64 failures, disk-write failure,
+lost replies, reopen/reconciliation, missing objects, and immutable storage/tamper checks.
+
+This implementation does **not** expose task mutations, compose the existing execution service into
+the ledger, install a daemon, recover remote intents, or repair the existing daily chain. Those
+remain activation blockers. Successful IPC tests must not be reported as a brokered-PR canary.
+
+The next execution adapter now has strict immutable agent/gate operation and result contracts and an
+internal `FactoryLedgerOperationWorker`. Each operation uses its own physical worktree, named by the
+caller-pinned operation ID rather than reusing the orchestration workspace. It reconstructs the
+exact base and seed patch, resolves only an installed provider or gate under pinned local policy,
+applies run/output/resource ceilings, and closes the worktree before returning a canonical result
+claim. Reviewer and gate operations must leave the candidate patch unchanged. This preserves the
+existing execution-service ports while allowing independent role checkouts in the eventual remote
+bridge.
+
+The adapter refuses overlapping work and in-process operation replays. Failed construction,
+unconfirmed process cleanup, or a mismatched isolation identity blocks further work until the
+existing exact process/worktree recovery port confirms inactivity. Recovery never reruns a model.
+Its tests use real Git worktrees with injected model/gate outputs. The cross-UID test now
+additionally enqueues from the owner, authenticates a UID-2 worker, consumes its claim once,
+executes in its private Git worktree, uploads the result, and reconciles the durable receipt. UID 3
+and an unknown UID cannot claim the operation, and the source checkout stays unchanged. The
+provider/process report in that test is explicitly a fixture, not a live model or a brokered-PR
+canary. Queue tests cover atomic rollback, task-head races, quota exhaustion, restart, lost replies,
+conflicting results, malformed reports, migration from schema 33, and immutable canonical storage.
+The owner-side orchestration bridge, verified recovery protocol, and deployment wiring remain
+unimplemented; the adapter is not exposed by a CLI command or composed into the live ledger yet.
+
 ## Implementation sequence
 
 1. Specify the typed role operations and threat/authority boundaries; implement local peer
@@ -89,6 +228,6 @@ credentials.
 - Required local/hosted checks, a real bounded canary, incident disablement, ledger backup/restore,
   and the brokered-PR observation record pass on the exact deployable binary and policies.
 
-This proposal does not transfer repository ownership, install a daemon, change permissions on live
+This decision does not transfer repository ownership, install a daemon, change permissions on live
 state, provision credentials, spend a model budget, or enable factory authority. Approval of this
 architecture is distinct from confirming that its future implementation satisfies these checks.

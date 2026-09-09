@@ -56,6 +56,7 @@ import {
   type FactoryExecutionJournalDependencies
 } from "./factory-execution-journal.js";
 import { FactoryExecutionOperations, patchLimits } from "./factory-execution-operations.js";
+import type { FactoryLedgerExecutionBridge } from "./factory-ledger-execution-bridge.js";
 import type { FactoryEvidenceIngress } from "./factory-evidence-ingress.js";
 import { FactoryPullRequestRepairEvidenceReader } from "./factory-pull-request-repair-evidence.js";
 import { FactoryPullRequestLineageReader } from "./factory-pull-request-lineage.js";
@@ -109,6 +110,7 @@ export interface FactoryPullRequestRepairExecutionServiceDependencies extends Om
   readonly agents: FactoryAgentExecutor;
   readonly providers: FactoryAgentProviderResolver;
   readonly gates: FactoryGateExecutor;
+  readonly ledgerExecution?: Pick<FactoryLedgerExecutionBridge, "execute">;
 }
 
 export interface FactoryPullRequestRepairExecutionOutcome {
@@ -394,7 +396,8 @@ export class FactoryPullRequestRepairExecutionService {
       journal: input.journal,
       patchProposalDigest: input.priorProposal.digest,
       repairAuthorizationDigest: input.authorizationDigest,
-      pullRequestFeedback: input.feedback
+      pullRequestFeedback: input.feedback,
+      seedPatch: input.priorPatch
     });
     input.meter.addAgent(repairer.output);
     if (repairer.output.status !== "succeeded") {

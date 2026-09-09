@@ -51,6 +51,7 @@ import {
   type FactoryEvidencePublisherCredentials
 } from "./factory-evidence-publisher.js";
 import { FactoryExecutionOperations, patchLimits } from "./factory-execution-operations.js";
+import type { FactoryLedgerExecutionBridge } from "./factory-ledger-execution-bridge.js";
 
 const executionInputSchema = z
   .object({
@@ -93,6 +94,7 @@ export interface FactoryExecutionServiceDependencies extends Omit<
   readonly agents: FactoryAgentExecutor;
   readonly providers: FactoryAgentProviderResolver;
   readonly gates: FactoryGateExecutor;
+  readonly ledgerExecution?: Pick<FactoryLedgerExecutionBridge, "execute">;
 }
 
 export interface FactoryExecutionOutcome {
@@ -275,7 +277,8 @@ export class FactoryExecutionService {
       ...(progress.latestPatch === null
         ? {}
         : { patchProposalDigest: progress.latestPatch.digest }),
-      ...(progress.priorReview === undefined ? {} : { repairReview: progress.priorReview })
+      ...(progress.priorReview === undefined ? {} : { repairReview: progress.priorReview }),
+      ...(progress.seedPatch === null ? {} : { seedPatch: progress.seedPatch })
     });
     meter.addAgent(worker.output);
     if (worker.output.status !== "succeeded") {

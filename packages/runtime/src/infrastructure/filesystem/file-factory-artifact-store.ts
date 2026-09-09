@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { chmod, link, mkdir, open, realpath, unlink } from "node:fs/promises";
-import { join, parse, resolve } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
 import { sha256DigestSchema, type Sha256Digest } from "@agentlab/contracts";
@@ -9,6 +9,7 @@ import type {
   FactoryArtifactStore,
   StoredFactoryArtifact
 } from "../../domain/factory-artifact-store.js";
+import { FactoryArtifactNotFoundError } from "../../domain/factory-artifact-store.js";
 
 const defaultMaximumArtifactBytes = 128 * 1_024 * 1_024;
 
@@ -62,6 +63,7 @@ export class FileFactoryArtifactStore implements FactoryArtifactStore {
       await unlink(temporary).catch((error: unknown) => {
         if (!hasErrorCode(error, "ENOENT")) throw error;
       });
+      await syncDirectory(directory);
     }
     return { digest, sizeBytes: content.byteLength };
   }
@@ -76,7 +78,12 @@ export class FileFactoryArtifactStore implements FactoryArtifactStore {
       throw new Error("Maximum read bytes must be a positive integer.");
     }
     const { target } = await this.#artifactPath(parsedDigest);
-    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW).catch(
+      (error: unknown) => {
+        if (hasErrorCode(error, "ENOENT")) throw new FactoryArtifactNotFoundError();
+        throw error;
+      }
+    );
     try {
       const metadata = await handle.stat();
       if (!metadata.isFile()) throw new Error(`Factory artifact ${parsedDigest} is not a file.`);
@@ -113,6 +120,7 @@ export class FileFactoryArtifactStore implements FactoryArtifactStore {
       throw new Error("Factory artifact shard resolves outside its canonical path.");
     }
     await chmod(resolvedDirectory, 0o700);
+    await syncDirectory(join(root, "sha256"));
     return { directory: resolvedDirectory, target: join(resolvedDirectory, hexadecimal) };
   }
 
@@ -150,7 +158,21 @@ async function prepareRoot(root: string): Promise<string> {
     throw new Error("Factory artifact digest directory is not canonical.");
   }
   await chmod(join(canonical, "sha256"), 0o700);
+  await syncDirectory(canonical);
+  await syncDirectory(dirname(canonical));
   return canonical;
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  const handle = await open(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+  );
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
 }
 
 function safeOwnedStorageRoot(root: string): string {

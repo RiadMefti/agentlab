@@ -32,6 +32,7 @@ import type {
   FactoryWorkspacePatch
 } from "../domain/factory-workspace.js";
 import type { FactoryExecutionOperationJournal } from "./factory-execution-journal.js";
+import { FactoryLedgerExecutionBridge } from "./factory-ledger-execution-bridge.js";
 import {
   FactoryEvidencePublisher,
   type PublishedFactoryAgentRun
@@ -49,6 +50,8 @@ export interface FactoryExecutionOperationsDependencies {
   readonly providers: FactoryAgentProviderResolver;
   readonly gates: FactoryGateExecutor;
   readonly createId: () => string;
+  /** Optional owner-side broker for isolated ledger workers; absent keeps the local path. */
+  readonly ledgerExecution?: Pick<FactoryLedgerExecutionBridge, "execute">;
 }
 
 export interface FactoryExecutedAgent {
@@ -76,6 +79,7 @@ export class FactoryExecutionOperations {
     readonly repairReview?: FactoryReviewResult;
     readonly repairAuthorizationDigest?: Sha256Digest;
     readonly pullRequestFeedback?: FactoryPullRequestRepairFeedback;
+    readonly seedPatch?: FactoryWorkspacePatch;
   }): Promise<FactoryExecutedAgent> {
     const capability = this.dependencies.agents
       .capabilities()
@@ -151,6 +155,41 @@ export class FactoryExecutionOperations {
       throw new Error("Stored agent request digest disagrees with its canonical document.");
     }
     await input.journal.startAgent(request.value, request.digest);
+    const resourceLimits = this.dependencies.policy.requirements(
+      input.task.contract.riskTier,
+      "execution"
+    ).resourceLimits;
+    const ledgerExecution = this.dependencies.ledgerExecution;
+    if (ledgerExecution !== undefined) {
+      const snapshot = input.journal.snapshot;
+      if (snapshot === undefined) {
+        throw new Error("Brokered execution requires durable journal coordinates.");
+      }
+      const remote = await ledgerExecution.execute({
+        task: input.task,
+        workspace: input.workspace,
+        request: request.value,
+        requestDigest: request.digest,
+        prompt,
+        providerVersion: provider.version,
+        role: input.role,
+        budget: input.budget,
+        attempt: input.attempt,
+        seedPatch: input.seedPatch ?? null,
+        execution: ledgerExecutionCoordinates(snapshot),
+        resourceLimits
+      });
+      const published = await this.publisher.agentRun(input.task, request.value, remote.output);
+      await input.journal.finishOperation(
+        remote.output.status === "succeeded"
+          ? "succeeded"
+          : remote.output.status === "timed-out"
+            ? "timed-out"
+            : "failed",
+        published.document.digest
+      );
+      return { output: remote.output, published };
+    }
     const output = await this.dependencies.agents.execute({
       request: request.value,
       policyBundleDigest: input.task.contract.gateProfile.policyDigest,
@@ -158,10 +197,7 @@ export class FactoryExecutionOperations {
       providerVersion: provider.version,
       workspace: input.workspace,
       prompt,
-      resourceLimits: this.dependencies.policy.requirements(
-        input.task.contract.riskTier,
-        "execution"
-      ).resourceLimits
+      resourceLimits
     });
     if (output.errorCode === factoryProcessCleanupUnconfirmedErrorCode) {
       throw new Error("Factory agent process cleanup could not be confirmed.");
@@ -357,7 +393,8 @@ export class FactoryExecutionOperations {
         budget: minimumFactoryBudget(selection.budget, remainingBudget),
         attempt: input.attempt,
         journal: input.journal,
-        patchProposalDigest: input.patch.digest
+        patchProposalDigest: input.patch.digest,
+        seedPatch: input.expectedPatch
       });
       input.meter.addAgent(reviewer.output);
       if (reviewer.output.status !== "succeeded") {
@@ -431,6 +468,26 @@ export class FactoryExecutionOperations {
       reviews
     };
   }
+}
+
+function ledgerExecutionCoordinates(
+  snapshot: NonNullable<FactoryExecutionOperationJournal["snapshot"]>
+) {
+  const run = snapshot.run;
+  return run.schemaVersion === "agentlab.execution-run.v1"
+    ? {
+        kind: "execution" as const,
+        runId: run.runId,
+        runDigest: snapshot.runDigest,
+        eventDigest: snapshot.lastEventDigest
+      }
+    : {
+        kind: "pull-request-repair" as const,
+        runId: run.runId,
+        runDigest: snapshot.runDigest,
+        eventDigest: snapshot.lastEventDigest,
+        authorizationDigest: run.authorizationDigest
+      };
 }
 
 const preparationGateIds = new Set([

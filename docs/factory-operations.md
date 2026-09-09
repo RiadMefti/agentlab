@@ -15,17 +15,50 @@ cannot perform the artifact store's chmod. Relaxing the disposable database's mo
 mandatory chmod, so group/ACL provisioning alone cannot make this implementation work.
 
 Run `npm run test:factory-role-isolation` on Linux with unprivileged user namespaces, `unshare`,
-`newuidmap`/`newgidmap`, and assigned subordinate UID/GID ranges. It executes the real built
-adapters under two distinct mapped UIDs, creates only disposable test storage, and verifies these
-denials. The test passes when isolation holds; it is **not** a successful factory handoff test. It
-is opt-in and is not included in the hosted `factory-sandbox` job. Missing namespace support fails
-the explicit test command rather than reporting a successful proof.
+`newuidmap`/`newgidmap`, Python 3, and assigned subordinate UID/GID ranges. It executes the real
+built adapters under distinct mapped UIDs, creates only disposable test storage, and verifies these
+denials. A second positive test starts the actual ledger owner as UID 1 and authenticates clients as
+UIDs 2 and 3; both read their assigned immutable task, while UID 4 and unauthorized operator
+commands are rejected. UID 2 also uploads binary content that UID 3 reads through the socket; both
+remain unable to open the artifact store directly. UID 5 separately proves scoped switch changes,
+stable receipts, and stale/replay rejection. These proofs are not a complete software-factory
+handoff. The explicit command and hosted `factory-sandbox` job run both tests; missing prerequisites
+fail rather than report successful proof.
 
-The proposed correction is a single-owner local ledger service with authenticated, role-limited
-commands and verified evidence handoffs. It is not implemented or approved by the current ADRs; see
+The accepted correction is a single-owner local ledger service with authenticated, role-limited
+commands and verified evidence handoffs. Scoped reads and separately granted operator switch changes
+with atomic, idempotent receipts, bounded artifact transfers, and durable worker job claims/result
+receipts are implemented. Task mutations, the execution-service bridge, worker/broker deployment,
+role migration, full process-crash recovery, and a real brokered-PR canary remain outstanding. See
 [ADR 0034](decisions/0034-single-owner-factory-ledger-boundary.md). The provisioning instructions
 below remain reference material, not an executable activation recipe. Do not weaken private storage,
 share role credentials, or rotate storage ownership between stages as a workaround.
+
+Ledger config v3 requires a pre-provisioned canonical owner-only artifact root, an expiring artifact
+policy with distinct producer/reader UIDs matching the peer policy, and transport capacity for
+base64 content plus its envelope. Each object is capped at 8 MiB; reviewed policy also caps task and
+ledger-wide cumulative bytes and reservation counts. Producer grants distinguish implementer,
+reviewer, and gate-observer, but confer no authority to approve gates or publish evidence. Uploads
+must name an existing task's exact contract/state head and active execution or PR-repair operation.
+Readers can request only artifacts associated with their assigned task, never a filesystem path.
+
+Artifact reservations are immutable and charged before the file write. A lost reply is reconciled by
+the original UID, key, and intent digest using `artifact.receipt`; `stored: false` means delivery is
+incomplete, not that quota was released. An expired upload cannot run again. Do not delete a
+reservation or lower usage to retry uncertain work. The store verifies content hashes, synchronizes
+files and publication directories, and treats corruption as a failure. Back up the stopped ledger
+and its artifact store together; a pre-schema-33 binary requires restoring its compatible backup,
+not lowering the schema number. This API alone does not run a model, pass a gate, or create a PR.
+
+Ledger config v4 additionally pins operation principals to matching artifact producers and requires
+full job-frame capacity. Only the owner can enqueue; the socket exposes next/inspect/claim/report,
+not arbitrary jobs, paths, commands, or SQL. Schema 34 records immutable jobs, one-shot claims, and
+result receipts. Claims compare the exact task and execution heads atomically. A lost claim reply
+can be inspected or replayed, but `newlyClaimed: false` never authorizes execution. One unresolved
+claim blocks further work for that UID; expiry does not release or reassign it. A canonical result
+must come through the assigned producer's exact artifact reservation and match the job and claim. It
+records a report, not approval or a task transition. Back up before schema 34; rollback requires a
+compatible backup. Verified remote cleanup/recovery and a deployed worker host remain pending.
 
 ## Reviewed inputs
 
