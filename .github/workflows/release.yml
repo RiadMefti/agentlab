@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -85,7 +85,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -102,7 +102,7 @@ jobs:
         run:
           file release/agentlab-v${{ needs.validate.outputs.version }}-linux-x64 | grep -F "x86-64"
       - name: Upload the Linux executable and target-specific SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-linux-x64
           path: |
@@ -123,7 +123,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -141,7 +141,7 @@ jobs:
         run:
           file release/agentlab-v${{ needs.validate.outputs.version }}-mac-arm64 | grep -F "arm64"
       - name: Upload the macOS executable and target-specific SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: binary-macos-arm64
           path: |
@@ -171,7 +171,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Download all release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: binary-*
           path: release-assets
@@ -343,7 +343,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -378,7 +378,7 @@ jobs:
           npm pack ./npm-package --pack-destination npm-artifact
           test -f "npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz"
       - name: Upload the exact npm candidate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-launcher
           path: npm-artifact/agentlab-${{ needs.validate.outputs.version }}.tgz
@@ -393,12 +393,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Download the npm candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: npm-launcher
           path: npm-artifact
@@ -428,14 +428,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Verify the runner architecture
         run: test "$(uname -m)" = "arm64"
       - name: Download the npm candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: npm-launcher
           path: npm-artifact
@@ -475,7 +475,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js for trusted publishing
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
@@ -483,7 +483,7 @@ jobs:
       - name: Install the pinned npm CLI
         run: npm install --global "npm@${NPM_VERSION}"
       - name: Download the tested npm candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: npm-launcher
           path: npm-artifact
@@ -626,7 +626,7 @@ jobs:
               --deny-self-hosted-runners
           done
       - name: Upload the recovered npm candidate
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-launcher-recovery
           path: npm-artifact/agentlab-${{ steps.recovery.outputs.version }}.tgz
@@ -652,14 +652,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Verify the runner architecture
         run: test "$(uname -m)" = "${{ matrix.architecture }}"
       - name: Download the recovered npm candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: npm-launcher-recovery
           path: npm-artifact
@@ -702,7 +702,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Node.js for trusted publishing
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: https://registry.npmjs.org
@@ -710,7 +710,7 @@ jobs:
       - name: Install the pinned npm CLI
         run: npm install --global "npm@${NPM_VERSION}"
       - name: Download the twice-tested npm candidate
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: npm-launcher-recovery
           path: npm-artifact
